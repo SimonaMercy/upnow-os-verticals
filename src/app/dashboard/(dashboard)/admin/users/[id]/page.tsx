@@ -67,6 +67,7 @@ interface UserDetail {
     };
     managers: { userId: number; name: string; email: string | null; accountStatus: string | null; grantedAt: string; grantedByRole: string | null; isActive: boolean; grantedCount: number }[];
     settings: {
+      feeSchedule: FeeRuleRow[];
       preferences: { startDays: number[] | null; chequeDays: number[] | null; allowedInstallments: number[] | null; rentVatMode: string | null; renewalRentIncrementPct: number | null };
       penalties: Record<string, { enabled: boolean; fee: number | null; pct: number | null; months?: number | null; daily?: boolean }>;
       settlementDiscountCaps: { rentPct: number | null; penaltiesPct: number | null; restorationPct: number | null; utilitiesPct: number | null };
@@ -367,6 +368,24 @@ function Caption({ children }: { children: React.ReactNode }) {
 }
 
 /** Human labels for the landlord's configurable penalties, in RP-settings order. */
+type FeeRuleRow = {
+  id: number; spaceCategory: string | null; feeType: string | null; valueType: string | null;
+  value: number; vatApplicable: boolean; vatRate: number; isActive: boolean;
+};
+
+/**
+ * fee_rules.fee_type → display label. `ejari_fee` keeps its government key in the
+ * data and on the printed certificate, but reads as "Contract registration" in
+ * product surfaces — see the Ejari rename.
+ */
+const FEE_TYPE_LABELS: Record<string, string> = {
+  ejari_fee: 'Contract registration',
+  admin_fee: 'Admin fee',
+  commission: 'Commission',
+  security_deposit: 'Security deposit',
+  rent_vat: 'VAT on rent',
+};
+
 const PENALTY_LABELS: [string, string][] = [
   ['bouncedCheque', 'Bounced cheque'],
   ['chequeHold', 'Cheque hold'],
@@ -1425,7 +1444,10 @@ export default function AdminUserDetailPage() {
   // not an empty settings form.
   const prefs = L?.settings?.preferences;
   const setPrefs: [string, string][] = [];
-  if (prefs?.rentVatMode) setPrefs.push(['VAT on rent', titleCase(prefs.rentVatMode)]);
+  // "VAT collection mode", not "VAT on rent" — the fee schedule above now shows the
+  // rent_vat RATE under that name, and two rows reading "VAT on rent" with different
+  // values (0% vs Annual) is unreadable. Rate and collection mode are both needed.
+  if (prefs?.rentVatMode) setPrefs.push(['VAT collection mode', titleCase(prefs.rentVatMode)]);
   if (prefs?.allowedInstallments?.length) setPrefs.push(['Installment plans', `${prefs.allowedInstallments.join(', ')} cheques`]);
   if (prefs?.startDays?.length) setPrefs.push(['Contract start days', prefs.startDays.join(', ')]);
   if (prefs?.chequeDays?.length) setPrefs.push(['Cheque due days', prefs.chequeDays.join(', ')]);
@@ -1434,6 +1456,18 @@ export default function AdminUserDetailPage() {
   const setPenalties: [string, string][] = PENALTY_LABELS
     .map(([key, label]) => [label, penaltyValue(L?.settings?.penalties?.[key])] as [string, string | null])
     .filter((e): e is [string, string] => e[1] != null);
+
+  // Fee schedule grouped by space category (SCRUM-694). A landlord charges
+  // different fees for residential vs commercial stock, so a flat list would be
+  // ambiguous about which rule produced a given charge.
+  const feeByCategory = (L?.settings?.feeSchedule ?? []).reduce<Record<string, FeeRuleRow[]>>(
+    (acc, f) => {
+      const key = f.spaceCategory ?? 'Uncategorised';
+      (acc[key] ??= []).push(f);
+      return acc;
+    },
+    {},
+  );
 
   const caps = L?.settings?.settlementDiscountCaps;
   const setCaps: [string, string][] = ([
@@ -1552,11 +1586,38 @@ export default function AdminUserDetailPage() {
                   as "not set", so the panel reads as data rather than a config form. */}
               {L.settings && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-                  {(setPrefs.length > 0 || setPenalties.length > 0) && (
+                  {(setPrefs.length > 0 || setPenalties.length > 0 || Object.keys(feeByCategory).length > 0) && (
                     <MiniPanel title="Charging rules">
                       <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
                         What this landlord charges customers. A fee dispute can be checked against this.
                       </p>
+                      {/* Fee schedule from fee_rules, per space category (SCRUM-694).
+                          Switched-off rules stay listed and greyed — a charge raised
+                          under a rule later disabled still has to be explainable. */}
+                      {Object.entries(feeByCategory).map(([category, rules]) => (
+                        <div key={category}>
+                          <Caption>{titleCase(category)} fees</Caption>
+                          {rules.map((f) => (
+                            <KV
+                              key={f.id}
+                              label={FEE_TYPE_LABELS[f.feeType ?? ''] ?? titleCase(f.feeType)}
+                              value={
+                                <span style={{ opacity: f.isActive ? 1 : 0.5 }}>
+                                  {f.valueType === 'percentage' ? `${f.value}%` : aed(f.value)}
+                                  {f.vatApplicable && f.vatRate > 0 && (
+                                    <span style={{ color: 'var(--color-neutral-400)' }}> +{f.vatRate}% VAT</span>
+                                  )}
+                                  {!f.isActive && (
+                                    <span style={{ color: 'var(--color-neutral-400)' }}> · off</span>
+                                  )}
+                                </span>
+                              }
+                              dot="var(--color-primary)"
+                            />
+                          ))}
+                        </div>
+                      ))}
+                      {setPrefs.length > 0 && Object.keys(feeByCategory).length > 0 && <Divider />}
                       {setPrefs.length > 0 && (
                         <>
                           <Caption>Payment preferences</Caption>
