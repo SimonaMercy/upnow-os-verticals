@@ -73,7 +73,7 @@ interface UserDetail {
       settlementDiscountCaps: { rentPct: number | null; penaltiesPct: number | null; restorationPct: number | null; utilitiesPct: number | null };
     };
     insights: {
-      financials: { annualRecurringRent: number; totalContractValue: number; avgRentActive: number; depositsHeld: number; vatCollected: number };
+      financials: { marketRent: number; earningUnits: number; unitsAwaitingActivation: number; annualRecurringRent: number; totalContractValue: number; avgRentActive: number; depositsHeld: number; vatCollected: number };
       occupancy: { totalUnits: number; occupiedUnits: number; vacantUnits: number; occupancyPct: number; vacantRentPotential: number };
       collections: { byStatus: Record<string, { count: number; amount: number }>; collectedAmount: number; pendingAmount: number; bouncedCount: number; collectionRatePct: number };
       listings: { byStatus: Record<string, number>; published: number; total: number };
@@ -98,7 +98,19 @@ interface UserDetail {
       manageDocuments: boolean; inviteManager: boolean;
     };
     allPermissions: Record<string, boolean>;
-    attributed: { contractsSigned: number; auditActions: number; terminations: number; lastActionAt: string | null };
+    attributed: {
+      contractsSigned: number; auditActions: number; terminations: number; lastActionAt: string | null;
+      recent: { actionKey: string; entityType: string; entityId: number; createdAt: string }[];
+    };
+    records: {
+      scopedToLandlords: number;
+      properties: { id: number; buildingName: string | null; spaceCategory: string | null; fullAddress: string | null; landlord: string | null; unitCount: number; occupiedCount: number }[];
+      units: { id: number; unitNumber: string | null; unitName: string | null; unitType: string | null; availability: string | null; rentalPrice: number | null; propertyId: number; propertyName: string | null; landlord: string | null }[];
+      customers: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean }[];
+      leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null; landlord: string | null }[];
+      payments: { id: number; contractId: number | null; customerName: string; unitNumber: string | null; landlord: string | null; paymentType: string | null; paymentMethod: string | null; chequeNumber: string | null; amountPaid: number; vatAmount: number; chequeStatus: string; transactionDate: string | null; description: string | null }[];
+      documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null; landlord: string | null }[];
+    };
     risk: {
       tier: 'ok' | 'monitor' | 'review' | 'critical'; moneyPower: boolean; dormant: boolean; dormantDays: number | null; signalCount: number;
       signals: { key: string; label: string; severity: 'critical' | 'high' | 'medium' | 'info'; detail: string }[];
@@ -428,8 +440,26 @@ function Insights({ ins }: { ins: LandlordInsights }) {
   return (
     <>
       {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
-        <KpiCard label="Annual recurring rent" value={aed(f.annualRecurringRent)} sub={`avg ${aed(f.avgRentActive)}/unit`} accent="var(--color-primary)" />
+      {/* 4 across, not 7: a seventh card squeezes the money values into an
+          ellipsis at this width, and a truncated figure is worse than a second row. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
+        {/* Asking vs contracted, side by side. Market rent is Σ units.rental_price
+            across every unit — what the landlord asks. */}
+        <KpiCard label="Market rent (asking)" value={aed(f.marketRent)} sub={`${o.totalUnits} units · ${aed(o.vacantRentPotential)} vacant`} />
+        {/* The denominator is stated because it is NOT the occupied count beside
+            it: a term with confirmed PDCs earns before its unit flips to occupied.
+            Where that applies the count is named, so the two figures read as
+            reconcilable rather than contradictory. */}
+        <KpiCard
+          label="Annual recurring rent"
+          value={aed(f.annualRecurringRent)}
+          sub={
+            f.unitsAwaitingActivation > 0
+              ? `${f.earningUnits} earning · ${f.unitsAwaitingActivation} on confirmed cheques`
+              : `${f.earningUnits} earning units · avg ${aed(f.avgRentActive)}`
+          }
+          accent="var(--color-primary)"
+        />
         <KpiCard label="Occupancy" value={`${o.occupancyPct}%`} sub={`${o.occupiedUnits}/${o.totalUnits} · ${o.vacantUnits} vacant`} />
         <KpiCard label="Rent collected" value={aed(col.collectedAmount)} sub={`${aed(col.pendingAmount)} pending · ${col.bouncedCount} bounced`} />
         <KpiCard label="Listed units" value={`${lst.published}/${lst.total}`} sub="published on platform" accent={lst.total > 0 && lst.published === 0 ? 'var(--color-error)' : undefined} />
@@ -523,7 +553,8 @@ type OwnedDoc = {
   id: number; documentKey: string; displayName: string | null; category: string | null;
   fileUrl: string | null; expiryDate: string | null;
 };
-function DocRow({ d }: { d: OwnedDoc }) {
+/** `sub` prefixes the meta line — the manager view uses it to name the owning landlord. */
+function DocRow({ d, sub }: { d: OwnedDoc; sub?: string }) {
   const label = d.displayName || titleCase((d.documentKey || '').replace(/_/g, ' '));
   return (
     <div className={ROW} style={ROW_STYLE}>
@@ -531,7 +562,7 @@ function DocRow({ d }: { d: OwnedDoc }) {
       <div className="min-w-0 flex-1">
         <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{label}</p>
         <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-          {d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}
+          {sub ? `${sub} · ` : ''}{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}
         </p>
       </div>
       {d.fileUrl ? (
@@ -638,6 +669,12 @@ function RiskPanel({ risk }: { risk: NonNullable<UserDetail['manager']>['risk'] 
 function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
   const s = m.summary, p = m.portfolio, a = m.attributed, t = m.tenure, auth = m.authority;
   const prof = m.profile;
+  const rec = m.records;
+  // Units nested under their building, as on the landlord page.
+  const unitsByProp = (rec?.units ?? []).reduce<Record<number, NonNullable<typeof rec>['units']>>((acc, u) => {
+    (acc[u.propertyId] ??= []).push(u);
+    return acc;
+  }, {});
   const occData = p ? [
     { name: 'Occupied', value: p.occupancy.occupiedUnits, fill: CHART.teal },
     { name: 'Vacant', value: p.occupancy.vacantUnits, fill: CHART.gray },
@@ -831,6 +868,123 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
           );
         })}
       </Section>
+
+      {/* Record parity with the landlord page (SCRUM-699). Everything above is an
+          aggregate; these are the rows behind them. Scoped to landlords with a
+          LIVE grant — a revoked grant is listed above but confers no access, so
+          its records are not part of "what can this manager reach". */}
+      {rec && (
+        <>
+          <p className="text-xs mt-6 mb-2 px-1" style={{ color: 'var(--color-neutral-400)' }}>
+            The records below cover the {rec.scopedToLandlords} landlord{rec.scopedToLandlords === 1 ? '' : 's'} this
+            manager currently holds an active grant for. Each row names its landlord.
+          </p>
+
+          <Section title="Buildings & units" count={rec.properties.length}>
+            {rec.properties.map((p) => (
+              <div key={p.id} className="rounded-xl mb-2 last:mb-0" style={ROW_STYLE}>
+                <div className={ROW} style={{ border: 'none' }}>
+                  <Building2 size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName || `Property #${p.id}`}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                      {p.landlord ?? '—'} · {p.occupiedCount}/{p.unitCount} units occupied
+                      {p.fullAddress ? ` · ${p.fullAddress}` : ''}
+                    </p>
+                  </div>
+                  {p.spaceCategory && <Pill value={p.spaceCategory} />}
+                </div>
+                {(unitsByProp[p.id] ?? []).length > 0 && (
+                  <div className="px-3 pb-2.5 -mt-1 flex flex-wrap gap-1">
+                    {(unitsByProp[p.id] ?? []).map((un) => (
+                      <span key={un.id} className="text-[11px] font-medium px-1.5 py-0.5 rounded"
+                        style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>
+                        {un.unitNumber || un.unitName || `#${un.id}`}
+                        {un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </Section>
+
+          <Section title="Customers" count={rec.customers.length}>
+            {rec.customers.map((t) => (
+              <Link key={t.tenantId} href={`/dashboard/admin/users/${t.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+                <UsersIcon size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{t.name}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{t.email ?? t.phone ?? '—'}{t.hasLease ? '' : ' · no lease yet'}</p>
+                </div>
+                <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+              </Link>
+            ))}
+          </Section>
+
+          <Section title="Leases" count={rec.leases.length}>
+            {rec.leases.map((c) => (
+              <div key={c.id} className={ROW} style={ROW_STYLE}>
+                <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                    {c.tenantName}
+                    {c.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {c.unitNumber}</span>}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                    {c.landlord ?? '—'} · {fmtDate(c.contractStartDate)} → {fmtDate(c.contractEndDate)} · {aed(c.annualRent)}/yr
+                  </p>
+                </div>
+                <Pill value={c.status} />
+              </div>
+            ))}
+          </Section>
+
+          <Section title="Payments" count={rec.payments.length}>
+            <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+              Most recent 200 rows across managed landlords. All payment types — the collection figures above cover rent only.
+            </p>
+            {rec.payments.map((p) => (
+              <div key={p.id} className={ROW} style={ROW_STYLE}>
+                <Banknote size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                    {p.customerName}
+                    {p.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {p.unitNumber}</span>}
+                  </p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                    {p.landlord ?? '—'} · {titleCase(p.paymentType)} · {fmtDate(p.transactionDate)}
+                    {p.chequeNumber ? ` · cheque ${p.chequeNumber}` : ''}
+                  </p>
+                </div>
+                <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--color-neutral-900)' }}>{aed(p.amountPaid)}</span>
+                <Pill value={p.chequeStatus} />
+              </div>
+            ))}
+          </Section>
+
+          <Section title="Landlord documents" count={rec.documents.length}>
+            {rec.documents.map((d) => <DocRow key={d.id} d={d} sub={d.landlord ?? undefined} />)}
+          </Section>
+
+          {/* The rows behind "Attributed to this manager" above. */}
+          <Section title="Recent activity" count={m.attributed.recent?.length ?? 0}>
+            <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+              {m.attributed.auditActions} logged actions all time. Work done for a landlord is attributed here, not on their page.
+            </p>
+            {(m.attributed.recent ?? []).map((a, i) => (
+              <div key={i} className={ROW} style={ROW_STYLE}>
+                <Clock size={14} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{titleCase(a.actionKey)}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{titleCase(a.entityType)} #{a.entityId}</p>
+                </div>
+                <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>{fmtDate(a.createdAt)}</span>
+              </div>
+            ))}
+          </Section>
+        </>
+      )}
     </>
   );
 }
