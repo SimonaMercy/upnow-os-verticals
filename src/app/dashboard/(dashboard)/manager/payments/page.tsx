@@ -2,9 +2,10 @@
 
 /**
  * Manager · Payments page — mirrors the landlord Payments ledger
- * (src/app/rental-provider/dashboard/payments/page.tsx): four top-level
- * categories (Rental Income, Security Deposit, Management Fee, Others) with the
- * category breakdown as the clickable top-level filter. Read-only and gated per
+ * (src/app/rental-provider/dashboard/payments/page.tsx): the same five top-level
+ * categories (Rental Income, Security Deposit, Management Fee, Third Party,
+ * Other) with the category breakdown as the clickable top-level filter, so a
+ * manager and their landlord read identical figures. Read-only and gated per
  * landlord on `canManageDeposits`; data via GET /manager/payments?rp=<id>.
  */
 
@@ -13,42 +14,105 @@ import { Search, X, Wallet, Loader2, RefreshCw, Lock, Calendar, ExternalLink } f
 import { apiGet } from '@/lib/api';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
+import { taxPortionOf } from '@/lib/chargeTax';
 
 // ─── Categories (top level) ───────────────────────────────────────────────
-type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'others';
+// Identical set, order and membership to the landlord ledger — see that file for
+// the rationale behind each bucket.
+type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'third_party' | 'others';
 
-const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'management_fee', 'others'];
+const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'management_fee', 'third_party', 'others'];
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   rental_income:    'Rental Income',
   security_deposit: 'Security Deposit',
   management_fee:   'Management Fee',
-  others:           'Others',
+  third_party:      'Third Party',
+  others:           'Other',
 };
 const CATEGORY_SUB: Record<CategoryKey, string> = {
-  rental_income:    'rent collected',
+  rental_income:    'rent',
   security_deposit: 'deposits',
-  management_fee:   'Contract Registration · admin · commission',
-  others:           'maintenance · service · other',
+  management_fee:   'admin · commission · penalties',
+  third_party:      'VAT · Contract Registration · pass-throughs',
+  others:           'uncategorised',
 };
-const MANAGEMENT_TYPES = ['ejari_fee', 'admin_fee', 'commission'];
 
-function categoryOf(t: string): CategoryKey {
-  if (t === 'rental_income') return 'rental_income';
-  if (t === 'security_deposit') return 'security_deposit';
-  if (MANAGEMENT_TYPES.includes(t)) return 'management_fee';
+// The VAT column / subtotals. A custom "Other" charge holds its tax in the LABEL
+// rather than in vat_amount ("5% VAT on sub-lease" IS tax), so read it through the
+// shared rule instead of the stored column — see lib/chargeTax. Mirrors the RP
+// ledger, so the two reconcile one-to-one.
+const vatOf = (r: { paymentType: string; description?: string | null; vatAmount?: number | null; amount: number }) =>
+  taxPortionOf(r, r.amount);
+
+// A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission fees)
+// when its description says so. Every other `vat` cheque is rent VAT. BOTH sit
+// under Third Party — VAT is collected, not earned, and the rent-VAT cheque is
+// the same charge that other contracts hold as a free-text "5% VAT on Rent" row.
+const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+  (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
+
+// The sub-item a payment row belongs to. VAT splits into rental vs fees; every
+// other row keeps its raw payment type.
+function itemKeyOf(r: { paymentType: string; description?: string | null }): string {
+  if (r.paymentType === 'vat') return isFeesVat(r) ? 'vat_fees' : 'vat_rental';
+  return r.paymentType;
+}
+
+// Rental Income — rent only. The rent-VAT cheque is a pass-through and sits
+// under Third Party, alongside the free-text "5% VAT on Rent" rows that record
+// the identical charge on contracts that never used a VAT cheque.
+const RENTAL_TYPES = ['rental_income'];
+// Management Fee — RP-charged fees + every Settings → Rules penalty / charge.
+const MANAGEMENT_TYPES = [
+  'admin_fee', 'commission',
+  'bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee',
+  'late_renewal_fee', 'early_termination_fee', 'late_moveout_fee',
+  'unauthorized_sharing_fee', 'access_card_fee', 'contract_name_change_fee', 'unit_transfer_fee',
+];
+// Third Party — pass-throughs the RP collects on behalf of others. `other` belongs
+// here (a sub-leased building's levy and the tax on it, service charges), matching
+// the contract page, the receipts and the segregated payment plan; leaving it in the
+// catch-all filed the landlord's Al Wasl money under "uncategorised".
+const THIRD_PARTY_TYPES = ['vat_rental', 'ejari_fee', 'vat_fees', 'maintenance_fee', 'service_charge', 'refund', 'other'];
+// Per-category display order for the type sub-groups.
+const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
+  rental_income:  RENTAL_TYPES,
+  management_fee: MANAGEMENT_TYPES,
+  third_party:    THIRD_PARTY_TYPES,
+};
+
+// Route a sub-item key to its top-level category. Unmapped types fall through to
+// Other, so nothing is ever silently dropped.
+function categoryOf(itemKey: string): CategoryKey {
+  if (itemKey === 'security_deposit') return 'security_deposit';
+  if (RENTAL_TYPES.includes(itemKey)) return 'rental_income';
+  if (MANAGEMENT_TYPES.includes(itemKey)) return 'management_fee';
+  if (THIRD_PARTY_TYPES.includes(itemKey)) return 'third_party';
   return 'others';
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  rental_income:    'Rental Income',
-  security_deposit: 'Security Deposit',
-  ejari_fee:        'Contract Registration',
-  admin_fee:        'Admin',
-  commission:       'Commission',
-  maintenance_fee:  'Maintenance',
-  service_charge:   'Service Charge',
-  refund:           'Refund',
-  other:            'Other',
+  rental_income:            'Rental Income',
+  vat_rental:               '5% VAT on Rent',
+  vat_fees:                 'Fees VAT',
+  security_deposit:         'Security Deposit',
+  admin_fee:                'Admin',
+  commission:               'Commission',
+  bounced_cheque_fee:       'Bounced cheque',
+  cheque_replacement_fee:   'Cheque hold / replacement',
+  cheque_deferral_fee:      'Cheque deferral',
+  late_renewal_fee:         'Late renewal',
+  early_termination_fee:    'Early termination',
+  late_moveout_fee:         'Late move-out',
+  unauthorized_sharing_fee: 'Sharing without notice / NOC',
+  access_card_fee:          'Access card / remote replacement',
+  contract_name_change_fee: 'Contract name change',
+  unit_transfer_fee:        'Unit transfer',
+  ejari_fee:                'Contract Registration',
+  maintenance_fee:          'Maintenance',
+  service_charge:           'Service Charge',
+  refund:                   'Refund',
+  other:                    'Other',
 };
 const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -232,21 +296,21 @@ export default function ManagerPaymentsPage() {
     return true;
   });
 
-  const filtered = filterCategory === 'all' ? scoped : scoped.filter(d => categoryOf(d.paymentType) === filterCategory);
+  const filtered = filterCategory === 'all' ? scoped : scoped.filter(d => categoryOf(itemKeyOf(d)) === filterCategory);
 
-  const catTotals: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, others: 0 };
-  for (const d of scoped) catTotals[categoryOf(d.paymentType)] += d.amount;
+  const catTotals: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, third_party: 0, others: 0 };
+  for (const d of scoped) catTotals[categoryOf(itemKeyOf(d))] += d.amount;
   const grandTotal   = scoped.reduce((s, d) => s + d.amount, 0);
   const depositsHeld = scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held').reduce((s, d) => s + d.amount, 0);
 
   const groups = CATEGORY_ORDER
     .map(cat => {
-      const catRows = filtered.filter(r => categoryOf(r.paymentType) === cat);
+      const catRows = filtered.filter(r => categoryOf(itemKeyOf(r)) === cat);
       return {
         cat,
         rows: catRows,
         subtotal: catRows.reduce((s, r) => s + r.amount, 0),
-        vat: catRows.reduce((s, r) => s + (r.vatAmount ?? 0), 0),
+        vat: catRows.reduce((s, r) => s + vatOf(r), 0),
       };
     })
     .filter(g => g.rows.length > 0);
@@ -261,6 +325,7 @@ export default function ManagerPaymentsPage() {
     { key: 'rental_income',    label: CATEGORY_LABELS.rental_income,    value: catTotals.rental_income,    sub: CATEGORY_SUB.rental_income },
     { key: 'security_deposit', label: CATEGORY_LABELS.security_deposit, value: catTotals.security_deposit, sub: `held ${fmtAed(depositsHeld)}` },
     { key: 'management_fee',   label: CATEGORY_LABELS.management_fee,   value: catTotals.management_fee,   sub: CATEGORY_SUB.management_fee },
+    { key: 'third_party',      label: CATEGORY_LABELS.third_party,      value: catTotals.third_party,      sub: CATEGORY_SUB.third_party },
     { key: 'others',           label: CATEGORY_LABELS.others,           value: catTotals.others,           sub: CATEGORY_SUB.others },
   ];
 
@@ -405,10 +470,14 @@ function ManagerCategoryBlock({
   vat: number;
   onRowClick: (id: string) => void;
 }) {
-  const multiType = category === 'management_fee' || category === 'others';
-  const typeOrder = category === 'management_fee' ? MANAGEMENT_TYPES : [...new Set(rows.map(r => r.paymentType))];
+  const multiType = category !== 'security_deposit';
+  // Known types first in their canonical order, then anything unexpected — mirrors
+  // the landlord ledger so the two pages group identically.
+  const present = [...new Set(rows.map(itemKeyOf))];
+  const ordered = TYPE_ORDER[category] ?? [];
+  const typeOrder = [...ordered.filter(t => present.includes(t)), ...present.filter(t => !ordered.includes(t))];
   const byType = typeOrder
-    .map(t => ({ type: t, rows: rows.filter(r => r.paymentType === t) }))
+    .map(t => ({ type: t, rows: rows.filter(r => itemKeyOf(r) === t) }))
     .filter(g => g.rows.length > 0);
 
   return (
@@ -425,7 +494,7 @@ function ManagerCategoryBlock({
 
       {byType.map(grp => {
         const grpTotal = grp.rows.reduce((s, r) => s + r.amount, 0);
-        const grpVat   = grp.rows.reduce((s, r) => s + (r.vatAmount ?? 0), 0);
+        const grpVat   = grp.rows.reduce((s, r) => s + vatOf(r), 0);
         return (
           <Fragment key={grp.type}>
             {multiType && (
@@ -454,7 +523,7 @@ function ManagerCategoryBlock({
                   <td className="px-4 py-3.5">{d.tenant}</td>
                   <td className="px-4 py-3.5 text-[#6b6860] max-w-[220px] truncate" title={d.description ?? ''}>{d.description ?? '—'}</td>
                   <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
-                  <td className="px-4 py-3.5 text-[#6b6860]">{d.vatAmount != null && d.vatAmount > 0 ? fmtAed(d.vatAmount) : '—'}</td>
+                  <td className="px-4 py-3.5 text-[#6b6860]">{vatOf(d) > 0 ? fmtAed(vatOf(d)) : '—'}</td>
                   <td className="px-4 py-3.5">
                     <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[d.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
                       {STATUS_LABELS[d.status] ?? d.status}

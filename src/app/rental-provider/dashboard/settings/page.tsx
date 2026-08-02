@@ -748,6 +748,16 @@ export default function SettingsPage() {
     maintenanceUpdate: false, promotional: false,
   });
 
+  // ── Correspondence (CC) ──────────────────────────────────────
+  // Addresses copied on every customer-facing email, so the RP holds the same
+  // email — same payment plan, same renewal terms — the customer received.
+  // `ccDraft` is the not-yet-added text in the input.
+  const [ccEmails,   setCcEmails]   = useState<string[]>([]);
+  const [ccDraft,    setCcDraft]    = useState('');
+  const [ccSaving,   setCcSaving]   = useState(false);
+  const [ccSaved,    setCcSaved]    = useState(false);
+  const [ccError,    setCcError]    = useState<string | null>(null);
+
   const [showInvite, setShowInvite]     = useState(false);
   const [invName, setInvName]           = useState('');
   const [invEmail, setInvEmail]         = useState('');
@@ -811,6 +821,7 @@ export default function SettingsPage() {
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
+        if (Array.isArray(p.ccEmails)) setCcEmails(p.ccEmails as string[]);
         // Penalty Rules engine — round-trip each rule to its stored mode. Months
         // (Early Termination) and Daily (Late Move-out) take precedence when set;
         // then % → 'pct', flat fee → 'aed'; nothing yet → the rule's default mode.
@@ -1252,6 +1263,57 @@ export default function SettingsPage() {
     }
   }
 
+  const CC_MAX = 5;
+
+  /** Add the drafted address as a chip. Returns the resulting list, or null if
+   *  the draft was rejected (invalid, duplicate, or over the cap). */
+  function addCcDraft(): string[] | null {
+    const value = ccDraft.trim().toLowerCase();
+    if (!value) return ccEmails;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      setCcError('Enter a valid email address.');
+      return null;
+    }
+    if (ccEmails.includes(value)) {
+      setCcError('That address is already on the list.');
+      return null;
+    }
+    if (ccEmails.length >= CC_MAX) {
+      setCcError(`You can copy at most ${CC_MAX} addresses.`);
+      return null;
+    }
+    const next = [...ccEmails, value];
+    setCcEmails(next);
+    setCcDraft('');
+    setCcError(null);
+    setCcSaved(false);
+    return next;
+  }
+
+  async function saveCcEmails() {
+    // Save whatever is typed but not yet added as a chip, so a half-finished
+    // entry isn't silently dropped by clicking Save.
+    const list = addCcDraft();
+    if (list === null) return;
+    setCcSaving(true);
+    setCcError(null);
+    setCcSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ccEmails: list.length ? list : null }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setCcSaved(true);
+    } catch {
+      setCcError('Failed to save. Please try again.');
+    } finally {
+      setCcSaving(false);
+    }
+  }
+
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!invName.trim() || !invEmail.trim()) return;
@@ -1311,6 +1373,91 @@ export default function SettingsPage() {
 
       {/* ── Notifications tab ──────────────────────────────────── */}
       {mainTab === 'notifications' && (
+        <div className="space-y-6">
+        {/* Correspondence — who gets copied on customer email */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <h2 className="font-semibold text-base text-[#1a1916] mb-1">Customer Correspondence</h2>
+          <p className="text-xs text-[#9b9890] mb-4">
+            Emails to your customers are sent by UpNow from <strong>noreply@upnow.ae</strong>. Add
+            addresses here and they are copied on every email your customers receive — payment
+            plans, renewal offers, contracts, settlements — so you hold exactly what they hold.
+            Customers can see the CC line and reply to all.
+          </p>
+
+          <label className="block text-xs font-medium text-[#6b6860] mb-1.5">
+            CC on customer emails <span className="text-[#9b9890] font-normal">(up to {CC_MAX})</span>
+          </label>
+
+          {ccEmails.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2.5">
+              {ccEmails.map(addr => (
+                <span
+                  key={addr}
+                  className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-[#e7f5f0] text-[#1f7e66] text-xs font-medium"
+                >
+                  {addr}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${addr}`}
+                    onClick={() => { setCcEmails(ccEmails.filter(a => a !== addr)); setCcSaved(false); setCcError(null); }}
+                    className="rounded-full p-0.5 hover:bg-[#c9e8dc] transition-colors cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[240px]">
+              <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+              <input
+                type="email"
+                value={ccDraft}
+                onChange={e => { setCcDraft(e.target.value); setCcSaved(false); setCcError(null); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCcDraft(); }
+                }}
+                disabled={ccEmails.length >= CC_MAX}
+                className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:cursor-not-allowed"
+                placeholder={ccEmails.length >= CC_MAX ? `Limit of ${CC_MAX} reached` : 'leasing@yourcompany.ae — press Enter to add'}
+              />
+            </div>
+            {user?.email && !ccEmails.includes(user.email.toLowerCase()) && ccEmails.length < CC_MAX && (
+              <button
+                type="button"
+                onClick={() => { setCcEmails([...ccEmails, user.email!.toLowerCase()]); setCcSaved(false); setCcError(null); }}
+                className="px-3 py-2 rounded-lg text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
+              >
+                Add my account email
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={saveCcEmails}
+              disabled={ccSaving}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {ccSaving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+
+          <div className="min-h-4 mt-2">
+            {ccError && <p className="text-xs text-[#c0392b]">{ccError}</p>}
+            {ccSaved && !ccError && (
+              <p className="text-xs text-[#2e9f82]">
+                {ccEmails.length
+                  ? `Saved. ${ccEmails.length === 1 ? 'This address' : 'These addresses'} will be copied on every customer email.`
+                  : 'Cleared. You will no longer receive a copy of customer emails.'}
+              </p>
+            )}
+            {!ccSaved && !ccError && !ccEmails.length && !profileLoading && (
+              <p className="text-xs text-[#9b9890]">No copies — you currently do not receive the emails your customers are sent.</p>
+            )}
+          </div>
+        </div>
+
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
           <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about.</p>
@@ -1325,6 +1472,7 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
+        </div>
         </div>
       )}
 

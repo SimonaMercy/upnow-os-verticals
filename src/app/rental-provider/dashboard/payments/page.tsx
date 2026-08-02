@@ -4,10 +4,11 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, Calendar } from 'lucide-react';
 import Link from 'next/link';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
+import { taxPortionOf } from '@/lib/chargeTax';
 
 /** Portfolio-wide Payments ledger (SCRUM-577 / 579). Lists every payment row across
  *  the RP's contracts, grouped into top-level CATEGORIES that mirror the Payment
- *  Grouping report one-to-one — Rental Income (rent + rental VAT), Security Deposit,
+ *  Grouping report one-to-one — Rental Income (rent), Security Deposit,
  *  Management Fee (admin, commission + Settings → Rules penalties), Third Party
  *  (Contract Registration, Fees VAT and pass-throughs the RP collects on behalf of
  *  others) and Other — with a per-category subtotal and a per-type breakdown inside
@@ -27,17 +28,24 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   others:           'Other',
 };
 const CATEGORY_SUB: Record<CategoryKey, string> = {
-  rental_income:    'rent + rental VAT',
+  rental_income:    'rent',
   security_deposit: 'deposits',
   management_fee:   'admin · commission · penalties',
-  third_party:      'Contract Registration · Fees VAT · pass-throughs',
+  third_party:      'VAT · Contract Registration · pass-throughs',
   others:           'uncategorised',
 };
 
+// The VAT column / subtotals. A custom "Other" charge holds its tax in the LABEL
+// rather than in vat_amount ("5% VAT on sub-lease" IS tax), so read it through
+// the shared rule instead of the stored column — see lib/chargeTax.
+const vatOf = (r: { paymentType: string; description?: string | null; vatAmount?: number | null; amount: number }) =>
+  taxPortionOf(r, r.amount);
+
 // A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission fees)
-// when its description says so — a pass-through that sits under Third Party. Every
-// other `vat` cheque is Rental VAT and belongs with Rental Income. Identical to the
-// Payment Grouping report's split, so the two surfaces reconcile one-to-one.
+// when its description says so. Every other `vat` cheque is rent VAT. BOTH sit
+// under Third Party — VAT is collected, not earned, and the rent-VAT cheque is
+// the same charge that other contracts hold as a free-text "5% VAT on Rent" row.
+// Identical to the Payment Grouping report's split, so the two reconcile one-to-one.
 const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
   (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
 
@@ -49,8 +57,10 @@ function itemKeyOf(r: { paymentType: string; description?: string | null }): str
   return r.paymentType;
 }
 
-// Rental Income — rent collected plus the rental-VAT cheque.
-const RENTAL_TYPES = ['rental_income', 'vat_rental'];
+// Rental Income — rent only. The rent-VAT cheque is a pass-through and sits
+// under Third Party, alongside the free-text "5% VAT on Rent" rows that record
+// the identical charge on contracts that never used a VAT cheque.
+const RENTAL_TYPES = ['rental_income'];
 // Management Fee — RP-charged fees + every Settings → Rules penalty / charge.
 const MANAGEMENT_TYPES = [
   'admin_fee', 'commission',
@@ -58,8 +68,11 @@ const MANAGEMENT_TYPES = [
   'late_renewal_fee', 'early_termination_fee', 'late_moveout_fee',
   'unauthorized_sharing_fee', 'access_card_fee', 'contract_name_change_fee', 'unit_transfer_fee',
 ];
-// Third Party — pass-through fees the RP collects on behalf of others.
-const THIRD_PARTY_TYPES = ['ejari_fee', 'vat_fees', 'maintenance_fee', 'service_charge', 'refund'];
+// Third Party — pass-through fees the RP collects on behalf of others. `other`
+// belongs here (a sub-leased building's levy and the tax on it, service charges),
+// matching the contract page, the receipts and the segregated payment plan;
+// leaving it in the catch-all filed that money under "uncategorised".
+const THIRD_PARTY_TYPES = ['vat_rental', 'ejari_fee', 'vat_fees', 'maintenance_fee', 'service_charge', 'refund', 'other'];
 // Per-category display order for the type sub-groups.
 const TYPE_ORDER: Partial<Record<CategoryKey, string[]>> = {
   rental_income:  RENTAL_TYPES,
@@ -86,7 +99,7 @@ function categoryOf(itemKey: string): CategoryKey {
 // Payment Grouping report's item labels.
 const TYPE_LABELS: Record<string, string> = {
   rental_income:            'Rental Income',
-  vat_rental:               'Rental VAT',
+  vat_rental:               '5% VAT on Rent',
   vat_fees:                 'Fees VAT',
   security_deposit:         'Security Deposit',
   admin_fee:                'Admin',
@@ -351,7 +364,7 @@ export default function PaymentsPage() {
           cat,
           rows: catRows,
           subtotal: catRows.reduce((s, r) => s + r.amount, 0),
-          vat: catRows.reduce((s, r) => s + (r.vatAmount ?? 0), 0),
+          vat: catRows.reduce((s, r) => s + vatOf(r), 0),
         };
       })
       .filter(g => g.rows.length > 0),
@@ -558,7 +571,7 @@ function CategoryBlock({
 
       {byType.map(grp => {
         const grpTotal = grp.rows.reduce((s, r) => s + r.amount, 0);
-        const grpVat   = grp.rows.reduce((s, r) => s + (r.vatAmount ?? 0), 0);
+        const grpVat   = grp.rows.reduce((s, r) => s + vatOf(r), 0);
         return (
           <Fragment key={grp.type}>
             {multiType && (
@@ -592,7 +605,7 @@ function CategoryBlock({
                   <td className="px-4 py-3.5">{d.tenant}</td>
                   <td className="px-4 py-3.5 text-[#6b6860] max-w-[220px] truncate" title={rowDescription(d)}>{rowDescription(d)}</td>
                   <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
-                  <td className="px-4 py-3.5 text-[#6b6860]">{d.vatAmount != null && d.vatAmount > 0 ? fmtAed(d.vatAmount) : '—'}</td>
+                  <td className="px-4 py-3.5 text-[#6b6860]">{vatOf(d) > 0 ? fmtAed(vatOf(d)) : '—'}</td>
                   <td className="px-4 py-3.5">
                     <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[d.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
                       {STATUS_LABELS[d.status] ?? d.status}

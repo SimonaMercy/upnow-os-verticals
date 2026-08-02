@@ -26,6 +26,7 @@ import {
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
+import { taxPortionOf } from '@/lib/chargeTax';
 import { useBackClose } from '@/lib/useSlideOver';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
@@ -267,10 +268,27 @@ export default function TenantContractDetailPage() {
   const hasEjari  = contract?.ejariStatus === 'registered';
   const canSign   = isIssued && !hasTenantSigned && (contract?.pdcConfirmed ?? false);
 
-  const rentPayments = (contract?.payments ?? []).filter(p =>
+  const billedPayments = (contract?.payments ?? []).filter(p =>
     p.paymentType !== 'admin_fee' && p.paymentType !== 'security_deposit' &&
     !p.description?.toLowerCase().includes('ejari')
   );
+  // Rental Income = the rent cheques plus the rental-VAT cheque collected against
+  // them. Everything else here is a pass-through the landlord collects for someone
+  // else — a sub-leased building's levy, the tax on that levy, service charges —
+  // and gets its own section, so rent reads as rent. Same split as the receipts,
+  // the payment plan and the Payments ledger.
+  const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
+    (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
+  const rentPayments = billedPayments.filter(p =>
+    p.paymentType === 'rental_income' || (p.paymentType === 'vat' && !isFeesVat(p)));
+  const otherPayments = billedPayments.filter(p => !rentPayments.includes(p));
+  // The "n / expected" count is about rent CHEQUES — the VAT cheque is not one.
+  const rentInstalments = rentPayments.filter(p => p.paymentType === 'rental_income');
+  // A custom "Other" charge holds its tax in the LABEL, not in vat_amount — a
+  // sub-leased building's "5% VAT on sub-lease" row IS tax, so the "incl. X VAT"
+  // notes below have to read it through the shared rule (see lib/chargeTax).
+  const vatOf = (p: { paymentType?: string | null; description?: string | null; vatAmount?: number | null; amount: number }) =>
+    taxPortionOf(p, p.amount);
   const depositPayment = (contract?.payments ?? []).find(p => p.paymentType === 'security_deposit');
 
   // ── Timeline step states (mirrors RP 6-step journey) ────────────────────
@@ -286,7 +304,7 @@ export default function TenantContractDetailPage() {
   const expectedCheques = contract?.numberOfInstallments ?? 0;
   // ChequeStatus enum is pending|cleared|bounced|cancelled — the previous
   // 'received' literal never matched, so this never tripped.
-  const rentChequePayments = rentPayments.filter(p => p.chequeStatus === 'cleared');
+  const rentChequePayments = rentInstalments.filter(p => p.chequeStatus === 'cleared');
   const allChequesReceived = rentChequePayments.length >= expectedCheques && expectedCheques > 0;
 
   // A receipt is available once the landlord has collected the PDCs (pdcConfirmed)
@@ -686,7 +704,7 @@ export default function TenantContractDetailPage() {
 
                     {/* Rental Instalments (read-only) */}
                     <SectionCard
-                      title={`Rental Instalments (${rentPayments.length} / ${contract.numberOfInstallments ?? '?'})`}
+                      title={`Rental Instalments (${rentInstalments.length} / ${contract.numberOfInstallments ?? '?'})`}
                       icon={CreditCard}
                     >
                       {rentPayments.length === 0 ? (
@@ -711,8 +729,8 @@ export default function TenantContractDetailPage() {
                                   <td className="px-2 py-2 text-[#1a1916]">{p.description ?? `Instalment ${i + 1}`}</td>
                                   <td className="px-2 py-2 font-semibold text-[#1a1916]">
                                     {fmtAed(p.amount)}
-                                    {(p.vatAmount ?? 0) > 0 && (
-                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(p.vatAmount)} VAT</span>
+                                    {vatOf(p) > 0 && (
+                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(vatOf(p))} VAT</span>
                                     )}
                                   </td>
                                   <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
@@ -747,8 +765,8 @@ export default function TenantContractDetailPage() {
                                 <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#1a1916]">Total</td>
                                 <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
                                   {fmtAed(rentPayments.reduce((s, p) => s + p.amount, 0))}
-                                  {rentPayments.reduce((s, p) => s + (p.vatAmount ?? 0), 0) > 0 && (
-                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(rentPayments.reduce((s, p) => s + (p.vatAmount ?? 0), 0))} VAT</span>
+                                  {rentPayments.reduce((s, p) => s + vatOf(p), 0) > 0 && (
+                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(rentPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
                                   )}
                                 </td>
                                 <td colSpan={3} />
@@ -758,6 +776,79 @@ export default function TenantContractDetailPage() {
                         </div>
                       )}
                     </SectionCard>
+
+                    {/* Third Party charges — pass-throughs the landlord collects on
+                        someone else's behalf (a sub-leased building's levy and the
+                        tax on it, service charges). Kept out of Rental Instalments
+                        above so rent reads as rent; hidden when there are none. */}
+                    {otherPayments.length > 0 && (
+                      <SectionCard title={`Other Charges (${otherPayments.length})`} icon={CreditCard}>
+                        <div className="overflow-x-auto -mx-1">
+                          <table className="w-full text-xs min-w-[400px]">
+                            <thead>
+                              <tr className="text-left text-[10px] text-[#9b9890] uppercase border-b border-[#f4f3ef]">
+                                <th className="px-2 py-2 font-medium">#</th>
+                                <th className="px-2 py-2 font-medium">Description</th>
+                                <th className="px-2 py-2 font-medium">Amount</th>
+                                <th className="px-2 py-2 font-medium">Due Date</th>
+                                <th className="px-2 py-2 font-medium">Status</th>
+                                <th className="px-2 py-2 font-medium text-right">Receipt</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {otherPayments.map((p, i) => (
+                                <tr key={p.id} className={`border-b border-[#f4f3ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
+                                  <td className="px-2 py-2 text-[#9b9890]">{i + 1}</td>
+                                  <td className="px-2 py-2 text-[#1a1916]">{p.description ?? 'Charge'}</td>
+                                  <td className="px-2 py-2 font-semibold text-[#1a1916]">
+                                    {fmtAed(p.amount)}
+                                    {vatOf(p) > 0 && (
+                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(vatOf(p))} VAT</span>
+                                    )}
+                                  </td>
+                                  <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
+                                  <td className="px-2 py-2">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      p.chequeStatus === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                                      p.chequeStatus === 'bounced'   ? 'bg-red-50 text-red-700' :
+                                      p.chequeStatus === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
+                                      'bg-amber-50 text-amber-700'
+                                    }`}>{p.chequeStatus}</span>
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    {canReceipt(p) ? (
+                                      <a
+                                        href={receiptHref(p)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="View receipt"
+                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline"
+                                      >
+                                        <FileText size={11} /> Receipt
+                                      </a>
+                                    ) : (
+                                      <span className="text-[10px] text-[#c4c2bb]">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t-2 border-[#c5e8df] bg-[#f0faf6]">
+                                <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#1a1916]">Total</td>
+                                <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
+                                  {fmtAed(otherPayments.reduce((s, p) => s + p.amount, 0))}
+                                  {otherPayments.reduce((s, p) => s + vatOf(p), 0) > 0 && (
+                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(otherPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
+                                  )}
+                                </td>
+                                <td colSpan={3} />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </SectionCard>
+                    )}
                   </div>
 
                   {/* Documents */}

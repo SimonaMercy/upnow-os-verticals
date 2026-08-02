@@ -51,6 +51,7 @@ import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
+import { taxPortionOf } from '@/lib/chargeTax';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
@@ -123,6 +124,8 @@ interface ContractDetail {
   kycExpiryMissingKeys?: string[];
   /** Durable "KYC re-verification was required" flag (snapshotted at accept-time). */
   renewalDocsRequiredAt?: string | null;
+  /** Customer pressed "Submit for review" — their side of the step is finished. */
+  renewalDocsSubmittedAt?: string | null;
   /** RP has reviewed + accepted the re-uploaded KYC docs → cheques unlock. */
   renewalDocsAcceptedAt?: string | null;
   utilityStatus?: string | null;
@@ -803,7 +806,7 @@ interface StepHandlers {
   /** Approve a single KYC document → POST /documents/:id/verify (same as leads / new-lease). */
   onApproveDoc: (docId: number) => void;
   /** Reject a single KYC document → POST /documents/:id/reject (same as leads / new-lease). */
-  onRejectDoc: (docId: number) => void;
+  onRejectDoc: (docId: number, label?: string) => void;
   /** Approve a KYC doc AND record the expiry the RP read off it → POST /documents/:id/verify
    *  with a body. Rejects on failure so the caller can surface it (unlike onApproveDoc,
    *  which is fire-and-forget). */
@@ -1189,14 +1192,18 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
   const LABELS: Record<string, string> = {
     emirates_id: 'Emirates ID', passport: 'Passport', visa: 'UAE Visa / Residency', trade_license: 'Trade License',
   };
-  // The slot each flagged base is uploaded into — the SAME keys the customer's
-  // own renewal step writes to (spaces v2 BASE_DOC), so a copy sent through the
+  // The slot(s) each flagged base is uploaded into — the SAME keys the customer's
+  // own renewal step writes to (spaces v2 BASE_SLOTS), so a copy sent through the
   // upload link refreshes the base here instead of landing as a stray file.
-  const UPLOAD_SLOT: Record<string, { key: string; category: string }> = {
-    emirates_id:   { key: 'emirates_id',   category: 'identity' },
-    passport:      { key: 'passport',      category: 'identity' },
-    visa:          { key: 'uae_visa',      category: 'identity' },
-    trade_license: { key: 'trade_license', category: 'license'  },
+  // Emirates ID is TWO slots, front and back, as it is everywhere else.
+  const UPLOAD_SLOTS: Record<string, { key: string; label: string; category: string }[]> = {
+    emirates_id: [
+      { key: 'emirates_id_front', label: 'Emirates ID — Front', category: 'identity' },
+      { key: 'emirates_id_back',  label: 'Emirates ID — Back',  category: 'identity' },
+    ],
+    passport:      [{ key: 'passport',      label: 'Passport',             category: 'identity' }],
+    visa:          [{ key: 'uae_visa',      label: 'UAE Visa / Residency', category: 'identity' }],
+    trade_license: [{ key: 'trade_license', label: 'Trade License',        category: 'license'  }],
   };
   const baseOf = (k: string): string | null => {
     const s = (k ?? '').toLowerCase();
@@ -1229,6 +1236,10 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
   // (commercial → trade licence, residential → personal IDs), so a doc that isn't
   // flagged simply shows as already "Approved / on file" rather than "Pending".
   const bases = Array.from(new Set([...remaining, ...Array.from(freshestByBase.keys())]));
+  const uploadSlots = bases.flatMap(b => UPLOAD_SLOTS[b] ?? [{ key: b, label: LABELS[b] ?? b, category: 'identity' }]);
+  // The customer has pressed "Submit for review" on their side — their part is done,
+  // so the footer must stop telling the RP to wait on them.
+  const custSubmittedAt = h.contract.renewalDocsSubmittedAt ?? null;
 
   const [accepting, setAccepting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1319,7 +1330,7 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
                   <button type="button" className="mini-btn ok cursor-pointer" onClick={() => h.onApproveDoc(doc.id)}><Check size={12} /> Approve</button>
                 )}
                 {canEdit && doc && (needsExpiry || (!stillMissing && !rejected)) && (
-                  <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id)}><X size={12} /> Reject</button>
+                  <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id, lbl)}><X size={12} /> Reject</button>
                 )}
                 {awaitingUpload && <span className="cstat bounced">Pending</span>}
               </div>
@@ -1341,12 +1352,9 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
             tenantId={h.contract.tenant.id}
             contractId={h.contract.id}
             variant="inline"
-            label={`Send upload link (${bases.length})`}
-            presetDocs={bases.map(b => ({
-              key: UPLOAD_SLOT[b]?.key ?? b,
-              label: LABELS[b] ?? b,
-              category: UPLOAD_SLOT[b]?.category ?? 'identity',
-              required: true,
+            label={`Send upload link (${uploadSlots.length})`}
+            presetDocs={uploadSlots.map(s => ({
+              key: s.key, label: s.label, category: s.category, required: true,
             }))}
           />
         </div>
@@ -1360,7 +1368,10 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
         )
       ) : awaitingCustomer.length === 0 ? (
         // Every blocker is RP-side — don't tell them to wait on a customer who has nothing to send.
-        <p className="note">Add the missing expiry date{undated.length === 1 ? '' : 's'} above to unlock the cheques step.</p>
+        <p className="note">
+          {custSubmittedAt ? `${h.contract.tenant.name || 'The customer'} submitted their documents on ${fmtDate(custSubmittedAt)}. ` : ''}
+          Add the missing expiry date{undated.length === 1 ? '' : 's'} above to unlock the cheques step.
+        </p>
       ) : (
         <p className="note">
           Waiting for {h.contract.tenant.name || 'the customer'} to re-upload {awaitingCustomer.length === 1 ? 'a document' : `${awaitingCustomer.length} documents`}. You can accept once every copy is refreshed{undated.length ? ', including the expiry dates above' : ''}.
@@ -2350,7 +2361,7 @@ function DetailsDrawer({
    *  the Clauses & Notes editor is read-only, matching the backend lock. */
   editLocked?: boolean;
   contract: ContractDetail; payments: ContractPayment[]; kycDocs: ContractDoc[];
-  onApproveDoc: (id: number) => void; onRejectDoc: (id: number) => void;
+  onApproveDoc: (id: number) => void; onRejectDoc: (id: number, label?: string) => void;
   /** POST /api/contracts/:id/payments — record a new instalment / payment / fee. */
   onRecordPayment: (body: {
     description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
@@ -3992,7 +4003,7 @@ function DetailsDrawer({
                                     {!ok && (
                                       <>
                                         <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
-                                        <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id)}><X size={12} /> Reject</button>
+                                        <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id, lbl)}><X size={12} /> Reject</button>
                                       </>
                                     )}
                                   </>
@@ -5335,7 +5346,12 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
   // mirrors the depositForPlan zeroing that feeds the "Payment Plan" modal. The legitimate
   // "Security deposit held (refundable, not in rent total)" ledger footer keeps showing it.
   const deposit = isRenewal ? 0 : (rows.find(p => p.paymentType === 'security_deposit')?.amount ?? contract.securityDeposit?.amount ?? 0);
-  const totalVat = rentVat + v(otherItems) + v(feeItems);
+  // "Other" charges hold their tax in the LABEL, not in vat_amount — a
+  // sub-leased building's "5% VAT on sub-lease" row IS tax, so summing
+  // vat_amount alone left it out of the header's VAT figure (see lib/chargeTax).
+  const otherVat = otherItems.reduce(
+    (s, p) => s + (activePmt(p) ? taxPortionOf(p, Number(p.amount) || 0) : 0), 0);
+  const totalVat = rentVat + otherVat + v(feeItems);
   const totalPayable = rentGross + otherGross + feesGross + deposit;
   return (
     <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1.6fr 24px 1fr', background: 'var(--surface)', borderRadius: 22, border: '1px solid var(--mist-strong)', boxShadow: 'var(--sh-hero)', overflow: 'hidden', marginBottom: 22 }}>
@@ -5577,6 +5593,16 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     () => contract ? deriveState(contract, signatures, moveInInsp, moveOutInsp, settlementStatus) : null,
     [contract, signatures, moveInInsp, moveOutInsp, settlementStatus],
   );
+
+  // Reject-document dialog state. Declared HERE, above the loading/error returns
+  // below — every hook has to run on every render, and a first paint that returns
+  // early at "Loading contract…" would otherwise skip these four and change the
+  // hook order on the next render. The handlers that use them are plain functions
+  // and can stay down with the other action callbacks.
+  const [rejectTarget, setRejectTarget] = useState<{ id: number; label: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectBusy, setRejectBusy] = useState(false);
+  const [rejectErr, setRejectErr] = useState<string | null>(null);
 
   // Loading / error
   if (loading && !contract) {
@@ -5982,14 +6008,39 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     }
     await reload();
   };
-  const onRejectDoc = (id: number) => {
-    const reason = window.prompt('Reason for rejection (the customer will see this and be asked to re-upload):');
-    if (reason === null) return; // cancelled
-    fetch(`/api/documents/${id}/reject`, {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(reason.trim() ? { reason: reason.trim() } : {}),
-    }).then(r => { if (r.ok) void reload(); }).catch(() => {});
+  // Reject opens the app's own dialog, not window.prompt(). The native prompt was
+  // unstyled browser chrome in the middle of a designed page, it cannot say WHICH
+  // document is being rejected, its Cancel returns null and looked identical to a
+  // silent failure, and a rejection is the one action here the customer actually
+  // reads — the reason becomes their re-upload instruction, so it deserves a real
+  // field. Mirrors the reject dialog on the lead documents step. (Its state is
+  // declared above the loading/error returns — see the Rules-of-Hooks note there.)
+  const onRejectDoc = (id: number, label?: string) => {
+    setRejectReason(''); setRejectErr(null);
+    setRejectTarget({ id, label: label?.trim() || 'this document' });
+  };
+  const confirmRejectDoc = async () => {
+    if (!rejectTarget) return;
+    setRejectBusy(true); setRejectErr(null);
+    try {
+      const res = await fetch(`/api/documents/${rejectTarget.id}/reject`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rejectReason.trim() ? { reason: rejectReason.trim() } : {}),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({} as { message?: string }));
+        throw new Error((b as { message?: string }).message ?? `Could not reject (${res.status})`);
+      }
+      setRejectTarget(null);
+      await reload();
+    } catch (e) {
+      // Surfaced in the dialog instead of vanishing — the old handler swallowed
+      // every failure, so a reject that never landed looked exactly like one that did.
+      setRejectErr(e instanceof Error ? e.message : 'Could not reject');
+    } finally {
+      setRejectBusy(false);
+    }
   };
 
   // ── Flow 1: record payment + update status ──
@@ -6438,6 +6489,23 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       ? { tone: 'waiting', label: 'Starts later' }
       : { tone: content.tone, label: content.label };
 
+  // Deep-links to the related entities (Property → portfolio popup, Unit → unit
+  // page, Customer → customer page). The manager mirror gets the same links
+  // against its own landlord-scoped routes (?rp=<landlord>): it has no per-unit
+  // page, so the unit opens the units workspace pre-filtered to that unit
+  // number. Mirrors the lead detail page's link block exactly.
+  const mgrRpQ = rpScope !== '' ? `rp=${rpScope}` : '';
+  const propertyHref = !contract.property.id ? null
+    : isManagerView ? (mgrRpQ ? `/dashboard/manager/properties?${mgrRpQ}&property=${contract.property.id}` : null)
+    : `/rental-provider/dashboard/portfolio?property=${contract.property.id}`;
+  const unitHref = !contract.unit.id ? null
+    : isManagerView
+      ? (mgrRpQ ? `/dashboard/manager/units?${mgrRpQ}&q=${encodeURIComponent(contract.unit.number ?? contract.unit.name ?? '')}` : null)
+      : (contract.property.id ? `/rental-provider/dashboard/units/${contract.unit.id}` : null);
+  const customerHref = !contract.tenant.id ? null
+    : isManagerView ? (mgrRpQ ? `/dashboard/manager/tenants/${contract.tenant.id}?${mgrRpQ}` : null)
+    : `/rental-provider/dashboard/tenants/${contract.tenant.id}`;
+
   return (
     <div className="quest-page">
       <div className="wrap">
@@ -6455,17 +6523,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 <Building2 size={13} />
                 {/* Property name opens its details popup on the portfolio page
                     (no standalone property page — the portfolio popup is the home
-                    for property details). Manager view stays plain (different base). */}
-                {contract.property.id && !isManagerView ? (
-                  <Link href={`/rental-provider/dashboard/portfolio?property=${contract.property.id}`} className="chain-link" title="Open property details">
+                    for property details). A manager gets the same popup on their
+                    own landlord-scoped Properties page. */}
+                {propertyHref ? (
+                  <Link href={propertyHref} className="chain-link" title="Open property details">
                     {contract.property.buildingName ?? '—'}
                   </Link>
                 ) : (
                   <span>{contract.property.buildingName ?? '—'}</span>
                 )}
                 <ChevronRight size={12} style={{ opacity: .5 }} />
-                {contract.property.id && contract.unit.id && !isManagerView ? (
-                  <Link href={`/rental-provider/dashboard/units/${contract.unit.id}`} className="chain-link" title="Open unit details">
+                {unitHref ? (
+                  <Link href={unitHref} className="chain-link" title="Open unit details">
                     Unit {contract.unit.number ?? '—'}
                   </Link>
                 ) : (
@@ -6635,7 +6704,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
             keeps the compact info row instead. */}
-        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={!isManagerView && contract.tenant.id ? `/rental-provider/dashboard/tenants/${contract.tenant.id}` : null} />}
+        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={customerHref} />}
 
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}
@@ -6644,8 +6713,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
           <span className="pitem">
             <span className="pk">Customer</span>
             <span className="pv">
-              {contract.tenant.id && !isManagerView ? (
-                <Link href={`/rental-provider/dashboard/tenants/${contract.tenant.id}`} className="chain-link" title="Open customer details">
+              {customerHref ? (
+                <Link href={customerHref} className="chain-link" title="Open customer details">
                   {contract.tenant.name ?? 'Customer'}
                 </Link>
               ) : (
@@ -6965,6 +7034,41 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       {(ejariUploading || utilityUploading || chequesUploading || windDownUploading) && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'grid', placeItems: 'center', zIndex: 9999, color: '#fff', font: '600 14px system-ui' }}>
           Uploading {ejariUploading ? 'Contract Registration' : utilityUploading ? 'utility' : chequesUploading ? 'Payment Confirmation' : 'wind-down'} document…
+        </div>
+      )}
+
+      {/* Reject a customer document — replaces window.prompt(). Names the document,
+          makes the reason a real (optional) field, and reports failures instead of
+          swallowing them. */}
+      {rejectTarget && (
+        <div role="dialog" aria-modal="true" aria-label="Reject document"
+          style={{ position: 'fixed', inset: 0, zIndex: 96, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }}
+            onClick={() => { if (!rejectBusy) setRejectTarget(null); }} />
+          <div style={{ position: 'relative', width: 'min(440px, 100%)', background: 'var(--paper, #fff)', borderRadius: 16, padding: '20px 22px', boxShadow: '0 24px 60px -24px rgba(0,0,0,.45)' }}>
+            <p style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 15, fontWeight: 700, color: 'var(--ink, #1a1916)', margin: 0 }}>
+              <X size={15} style={{ color: 'var(--brick)' }} /> Reject document
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--ink-2, #3d3b35)', margin: '8px 0 12px', lineHeight: 1.5 }}>
+              Rejecting <strong>{rejectTarget.label}</strong>. {contract.tenant.name || 'The customer'} sees it as a re-upload slot, and your reason as the instruction.
+            </p>
+            <textarea
+              autoFocus rows={3} value={rejectReason} disabled={rejectBusy}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder="Reason (optional — shown to the customer)…"
+              style={{ width: '100%', resize: 'vertical', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong, #e8e6e0)', font: 'inherit', fontSize: 13, color: 'var(--ink, #1a1916)', background: 'var(--surface, #fafaf8)' }}
+            />
+            {rejectErr && <p style={{ fontSize: 12, color: 'var(--brick)', margin: '8px 0 0' }}>{rejectErr}</p>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button type="button" className="btn btn-sm" disabled={rejectBusy}
+                style={{ background: 'var(--brick)', color: '#fff' }}
+                onClick={() => void confirmRejectDoc()}>
+                <X size={14} /> {rejectBusy ? 'Rejecting…' : 'Reject'}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" disabled={rejectBusy}
+                onClick={() => setRejectTarget(null)}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 

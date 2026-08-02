@@ -43,14 +43,14 @@ import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { LocationMap } from '@/components/upnow/LocationMap';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import type { PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
-import { buildSegregatedPlan, segRowsFromCustomerPlan } from '@/lib/segregatedPlan';
+import { buildSegregatedPlan, segRowsFromCustomerPlan, segRowsFromContract } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
 import { RESIDENTIAL_RENTAL_DOCS, getKycDocs, getRentalSectionDocs, getRequiredDocs, getOccupantDocs, deriveOccupantCount, isDocKeySatisfied } from '@/lib/docRequirements';
 import { authorityLabel, authorityName, isKnownAuthority, licenseAuthorityGroups } from '@/lib/tradeLicenseAuthorities';
-import { additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
+import { additionalDocKey, docKeysForSlot, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 // The journey state machine is SHARED with the My Spaces list so both surfaces
 // name the same step — see lib/customerJourney.ts.
 import {
@@ -222,6 +222,9 @@ interface ApiContractPayment {
   vatAmount?: number;       // VAT portion already inside amountPaid
   transactionDate: string | null;
   chequeStatus?: string | null;
+  /** How the landlord expects this line to be paid — feeds the Payment Summary's
+   *  "Paid by" column, which hides itself when no row carries a method. */
+  paymentMethod?: string | null;
 }
 
 interface ApiContract {
@@ -249,9 +252,16 @@ interface ApiContract {
   /** Required KYC docs (EID/passport/visa/licence) that are expired or missing for
    *  this renewal — the customer must re-upload them. Blank expiry counts as expired. */
   expiredKycDocKeys?: string[];
+  /** The subset of expiredKycDocKeys flagged ONLY because no expiry date was ever
+   *  recorded. Expiry on a customer identity doc is the REVIEWER's to assert, so
+   *  these are not the customer's to fix — their copy is on file and it is the RP
+   *  who reads the date off it. Shown as done, never as "Replace". */
+  kycExpiryMissingKeys?: string[];
   /** Durable "KYC re-verification was required" flag — snapshotted at accept-time.
    *  Present ⇒ the renewal routes through the Documents step until the RP accepts. */
   renewalDocsRequiredAt?: string | null;
+  /** Customer pressed "Submit for review" on the renewal paperwork step. */
+  renewalDocsSubmittedAt?: string | null;
   /** RP has reviewed + accepted the re-uploaded renewal KYC docs → cheques unlock. */
   renewalDocsAcceptedAt?: string | null;
   numberOfInstallments: number | null;
@@ -339,6 +349,11 @@ interface CustomerCheque {
 interface TenantDoc {
   id?: number;
   documentKey: string;
+  /** `/documents/my` merges the customer's OWN docs with the tenant-visible docs
+   *  of EVERY contract they hold, so anything that means "this lease's document"
+   *  has to filter on these two — the key alone matches other leases as well. */
+  ownerType?: string | null;
+  ownerId?: number | null;
   displayName?: string | null;
   status?: string;
   /** Rejection reason (set by the RP/admin on reject); lives in documents.notes. */
@@ -947,8 +962,25 @@ function WaitingBadge() {
    payment, their signed tenancy contract the moment they've signed it, and their
    Contract Registration certificate the moment it's attached — without waiting
    for the tenancy to go active. Renders nothing until at least one is available. */
-function ejariCertDoc(resolved: Resolved): TenantDoc | undefined {
-  return (resolved.myDocs ?? []).find(d => d.documentKey.startsWith('ejari') && !!d.fileUrl);
+/**
+ * The Contract Registration certificate uploaded onto ONE specific lease.
+ *
+ * Scoping to `contractId` is the whole point: `myDocs` carries every contract the
+ * customer holds, so an unscoped `documentKey.startsWith('ejari')` matched a
+ * certificate from a DIFFERENT lease — which is how a brand-new space still
+ * mid-payment offered "your certificate is ready", and how a renewal offered the
+ * parent lease's certificate while its own registration was still pending.
+ * A certificate existing against this contract IS the proof registration is done.
+ *
+ * Every variant of the key is `ejari*` ([[Ejari Rename]] kept the DB keys).
+ * Highest id wins so a replaced certificate supersedes the one it replaced.
+ */
+function ejariCertDoc(resolved: Resolved, contractId: number | null | undefined): TenantDoc | undefined {
+  if (contractId == null) return undefined;
+  return (resolved.myDocs ?? [])
+    .filter(d => /^ejari/i.test(d.documentKey) && !!d.fileUrl
+      && d.ownerType === 'tenancy_contract' && d.ownerId === contractId)
+    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0))[0];
 }
 function receiptsReadyFor(contract: Resolved['contract'] | Resolved['renewalContract'] | null | undefined): boolean {
   if (!contract) return false;
@@ -975,7 +1007,7 @@ function DownloadCard({ href, icon, title, sub }: { href: string; icon: React.Re
  *  receipt or certificate actually exists. */
 const DOWNLOAD_STATES = new Set<StateKey>([
   'awaiting_rp_confirm', 'signature', 'ejari', 'utility', 'utility_review', 'move_in',
-  'renewal_cheques', 'renewal_progress', 'renewal_ejari',
+  'renewal_cheques', 'renewal_cheques_review', 'renewal_progress', 'renewal_ejari',
 ]);
 /**
  * Standalone section (rendered BELOW the current-step card, never inside it) so
@@ -989,7 +1021,7 @@ function SetupDownloads({ resolved, stateKey }: { resolved: Resolved; stateKey: 
   // the ones the customer is settling); falls back to the primary contract for
   // a brand-new lease, where renewalContract is null.
   const contract = resolved.renewalContract ?? resolved.contract;
-  const ejariDoc = ejariCertDoc(resolved);
+  const ejariDoc = ejariCertDoc(resolved, contract?.id);
   const showReceipts = !!contract && receiptsReadyFor(contract);
   // The tenancy contract becomes a document to keep once the customer has signed
   // it. Before that the signature step already shows its own "preview your
@@ -1111,7 +1143,8 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'termination_request_received':  return <TerminationReceivedAction resolved={resolved} onRefresh={onRefresh} />;
     case 'renewal_offered':               return <RenewalOfferedAction resolved={resolved} onRefresh={onRefresh} />;
     case 'renewal_documents':             return <DocumentsAction resolved={resolved} onRefresh={onRefresh} renewal />;
-    case 'renewal_cheques':               return <RenewalChequesAction resolved={resolved} onRefresh={onRefresh} />;
+    case 'renewal_cheques':
+    case 'renewal_cheques_review':        return <RenewalChequesAction resolved={resolved} onRefresh={onRefresh} />;
     case 'renewal_progress':              return <SignatureAction resolved={resolved} onRefresh={onRefresh} renewal />;
     case 'renewal_ejari':                 return <WaitingBadge />;
     case 'renewal_active':                return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
@@ -1266,21 +1299,36 @@ function BookedAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
         ) : planError ? (
           <ErrorBox msg={planError} />
         ) : plan ? (
+          (() => {
+          // Admin / Contract Registration / Commission VAT is collected as ONE
+          // cheque, so it reads as one line here too (same rule as the plan).
+          const feeVatFils = (plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0);
+          return (
           <div style={{ display: 'grid', gap: 6 }}>
-            <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
+            {/* Every charge is listed NET and the VAT is its OWN line — the same
+                way it is collected (a separate VAT cheque, per the landlord's
+                Rent VAT collection setting). Rolling it into "Annual rent (incl.
+                VAT)" hid what the customer is actually paying tax on. */}
+            <PaymentRow label="Annual rent" amountFils={plan.rentFils} />
             <PaymentRow label="Security deposit" amountFils={plan.securityDepositFils ?? 0} />
-            <PaymentRow label={`Admin fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0)} />
-            <PaymentRow label={`Contract Registration Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0)} />
-            <PaymentRow label={`Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={(plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0)} />
+            <PaymentRow label="Admin fee" amountFils={plan.adminFeeFils ?? 0} />
+            <PaymentRow label="Contract Registration Fee" amountFils={plan.ejariFils ?? 0} />
+            <PaymentRow label="Commission" amountFils={plan.commissionFils ?? 0} />
             {(plan.customFees ?? []).map((f, i) => (
-              <PaymentRow key={i} label={`${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`} amountFils={f.netFils + f.vatFils} />
+              <PaymentRow key={i} label={f.label} amountFils={f.netFils + f.vatFils} />
             ))}
+            {(plan.rentVatFils ?? 0) > 0 && (
+              <PaymentRow label={`Rental VAT${plan.rentVatRate ? ` (${plan.rentVatRate}%)` : ''}`} amountFils={plan.rentVatFils ?? 0} />
+            )}
+            {feeVatFils > 0 && <PaymentRow label="Fees VAT" amountFils={feeVatFils} />}
             <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
             <PaymentRow label="Total payable" amountFils={plan.totalAmountFils} bold />
             <p style={{ fontSize: 11, color: 'var(--mute)', margin: '8px 0 0', lineHeight: 1.4 }}>
               You&rsquo;ll pick a payment frequency (annual, semi-annual, quarterly, etc.) when you tap <b>I&rsquo;m Interested</b> — your rental provider confirms the payment schedule with your offer.
             </p>
           </div>
+          );
+          })()
         ) : null}
       </div>
 
@@ -2713,44 +2761,10 @@ function RenewalDocumentsAction({
   resolved: Resolved;
   onRefresh: () => void;
 }) {
-  const viewing = resolved.viewing;
-  const unit = resolved.unit;
-  const unitType = unit?.unitType ?? null;
-  const renewal = true;
-
-  const requiredDocs: DocReq[] = useMemo(
-    () => getRentalSectionDocs(unitType, resolved.entityType).filter(d => d.required),
-    [unitType, resolved.entityType],
-  );
-  // Rejected/missing docs do NOT satisfy a requirement — keep the Continue gate
-  // honest so a rejected doc forces a re-upload before payment.
-  const uploadedKeys = useMemo(() => new Set(resolved.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey)), [resolved.myDocs]);
-  // Occupants — only meaningful for residential. We don't persist count in
-  // the DB; the uploaded `occupant_N_*` doc keys are the source of truth.
-  const RESIDENTIAL_BLOCKLIST = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
-  const isResidential = !unitType || !RESIDENTIAL_BLOCKLIST.includes(unitType);
-  const initialOccupantCount = useMemo(
-    () => Math.max(
-      viewing?.occupantsAdults ?? 1,
-      deriveOccupantCount(resolved.myDocs.map(d => d.documentKey)),
-    ),
-    [viewing?.occupantsAdults, resolved.myDocs],
-  );
-  const [occupantCount, setOccupantCount] = useState<number>(initialOccupantCount);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (initialOccupantCount > occupantCount) setOccupantCount(initialOccupantCount);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialOccupantCount]);
-  const occupantDocs: DocReq[] = useMemo(
-    () => isResidential ? getOccupantDocs(occupantCount) : [],
-    [isResidential, occupantCount],
-  );
-  const requiredMissing = [
-    ...requiredDocs.filter(d => !uploadedKeys.has(d.key)),
-    ...occupantDocs.filter(d => !uploadedKeys.has(d.key)),
-  ];
-  const docsOk = requiredMissing.length === 0;
+  // A renewal re-verifies ONLY the KYC bases the backend flagged — the full document
+  // pack (occupants, financials, the unit category's rental section) was collected on
+  // the original lease and is not asked for again. The occupant-count / required-doc
+  // scaffolding this component used to carry computed nothing it ever rendered.
 
   const [prefSaving, setPrefSaving] = useState(false);
   const [prefError,  setPrefError]  = useState<string | null>(null);
@@ -2759,9 +2773,13 @@ function RenewalDocumentsAction({
   const [docUploading, setDocUploading] = useState<string | null>(null);
   const [uploadError,  setUploadError]  = useState<string | null>(null);
 
-  async function handleUpload(req: DocReq, file: File) {
+  /** `slotKey` is the row the customer tapped (what the UI tracks); `targetKey` is
+   *  the document key the file is written to, which is the same thing UNLESS this
+   *  customer's copy is already filed under a legacy key — then we replace THAT row
+   *  rather than adding a second one. Keeping the two apart is the whole fix. */
+  async function handleUpload(slotKey: string, req: DocReq, file: File) {
     if (!resolved.tenantProfileId) { setUploadError('Customer profile missing.'); return; }
-    setDocUploading(req.key); setUploadError(null);
+    setDocUploading(slotKey); setUploadError(null);
     try {
       const urlRes = await fetch('/api/documents/upload-url', {
         method: 'POST', credentials: 'include',
@@ -2787,6 +2805,10 @@ function RenewalDocumentsAction({
         }),
       });
       if (!regRes.ok) throw new Error('Registration failed');
+      // No local "just uploaded" flag: onRefresh remounts this tree, so it could not
+      // survive anyway — and it isn't needed. A fresh copy is registered undated (the
+      // API drops a customer-supplied expiry), so the reload comes back with this base
+      // in kycExpiryMissingKeys and the row turns green off server truth alone.
       onRefresh();
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : 'Upload failed');
@@ -2795,83 +2817,146 @@ function RenewalDocumentsAction({
     }
   }
 
+  // Renewal KYC re-verification: re-upload ONLY the expired / blank-expiry KYC docs
+  // the backend flagged (EID / passport / visa / trade licence). The RP reviews the
+  // fresh copies and accepts them (renewalDocsAcceptedAt) before cheques unlock.
+  //
+  // Each flagged BASE renders one row per slot the document actually occupies.
+  // Emirates ID is TWO slots — front and back — everywhere else in the product
+  // (docRequirements.KYC_DOCS, the RP checklist, the tenant binder); asking for
+  // "both sides" as one file here was the odd one out, and it forced the customer to
+  // choose which side to send.
+  const BASE_SLOTS: Record<string, DocReq[]> = {
+    emirates_id: [
+      { key: 'emirates_id_front', label: 'Emirates ID — Front',  category: 'identity', required: true, hint: 'Clear photo or scan of the FRONT of your current Emirates ID' },
+      { key: 'emirates_id_back',  label: 'Emirates ID — Back',   category: 'identity', required: true, hint: 'Clear photo or scan of the BACK of the same Emirates ID' },
+    ],
+    passport:      [{ key: 'passport',      label: 'Passport',             category: 'identity', required: true, hint: 'Bio-data page of your valid passport' }],
+    visa:          [{ key: 'uae_visa',      label: 'UAE Visa / Residency', category: 'identity', required: true, hint: 'Your current UAE residence visa page' }],
+    trade_license: [{ key: 'trade_license', label: 'Trade License',        category: 'license',  required: true, hint: 'Current valid UAE trade licence' }],
+  };
+  /** The document on file for a slot — its own key first, then any legacy key the
+   *  same document has historically been filed under (docKeysForSlot). A refresh
+   *  must land in the slot the customer's existing copy already occupies, or the
+   *  upload creates a second row for one document — the tenant's visa sat under
+   *  `visa` while this step wrote to `uae_visa`, so refreshing it left BOTH on file
+   *  and the row still read "Tap to upload" over a document they had just sent. */
+  const docForSlot = (key: string): TenantDoc | undefined =>
+    docKeysForSlot(key).reduce<TenantDoc | undefined>(
+      (found, k) => found ?? resolved.myDocs.find(d => d.documentKey === k), undefined);
+  /** What COVERS a slot today. Same as docForSlot, except an Emirates ID side also
+   *  falls back to a legacy combined `emirates_id` scan: one file showing both sides
+   *  does cover both slots (isDocKeySatisfied says so everywhere else), so a customer
+   *  holding one must not be told they have sent nothing. It is only the upload
+   *  TARGET that stays split — a replacement is sent as two proper sides. */
+  const isEidSide = (k: string) => k === 'emirates_id_front' || k === 'emirates_id_back';
+  // ...but ONLY while the customer still holds nothing but that combined file. The
+  // moment they send one proper side, they have committed to the two-sided form and
+  // the combined scan stops standing in for the other one. Without this, replacing
+  // just the FRONT marked the whole Emirates ID done: the base went undated, the back
+  // row borrowed the old combined file as its cover, and both sides turned green off
+  // a single upload — which could carry the whole step to "submitted for review".
+  const eidSideOnFile = resolved.myDocs.some(d => isEidSide(d.documentKey) && !!d.fileUrl);
+  const coverForSlot = (key: string): TenantDoc | undefined =>
+    docForSlot(key)
+    ?? (isEidSide(key) && !eidSideOnFile
+      ? resolved.myDocs.find(d => d.documentKey === 'emirates_id')
+      : undefined);
+  /** Where a refresh for this slot is written — the existing row's key, so the
+   *  upload REPLACES it in place rather than adding a second copy. */
+  const uploadKeyForSlot = (key: string): string => docForSlot(key)?.documentKey ?? key;
+
+  const expiredBases  = resolved.renewalContract?.expiredKycDocKeys ?? [];
+  // Flagged only for want of an expiry DATE. The customer cannot supply one — the
+  // API ignores a customer-set expiry by design (it is the reviewer's assertion), so
+  // their copy is on file and the ball is in the RP's court. Showing these as an
+  // amber "Replace" was a dead end: replacing produced another undated copy and the
+  // row went amber again, which is exactly what was reported.
+  const undatedBases  = resolved.renewalContract?.kycExpiryMissingKeys ?? [];
+  const docsAccepted  = !!resolved.renewalContract?.renewalDocsAcceptedAt;
+  const docsSubmitted = !!resolved.renewalContract?.renewalDocsSubmittedAt;
+
+  /** Whether this slot still needs a fresh file from the customer. */
+  const slotNeedsUpload = (base: string, key: string): boolean => {
+    const rec = coverForSlot(key);
+    if (rec?.status === 'rejected') return true;      // the RP sent it back — always theirs to redo
+    if (!rec?.fileUrl) return true;                   // nothing on file for this side at all
+    return !undatedBases.includes(base);              // on file: done unless genuinely expired
+  };
+
+  const rows = expiredBases.flatMap(base => (BASE_SLOTS[base] ?? []).map(req => ({ base, req })));
+  const outstanding = rows.filter(({ base, req }) => slotNeedsUpload(base, req.key));
+  // Nothing outstanding ⇒ ready to hand over. Includes the rows.length === 0 case: a
+  // renewal can be routed here by the durable renewalDocsRequiredAt flag and have
+  // nothing left flagged, and that customer must still be able to leave the step.
+  const allRefreshed = outstanding.length === 0;
+
   async function handleSubmit() {
+    const id = resolved.renewalContract?.id;
+    if (!id) return;
     setPrefSaving(true); setPrefError(null);
-    try { onRefresh(); }
-    finally { setPrefSaving(false); }
+    try {
+      const r = await fetch(`/api/contracts/tenant/${id}/renewal-docs-submitted`, {
+        method: 'PATCH', credentials: 'include',
+      });
+      if (!r.ok) {
+        const b = await r.json().catch(() => ({} as { message?: string }));
+        throw new Error(b?.message ?? `Could not submit (${r.status})`);
+      }
+      onRefresh();
+    } catch (e) {
+      setPrefError(e instanceof Error ? e.message : 'Could not submit');
+    } finally { setPrefSaving(false); }
   }
 
-  const allDocs: DocReq[] = [...requiredDocs, ...occupantDocs];
-
-  // Renewal KYC re-verification: re-upload ONLY the expired / blank-expiry KYC docs
-  // the backend flagged (EID / passport / visa / trade licence). Once every flagged
-  // base has a fresh valid copy, expiredKycDocKeys empties and the customer waits for
-  // the RP to review + accept (renewalDocsAcceptedAt) before cheques unlock.
-  const BASE_DOC: Record<string, DocReq> = {
-    emirates_id:   { key: 'emirates_id',   label: 'Emirates ID',          category: 'identity', required: true, hint: 'Fresh photo/scan of your current Emirates ID (both sides)' },
-    passport:      { key: 'passport',      label: 'Passport',             category: 'identity', required: true, hint: 'Bio-data page of your valid passport' },
-    visa:          { key: 'uae_visa',      label: 'UAE Visa / Residency', category: 'identity', required: true, hint: 'Your current UAE residence visa page' },
-    trade_license: { key: 'trade_license', label: 'Trade License',        category: 'license',  required: true, hint: 'Current valid UAE trade licence' },
-  };
-  const expiredBases = resolved.renewalContract?.expiredKycDocKeys ?? [];
-  const docsAccepted = !!resolved.renewalContract?.renewalDocsAcceptedAt;
-  const reUploadDocs: DocReq[] = expiredBases.map(b => BASE_DOC[b]).filter(Boolean) as DocReq[];
-  // Every flagged doc has a fresh valid copy but the RP hasn't accepted yet.
-  const awaitingRpReview = reUploadDocs.length === 0 && !docsAccepted;
-
-  function DocRow({ req }: { req: DocReq }) {
-    const rec = resolved.myDocs.find(d => d.documentKey === req.key);
+  function DocRow({ base, req }: { base: string; req: DocReq }) {
+    const rec = coverForSlot(req.key);
     const isRejected = rec?.status === 'rejected';
-    const isApproved = rec?.status === 'complete' || rec?.status === 'processed';
-    const onFile     = !!rec && rec.status !== 'rejected' && rec.status !== 'missing';
     const isUploading = docUploading === req.key;
-    // In the renewal re-verification context, every listed doc is still flagged as
-    // expired / undated (it's in expiredKycDocKeys) — surface THAT, not the stale
-    // "Approved" record status the customer had from their last lease. Checked
-    // against today, not the renewal's start date — a doc that's still valid
-    // today shouldn't read as "Expired" just because it lapses before the new
-    // lease term ends.
-    const expMs = rec?.expiryDate ? Date.parse(rec.expiryDate) : NaN;
-    const isExpiredForRenewal = !isRejected && (!Number.isFinite(expMs) || expMs < Date.now());
+    const needsUpload = slotNeedsUpload(base, req.key);
+    // Green = nothing left for the CUSTOMER to do on this row. Either they have just
+    // sent a copy, or one is on file and the only thing missing is the expiry date,
+    // which only the rental provider can record.
+    const done = !needsUpload;
+    const accent = needsUpload ? 'var(--saffron-deep, #b45309)' : 'var(--jade-deep)';
     // The customer only uploads — the RP records the expiry when they review the copy.
-    const onPick = (f: File) => handleUpload(req, f);
+    const onPick = (f: File) => handleUpload(req.key, { ...req, key: uploadKeyForSlot(req.key) }, f);
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
-        background: (isRejected || isExpiredForRenewal) ? 'var(--saffron-soft, #fff7ed)' : onFile ? 'rgba(46,159,130,0.08)' : 'var(--paper)',
-        border: `1px solid ${(isRejected || isExpiredForRenewal) ? 'var(--saffron, #f59e0b)' : onFile ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`,
+        background: needsUpload ? 'var(--saffron-soft, #fff7ed)' : 'rgba(46,159,130,0.08)',
+        border: `1px solid ${needsUpload ? 'var(--saffron, #f59e0b)' : 'rgba(46,159,130,0.35)'}`,
         cursor: isUploading ? 'progress' : 'pointer',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
-          <p style={{ fontSize: 11, color: (isRejected || isExpiredForRenewal) ? 'var(--saffron-deep, #b45309)' : 'var(--mute)', fontWeight: (isRejected || isExpiredForRenewal) ? 600 : 400, margin: '2px 0 0' }}>
-            {isRejected
-              ? <>Rejected — re-upload required{rec?.notes && <span style={{ fontWeight: 400, color: 'var(--ink-2)' }}> · {rec.notes}</span>}</>
-              : isExpiredForRenewal
-                ? (Number.isFinite(expMs)
-                    ? 'Expired — upload a current copy, or correct the expiry date below'
-                    : 'No expiry on file — upload a current copy and set its expiry below')
-              : isApproved ? 'Approved ✓'
-              : onFile ? (rec!.displayName ?? 'Uploaded · awaiting review')
-              : (req.hint ?? 'Tap to upload')}
+          <p style={{ fontSize: 11, color: needsUpload ? accent : 'var(--jade-deep)', fontWeight: 600, margin: '2px 0 0' }}>
+            {/* One instruction for every row still owed, whatever the reason it is
+                owed — expired, undated, rejected, or never sent. The customer's
+                action is identical in all four cases, so four different sentences
+                only made them work out whether they meant different things. A
+                rejection reason still rides along: that is information they need,
+                not a different instruction. */}
+            {needsUpload
+              ? <>Upload new copy{isRejected && rec?.notes && <span style={{ fontWeight: 400, color: 'var(--ink-2)' }}> · {rec.notes}</span>}</>
+              : 'On file ✓ — your rental provider will confirm its expiry date'}
           </p>
         </div>
         {isUploading ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
-          : (isRejected || isExpiredForRenewal) ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--saffron-deep, #b45309)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><UploadCloud size={16} />Replace</span>
-          : onFile ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 700, flexShrink: 0 }}><CheckCircle2 size={16} />Replace</span>
-          : <UploadCloud size={16} style={{ color: 'var(--mute)', flexShrink: 0 }} />}
+          : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: accent, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+              {done ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}{done ? 'Replace' : 'Upload'}
+            </span>}
         <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
           disabled={isUploading}
           onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); }} />
       </label>
-      </div>
     );
   }
 
-  // Fresh copies uploaded, RP now reviewing → waiting panel (no Continue button:
-  // the RP's acceptance advances the flow, not the customer).
-  if (awaitingRpReview) {
+  // Handed over → waiting panel. No button: the RP's acceptance advances the flow,
+  // not the customer. A rejected copy re-opens the step (slotNeedsUpload) so the
+  // customer is never left waiting on a document the RP already sent back.
+  if (!docsAccepted && docsSubmitted && outstanding.length === 0) {
     return (
       <div style={{ display: 'grid', gap: 14 }}>
         <div style={{ background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.35)', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 8 }}>
@@ -2898,21 +2983,43 @@ function RenewalDocumentsAction({
         <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 2px' }}>
           Documents to refresh
           <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--mute)', textTransform: 'none', letterSpacing: 0 }}>
-            {reUploadDocs.length} {reUploadDocs.length === 1 ? 'document needs' : 'documents need'} a current copy
+            {outstanding.length === 0
+              ? `${rows.length} of ${rows.length} ready`
+              : `${rows.length - outstanding.length} of ${rows.length} ready`}
           </span>
         </p>
         <p style={{ fontSize: 12, color: 'var(--mute)', margin: '0 0 4px' }}>
-          These KYC documents expired (or have no expiry on file) since your last lease. Upload current copies with their expiry date to continue.
+          {outstanding.length === 0
+            ? 'Everything is in. Submit these for your rental provider to review — they record each document’s expiry date when they check it.'
+            : 'These identity documents need a current copy for the renewal. Your rental provider records each expiry date when they review them, so you only need to send the file.'}
         </p>
-        {reUploadDocs.length === 0
+        {rows.length === 0
           ? <p style={{ fontSize: 13, color: 'var(--mute)', margin: 0 }}>No documents need refreshing.</p>
-          : reUploadDocs.map(req => <DocRow key={req.key} req={req} />)
+          : rows.map(({ base, req }) => <DocRow key={req.key} base={base} req={req} />)
         }
       </div>
 
       <div style={{ display: 'grid', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={!allRefreshed || prefSaving}
+          style={{
+            width: '100%', padding: '13px 20px', borderRadius: 12, border: 'none',
+            fontSize: 14.5, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            background: allRefreshed ? 'var(--jade-deep)' : 'var(--mist)',
+            color: allRefreshed ? 'var(--paper)' : 'var(--mute)',
+            cursor: allRefreshed && !prefSaving ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {prefSaving ? <><Loader2 size={16} className="animate-spin" /> Submitting…</> : <><CheckCircle2 size={16} /> Submit for review</>}
+        </button>
         <p style={{ fontSize: 12, color: 'var(--mute)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Info size={13} /> Your rental provider will review and accept these before you prepare cheques.
+          <Info size={13} />
+          {allRefreshed
+            ? 'Your rental provider will review and accept these before you prepare cheques.'
+            : `Send the remaining ${outstanding.length === 1 ? 'document' : `${outstanding.length} documents`} to enable this.`}
         </p>
       </div>
     </div>
@@ -3001,12 +3108,14 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
 
   <h2>Rent &amp; Fees</h2>
   <div class="grid">
-    <div class="l">Annual Rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(plan.rentFils + (plan.rentVatFils ?? 0))}</div>
+    <div class="l">Annual Rent</div><div class="v">${aed(plan.rentFils)}</div>
     ${plan.securityDepositFils ? `<div class="l">Security Deposit</div><div class="v">${aed(plan.securityDepositFils)}</div>` : ''}
-    ${plan.adminFeeFils ? `<div class="l">Admin Fee${(plan.adminFeeVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.adminFeeFils ?? 0) + (plan.adminFeeVatFils ?? 0))}</div>` : ''}
-    ${plan.ejariFils ? `<div class="l">Contract Registration Fee${(plan.ejariVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.ejariFils ?? 0) + (plan.ejariVatFils ?? 0))}</div>` : ''}
-    ${plan.commissionFils ? `<div class="l">Commission${(plan.commissionVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed((plan.commissionFils ?? 0) + (plan.commissionVatFils ?? 0))}</div>` : ''}
-    ${(plan.customFees ?? []).map(f => `<div class="l">${String(f.label).replace(/</g, '&lt;')}${f.vatFils > 0 ? ' (incl. VAT)' : ''}</div><div class="v">${aed(f.netFils + f.vatFils)}</div>`).join('')}
+    ${plan.adminFeeFils ? `<div class="l">Admin Fee</div><div class="v">${aed(plan.adminFeeFils)}</div>` : ''}
+    ${plan.ejariFils ? `<div class="l">Contract Registration Fee</div><div class="v">${aed(plan.ejariFils)}</div>` : ''}
+    ${plan.commissionFils ? `<div class="l">Commission</div><div class="v">${aed(plan.commissionFils)}</div>` : ''}
+    ${(plan.customFees ?? []).map(f => `<div class="l">${String(f.label).replace(/</g, '&lt;')}</div><div class="v">${aed(f.netFils + f.vatFils)}</div>`).join('')}
+    ${(plan.rentVatFils ?? 0) > 0 ? `<div class="l">Rental VAT${plan.rentVatRate ? ` (${plan.rentVatRate}%)` : ''}</div><div class="v">${aed(plan.rentVatFils ?? 0)}</div>` : ''}
+    ${((plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0)) > 0 ? `<div class="l">Fees VAT</div><div class="v">${aed((plan.adminFeeVatFils ?? 0) + (plan.ejariVatFils ?? 0) + (plan.commissionVatFils ?? 0))}</div>` : ''}
   </div>
 
   <h2>Cheque Schedule (${plan.chequeCount} cheques)</h2>
@@ -3139,7 +3248,10 @@ function PlanAttachCell({ slot, refs, uploading, onFiles, onRemove }: {
     slot.label,
   );
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+    // Wraps rather than overflows: in a narrow card the three controls don't fit
+    // on one line, and clipping them is what made the row look like it had no
+    // attach option at all.
+    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 7 }}>
       {viewable.length > 0 && (
         <button type="button" onClick={openAll} title={`View what you attached to ${slot.label}`}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', padding: 0, fontSize: 10.5, fontWeight: 700, color: 'var(--jade-deep)', cursor: 'pointer' }}>
@@ -3302,13 +3414,6 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
   }
 
-  const items = sortPlanItems(plan.items ?? []);
-  const firstDue = items.find(i => i.dueDate)?.dueDate ?? null;
-  // Everything in the first cheque (fees + deposit + installment 1) is collected
-  // before move-in — the customer's upfront total.
-  const beforeMoveInFils = items
-    .filter(ch => ch.type === 'fee' || ch.type === 'security_deposit' || ch.type === 'first_bundle')
-    .reduce((s, ch) => s + (ch.amountFils ?? 0), 0);
   // Full segregated plan — the four customer-facing groups (Security Deposit ·
   // Rental Income · Management Fee · Third Party), built from the RP-issued items
   // so amounts + per-instalment due dates match exactly what was proposed.
@@ -3342,11 +3447,6 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-        <Stat label="Annual rent" value={fmtAedFils(plan.rentFils)} />
-        <Stat label="Total contract value" value={fmtAedFils(plan.totalAmountFils)} accent />
-        <Stat label="Before move-in" value={fmtAedFils(beforeMoveInFils)} sub={firstDue ? `due ${fmtDateShort(firstDue)}` : undefined} />
-      </div>
 
       {/* The SAME Payment Summary card the lease and the landlord's lead view use
           — so the plan the customer is quoted looks like the one they sign. */}
@@ -3913,7 +4013,6 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   // only carries Documents now.
   const [section, setSection] = useState<'documents'>('documents');
   const [showTerm, setShowTerm] = useState(false);
-  const tenantDocs = resolved.myDocs;
 
   if (!c) return null;
 
@@ -3964,10 +4063,12 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
   // Only "next cheque" is read here now; the runway itself lives in the rail.
   const nextCheque = buildPaymentRunway(c, pp).next;
 
-  // The Contract Registration certificate the landlord uploaded onto this lease.
-  // Every variant of the key is `ejari*` ([[Ejari Rename]] kept the DB keys), so
-  // match on the prefix and take the most recent one on file.
-  const ejariCertDoc = [...(tenantDocs ?? [])].reverse().find(d => /^ejari/i.test(d.documentKey) && !!d.fileUrl) ?? null;
+  // The Contract Registration certificate the landlord uploaded onto THIS lease.
+  // Was matching on the key alone against the customer-wide `myDocs`, so a
+  // certificate from another lease surfaced here — and `.reverse().find()` on a
+  // newest-first list actually returned the OLDEST match, not "the most recent
+  // one on file" as intended. Both are handled by the shared helper.
+  const ejariCert = ejariCertDoc(resolved, c?.id) ?? null;
   const sections = [
     // No sub-label: the card below is already headed "Tenancy Documents", so a
     // count line here just repeated it.
@@ -4191,8 +4292,8 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
               {/* The registration certificate is a STORED file (keys stay `ejari*`),
                   opened in a new tab like the other documents — and only once it's
                   actually on file. */}
-              {ejariCertDoc?.fileUrl && (
-                <a href={ejariCertDoc.fileUrl} target="_blank" rel="noopener noreferrer"
+              {ejariCert?.fileUrl && (
+                <a href={ejariCert.fileUrl} target="_blank" rel="noopener noreferrer"
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
                     padding: '11px 14px', background: '#f4efe8', border: '1px solid var(--mist)',
@@ -4409,138 +4510,83 @@ function TerminationReceivedAction({ resolved, onRefresh }: { resolved: Resolved
 }
 
 /* ─── RENEWAL ──────────────────────────────────────────────────────── */
-/** Shared renewal terms + payment-schedule summary. Rendered on BOTH the
- *  renewal OFFER step (before acceptance) and the renewal PAYMENTS step
- *  (after acceptance, while the RP finalises the contract) so the customer
- *  always sees the new rent, cost breakdown and per-installment schedule —
- *  link, don't duplicate. `parent` is the current lease (drives the
- *  rent-vs-current delta); `child` is the proposed/renewed contract that
- *  carries the new terms + Payment rows. */
-function RenewalTermsSummary({ parent, child }: { parent: ApiContract | null; child: ApiContract | null }) {
-  const currentRent = parent?.annualRent ?? 0;
-  const newRent = child?.annualRent ?? null;
-  const rentDelta = newRent != null && currentRent ? newRent - currentRent : null;
-  const rentDeltaPct = newRent != null && currentRent ? Math.round(((newRent - currentRent) / currentRent) * 1000) / 10 : null;
-  const rentVatRate = child?.rentVatRate ?? 0;
-  const newRentVat = newRent != null ? Math.round(newRent * rentVatRate) / 100 : 0;
+/** The renewal child's Payment rows (built by proposeRenewal) mapped onto the
+ *  canonical segregation input the landlord's card uses. The customer payload
+ *  names the gross amount `amountPaid`, so it maps onto the `amount` the row
+ *  builder reads — everything else lines up field-for-field.
+ *
+ *  Shared by the Payment Summary and the Cheques step, so the rows the customer
+ *  sees and the slots their uploads are tagged with can never disagree. */
+function renewalSegRows(child: ApiContract | null) {
+  return segRowsFromContract(
+    { contractType: child?.contractType ?? 'renewal' },
+    (child?.payments ?? []).map(p => ({
+      paymentType: p.paymentType,
+      description: p.description,
+      amount: p.amountPaid,
+      vatAmount: p.vatAmount ?? null,
+      transactionDate: p.transactionDate,
+      chequeStatus: p.chequeStatus ?? null,
+      paymentMethod: p.paymentMethod ?? null,
+    })),
+  );
+}
 
-  const newCheques = child?.numberOfInstallments ?? null;
-  const newContractValue = child?.contractValue ?? null;
-  const securityDeposit = parent?.securityDepositAmount ?? null;
+/** Every attach-slot label the plan will render, in SegregatedPlanView's own
+ *  terms: Rental Income attaches per instalment row, the other groups once at
+ *  the heading. Used to spot uploads whose slot no longer exists. */
+function renewalSlotLabels(child: ApiContract | null): string[] {
+  return buildSegregatedPlan(renewalSegRows(child)).groups.flatMap(g =>
+    g.key === 'rental' ? g.lines.map(l => `Rent — ${l.item}`) : [g.title],
+  );
+}
 
-  // Renewal payment schedule comes straight from the renewal contract's
-  // Payment rows (built by proposeRenewal — first row bundles admin + ejari
-  // + commission + rent installment 1). Mirrors the new-lease payment_review
-  // step so the customer sees identical detail.
-  // Grouped by category (deposit → rent cheques → Ejari → Admin → Commission →
-  // custom), chronological within each — matches the cost-breakdown sequence.
-  const payments = (child?.payments ?? []).slice().sort(comparePaymentSchedule);
-  const totalScheduled = payments.reduce((s, p) => s + (p.amountPaid ?? 0), 0);
-  const fmt = (v: number | null | undefined) => v != null ? fmtAed(v) : '—';
+/** The renewal's Payment Summary. Rendered on BOTH the renewal OFFER step
+ *  (before acceptance) and the renewal PAYMENTS step (after acceptance, while
+ *  the RP finalises the contract) — link, don't duplicate.
+ *
+ *  This is the SAME document the RP/manager reads on the Operations "Renewal ·
+ *  step 1" card: PaymentPlanCard over the canonical segregatedPlan grouping, so
+ *  what the customer is quoted is line-for-line what the landlord sent rather
+ *  than a second look-alike table that can drift. `child` is the proposed/renewed
+ *  contract carrying the Payment rows; `parent` (the running lease) only backs
+ *  up the header meta when the child hasn't got it.
+ *
+ *  `renderAttach` is passed ONLY by the Cheques/PDC step — that is where the
+ *  customer hands over a cheque per instalment. On the Terms step the card stays
+ *  read-only: nothing should ask for an upload before the offer is accepted. */
+function RenewalTermsSummary({ parent, child, resolved, renderAttach }: { parent: ApiContract | null; child: ApiContract | null; resolved: Resolved; renderAttach?: (slot: PlanAttachSlot) => React.ReactNode }) {
+  const { user } = useAuth();
+
+  const segRows = renewalSegRows(child);
+  const rp = resolved.unit?.property?.rentalProvider ?? resolved.unit?.property?.rental_provider;
+  // Header meta reads off the CONTRACT first, exactly as the landlord's card does.
+  // On a `v-` space the unit is resolved from the VIEWING, whose property carries
+  // no community — falling back to the unit alone left the Community line blank
+  // while the same card on Operations showed it.
+  const cp = child?.property ?? parent?.property;
+  const place = {
+    unitNumber: child?.unit?.unitNumber ?? child?.unit?.number ?? resolved.unit?.unitNumber ?? null,
+    buildingName: cp?.buildingName ?? resolved.unit?.property?.buildingName ?? null,
+    community: cp?.community ?? cp?.emirate ?? resolved.unit?.property?.community?.name ?? null,
+  };
 
   return (
-    <>
-      {/* Headline rent comparison */}
-      <div style={{
-        background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14,
-        padding: '18px 20px', display: 'grid', gap: 14,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>New annual rent</p>
-            <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>
-              {fmt(newRent)}
-            </p>
-            {rentDelta != null && rentDelta !== 0 && (
-              <p style={{
-                fontSize: 12, fontWeight: 600, margin: '4px 0 0',
-                color: rentDelta > 0 ? 'var(--brick)' : 'var(--jade-deep)',
-              }}>
-                {rentDelta > 0 ? '↑' : '↓'} {fmt(Math.abs(rentDelta))} ({rentDeltaPct! > 0 ? '+' : ''}{rentDeltaPct}%) vs current
-              </p>
-            )}
-            {rentDelta === 0 && (
-              <p style={{ fontSize: 12, color: 'var(--jade-deep)', fontWeight: 600, margin: '4px 0 0' }}>
-                No change from current rent
-              </p>
-            )}
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Currently paying</p>
-            <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink-2)', margin: '4px 0 0', fontVariantNumeric: 'tabular-nums' }}>
-              {fmt(currentRent)}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Key stats trio — matches the new-lease payment_review look */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-        <Stat label="Total contract value" value={fmt(newContractValue ?? (newRent ?? 0))} accent />
-        <Stat label="Installments" value={newCheques ? `${newCheques}` : '—'} />
-        <Stat label="First payment" value={payments[0]?.transactionDate ? fmtDateShort(payments[0].transactionDate) : '—'} />
-      </div>
-
-      {/* Cost breakdown — same lines as PaymentPlanSummary */}
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Cost breakdown</p>
-        <div style={{ display: 'grid', gap: 6 }}>
-          {securityDeposit != null && securityDeposit > 0 && (
-            <PaymentRow label="Security deposit (carries forward)" amountFils={securityDeposit * 100} />
-          )}
-          <PaymentRow label="Rent (cheques)" amountFils={(newRent ?? 0) * 100} />
-          {newRentVat > 0 && (
-            <PaymentRow label={`VAT on rent (${rentVatRate}%)`} amountFils={newRentVat * 100} />
-          )}
-          {child?.ejariFeeFils != null && child.ejariFeeFils > 0 && (
-            <PaymentRow label="Contract Registration Fee" amountFils={child.ejariFeeFils * 100} />
-          )}
-          {child?.adminFeeFils != null && child.adminFeeFils > 0 && (
-            <PaymentRow label="Admin fee" amountFils={child.adminFeeFils * 100} />
-          )}
-          <div style={{ borderTop: '1px solid var(--mist-strong)', margin: '6px 0' }} />
-          <PaymentRow label="Total scheduled" amountFils={totalScheduled * 100} bold />
-        </div>
-      </div>
-
-      {/* Per-installment schedule — driven by the renewal contract's Payment rows */}
-      {payments.length > 0 && (
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--mist-strong)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Payment schedule · {payments.length} payment{payments.length === 1 ? '' : 's'}
-            </span>
-            {newCheques && (
-              <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>{newCheques} rent installments</span>
-            )}
-          </div>
-          {payments.map((p, i) => {
-            const isVat = (p.paymentType ?? '').toLowerCase() === 'vat';
-            const isFirstBundle = i === 0 && !isVat && (child?.adminFeeFils ?? 0) + (child?.ejariFeeFils ?? 0) > 0;
-            const isDeposit = (p.paymentType ?? '').toLowerCase() === 'security_deposit';
-            return (
-              <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--mist)', background: isFirstBundle ? 'var(--saffron-soft)' : undefined }}>
-                <span style={{ fontSize: 12, color: 'var(--mute)', fontWeight: 600 }}>#{i + 1}</span>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', margin: 0 }}>{p.description ?? (isDeposit ? 'Security deposit' : `Payment ${i + 1}`)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{p.transactionDate ? fmtDateLong(p.transactionDate) : 'No due date'}</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(p.amountPaid)}</span>
-                  {/* A VAT cheque is entirely VAT — the "incl. X VAT" note only makes sense on a gross rent/fee cheque. */}
-                  {!isVat && (p.vatAmount ?? 0) > 0 && (
-                    <p style={{ fontSize: 10, color: 'var(--mute)', margin: '2px 0 0' }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</p>
-                  )}
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: isFirstBundle ? 'var(--saffron)' : isDeposit ? 'var(--mist)' : isVat ? 'var(--jade-soft)' : 'var(--surface)', color: isFirstBundle ? 'var(--saffron-deep)' : isDeposit ? 'var(--ink-2)' : isVat ? 'var(--jade-deep)' : 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {isFirstBundle ? 'Renewal start' : isDeposit ? 'Deposit' : isVat ? 'VAT' : 'Rent'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </>
+    /* The SAME Payment Summary the landlord sees on their renewal step — one
+       card, one grouping, one grand total. */
+    <PaymentPlanCard
+      rows={segRows}
+      refLabel={child?.ref ?? null}
+      contractType={child?.contractType ?? 'renewal'}
+      tenantName={child?.tenantCompanyName || parent?.tenantCompanyName || personName(user) || null}
+      landlordName={rp?.user?.name?.trim() || rp?.companyName?.trim() || null}
+      unitNumber={place.unitNumber}
+      buildingName={place.buildingName}
+      community={place.community}
+      periodStart={child?.startDate ?? null}
+      periodEnd={child?.endDate ?? null}
+      renderAttach={renderAttach}
+    />
   );
 }
 
@@ -4549,10 +4595,6 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const child = resolved.renewalContract;
   const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // Phase 6 — payment-readiness checkbox replaces the dedicated cheques
-  // step. The customer can't accept the renewal until they tick this; their
-  // confirmation is captured alongside the accept call below.
-  const [paymentReady, setPaymentReady] = useState(false);
   // Phase 6c — reject confirm modal. Reject no longer fires on a single tap;
   // we open this panel, capture an optional reason, then PATCH. The reason
   // is persisted on the parent contract so the RP sees it when deciding
@@ -4652,10 +4694,6 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   async function act(verb: 'accept' | 'reject') {
     // Accepting only agrees the TERMS. Cheque upload + submission now happen on the
     // next step (Cheques/PDC) — the customer isn't marked cheques-submitted here.
-    if (verb === 'accept' && !paymentReady) {
-      setErr('Please confirm your payments are ready to proceed.');
-      return;
-    }
     setBusy(verb); setErr(null);
     try {
       const init: RequestInit = { method: 'PATCH', credentials: 'include' };
@@ -4717,42 +4755,17 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         </>
       )}
 
-      <RenewalTermsSummary parent={parent} child={child} />
+      <RenewalTermsSummary parent={parent} child={child} resolved={resolved} />
 
       {/* Cheque / PDC upload moved to the next step (Cheques/PDC) — the customer
           agrees the terms here, then uploads their cheques against the schedule,
           which the RP reviews & collects before signing. */}
 
-      {/* Payment-readiness confirmation. The customer ticks this to confirm their
-          payments are prepared; the next step captures the actual cheque uploads. */}
-      <label
-        style={{
-          display: 'flex', gap: 12, alignItems: 'flex-start',
-          background: paymentReady ? 'var(--jade-soft)' : 'var(--paper)',
-          border: `1px solid ${paymentReady ? 'var(--jade)' : 'var(--mist-strong)'}`,
-          borderRadius: 12, padding: '12px 14px', cursor: 'pointer', transition: 'all 0.15s ease',
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={paymentReady}
-          onChange={(e) => { setPaymentReady(e.target.checked); if (e.target.checked) setErr(null); }}
-          data-testid="renewal-payment-ready"
-          style={{ marginTop: 3, width: 16, height: 16, accentColor: 'var(--jade-deep)', cursor: 'pointer' }}
-        />
-        <div style={{ minWidth: 0, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-          <p style={{ margin: 0, fontWeight: 700, color: 'var(--ink)' }}>I confirm my payments are ready to be collected</p>
-          <p style={{ margin: '2px 0 0' }}>
-            By ticking this, you agree the renewal payments listed above are prepared. On the next step you&rsquo;ll upload your cheques, and your rental provider collects them before you sign.
-          </p>
-        </div>
-      </label>
-
       {err && <ErrorBox msg={err} />}
 
       {/* Accept / Reject actions */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', paddingTop: 4 }}>
-        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy || !paymentReady}>
+        <PrimaryBtn onClick={() => act('accept')} disabled={!!busy}>
           {busy === 'accept' ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy === 'accept' ? 'Accepting…' : 'Accept renewal terms'}
         </PrimaryBtn>
@@ -4862,6 +4875,27 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   );
 }
 
+/**
+ * Separates the schedule slot a renewal cheque was attached to from the file's
+ * own name inside `documents.display_name` ("Rent — Instalment 2 · cheque.jpg").
+ *
+ * Documents have no free-text column to tag with, and the slot cannot ride on
+ * `document_key`: the binder matches Payment Advice by stripping a trailing
+ * `_<10+digits>`, so any other suffix would stop the file snapping into the
+ * Payment Advice slot the RP reads cheques from. Carrying it in the display name
+ * keeps the binder match intact AND tells the RP which instalment each cheque
+ * covers. Untagged (bulk-uploaded) files simply have no separator.
+ */
+const SLOT_SEP = ' · ';
+function slotOfDoc(displayName?: string | null): string | null {
+  const i = (displayName ?? '').indexOf(SLOT_SEP);
+  return i > 0 ? displayName!.slice(0, i) : null;
+}
+function fileNameOfDoc(displayName?: string | null): string {
+  const i = (displayName ?? '').indexOf(SLOT_SEP);
+  return i > 0 ? displayName!.slice(i + SLOT_SEP.length) : (displayName ?? '');
+}
+
 function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const child = resolved.renewalContract;
   const [busy, setBusy] = useState(false);
@@ -4893,8 +4927,17 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
   if (!child) return <ErrorBox msg="Renewal contract not found." />;
   const submitted = !!child.tenantChequesSubmittedAt;
+  // Files no attach row will render: bulk uploads from before per-payment attach
+  // existed, plus anything tagged to a slot the plan no longer has (the RP can
+  // re-price a renewal, changing the instalment count under an upload). They
+  // still count toward submit, so they must stay visible and removable below.
+  const slotLabels = renewalSlotLabels(child);
+  const untaggedDocs = pdcDocs.filter(d => {
+    const s = slotOfDoc(d.displayName);
+    return !s || !slotLabels.includes(s);
+  });
 
-  async function uploadPdc(file: File, index: number): Promise<PdcDoc> {
+  async function uploadPdc(file: File, index: number, slotLabel?: string): Promise<PdcDoc> {
     if (!child?.id) throw new Error('Renewal contract not ready');
     const mime = file.type || 'application/octet-stream';
     // Unique Payment-Advice key: the binder strips the _<digits> suffix so each
@@ -4911,13 +4954,37 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     if (!putRes.ok) throw new Error('File upload failed');
     const regRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, category: 'payment', displayName: file.name, fileUrl, mimeType: mime, s3Key: fileKey, isVisibleToTenant: true }),
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, category: 'payment', displayName: slotLabel ? `${slotLabel}${SLOT_SEP}${file.name}` : file.name, fileUrl, mimeType: mime, s3Key: fileKey, isVisibleToTenant: true }),
     });
     if (!regRes.ok) { const b = await regRes.json().catch(() => ({})); throw new Error(b?.message ?? 'Reference registration failed'); }
     return (await regRes.json()) as PdcDoc;
   }
 
-  async function handleFiles(files: FileList | null) {
+  /**
+   * Attach files to ONE payment on the schedule. Mirrors the new-lease
+   * `handleSlotFiles`: when `replaceIds` is given the control said "Replace", so
+   * the earlier files are dropped only AFTER the new ones are safely stored — a
+   * failed upload can never leave a payment with nothing attached where the
+   * customer had already provided a reference.
+   */
+  async function handleSlotFiles(slotLabel: string, files: FileList | null, replaceIds?: number[]) {
+    if (!files || files.length === 0 || !child?.id) return;
+    setUploadErr(null); setUploading(files.length);
+    try {
+      const saved: PdcDoc[] = [];
+      let i = 0;
+      for (const file of Array.from(files)) saved.push(await uploadPdc(file, i++, slotLabel));
+      if (saved.length) setPdcDocs(prev => [...prev, ...saved]);
+      if (saved.length && replaceIds?.length) {
+        for (const id of replaceIds) await removePdc(id);
+      }
+    } catch (e) { setUploadErr(e instanceof Error ? e.message : 'Upload failed'); }
+    finally { setUploading(0); }
+  }
+
+  /** Bulk drop — every file lands untagged, for customers who'd rather hand the
+   *  whole set over at once than match each cheque to its row. */
+  async function handleBulkFiles(files: FileList | null) {
     if (!files || files.length === 0 || !child?.id) return;
     setUploadErr(null); setUploading(files.length);
     try {
@@ -4945,68 +5012,133 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
   }
 
-  return (
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
-        <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          {submitted
-            ? 'Thanks — your cheques are uploaded and submitted. Your rental provider will review and collect them, then you’ll sign the renewal. We’ll notify you the moment it’s your turn.'
-            : 'Review the renewal schedule below, then upload a picture / PDF of your post-dated cheques (or transfer receipts) to match it. Your rental provider reviews and collects them before you sign.'}
-        </p>
-      </div>
-      <RenewalTermsSummary parent={resolved.contract} child={child} />
-
-      {/* PDC upload → filed as Payment Advice (see key note above). */}
-      <div style={{ background: 'var(--paper)', border: `1px solid ${pdcDocs.length > 0 ? 'var(--mist-strong)' : 'var(--jade)'}`, borderRadius: 14, padding: '16px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Upload your cheques / PDC {!submitted && <span style={{ color: 'var(--jade-deep)' }}>*</span>}</p>
-          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{pdcDocs.length} uploaded</span>
+  // Submitted → the ball is in the RP's court and there is nothing left to do
+  // here, so mirror the new-lease waiting step (ChequesReviewWaitAction): the
+  // status message and what was sent, nothing else. Re-showing the schedule
+  // implies the customer still has to act on it, and the plan stays available
+  // from the renewal contract itself.
+  if (submitted) {
+    return (
+      <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ background: 'var(--jade-soft)', border: '1px solid var(--jade)', borderRadius: 14, padding: '14px 16px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <Clock size={18} style={{ color: 'var(--jade-deep)', flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--jade-deep)', margin: '0 0 4px' }}>Cheques submitted — rental provider is reviewing</p>
+            <p style={{ fontSize: 13, color: 'var(--jade-deep)', margin: 0, lineHeight: 1.5 }}>
+              Your rental provider will review and collect them, then you&rsquo;ll sign the renewal. We&rsquo;ll notify you the moment it&rsquo;s your turn.
+            </p>
+          </div>
         </div>
-        <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Attach a photo or PDF of your signed post-dated cheques (or bank-transfer receipts), matching the schedule above. These are filed as your Payment Confirmation for the renewal.</p>
-        {!submitted && (
-          <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)', background: 'var(--surface)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)' }}>
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={(e) => handleFiles(e.target.files)} style={{ display: 'none' }} data-testid="renewal-pdc-input" />
-            {uploading > 0 ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploading} file{uploading === 1 ? '' : 's'}…</> : <><UploadCloud size={14} /> Choose files</>}
-          </label>
-        )}
-        {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
         {pdcDocs.length > 0 && (
-          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Your uploaded cheques</p>
             {pdcDocs.map((d, i) => {
               const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
+              // The slot it was attached against, so the customer can see which
+              // payment each cheque covers — the bulk-uploaded ones have none.
+              const slot = slotOfDoc(d.displayName);
               return (
-                <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
-                  {d.fileUrl && !isPdf ? (
-                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: d.displayName ?? `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                <div key={d.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 12, padding: '10px 14px', background: 'var(--paper)', display: 'flex', gap: 12, alignItems: 'center' }}>
+                  {d.fileUrl && (
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: slot ?? fileNameOfDoc(d.displayName) ?? `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
+                      {isPdf ? (
+                        <span style={{ width: 56, height: 36, borderRadius: 6, background: 'var(--mist)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--jade-deep)' }}>
+                          <FileText size={18} />
+                        </span>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={d.fileUrl} alt="cheque" style={{ width: 56, height: 36, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                      )}
                     </button>
-                  ) : d.fileUrl ? (
-                    <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}><FileText size={14} color="var(--ink-2)" /></span>
-                  ) : null}
-                  <div style={{ flex: 1, minWidth: 0 }}><p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.displayName ?? `Cheque ${i + 1}`}</p></div>
-                  {d.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: d.displayName ?? `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ExternalLink size={12} /> View</button>}
-                  {!submitted && <button type="button" onClick={() => removePdc(d.id)} style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }} aria-label="Remove cheque">Remove</button>}
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{slot ?? `Cheque ${i + 1}`}</p>
+                    <p style={{ fontSize: 12, color: 'var(--mute)', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileNameOfDoc(d.displayName)}</p>
+                  </div>
+                  <span style={{ fontSize: 11, background: 'var(--jade-soft)', color: 'var(--jade-deep)', borderRadius: 6, padding: '3px 8px', fontWeight: 600, flexShrink: 0 }}>Submitted</span>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+        <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+          Attach a picture / PDF of each post-dated cheque (or transfer receipt) against the payment it covers. Your rental provider reviews and collects them before you sign.
+        </p>
+      </div>
+
+      {/* Per-payment attach lives ON the schedule rows — same control the
+          new-lease payment step uses, so a 4-instalment renewal gets four
+          separate cheque slots instead of one shared bucket. Uploads are filed
+          as Payment Advice (see key note above). */}
+      <RenewalTermsSummary
+        parent={resolved.contract}
+        child={child}
+        resolved={resolved}
+        renderAttach={(slot) => (
+          <PlanAttachCell
+            slot={slot}
+            refs={pdcDocs
+              .filter(d => slotOfDoc(d.displayName) === slot.label)
+              .map(d => ({ id: d.id, index: 0, imageUrl: d.fileUrl ?? null }))}
+            uploading={uploading}
+            onFiles={handleSlotFiles}
+            onRemove={removePdc}
+          />
+        )}
+      />
+
+      {/* Bulk alternative to the per-row controls: send the whole set at once.
+          These files stay untagged, which is also where anything uploaded before
+          per-payment attach existed — or tagged to a slot the plan no longer has
+          — shows up. They count toward submit, so they must stay visible and
+          removable rather than becoming invisible but still gating the button. */}
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Or send them all together</p>
+            {untaggedDocs.length > 0 && <span style={{ fontSize: 11, color: 'var(--mute)' }}>{untaggedDocs.length} file{untaggedDocs.length === 1 ? '' : 's'}</span>}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Rather hand the whole set over at once? Attach every cheque here instead of row by row — your rental provider matches them to the schedule.</p>
+          <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)', background: 'var(--surface)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)' }}>
+              <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={(e) => handleBulkFiles(e.target.files)} style={{ display: 'none' }} data-testid="renewal-pdc-input" />
+              {uploading > 0 ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploading} file{uploading === 1 ? '' : 's'}…</> : <><UploadCloud size={14} /> Choose files</>}
+          </label>
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {untaggedDocs.map((d, i) => {
+              const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
+              return (
+                <div key={d.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
+                  {d.fileUrl && !isPdf ? (
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: fileNameOfDoc(d.displayName) || `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ flexShrink: 0, lineHeight: 0, display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={d.fileUrl} alt={d.displayName ?? ''} style={{ width: 44, height: 30, objectFit: 'cover', borderRadius: 4, display: 'block' }} />
+                    </button>
+                  ) : d.fileUrl ? (
+                    <span style={{ width: 44, height: 30, display: 'grid', placeItems: 'center', background: 'var(--mist)', borderRadius: 4, flexShrink: 0 }}><FileText size={14} color="var(--ink-2)" /></span>
+                  ) : null}
+                  <div style={{ flex: 1, minWidth: 0 }}><p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileNameOfDoc(d.displayName) || `Cheque ${i + 1}`}</p></div>
+                  {d.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl!, caption: fileNameOfDoc(d.displayName) || `Cheque ${i + 1}`, mimeType: d.mimeType })} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 600, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}><ExternalLink size={12} /> View</button>}
+                  <button type="button" onClick={() => removePdc(d.id)} style={{ background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }} aria-label="Remove cheque">Remove</button>
+                </div>
+              );
+            })}
+        </div>
+      </div>
+
+      {uploadErr && <ErrorBox msg={uploadErr} />}
 
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {submitted ? (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'var(--jade-soft, #eef8f4)', color: 'var(--jade-deep, #1f5a3f)', fontSize: 13, fontWeight: 600 }}>
-            <CheckCircle2 size={16} /> Cheques submitted — waiting for your rental provider to review &amp; collect them
-          </div>
-        ) : (
-          <PrimaryBtn onClick={submit} disabled={busy || pdcDocs.length === 0}>
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-            {busy ? 'Submitting…' : 'Submit cheques for review'}
-          </PrimaryBtn>
-        )}
-        <SecondaryBtn href={`/dashboard/customer/contracts/${child.id}`}>View renewal contract <ExternalLink size={14} /></SecondaryBtn>
+        <PrimaryBtn onClick={submit} disabled={busy || pdcDocs.length === 0}>
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+          {busy ? 'Submitting…' : 'Submit cheques for review'}
+        </PrimaryBtn>
       </div>
     </div>
   );

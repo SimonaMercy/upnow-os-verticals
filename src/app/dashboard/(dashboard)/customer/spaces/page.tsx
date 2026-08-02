@@ -291,13 +291,21 @@ export default function MySpacesPage() {
   // customer always sees their leases (including contracts created outside the
   // viewing/lead pipeline, e.g. imported data). One row per unit, primary pick.
   const TERMINAL_CONTRACT = new Set(['expired', 'terminated', 'cancelled', 'rejected', 'superseded']);
-  // A lease that has naturally EXPIRED but carries a live renewal offer
-  // (renewalAccepted='pending') is NOT past — the customer still has to accept
-  // the renewal. This happens whenever the old term ends before the tenant
-  // signs the renewal (proposed for 1 Jul, old lease ended 30 Jun). Keep it in
-  // the active section so the "Renewal Offered" CTA stays visible.
-  const hasLiveRenewalOffer = (c: TenantContract) =>
-    c.renewalAccepted === 'pending' && c.status === 'expired';
+  // A space is past only when the WHOLE chain is done. An expired lease whose
+  // renewal is still in flight is not past — the renewal is the live thing the
+  // customer has to act on, and the old term ending first is the norm, not the
+  // exception (renewal starts 1 Aug, old lease ended 31 Jul; the customer still
+  // owes cheques/signature). Judging the row on the parent's status alone filed
+  // those under "Past · Lease ended" and hid the renewal CTA entirely.
+  //
+  // The renewal CHILD is the source of truth: any non-terminal child keeps the
+  // row live, whatever the parent reads. `renewalAccepted === 'pending'` is kept
+  // only as the no-child fallback (offer recorded before the draft resolves).
+  const chainStillLive = (x: { contract: TenantContract; renewalContract?: TenantContract }) =>
+    !TERMINAL_CONTRACT.has(x.contract.status) ||
+    (x.renewalContract
+      ? !TERMINAL_CONTRACT.has(x.renewalContract.status)
+      : x.contract.renewalAccepted === 'pending');
   const contractOnly = Array.from(
     new Set(contracts.map(c => c.unit?.id).filter((x): x is number => x != null)),
   )
@@ -305,10 +313,10 @@ export default function MySpacesPage() {
     .map(uid => chainForUnit(contracts, uid))
     .filter((x): x is { contract: TenantContract; renewalContract: TenantContract | undefined } => !!x.contract);
   const activeContractRows: SpaceRow[] = contractOnly
-    .filter(x => !TERMINAL_CONTRACT.has(x.contract.status) || hasLiveRenewalOffer(x.contract))
+    .filter(chainStillLive)
     .map(x => ({ kind: 'contract' as const, key: `c-${x.contract.id}`, contract: x.contract, renewalContract: x.renewalContract }));
   const pastContractRows = contractOnly
-    .filter(x => TERMINAL_CONTRACT.has(x.contract.status) && !hasLiveRenewalOffer(x.contract))
+    .filter(x => !chainStillLive(x))
     .map(x => x.contract);
 
   const activeRows: SpaceRow[] = [
@@ -435,10 +443,15 @@ export default function MySpacesPage() {
             const location = [community, emirate].filter(Boolean).join(', ') || null;
             // Beds only apply to residential units — a leased shop/office shows "—".
             const bedrooms = isResidentialUnitType(unit?.unitType) ? unit?.bedrooms : null;
-            const annual = c?.annualRent ?? unit?.rentalPrice ?? null;
-            const annualIsAsking = !c?.annualRent && annual != null;
-            const periodLabel = c?.startDate && c?.endDate
-              ? { label: 'Period', value: `${fmtShort(c.startDate)} -> ${fmtShort(c.endDate)}` }
+            // Which contract the money/term stats describe. Once the current
+            // term has ENDED and the renewal is the live one, the strip must
+            // read the RENEWAL's dates and rent — an already-finished term on a
+            // card whose CTA says "sign your renewal" reads as a past lease.
+            const termC = c && TERMINAL_CONTRACT.has(c.status) && row.renewalContract ? row.renewalContract : c;
+            const annual = termC?.annualRent ?? unit?.rentalPrice ?? null;
+            const annualIsAsking = !termC?.annualRent && annual != null;
+            const periodLabel = termC?.startDate && termC?.endDate
+              ? { label: 'Period', value: `${fmtShort(termC.startDate)} -> ${fmtShort(termC.endDate)}` }
               : row.kind === 'viewing'
                 ? { label: 'Viewing', value: fmtShort(row.group.primary.scheduledAt) }
                 : row.kind === 'direct'

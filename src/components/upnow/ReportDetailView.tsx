@@ -692,12 +692,12 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'fee-taxation': {
     title: 'Fee & VAT (Taxation)',
-    description: 'One-off fees and rent VAT per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); Contract Registration is exempt; rent VAT applies to commercial/industrial leases. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
+    description: 'One-off fees, rent VAT and third-party pass-throughs per year, bucketed by the contract start date — net, VAT and the output VAT to file. Admin & commission are VAT-able (5%); Contract Registration is exempt; rent VAT applies to commercial/industrial leases; a sub-leased building also carries the head lessor\'s levy and the 5% charged on it. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
     endpoint: '/api/reports/fee-taxation',
     feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
-    dataNote: 'Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT = annual rent × the contract\'s stored VAT rate (commercial / industrial only; residential is exempt). Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
+    dataNote: 'Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT = annual rent × the contract\'s stored VAT rate (commercial / industrial only; residential is exempt). "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
     columns: [
       { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
@@ -709,6 +709,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
       { key: 'rentNetFils', label: 'Rent (net)', align: 'right', type: 'aed' },
       { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
+      { key: 'otherNetFils', label: 'Other charges (net)', align: 'right', type: 'aed' },
+      { key: 'otherVatFils', label: 'Other charges VAT', align: 'right', type: 'aed' },
       { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
     ],
     totals: [
@@ -721,6 +723,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'commissionVatFils', label: 'Commission VAT', type: 'aed' },
       { key: 'rentNetFils', label: 'Rent (net)', type: 'aed' },
       { key: 'rentVatFils', label: 'Rent VAT', type: 'aed' },
+      { key: 'otherNetFils', label: 'Other charges (net)', type: 'aed' },
+      { key: 'otherVatFils', label: 'Other charges VAT', type: 'aed' },
       { key: 'totalVatFils', label: 'Total VAT', type: 'aed' },
     ],
     // Summary (overall) view: click a period row to see the contracts behind it
@@ -761,6 +765,8 @@ const FEE_DETAIL_COLUMNS: Column[] = [
   { key: 'commissionNetFils', label: 'Commission (net)', align: 'right', type: 'aed' },
   { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
   { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
+  { key: 'otherNetFils', label: 'Other charges (net)', align: 'right', type: 'aed' },
+  { key: 'otherVatFils', label: 'Other charges VAT', align: 'right', type: 'aed' },
   { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
 ];
 

@@ -26,13 +26,14 @@ import {
   ShieldAlert, Send, Copy,
 } from 'lucide-react';
 import { APP_TIME_ZONE } from '@/lib/datetime';
-import { getRequiredDocs, type DocReq } from '@/lib/docRequirements';
+import { getRequiredDocs, docNeedsExpiry, type DocReq } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/components/upnow/DocumentReaderModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
+import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
 import { putKycSlot } from '@/lib/kycSlotUpload';
-import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, parseAdditionalDocs, requestedDocKey, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
@@ -78,6 +79,8 @@ type TenantDoc = {
   id: number; documentKey: string; displayName: string | null;
   fileUrl: string; mimeType: string | null; status: string;
   notes?: string | null;
+  // Recorded by the RP at review time — never by the customer.
+  expiryDate?: string | null;
 };
 /** One entry in the lead's running notes log (newest first). */
 type LeadNote = {
@@ -332,7 +335,7 @@ function DocItem({ state, name, status, children }: { state: DocState; name: str
   return (
     <div className={`docitem ${state}${state === 'docmiss' && status.toLowerCase().includes('required') ? ' req' : ''}`}>
       <FileText size={15} />
-      <div><span className="dn">{name}</span><span className="ds">{status}</span></div>
+      <div className="dmain"><span className="dn">{name}</span><span className="ds">{status}</span></div>
       {children && <div className="dacts">{children}</div>}
     </div>
   );
@@ -516,9 +519,28 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       body: JSON.stringify({ note: note ?? '' }),
     }));
 
-  const verifyDoc = (docId: number) => runAction(async () => {
-    const r = await fetch(`/api/documents/${docId}/verify`, { method: 'POST', credentials: 'include' });
-    if (r.ok) setDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'processed' } : d) : prev);
+  // Approving an identity / licence document also records its expiry when the RP
+  // has typed one — the date rides along with the approval rather than needing a
+  // second save. Expiry is the RP's to record; the customer never enters it.
+  const verifyDoc = (docId: number, expiryDate?: string) => runAction(async () => {
+    const r = await fetch(`/api/documents/${docId}/verify`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(expiryDate ? { expiryDate } : {}),
+    });
+    if (r.ok) setDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, status: 'processed', ...(expiryDate ? { expiryDate } : {}) } : d) : prev);
+    return r;
+  });
+
+  // Re-dating a document that is already on file (or filling in a blank expiry
+  // without approving yet).
+  const setDocExpiry = (docId: number, expiryDate: string) => runAction(async () => {
+    const r = await fetch(`/api/documents/${docId}`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiryDate: expiryDate || null }),
+    });
+    if (r.ok) setDocs(prev => prev ? prev.map(d => d.id === docId ? { ...d, expiryDate: expiryDate || null } : d) : prev);
     return r;
   });
   // Doc-reject DOES take an optional {reason} — mirrors handleRejectDoc on the list page.
@@ -669,6 +691,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const pendingViewing = getPendingViewing(lead);
   const latestViewing = getLatestViewing(lead);
   const plan = lead.paymentPlan ?? null;
+  // The LANDLORD's rent-VAT collection setting, served with the lead (a manager
+  // has no RP profile of their own to read it from).
+  const rentVatMode = lead.rentVatMode ?? 'installment';
   const rejected = lead.stage === 'rejected';
   const converted = lead.stage === 'converted';
 
@@ -827,7 +852,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 lead={lead} plan={plan} docs={docs} cheques={cheques} busy={busy}
                 pendingViewing={pendingViewing} latestViewing={latestViewing}
                 annualRentAed={annualRentAed}
-                feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments}
+                feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
                 onMarkVisited={markVisited}
                 onApproveDocuments={approveDocuments}
                 onSharePlan={sharePlan}
@@ -835,6 +860,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 onConfirmCollected={confirmCollected}
                 onReopen={() => { setReopenNote(''); setReopenOpen(true); }}
                 onVerifyDoc={verifyDoc}
+                onSetDocExpiry={setDocExpiry}
                 onRejectDoc={rejectDoc}
                 onUploadDoc={uploadDocForCustomer}
                 onSaveDocsNote={saveDocsNote}
@@ -1186,13 +1212,15 @@ type StageBodyProps = {
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
   allowedInstallments: number[];
+  rentVatMode: 'annual' | 'installment';
   onMarkVisited: (viewingId: number, outcome?: string) => void;
   onApproveDocuments: () => void;
   onSharePlan: () => void;
   onApproveCheques: () => void;
   onConfirmCollected: () => void;
   onReopen: () => void;
-  onVerifyDoc: (id: number) => void;
+  onVerifyDoc: (id: number, expiryDate?: string) => void;
+  onSetDocExpiry: (id: number, expiryDate: string) => void;
   onRejectDoc: (id: number, reason?: string) => void;
   onUploadDoc: (req: { key: string; label: string; category: string }, file: File) => Promise<void>;
   onSaveDocsNote: (items: string[]) => void;
@@ -1210,13 +1238,18 @@ type StageBodyProps = {
  *  payable) — one consistent layout across both sides. Shown at the viewing stage
  *  before a firm plan exists, so the cheque schedule is deliberately omitted. ────── */
 function CostSummary({ cp }: { cp: NonNullable<ApiLead['costPreview']> }) {
+  // Charges NET, VAT on its own line — the way it is actually collected (a
+  // separate VAT cheque) and the same shape the customer's copy shows.
+  const feeVatFils = cp.adminFeeVatFils + cp.ejariVatFils + cp.commissionVatFils;
   const rows: Array<{ label: string; fils: number }> = [
-    { label: `Annual rent${cp.rentVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.rentFils + cp.rentVatFils },
+    { label: 'Annual rent', fils: cp.rentFils },
     { label: 'Security deposit', fils: cp.securityDepositFils },
-    { label: `Admin fee${cp.adminFeeVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.adminFeeFils + cp.adminFeeVatFils },
-    { label: `Contract Registration Fee${cp.ejariVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.ejariFils + cp.ejariVatFils },
-    { label: `Commission${cp.commissionVatFils > 0 ? ' (incl. VAT)' : ''}`, fils: cp.commissionFils + cp.commissionVatFils },
-    ...(cp.customFees ?? []).map(f => ({ label: `${f.label}${f.vatFils > 0 ? ' (incl. VAT)' : ''}`, fils: f.netFils + f.vatFils })),
+    { label: 'Admin fee', fils: cp.adminFeeFils },
+    { label: 'Contract Registration Fee', fils: cp.ejariFils },
+    { label: 'Commission', fils: cp.commissionFils },
+    ...(cp.customFees ?? []).map(f => ({ label: f.label, fils: f.netFils + f.vatFils })),
+    { label: `Rental VAT${cp.rentVatRate ? ` (${cp.rentVatRate}%)` : ''}`, fils: cp.rentVatFils },
+    { label: 'Fees VAT', fils: feeVatFils },
   ].filter(r => r.fils > 0);
   return (
     <div>
@@ -1320,9 +1353,9 @@ function MarkVisitedButton({ viewingId, busy, onConfirm }: { viewingId: number; 
 function StageBody(props: StageBodyProps) {
   const {
     lead, plan, docs, cheques, busy, pendingViewing, latestViewing, annualRentAed,
-    feeRules, preferredStartDays, allowedInstallments,
+    feeRules, preferredStartDays, allowedInstallments, rentVatMode,
     onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected,
-    onReopen, onVerifyDoc, onRejectDoc, onUploadDoc, onSaveDocsNote, onIssuePlan,
+    onReopen, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onIssuePlan,
     onRecordCheque, onDeleteCheque, onSetChequeStatus, onTagCheque, onSetPlanItemMethod,
     onOpenLease,
   } = props;
@@ -1393,7 +1426,7 @@ function StageBody(props: StageBodyProps) {
       return (
         <DocsSection
           lead={lead} docs={docs} busy={busy}
-          onVerifyDoc={onVerifyDoc} onRejectDoc={onRejectDoc}
+          onVerifyDoc={onVerifyDoc} onSetDocExpiry={onSetDocExpiry} onRejectDoc={onRejectDoc}
           onUploadDoc={onUploadDoc} onSaveDocsNote={onSaveDocsNote}
           onApproveDocuments={onApproveDocuments}
         />
@@ -1406,7 +1439,7 @@ function StageBody(props: StageBodyProps) {
         <PlanSection
           lead={lead} plan={plan} busy={busy}
           latestViewing={latestViewing}
-          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments}
+          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
           onIssuePlan={onIssuePlan}
           shared={false} onSharePlan={onSharePlan}
         />
@@ -1417,7 +1450,7 @@ function StageBody(props: StageBodyProps) {
         <PlanSection
           lead={lead} plan={plan} busy={busy}
           latestViewing={latestViewing}
-          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments}
+          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
           onIssuePlan={onIssuePlan}
           shared={true} onSharePlan={onSharePlan}
         />
@@ -1517,12 +1550,13 @@ function StageBody(props: StageBodyProps) {
  *  require-additional-document, RP upload-on-behalf + bulk approve. Ports the
  *  list page's docs panel behaviour into the quest-page design. ────────────── */
 function DocsSection({
-  lead, docs, busy, onVerifyDoc, onRejectDoc, onUploadDoc, onSaveDocsNote, onApproveDocuments,
+  lead, docs, busy, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onApproveDocuments,
 }: {
   lead: ApiLead;
   docs: TenantDoc[] | null;
   busy: boolean;
-  onVerifyDoc: (id: number) => void;
+  onVerifyDoc: (id: number, expiryDate?: string) => void;
+  onSetDocExpiry: (id: number, expiryDate: string) => void;
   onRejectDoc: (id: number, reason?: string) => void;
   onUploadDoc: (req: { key: string; label: string; category: string }, file: File) => Promise<void>;
   onSaveDocsNote: (items: string[]) => void;
@@ -1534,10 +1568,14 @@ function DocsSection({
   const [rejecting, setRejecting] = useState<{ id: number; label: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   // Additional-docs request list (append a slug via additional-docs-note).
-  const [noteItems, setNoteItems] = useState<string[]>(() => parseAdditionalDocs(lead.additionalDocsNote));
+  // Collapsed on load: a lead saved before the picker's names were aligned can
+  // hold two wordings of one document, which would list the same request twice.
+  const [noteItems, setNoteItems] = useState<string[]>(() => dedupeRequests(parseAdditionalDocs(lead.additionalDocsNote)));
   const [docSearch, setDocSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);   // "View all documents" reader popup
+  // Expiry the RP is typing, keyed by document id, until it is saved.
+  const [expiryDraft, setExpiryDraft] = useState<Record<number, string>>({});
 
   // A company customer is asked for the company's pack (trade licence +
   // authorised signatory), never the personal one — same rule the customer sees.
@@ -1549,8 +1587,25 @@ function DocsSection({
   // file) — it is the request itself, not a document. Requiring a fileUrl keeps
   // it out of "received", so asking for a document never ticks it off.
   const okKeys = new Set((docs ?? []).filter(d => !!d.fileUrl && !['missing', 'rejected'].includes(d.status)).map(d => d.documentKey));
-  const required = reqDocs.filter(d => d.required);
-  const optional = reqDocs.filter(d => !d.required);
+  // A requested name that maps onto a slot we ALREADY collect (e.g. "UAE Visa /
+  // Residence Visa" ⇢ the `uae_visa` supporting slot) must not be drawn a second
+  // time below — it is the SAME document key, so two rows would show one file
+  // twice with two sets of approve/reject buttons. It promotes the existing slot
+  // to required instead, which is what asking for it means.
+  // Same promotion rule the customer's journey applies, so both sides count the
+  // request against the same slot.
+  const slotKeys = new Set(reqDocs.map(d => d.key));
+  // The slots a requested name lands on: usually one, but "Emirates ID" is
+  // collected as two sides, so asking for it promotes BOTH.
+  const promotedSlots = (item: string): string[] => {
+    const k = resolveRequestedDocKey(item) ?? additionalDocKey(item);
+    if (k === 'emirates_id' && slotKeys.has('emirates_id_front')) return ['emirates_id_front', 'emirates_id_back'];
+    return slotKeys.has(k) ? [k] : [];
+  };
+  const promotedKeys = new Set(noteItems.flatMap(promotedSlots));
+  const isRequired = (d: DocReq) => d.required || promotedKeys.has(d.key);
+  const required = reqDocs.filter(isRequired);
+  const optional = reqDocs.filter(d => !isRequired(d));
   const received = required.filter(d => okKeys.has(d.key)).length;
 
   // What the upload link carries: this checklist in FULL — every requirement and
@@ -1594,9 +1649,11 @@ function DocsSection({
 
   const addDocByName = (raw: string) => {
     const name = raw.trim();
-    if (!name || noteItems.includes(name)) return;
-    setNoteItems(prev => [...prev, name]);
+    // Clear the box either way — re-picking an already-requested document is a
+    // no-op, and leaving the text sitting there reads as a failed keystroke.
     setDocSearch(''); setMenuOpen(false);
+    if (!name || alreadyRequested(noteItems, name)) return;
+    setNoteItems(prev => [...prev, name]);
   };
 
   async function doUpload(req: DocReq | { key: string; label: string; category: string }, file: File) {
@@ -1606,7 +1663,44 @@ function DocsSection({
     finally { setUploadingKey(null); }
   }
 
-  // One row per requirement: status + View/Approve/Reject + Upload-on-behalf.
+  // The expiry date for an identity / licence copy. Recorded HERE, at review
+  // time, by the RP — the customer never asserts their own compliance dates.
+  // Only a document with a file can be dated; there is nothing to expire until
+  // one arrives.
+  const savedExpiry = (doc: TenantDoc) => doc.expiryDate?.slice(0, 10) ?? '';
+  const draftExpiry = (doc: TenantDoc) => expiryDraft[doc.id] ?? savedExpiry(doc);
+  // A file that expires but carries no date yet — it cannot be approved, here or
+  // in one go at the bottom of the step.
+  const needsDate = (doc: TenantDoc | undefined, key: string) =>
+    !!doc?.fileUrl && docNeedsExpiry(key) && !draftExpiry(doc);
+  // Named for the blocking message: the checklist slots, then the extra requests.
+  const undated = [
+    ...reqDocs.filter(d => needsDate((docs ?? []).find(x => x.documentKey === d.key), d.key)).map(d => d.label),
+    ...noteItems.filter(item => {
+      const k = requestedDocKey(item);
+      return !slotKeys.has(k) && needsDate((docs ?? []).find(x => x.documentKey === k), k);
+    }),
+  ];
+  const ExpiryCell = (doc: TenantDoc, key: string, label: string) => {
+    if (!doc.fileUrl || !docNeedsExpiry(key)) return null;
+    const v = draftExpiry(doc);
+    const expired = !!v && v < new Date().toISOString().slice(0, 10);
+    return (
+      // Blank = the RP still owes this date; past = the customer owes a fresh copy.
+      <span className={`dexp${v ? (expired ? ' gone' : ' set') : ' blank'}`}>
+        <ExpiryDatePicker
+          value={v}
+          label={`${label} expiry date`}
+          placeholder="DD-MM-YYYY"
+          disabled={busy}
+          // Picking a day IS the save — there is no separate confirm step.
+          onChange={next => { setExpiryDraft(p => ({ ...p, [doc.id]: next })); if (next !== savedExpiry(doc)) onSetDocExpiry(doc.id, next); }}
+        />
+      </span>
+    );
+  };
+
+  // One row per requirement: status + expiry + View/Approve/Reject + Upload-on-behalf.
   const ReqRow = (d: DocReq) => {
     const doc = (docs ?? []).find(x => x.documentKey === d.key);
     const on = okKeys.has(d.key);
@@ -1614,12 +1708,14 @@ function DocsSection({
     // Row exists but holds no file → this is the request the RP sent, waiting on
     // the customer. There is nothing to view, approve or reject yet.
     const awaitingUpload = !!doc && !doc.fileUrl;
-    const label = d.label + (d.required && !on ? ' *' : '');
+    const req = isRequired(d);
+    const label = d.label + (req && !on ? ' *' : '');
     const statusText = st === 'approved' ? 'Approved'
       : st === 'rejected' ? 'Rejected'
       : st === 'pending' ? 'Uploaded · review'
       : awaitingUpload ? 'Requested · awaiting upload'
-      : d.required ? 'Missing · required' : 'Optional';
+      : promotedKeys.has(d.key) ? 'Requested by you · awaiting upload'
+      : req ? 'Missing · required' : 'Optional';
     const uploading = uploadingKey === d.key;
     return (
       <DocItem key={d.key} state={st} name={label} status={statusText}>
@@ -1629,7 +1725,15 @@ function DocsSection({
             <Eye size={12} /> View
           </button>
         )}
-        {doc?.fileUrl && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
+        {doc && ExpiryCell(doc, d.key, d.label)}
+        {/* Approving carries whatever expiry is in the row, so the date is
+            recorded in the same click rather than needing a second save — and
+            an expiring copy can't be approved until that date is there. */}
+        {doc?.fileUrl && st !== 'approved' && (
+          <button className="mini-btn ok" disabled={busy || needsDate(doc, d.key)}
+            title={needsDate(doc, d.key) ? 'Add the expiry date before approving' : 'Approve'}
+            onClick={() => onVerifyDoc(doc.id, draftExpiry(doc) || undefined)}><Check size={12} /></button>
+        )}
         {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: d.label }); setRejectReason(''); }}><X size={12} /></button>}
         {canUpload && (
           <label className={`mini-btn view ${uploading ? 'is-busy' : ''}`} style={{ cursor: uploading ? 'progress' : 'pointer' }}>
@@ -1687,13 +1791,30 @@ function DocsSection({
       {/* ── Require additional document ── */}
       <div>
         <div className="subhead"><Plus size={13} /> Request additional documents</div>
-        <p className="note" style={{ margin: '0 0 8px' }}>Each appears as an individual upload slot in the customer&rsquo;s journey.</p>
+        <p className="note" style={{ margin: '0 0 8px' }}>Each appears as an individual upload slot in the customer&rsquo;s journey, and on any upload link you have already sent them &mdash; no need to issue a new one. Asking for a document already in the checklist above marks that slot required instead of adding a second one.</p>
         {noteItems.length > 0 && (
           <div className="doclist" style={{ marginBottom: 8 }}>
             {noteItems.map((item, idx) => {
               // A request that maps to a standard slot (e.g. UAE Visa) is fulfilled
               // by that existing upload — track the same key the customer uploads to.
               const key = resolveRequestedDocKey(item) ?? additionalDocKey(item);
+              // Maps onto a checklist slot above — that row IS this request (now
+              // marked required). Show the request itself, not a second copy of
+              // the document, so there is only ever one place to act on it.
+              const slots = promotedSlots(item);
+              if (slots.length) {
+                // Show the CHECKLIST's label, not the requested wording — a
+                // request saved under an older name (e.g. "UAE Visa / Residence
+                // Visa") would otherwise read as a different document from the
+                // row it is actually tracked on.
+                const label = slots.map(k => reqDocs.find(d => d.key === k)?.label ?? k).join(' + ');
+                return (
+                  <DocItem key={idx} state="docmiss" name={label}
+                    status="Requested · already in the checklist above">
+                    <button className="mini-btn no" title="Remove request" onClick={() => setNoteItems(prev => prev.filter((_, i) => i !== idx))}><Trash2 size={12} /></button>
+                  </DocItem>
+                );
+              }
               const doc = (docs ?? []).find(d => d.documentKey === key);
               // Same rule as the checklist rows: a row with no file is the
               // request, not the document.
@@ -1702,12 +1823,18 @@ function DocsSection({
               const uploading = uploadingKey === key;
               return (
                 <DocItem key={idx} state={doc?.fileUrl ? st : 'docmiss'} name={item}
-                  status={st === 'approved' ? 'Approved' : st === 'rejected' ? 'Rejected' : doc?.fileUrl ? 'Uploaded · review' : 'Awaiting upload'}>
+                  status={st === 'approved' ? 'Approved' : st === 'rejected' ? 'Rejected' : doc?.fileUrl ? 'Uploaded · review' : 'Awaiting upload'}
+                  >
                   {doc?.fileUrl && (
                     <button className="mini-btn view" type="button"
                       onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType })}><Eye size={12} /> View</button>
                   )}
-                  {doc?.fileUrl && st !== 'approved' && <button className="mini-btn ok" disabled={busy} onClick={() => onVerifyDoc(doc.id)}><Check size={12} /></button>}
+                  {doc && ExpiryCell(doc, key, item)}
+                  {doc?.fileUrl && st !== 'approved' && (
+                    <button className="mini-btn ok" disabled={busy || needsDate(doc, key)}
+                      title={needsDate(doc, key) ? 'Add the expiry date before approving' : 'Approve'}
+                      onClick={() => onVerifyDoc(doc.id, draftExpiry(doc) || undefined)}><Check size={12} /></button>
+                  )}
                   {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
                   {canUpload && (
                     <label className="mini-btn view" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
@@ -1730,14 +1857,14 @@ function DocsSection({
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 const q = docSearch.trim();
-                const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q.toLowerCase()) && !noteItems.includes(d));
+                const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q.toLowerCase()) && !alreadyRequested(noteItems, d));
                 if (matches.length === 1) addDocByName(matches[0]); else if (q) addDocByName(q);
               } else if (e.key === 'Escape') setMenuOpen(false);
             }}
             placeholder="Search or type a document name…" />
           {menuOpen && (() => {
             const q = docSearch.trim().toLowerCase();
-            const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q) && !noteItems.includes(d));
+            const matches = REQUESTABLE_DOCS.filter(d => d.toLowerCase().includes(q) && !alreadyRequested(noteItems, d));
             const exact = REQUESTABLE_DOCS.some(d => d.toLowerCase() === q);
             return (
               <div className="addmenu">
@@ -1757,12 +1884,22 @@ function DocsSection({
           })()}
         </div>
         <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} disabled={busy} onClick={() => onSaveDocsNote(noteItems)}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save request
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Request document
         </button>
       </div>
 
       {/* ── Approve docs → opens the plan for review (customer sees it only after you share) ── */}
-      <button className="btn btn-jade btn-block" disabled={busy} onClick={onApproveDocuments}>
+      {/* An identity copy with no expiry on record can't be approved: nothing
+          downstream can tell whether it is still valid, and the RP is the only
+          one who ever records that date. Name the documents, so the block is a
+          to-do list rather than a dead button. */}
+      {undated.length > 0 && (
+        <p className="note" style={{ margin: '0 0 8px', color: 'var(--saffron-deep)', fontWeight: 700 }}>
+          <TriangleAlert size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+          Add the expiry date on {undated.join(', ')} before approving.
+        </p>
+      )}
+      <button className="btn btn-jade btn-block" disabled={busy || undated.length > 0} onClick={onApproveDocuments}>
         {busy ? <Loader2 size={15} className="animate-spin" /> : <>Approve documents <ArrowRight size={15} /> review plan</>}
       </button>
 
@@ -1801,7 +1938,7 @@ function DocsSection({
 /* ─── PlanSection: plan table + inline "Edit plan" editor (full port of the
  *  list page's plan form; same issue-payment-plan endpoint issues OR edits). ── */
 function PlanSection({
-  lead, plan, busy, latestViewing, feeRules, preferredStartDays, allowedInstallments, onIssuePlan,
+  lead, plan, busy, latestViewing, feeRules, preferredStartDays, allowedInstallments, rentVatMode, onIssuePlan,
   shared, onSharePlan,
 }: {
   lead: ApiLead;
@@ -1811,6 +1948,7 @@ function PlanSection({
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
   allowedInstallments: number[];
+  rentVatMode: 'annual' | 'installment';
   onIssuePlan: (body: Record<string, unknown>) => Promise<void> | void;
   /** true once the plan has been shared with the customer (payment_plan_shared). */
   shared?: boolean;
@@ -1841,7 +1979,7 @@ function PlanSection({
       {editing && (
         <PlanEditor
           lead={lead} plan={plan} busy={busy} latestViewing={latestViewing}
-          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments}
+          feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
           onCancel={() => setEditing(false)}
           onSubmit={async (body) => { await onIssuePlan(body); setEditing(false); }}
         />
@@ -1852,7 +1990,7 @@ function PlanSection({
 
 /* PlanEditor — the exact field set + due-date logic from leads/page.tsx. */
 function PlanEditor({
-  lead, plan, busy, latestViewing, feeRules, preferredStartDays, allowedInstallments, onCancel, onSubmit,
+  lead, plan, busy, latestViewing, feeRules, preferredStartDays, allowedInstallments, rentVatMode, onCancel, onSubmit,
 }: {
   lead: ApiLead;
   plan: NonNullable<ApiLead['paymentPlan']>;
@@ -1861,6 +1999,7 @@ function PlanEditor({
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
   allowedInstallments: number[];
+  rentVatMode: 'annual' | 'installment';
   onCancel: () => void;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
 }) {
@@ -1883,7 +2022,10 @@ function PlanEditor({
   const bundleInit = plan.items.find(it => it.type === 'first_bundle')?.dueDate ?? '';
   const depositInit = plan.items.find(it => it.type === 'security_deposit')?.dueDate ?? '';
   const instDatesInit = plan.items
-    .filter(it => it.type === 'installment' && it.description && /^Installment \d+$/.test(it.description))
+    // Tolerate the legacy "(5% VAT)" suffix (see extrasInit) — without it the
+    // stored due dates were never found and instalments 2..N opened BLANK, which
+    // then failed the "all cheque due dates are required" check on save.
+    .filter(it => it.type === 'installment' && it.description && /^Installment \d+(\s*\(\d+(?:\.\d+)?% VAT\))?$/.test(it.description))
     .sort((a, b) => { const n = (d?: string) => Number((d?.match(/(\d+)/) ?? [])[1] ?? 0); return n(a.description) - n(b.description); })
     .map(it => it.dueDate);
   const [bundleDate, setBundleDate] = useState(bundleInit);
@@ -1895,7 +2037,12 @@ function PlanEditor({
   );
   const [notes, setNotes] = useState(plan.notes ?? '');
   const extrasInit = plan.items
-    .filter(it => it.type === 'extra_installment' || (it.type === 'installment' && it.description && !/^Installment \d+$/.test(it.description)))
+    // An "extra" is a one-off line the RP added — NOT a rent instalment. Plans
+    // issued before VAT got its own cheque label the rent rows "Installment 2
+    // (5% VAT)", so the suffix has to be tolerated here: without it every such
+    // row was read as an extra AND re-generated as rent, double-counting the
+    // whole schedule.
+    .filter(it => it.type === 'extra_installment' || (it.type === 'installment' && it.description && !/^Installment \d+(\s*\(\d+(?:\.\d+)?% VAT\))?$/.test(it.description)))
     .map(it => ({ description: it.description ?? '', amountAed: String(it.amountFils / 100), dueDate: it.dueDate }));
   const [extras, setExtras] = useState<{ description: string; amountAed: string; dueDate: string }[]>(extrasInit);
   const [discountType, setDiscountType] = useState<'none' | 'percent' | 'fixed'>(plan.discountType ?? 'none');
@@ -1926,7 +2073,9 @@ function PlanEditor({
     commission: methodOfItem(it => it.type === 'fee' && !!it.description?.startsWith('Commission')),
     installments: [
       methodOfItem(it => it.type === 'first_bundle'),
-      ...instDatesInit.map((_, i) => methodOfItem(it => it.description === `Installment ${i + 2}`)),
+      // Same legacy "(5% VAT)" suffix as extrasInit — match the instalment NUMBER,
+      // not the whole label, or the RP's chosen method is silently lost.
+      ...instDatesInit.map((_, i) => methodOfItem(it => new RegExp(`^Installment ${i + 2}\\b`).test(it.description ?? ''))),
     ],
     extras: extrasInit.map(e => methodOfItem(it => it.description === e.description)),
   }));
@@ -1974,6 +2123,44 @@ function PlanEditor({
   const commFils = Math.round((parseFloat(commAed) || 0) * 100);
   const depositFils = Math.round((parseFloat(depositAed) || 0) * 100);
 
+  // ── VAT ───────────────────────────────────────────────────────────────────
+  // Rent and fee cheques are NET; the VAT is collected as its OWN cheque(s) and
+  // shown under Third Party, because it is money the landlord merely collects
+  // for the FTA. How many rent-VAT cheques there are is the RP's "Rent VAT
+  // collection" setting: one per rent cheque (quarterly filing) or one a year.
+  // Residential is exempt, so this whole block is 0 there.
+  const feeRuleFor = (feeType: string): FeeRuleDto | undefined => {
+    const cat = unitSpaceCategory(lead.unit?.unitType);
+    return (feeRules?.[cat] ?? feeRules?.['residential'] ?? []).find(r => r.feeType === feeType);
+  };
+  const rateOf = (feeType: string) => { const r = feeRuleFor(feeType); return r?.vatApplicable ? (r.vatRate || 0) : 0; };
+  // Rent VAT % comes from the BACKEND (the plan it issued, else the cost preview)
+  // — never re-derived here: whether rent is taxable depends on the landlord's
+  // rent_vat rule AND on whether a sub-lease makes an otherwise-exempt unit
+  // taxable, which only the server can decide. 0 / absent = exempt.
+  const rentVatRate = plan?.rentVatRate ?? lead.costPreview?.rentVatRate ?? 0;
+  const vatOn = (netFils: number, rate: number) => rate > 0 ? Math.round(netFils * rate / 100) : 0;
+  const perVat = vatOn(per, rentVatRate);
+  const lastVat = vatOn(last, rentVatRate);
+  const feeVatFils = vatOn(adminFils, rateOf('admin_fee')) + vatOn(ejariFils, rateOf('ejari_fee')) + vatOn(commFils, rateOf('commission'));
+  // One VAT line per rent cheque, on that cheque's own date — or a single annual
+  // line due with the first. Mirrors splitPlanVatToOwnItems on the backend.
+  const rentVatRows: Row[] = rentVatRate > 0 && effRent > 0
+    ? (rentVatMode === 'annual'
+        ? [{ key: 'rentvat', label: `Rental VAT (${rentVatRate}%)`, amountFils: perVat * (installmentCount - 1) + lastVat, dueDate: bundleDate, slot: { kind: 'vat' as const } }]
+        : Array.from({ length: installmentCount }, (_, i) => ({
+            key: `rentvat-${i}`,
+            label: `Rental VAT (${rentVatRate}%)`,
+            amountFils: i === installmentCount - 1 ? lastVat : perVat,
+            dueDate: i === 0 ? bundleDate : (instDates[i - 1] ?? ''),
+            slot: { kind: 'vat' as const },
+          })))
+    : [];
+  const feeVatRows: Row[] = feeVatFils > 0
+    ? [{ key: 'feevat', label: 'Fees VAT', amountFils: feeVatFils, dueDate: bundleDate, slot: { kind: 'vat' as const } }]
+    : [];
+  const vatTotalFils = rentVatRows.reduce((s, r) => s + r.amountFils, 0) + feeVatFils;
+
   // The schedule, laid out as the four groups the customer is shown (Security
   // Deposit · Rental Installments · Management Fee · Third Party) rather than one
   // "Admin + Contract Registration + Commission + Installment 1" lump. Each line
@@ -1984,7 +2171,10 @@ function PlanEditor({
     | { kind: 'deposit' }
     | { kind: 'installment'; index: number }        // 0 = instalment 1 (first cheque)
     | { kind: 'fee'; fee: 'adminFee' | 'ejari' | 'commission' }
-    | { kind: 'extra'; index: number };
+    | { kind: 'extra'; index: number }
+    // VAT lines are DERIVED from the rent/fee amounts and their dates — there is
+    // nothing to edit on them directly, so they carry no writable slot.
+    | { kind: 'vat' };
   type Row = { key: string; label: string; amountFils: number; dueDate: string; slot: Slot };
   type Group = { key: SegKey; title: string; rows: Row[] };
 
@@ -2019,17 +2209,25 @@ function PlanEditor({
     },
     {
       key: 'third_party' as const, title: 'Third Party',
+      // Contract Registration first (a government fee collected in full), then
+      // the VAT the landlord collects for the FTA — same order the lease's
+      // Third Party section uses (see lib/segregatedPlan).
       rows: [
         ...(ejariFils > 0 ? [{ key: 'ejari', label: 'Contract Registration Fee', amountFils: ejariFils, dueDate: bundleDate, slot: { kind: 'fee' as const, fee: 'ejari' as const } }] : []),
+        ...rentVatRows,
+        ...feeVatRows,
         ...extraRows,
       ],
     },
   ] as Group[]).filter(g => g.rows.length > 0);
   const rowCount = groups.reduce((n, g) => n + g.rows.length, 0);
   const extraTotalFils = extraRows.reduce((s, r) => s + r.amountFils, 0);
-  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils;
+  // Rent and fees are net here, so VAT is added once — as its own cheques above.
+  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils + vatTotalFils;
 
   const setRowDate = (slot: Slot, v: string) => {
+    // A VAT line follows the cheque it was split off — it has no date of its own.
+    if (slot.kind === 'vat') return;
     if (slot.kind === 'deposit') setDepositDate(v);
     // The fees ride on the first cheque, so their date IS the first instalment's.
     else if (slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)) setBundleDate(v);
@@ -2040,8 +2238,10 @@ function PlanEditor({
     (slot.kind === 'deposit' ? methods.deposit
       : slot.kind === 'fee' ? methods[slot.fee]
       : slot.kind === 'installment' ? methods.installments[slot.index]
+      : slot.kind === 'vat' ? undefined
       : methods.extras[slot.index]) ?? defaultMethodFor(slot);
   const setRowMethod = (slot: Slot, v: PaymentMethodKind) => setMethods(prev => {
+    if (slot.kind === 'vat') return prev;
     if (slot.kind === 'deposit') return { ...prev, deposit: v };
     if (slot.kind === 'fee') return { ...prev, [slot.fee]: v };
     if (slot.kind === 'installment') {
@@ -2601,7 +2801,7 @@ function GlobalStyle() {
       .quest-page .doclist { display: flex; flex-direction: column; gap: 6px; }
       .quest-page .docitem { display: flex; align-items: center; gap: 10px; border: 1px solid; border-radius: 9px; padding: 7px 11px; min-height: 38px; }
       .quest-page .docitem > svg { flex-shrink: 0; }
-      .quest-page .docitem > div:not(.dacts) { display: flex; align-items: baseline; gap: 9px; min-width: 0; flex: 1; }
+      .quest-page .docitem .dmain { display: flex; align-items: baseline; gap: 9px; min-width: 0; flex: 1; }
       .quest-page .docitem .dn { font-size: 12.5px; font-weight: 600; }
       .quest-page .docitem .ds { font-size: 10.5px; font-weight: 800; }
       .quest-page .docitem.approved { background: var(--jade-tint); border-color: #cfe9df; }
@@ -2615,7 +2815,15 @@ function GlobalStyle() {
       .quest-page .docitem.docmiss .dn { color: var(--mute); }
       .quest-page .docitem.docmiss.req { border-color: var(--brick-edge); }
       .quest-page .docitem.docmiss.req svg, .quest-page .docitem.docmiss.req .ds { color: var(--brick); }
-      .quest-page .docitem .dacts { margin-left: auto; display: flex; gap: 5px; flex-shrink: 0; }
+      .quest-page .docitem .dacts { margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+      /* Expiry sits in the row beside View / approve. The trigger itself is the
+         status: an undated copy is the RP's open task, a past date is the
+         customer's, so each reads differently at a glance. */
+      .quest-page .dexp { display: inline-flex; }
+      .quest-page .dexp.blank :global(.exp-trigger) { border-color: var(--saffron-edge); background: var(--saffron-soft); color: var(--saffron-deep); }
+      .quest-page .dexp.blank :global(.exp-ph) { color: var(--saffron-deep); }
+      .quest-page .dexp.gone :global(.exp-trigger) { border-color: var(--brick-edge); background: var(--brick-soft); color: var(--brick); }
+      .quest-page .dexp.set :global(.exp-trigger) { border-color: #cfe9df; background: #fff; color: var(--jade-deep); }
       .quest-page .mini-btn { font-size: 11px; font-weight: 700; padding: 5px 9px; border-radius: 8px; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-decoration: none; }
       .quest-page .mini-btn:disabled { opacity: .55; cursor: not-allowed; }
       .quest-page .mini-btn.ok { background: var(--jade-soft); color: var(--jade-deep); }

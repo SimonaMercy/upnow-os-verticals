@@ -19,7 +19,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { docLabel } from '@/lib/docLabel';
-import { REQUESTABLE_DOCS, additionalDocKey, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, parseAdditionalDocs, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { leadContactPerson, leadDisplayName } from '@/lib/leadJourney';
 
@@ -606,13 +606,14 @@ function LeadRow({
   const [docActionError, setDocActionError] = useState<string | null>(null);
   const [rejectingDoc, setRejectingDoc]     = useState<{ id: number; label: string } | null>(null);
   const [rejectReason, setRejectReason]     = useState('');
-  const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => parseAdditionalDocs(lead.additionalDocsNote));
+  const [docsNoteItems, setDocsNoteItems] = useState<string[]>(() => dedupeRequests(parseAdditionalDocs(lead.additionalDocsNote)));
   const [docSearch, setDocSearch]         = useState('');
   const [docMenuOpen, setDocMenuOpen]     = useState(false);
   // Add a document (a standard one, or a typed custom name) to the request list.
   const addDocByName = (raw: string) => {
     const name = raw.trim();
-    if (!name || docsNoteItems.includes(name)) return;
+    // By KEY, not wording — two names for one document would list it twice.
+    if (!name || alreadyRequested(docsNoteItems, name)) return;
     setDocsNoteItems(prev => [...prev, name]);
     setDocSearch(''); setDocMenuOpen(false); setDocsNoteSaved(false);
   };

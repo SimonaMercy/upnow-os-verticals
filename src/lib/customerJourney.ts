@@ -28,7 +28,7 @@ export type CustomerStateKey =
   | 'signature' | 'ejari' | 'utility' | 'utility_review'
   | 'move_in' | 'move_in_review' | 'active'
   | 'termination_request_received' | 'termination_request_sent'
-  | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques'
+  | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques' | 'renewal_cheques_review'
   | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
   | 'rejected' | 'withdrawn' | 'terminated' | 'renewal_rejected'
   | 'superseded' | 'terminating';
@@ -49,6 +49,9 @@ export interface JourneyContract {
   renewalDocsAcceptedAt?: string | null;
   tenantSignedAt?: string | null;
   landlordSignedAt?: string | null;
+  /** Customer has handed the renewal cheques over — the step becomes a waiting
+   *  screen until the RP confirms collection (pdcConfirmed). */
+  tenantChequesSubmittedAt?: string | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   vacateAtEnd?: boolean;
   moveInInspection?: { submitted: boolean; signedByTenant: boolean } | null;
@@ -119,7 +122,7 @@ export const CUSTOMER_STATE_DEFS: Record<CustomerStateKey, CustomerStateDef> = {
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
   termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
 
-  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 6',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, confirm your payments are ready, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
+  renewal_offered:               { label: 'Renewal offered',               sub: 'Renewal step 1 of 6',             mode: 'renewal', currentIndex: 0,  tone: 'action',    headline: 'Stay another year? Here are the new terms.',             body: 'Preview the contract, then accept to lock the terms in.',                                                                                                       timing: 'Awaiting your decision' },
   // Kept defined so the state map stays exhaustive, but no longer rendered
   // as a default timeline step. Routing only lands here if a future phase
   // turns the renewal docs step back on for expired KYC.
@@ -128,8 +131,12 @@ export const CUSTOMER_STATE_DEFS: Record<CustomerStateKey, CustomerStateDef> = {
   // the RP confirms collection BEFORE signature is unlocked (matches the RP
   // renewal pipeline / Operations kanban and the new-lease payment step).
   renewal_cheques:               { label: 'Renewal payments',              sub: 'Renewal step 3 of 6',                mode: 'renewal', currentIndex: 2,  tone: 'action',    headline: 'New year, new payments.',                                 body: 'Prepare each one against the renewal schedule below, then confirm.',                                                                                                                            timing: 'Confirm when ready' },
+  // Same stop on the rail (currentIndex 2) — the customer has handed the cheques
+  // over and is waiting on the RP, so the copy switches from "do this" to
+  // "we're on it", mirroring awaiting_rp_confirm on the new-lease side.
+  renewal_cheques_review:        { label: 'Payments under review',         sub: 'Renewal step 3 of 6',                mode: 'renewal', currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',        body: 'Each cheque is being verified and collected before your renewal goes for signature.',                                                                                                           timing: 'Usually within 1 business day' },
   renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
-  renewal_ejari:                 { label: 'Renewing Contract Registration',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing your Contract Registration Certificate.',                 body: '',                                                                                                                                            timing: '2-5 business days' },
+  renewal_ejari:                 { label: 'Renewing Contract Registration',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing your Contract Registration Certificate.',                 body: '',                                                                                                                                                                                             timing: '2-5 business days' },
   renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
@@ -294,6 +301,12 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
       if (rc.renewalDocsRequiredAt && !rc.renewalDocsAcceptedAt) return 'renewal_documents';
       // 2. Cheques/PDC BEFORE signing: the customer uploads + submits, the RP
       //    confirms collection (pdcConfirmed) before signature unlocks.
+      // Handed over but not yet collected → a waiting screen, exactly as the
+      // new-lease flow splits payment_review from awaiting_rp_confirm. Without
+      // the split the step still read "Prepare each one against the renewal
+      // schedule below, then confirm" over a screen with no schedule and
+      // nothing left to confirm.
+      if (rc.tenantChequesSubmittedAt && !rc.pdcConfirmed) return 'renewal_cheques_review';
       if (!rc.pdcConfirmed) return 'renewal_cheques';
       // 3. Signatures: advance to Ejari only once BOTH have signed — the customer
       //    signs and the RP countersigns. While the customer has signed but the RP

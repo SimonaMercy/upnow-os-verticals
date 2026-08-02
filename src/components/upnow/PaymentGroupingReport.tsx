@@ -7,7 +7,8 @@
  * page's four groups — Rental Income, Security Deposit, Management Fee (admin,
  * commission + Rules penalties) and Third Party (Contract Registration, VAT,
  * sub-lease / service pass-throughs). Contract Registration is one card (not
- * split); VAT separates into Rental VAT and Fees VAT.
+ * split); VAT separates into "5% VAT on Rent" and Fees VAT, BOTH of which sit
+ * under Third Party — VAT is money the RP collects and owes on, not rent.
  *
  * Session-only — the layout resets on reload (no persistence by design). Print
  * produces the grouped statement.
@@ -18,9 +19,11 @@ import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 
 // A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission
-// fees) when its description says so — a pass-through that sits under Third
-// Party. Every other `vat` cheque is Rental VAT and belongs with Rental Income,
-// exactly as the contract page splits them.
+// fees) when its description says so. Every other `vat` cheque is rent VAT.
+// Both are pass-throughs and both sit under Third Party — the rent-VAT cheque
+// is the SAME charge that other contracts record as a free-text 'other' row
+// labelled "5% VAT on Rent", and the two must not land in different categories
+// purely because of how they were entered.
 const isFeesVat = (p: { paymentType?: string | null; description?: string | null }) =>
   (p.paymentType ?? '') === 'vat' && /fees\s*vat/i.test(p.description ?? '');
 
@@ -47,7 +50,6 @@ interface PaymentRow {
 // split); Rental VAT and Fees VAT are separate items, as on the contract page.
 const ITEM_LABELS: Record<string, string> = {
   rental_income:   'Rental Income',
-  vat_rental:      'Rental VAT',
   security_deposit:'Security Deposit (held)',
   // Management Fee — RP-charged fees + every Settings → Rules penalty / charge.
   admin_fee:       'Admin fee',
@@ -62,7 +64,12 @@ const ITEM_LABELS: Record<string, string> = {
   access_card_fee:          'Access card / remote replacement',
   contract_name_change_fee: 'Contract name change',
   unit_transfer_fee:        'Unit transfer',
-  // Third Party — pass-through fees the RP collects on behalf of others.
+  // Third Party — pass-through fees the RP collects on behalf of others. Rent
+  // VAT is one of them: the RP collects it, it is a tax liability rather than
+  // rent, and the SAME charge is recorded on other contracts as a free-text
+  // 'other' row labelled "5% VAT on Rent" — so both spellings of it must read
+  // and group identically, whichever mechanism captured it.
+  vat_rental:      '5% VAT on Rent',
   ejari_fee:       'Contract Registration fee',
   vat_fees:        'Fees VAT',
   maintenance_fee: 'Maintenance',
@@ -71,17 +78,28 @@ const ITEM_LABELS: Record<string, string> = {
   other:           'Other',
 };
 // 'other' payments are split into one item PER distinct description (e.g.
-// "Service Charge", "5% VAT on Rent") so each can be dragged on its own; their
-// item key is `other:<description>`.
+// "Service Charge") so each can be dragged on its own; their item key is
+// `other:<description>`.
 const OTHER_PREFIX = 'other:';
+
+// Rent VAT is recorded two ways: as its own `vat` cheque, and — on contracts
+// that never used one — as a free-text 'other' row carrying this label. Same
+// charge, so both fold into the SINGLE `vat_rental` item rather than rendering
+// as two identically-named cards the RP would have to drag around in pairs.
+const RENT_VAT_LABEL = '5% VAT on Rent';
+const isRentVatCharge = (d: { paymentType: string; description?: string | null }) =>
+  d.paymentType === 'other'
+  && (d.description ?? '').trim().toLowerCase() === RENT_VAT_LABEL.toLowerCase();
 const itemLabel = (k: string) =>
   k.startsWith(OTHER_PREFIX) ? k.slice(OTHER_PREFIX.length) : (ITEM_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
 
-// The single draggable item a payment row belongs to. VAT splits into Rental
+// The single draggable item a payment row belongs to. VAT splits into rent VAT
 // vs Fees VAT (like the contract page); every distinct 'other' description is
-// its own item. Ejari is one item — NOT split into DLD + service.
+// its own item, EXCEPT a free-text rent-VAT row, which joins the `vat` cheques
+// in the one rent-VAT item. Ejari is one item — NOT split into DLD + service.
 const itemKeyOf = (d: { paymentType: string; description?: string | null }): string => {
   if (d.paymentType === 'vat') return isFeesVat(d) ? 'vat_fees' : 'vat_rental';
+  if (isRentVatCharge(d)) return 'vat_rental';
   if (d.paymentType === 'other') return `${OTHER_PREFIX}${(d.description ?? '').trim() || 'Other'}`;
   return d.paymentType;
 };
@@ -99,16 +117,18 @@ const DEFAULT_CATEGORIES: Category[] = [
   { id: 'other',         name: 'Other' },
 ];
 const DEFAULT_ASSIGN: Record<string, string> = {
-  rental_income: 'rental_income', vat_rental: 'rental_income',
+  rental_income: 'rental_income',
   security_deposit: 'deposits',
   admin_fee: 'management', commission: 'management',
   bounced_cheque_fee: 'management', cheque_replacement_fee: 'management', cheque_deferral_fee: 'management',
   late_renewal_fee: 'management', early_termination_fee: 'management', late_moveout_fee: 'management',
   unauthorized_sharing_fee: 'management', access_card_fee: 'management',
   contract_name_change_fee: 'management', unit_transfer_fee: 'management',
-  ejari_fee: 'third_party', vat_fees: 'third_party',
+  vat_rental: 'third_party', ejari_fee: 'third_party', vat_fees: 'third_party',
   maintenance_fee: 'third_party', service_charge: 'third_party', refund: 'third_party',
-  // Generic 'other' payments (and any unrecognised type) fall through to the 'Other' catch-all.
+  // Custom 'other' charges are keyed per description (`other:<label>`) so they
+  // can't be listed here — they default to Third Party in defaultCatOf below.
+  // Any unrecognised payment type still falls through to the 'Other' catch-all.
 };
 const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: 'Sub-lease', management: 'Property Management' };
 
@@ -272,8 +292,15 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   // types fall to the 'Other' catch-all (or the last category if it was deleted).
   const items = useMemo(() => Object.keys(itemTotals).sort((a, b) => (itemTotals[b] - itemTotals[a])), [itemTotals]);
   const fallbackCat = () => (categories.find(c => c.id === 'other') ?? categories[categories.length - 1] ?? categories[0])?.id;
+  // Every `other:<description>` item defaults to Third Party — those charges are
+  // pass-throughs the RP collects for someone else (a sub-leased building's levy
+  // and the tax on it, service charges), which is where the contract page, the
+  // receipts, the payment plan and both Payments ledgers file them. Still
+  // draggable: an RP who disagrees moves it and the choice sticks in `assign`.
+  const defaultCatOf = (item: string) =>
+    DEFAULT_ASSIGN[item] ?? (item.startsWith(OTHER_PREFIX) ? 'third_party' : undefined);
   const catOf = (item: string) => {
-    const a = assign[item] ?? DEFAULT_ASSIGN[item] ?? fallbackCat();
+    const a = assign[item] ?? defaultCatOf(item) ?? fallbackCat();
     return categories.some(c => c.id === a) ? a : fallbackCat();
   };
 

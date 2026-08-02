@@ -76,7 +76,7 @@ export interface PaymentPlanItem {
   amountFils: number;
   dueDate: string;
   description?: string;
-  type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+  type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment' | 'vat';
   paymentMethod?: PaymentMethodKind | null;
   reference?: string | null;
 }
@@ -96,6 +96,11 @@ export interface PaymentPlan {
   securityDepositFils: number;
   customFees?: Array<{ label: string; netFils: number; vatFils: number }>;
   customFeesFils?: number;
+  /** Rent VAT % applied to the rent (0 / absent = exempt, e.g. residential).
+   *  Set by the backend, which is the only place that knows whether a sub-lease
+   *  makes an otherwise-exempt unit taxable. */
+  rentVatRate?: number;
+  rentVatFils?: number;
   items: PaymentPlanItem[];
   notes?: string;
   rentalIndexReportUrl?: string;
@@ -125,6 +130,9 @@ export interface LeadChequeRecord {
 
 export interface ApiLead {
   id: number;
+  /** The LANDLORD's rent-VAT collection setting, served with the lead so a
+   *  manager (who has no RP profile of their own) still sees the right plan. */
+  rentVatMode?: 'annual' | 'installment';
   stage: LeadStage;
   priority: string;
   customerName: string;

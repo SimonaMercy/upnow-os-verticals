@@ -78,9 +78,11 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
         const headAttach = renderAttach && g.key !== 'rental'
           ? renderAttach({ key: g.key, label: g.title, amount: g.total, dueDate: g.lines[0]?.dueDate ?? null })
           : null;
-        // Squeeze the data columns to make room for the attach column. It has to
-        // hold View + Replace + delete on ONE line — at a narrower share the
-        // trash icon was clipped off the edge of the table.
+        // Squeeze the data columns to make room for the attach column, which has
+        // to hold View + Replace + delete — at a narrower share the trash icon
+        // was clipped off the edge of the table. PlanAttachCell wraps onto a
+        // second line when even this share is tight, which is why the min-width
+        // below can sit under the one-line ideal.
         const ATTACH_COL = 31;
         const k = perLineAttach ? (100 - ATTACH_COL) / 100 : 1;
         const w = (n: number) => Math.round(n * k);
@@ -95,7 +97,13 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
               </div>
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: perLineAttach ? 560 : 380 }}>
+              {/* 560 overflowed the customer's ~478px card, and the overflow is
+                  exactly the attach column — so the per-row control existed but
+                  sat off-screen behind a scrollbar nobody notices, reading as
+                  "no attach option on the rent rows". Only customer surfaces
+                  pass renderAttach (landlord cards are read-only), so the lower
+                  minimum applies solely where it was breaking. */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: perLineAttach ? 430 : 380 }}>
                 <thead>
                   <tr>
                     <th style={thCss(w(wItem))}>Item</th>

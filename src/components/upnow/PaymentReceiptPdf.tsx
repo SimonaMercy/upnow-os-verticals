@@ -35,6 +35,7 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 import { leaseDocFileName } from '@/lib/leaseDocName';
+import { isVatCheque, isTaxCharge } from '@/lib/chargeTax';
 
 // Roboto — clean modern sans for the whole document (no Bold ttf shipped, so map
 // bold → Medium). Receipts are English-only — no Arabic font dependency (avoids the
@@ -218,9 +219,7 @@ function isFee(p: ReceiptPayment): boolean {
   return FEE_TYPES.has((p.paymentType ?? '').toLowerCase());
 }
 /** VAT collected as its own cheque (Rental VAT / Fees VAT), payment_type 'vat'. */
-function isVat(p: ReceiptPayment): boolean {
-  return (p.paymentType ?? '').toLowerCase() === 'vat';
-}
+const isVat = isVatCheque;
 /** Government / other pass-through charges printed under the receipt's Government
  *  Fee section: VAT cheques ('vat') AND custom "Other" charges ('other' — per-unit
  *  taxes like "20% VAT on Rent", service charges like "Fire Fighting"). These are
@@ -341,10 +340,11 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
   if (isGovernment(sel)) {
-    // A pure VAT cheque is entirely tax (net 0, vat = gross). A custom "Other"
+    // A pure VAT cheque — or an "Other" charge whose label declares it tax at the
+    // standard rate — is entirely tax (net 0, vat = gross). Any other custom
     // charge carries its own net + whatever VAT it was entered with (usually 0),
     // so show its real split — never as net-0 VAT, and never as rent.
-    const govVat = isVat(sel) ? gross : vat;
+    const govVat = isTaxCharge(sel) ? gross : vat;
     const govNet = round2(gross - govVat);
     return { kind: 'fee', title: 'THIRD PARTY RECEIPT',
       receiptNo: realNo ?? `RCP-${contract.ref}-VAT`, date: sel.transactionDate, single: sel,
@@ -491,9 +491,10 @@ function buildVatReceipt(contract: ReceiptContract): Receipt | null {
   if (ejariLine) lines.push(ejariLine);
   for (const p of govRows) {
     const gross = round2(p.amount || 0);
-    // Pure VAT cheque → 100% tax (net 0). Custom "Other" charge → its own net +
-    // whatever VAT it carries (usually none), so it shows as a real net charge.
-    const vat = isVat(p) ? gross : round2(p.vatAmount || 0);
+    // Pure VAT cheque, or an "Other" charge labelled as tax at the standard rate
+    // ("5% VAT on sub-lease") → 100% tax (net 0). Every other custom charge keeps
+    // its own net + whatever VAT it carries, so it shows as a real net charge.
+    const vat = isTaxCharge(p) ? gross : round2(p.vatAmount || 0);
     const net = round2(gross - vat);
     lines.push({
       desc: p.description || (isVat(p) ? 'VAT' : 'Government charge'),
@@ -533,12 +534,13 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   // legacyBundle = admin+ejari folded into the rent cheques on legacy contracts;
   // 0 when real fee rows exist (those rents are already pure).
   const rentNet = Math.max(0, round2(netOf(rentRows) - legacyBundle));
-  // Government/other charges: a pure VAT cheque is 100% tax; a custom "Other" charge
-  // keeps its own net + VAT split so it isn't mislabelled as pure VAT. Ejari is a
-  // Third Party charge now — fold its FULL amount in here (feeLinesOf keeps it off
-  // the Management lines and returns it as ejariLine).
-  const govNet = round2(vatRows.reduce((s, p) => s + (isVat(p) ? 0 : Math.max(0, (p.amount || 0) - (p.vatAmount || 0))), 0) + (ejariLine?.net ?? 0));
-  const govVat = round2(vatRows.reduce((s, p) => s + (isVat(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0) + (ejariLine?.vat ?? 0));
+  // Government/other charges: a tax row (a VAT cheque, or an "Other" charge labelled
+  // as tax at the standard rate) is 100% tax; every other custom charge keeps its own
+  // net + VAT split so it isn't mislabelled as pure VAT. Ejari is a Third Party charge
+  // now — fold its FULL amount in here (feeLinesOf keeps it off the Management lines
+  // and returns it as ejariLine).
+  const govNet = round2(vatRows.reduce((s, p) => s + (isTaxCharge(p) ? 0 : Math.max(0, (p.amount || 0) - (p.vatAmount || 0))), 0) + (ejariLine?.net ?? 0));
+  const govVat = round2(vatRows.reduce((s, p) => s + (isTaxCharge(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0) + (ejariLine?.vat ?? 0));
   const govTotal = round2(govNet + govVat);
 
   const lines: LineItem[] = [...feeLines,
