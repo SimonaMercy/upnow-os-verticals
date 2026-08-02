@@ -50,9 +50,9 @@ const COLS: ColDef[] = [
   { key: 'kyc',          title: 'KYC verification',  hint: 'Emirates ID on file.',                                accent: '#4a5a8f', soft: '#eef0fa', dot: '#4a5a8f' },
   { key: 'payment_plan', title: 'Payment plan',      hint: 'Cheque / rent schedule entered.',                     accent: '#a9791f', soft: '#fdf6ea', dot: '#e6a91e' },
   { key: 'pdc',          title: 'PDC',               hint: 'Post-dated cheques confirmed.',                       accent: '#3f6f8f', soft: '#e6f0f3', dot: '#3f6f8f' },
-  { key: 'ejari',        title: 'Contract Registration',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },
   { key: 'utility',      title: 'Utility',           hint: 'DEWA / utility account on file (new leases).',        accent: '#6a4f8f', soft: '#efeaf5', dot: '#6a4f8f' },
   { key: 'move_in',      title: 'Move-in',           hint: 'Move-in inspection signed (new leases).',             accent: '#2b7a78', soft: '#e3f1f0', dot: '#2b7a78' },
+  { key: 'ejari',        title: 'Contract Registration',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },
   { key: 'ready',        title: 'Ready to activate', hint: 'Every step done — lock it and it moves to Leases.',   accent: '#1a7a5a', soft: '#ebf8f2', dot: '#2e9f82' },
   { key: 'winddown',     title: 'Winding down',      hint: 'Terminated leases finishing move-out & settlement.',  accent: '#991b1b', soft: '#fee2e2', dot: '#991b1b' },
 ];

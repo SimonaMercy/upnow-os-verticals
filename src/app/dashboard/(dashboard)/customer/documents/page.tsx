@@ -205,7 +205,7 @@ export default function CustomerDocumentsPage() {
   const [tenantProfileId, setTenantPId]   = useState<number | null>(null);
   const [loading, setLoading]             = useState(true);
   const [activeUnitType, setActiveUnitType] = useState<string | null | undefined>(undefined);
-  const [hasEjariRegistered, setHasEjariRegistered] = useState(false);
+  const [utilityStepOpen, setUtilityStepOpen] = useState(false);
 
 
   // Utility section
@@ -240,8 +240,14 @@ export default function CustomerDocumentsPage() {
       fetch('/api/contracts/tenant', { credentials: 'include' }).then(r => r.ok ? r.json() : []),
     ])
       .then(([docsData, [viewingsRaw, applicationsRaw], contractsRaw]) => {
-        const contracts: { ejariStatus?: string }[] = Array.isArray(contractsRaw) ? contractsRaw : [];
-        setHasEjariRegistered(contracts.some(c => c.ejariStatus === 'registered'));
+        const contracts: { ejariStatus?: string; tenantSignedAt?: string | null; landlordSignedAt?: string | null }[] =
+          Array.isArray(contractsRaw) ? contractsRaw : [];
+        // Utility is N3 — it opens once BOTH parties have signed, two lanes
+        // before N5 Registration. Mirrors contracts.service.submitUtility, so
+        // the section is never shown for a submission the server would reject.
+        // Registration still qualifies on its own, for leases already past it.
+        setUtilityStepOpen(contracts.some(c =>
+          (!!c.tenantSignedAt && !!c.landlordSignedAt) || c.ejariStatus === 'registered'));
         setTenantPId(docsData.tenantProfileId ?? null);
         const allDocs: MyDoc[] = docsData.documents ?? [];
         setDocs(allDocs);
@@ -582,11 +588,11 @@ export default function CustomerDocumentsPage() {
         </SectionCard>
       )}
 
-      {/* ── Section D: Utility Setup — only after Ejari is registered ───────── */}
-      {hasEjariRegistered && <SectionCard
+      {/* ── Section D: Utility Setup — open once both parties have signed ──── */}
+      {utilityStepOpen && <SectionCard
         icon={Zap}
         title="Utility Setup"
-        subtitle="Required after Contract Registration — provide your utility account number and proof of payment"
+        subtitle="Provide your utility account number and proof of payment"
         badge={
           utilityDocId && utilityAccountNum
             ? <span className="text-xs font-semibold text-[#16a34a] bg-[#dcfce7] px-2.5 py-1 rounded-full">Submitted ✓</span>

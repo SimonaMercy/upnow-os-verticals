@@ -269,9 +269,9 @@ interface Step { key: StepKey; short: string; label: string; icon: IconKey }
 const STEPS_NEW: Step[] = [
   { key: 'issue',   short: 'Issue',   label: 'Contract issued',  icon: 'document' },
   { key: 'sign',    short: 'Sign',    label: 'Signatures',        icon: 'pen'      },
-  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'utility', short: 'Utility', label: 'Utility account',   icon: 'bolt'     },
   { key: 'movein',  short: 'Move-in', label: 'Move-in inspection',icon: 'key'      },
+  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
 ];
 const STEPS_RENEWAL: Step[] = [

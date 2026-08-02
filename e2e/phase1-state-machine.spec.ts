@@ -28,7 +28,7 @@ const CUSTOMER_EMAIL = 'tenant.test@upnow.ae';
 const RP_PROPERTY_ID = 3;
 
 const STEP_LABELS = [
-  'Booked', 'Documents', 'Payment', 'Sign', 'Ejari', 'Utility', 'Move-in', 'Active',
+  'Booked', 'Documents', 'Payment', 'Sign', 'Utility', 'Move-in', 'Ejari', 'Active',
 ];
 
 const STATE_HEADLINES = [

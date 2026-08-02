@@ -293,7 +293,7 @@ interface ApiContract {
 /**
  * 8-step customer journey (Phase 1 collapse — May 30, 2026):
  *   booked → docs_required → payment_review → awaiting_rp_confirm
- *          → signature → ejari → utility → move_in → active
+ *          → signature → utility → move_in → ejari → active
  *
  * `docs_required` is conditional — hidden from the timeline when the customer's
  *  KYC is complete AND occupants=1 AND no RP-requested extras. `deriveStateKey`
@@ -311,9 +311,9 @@ const STEPS_NEW: Step[] = [
   { key: 'documents',       label: 'Documents',          short: 'Docs',     icon: 'document' },
   { key: 'payment',         label: 'Payment & cheques',  short: 'Payment',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen'      },
-  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'utility',         label: 'Utility',            short: 'Utility',  icon: 'bolt'     },
   { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
+  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
 ];
 // Renewal journey mirrors the RP renewal pipeline (Operations kanban):
@@ -957,8 +957,8 @@ function WaitingBadge() {
 }
 
 /* ─── Ongoing-setup downloads: receipts + tenancy contract + Registration cert ─
-   Surfaced across the ongoing setup steps (signature → registration → utility →
-   move-in) so the customer can grab their receipts the moment the RP confirms
+   Surfaced across the ongoing setup steps (signature → utility → move-in →
+   registration) so the customer can grab their receipts the moment the RP confirms
    payment, their signed tenancy contract the moment they've signed it, and their
    Contract Registration certificate the moment it's attached — without waiting
    for the tenancy to go active. Renders nothing until at least one is available. */
@@ -2719,7 +2719,24 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
       {/* Submit — explicit gate. Uploading the last file no longer auto-advances;
           the customer must click here to submit their documents for review. */}
       <PrimaryBtn
-        onClick={() => { if (allRequiredDone && personalDetailsComplete) writeDocsSubmitted(resolved.spaceKey); onRefresh(); }}
+        onClick={async () => {
+          if (allRequiredDone && personalDetailsComplete) {
+            // The local flag is an optimistic echo so the card does not flicker
+            // between the click and the refetch. The RECORD is the server call
+            // below: this used to write localStorage ONLY, so clearing site data
+            // or opening the page on another device silently put the customer
+            // back to "documents required", and the landlord had no record a
+            // submission had ever happened.
+            writeDocsSubmitted(resolved.spaceKey);
+            const submitLeadId = resolved.lead?.id ?? resolved.viewing?.leadId ?? null;
+            if (submitLeadId) {
+              try {
+                await apiPatch(`/leads/${submitLeadId}/documents-ready`, {});
+              } catch { /* the echo is already shown; the refetch reconciles */ }
+            }
+          }
+          onRefresh();
+        }}
         disabled={!allRequiredDone || !personalDetailsComplete}
       >
         {allRequiredDone && personalDetailsComplete ? <CheckCircle2 size={16} /> : <Info size={16} />}
@@ -3588,7 +3605,7 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   if (c.tenantSignedAt && !c.landlordSignedAt) {
     return (
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, background: 'var(--jade-soft, #eef8f4)', border: '1px solid var(--jade)', color: 'var(--jade-deep, #1f5a3f)', fontSize: 14, fontWeight: 600 }}>
-        <CheckCircle2 size={18} /> You&rsquo;ve signed your renewal. Waiting for your rental provider to countersign — we&rsquo;ll notify you the moment it&rsquo;s done.
+        <CheckCircle2 size={18} /> You&rsquo;ve signed. Waiting for your rental provider to countersign — we&rsquo;ll notify you the moment it&rsquo;s done.
       </div>
     );
   }
