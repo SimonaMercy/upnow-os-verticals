@@ -14,7 +14,8 @@ import 'react-day-picker/style.css';
 import {
   format, parseISO, isValid,
   startOfMonth, endOfMonth, startOfYear, endOfYear,
-  subDays, subMonths, subYears,
+  startOfQuarter, endOfQuarter,
+  subDays, subMonths, subQuarters, subYears,
 } from 'date-fns';
 import { Calendar, X } from 'lucide-react';
 
@@ -70,6 +71,9 @@ export function DateRangePicker({
       { label: 'Last 30 Days', range: () => ({ from: subDays(today, 29), to: today }) },
       { label: 'This Month',   range: () => ({ from: startOfMonth(today), to: endOfMonth(today) }) },
       { label: 'Last Month',   range: () => { const m = subMonths(today, 1); return { from: startOfMonth(m), to: endOfMonth(m) }; } },
+      // Quarters — VAT is filed per quarter, so the filing period is one click.
+      { label: 'This Quarter', range: () => ({ from: startOfQuarter(today), to: endOfQuarter(today) }) },
+      { label: 'Last Quarter', range: () => { const q = subQuarters(today, 1); return { from: startOfQuarter(q), to: endOfQuarter(q) }; } },
       { label: 'This Year',    range: () => ({ from: startOfYear(today), to: endOfYear(today) }) },
       { label: 'Last Year',    range: () => { const y = subYears(today, 1); return { from: startOfYear(y), to: endOfYear(y) }; } },
     ];

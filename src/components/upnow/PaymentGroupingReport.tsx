@@ -140,56 +140,48 @@ const fmtAed = (v: number) => {
   }).format(v);
 };
 
-// Year attribution IDENTICAL to the Payments ledger (yearMatch there): a row
-// belongs to year Y if its lease TERM overlaps Y — falling back to from/to year,
-// then the recorded/transaction year. This keeps the two pages' totals in sync
-// (and scopes deposits by their lease term, not their missing payment date).
+// ─── Period attribution ──────────────────────────────────────────────────────
+// A payment sits in ONE period: the one its own cheque date falls in. That date
+// is the tax point for a VAT return and it is the same basis Cash Management
+// uses (reports.service.ts filters rent on `p.transaction_date`), so the two
+// pages reconcile.
+//
+// This DELIBERATELY replaces the old lease-TERM-overlap rule. Under that rule a
+// row belonged to every year/quarter its lease touched, so a Jan→Dec lease put
+// its full year of cheques — and its full year of VAT — into all four quarters
+// at face value. On the live data that reported 2.9x the real 2026 rent VAT and
+// made each year's rental income exceed the entire multi-year ledger. The
+// Payments ledger still carries the old rule; these totals will differ from it
+// until that page is moved over too.
+/** The single date a row is attributed to. The cheque date where there is one;
+ *  otherwise the recorded date, then the lease start, then the deposit's from
+ *  year — each a single point, so a row can never land in two periods. */
+const effectiveDate = (d: PaymentRow): string | null => {
+  const raw = d.transactionDate ?? d.recordedDate ?? d.startDate
+    ?? (d.fromYear != null ? `${d.fromYear}-01-01` : null);
+  return raw ? raw.slice(0, 10) : null;
+};
+/** True when the row carries no date of its own and `effectiveDate` had to fall
+ *  back to the lease. Surfaced in the UI so an inferred period is never quietly
+ *  filed as fact — on the live data these are rent rows missing a due date. */
+const isPeriodInferred = (d: PaymentRow): boolean => !d.transactionDate && !d.recordedDate;
+
 const yearMatch = (d: PaymentRow, y: number): boolean => {
-  if (d.startDate || d.endDate) {
-    const s = d.startDate ? Number(d.startDate.slice(0, 4)) : -Infinity;
-    const e = d.endDate ? Number(d.endDate.slice(0, 4)) : Infinity;
-    return y >= s && y <= e;
-  }
-  if (d.fromYear != null || d.toYear != null) {
-    const lo = d.fromYear ?? d.toYear!;
-    const hi = d.toYear ?? d.fromYear!;
-    return y >= Math.min(lo, hi) && y <= Math.max(lo, hi);
-  }
-  const s = d.recordedDate ?? d.transactionDate;
+  const s = effectiveDate(d);
   return s ? Number(s.slice(0, 4)) === y : false;
 };
 const yearsOf = (d: PaymentRow): number[] => {
-  if (d.startDate || d.endDate) {
-    const out: number[] = [];
-    if (d.startDate) out.push(Number(d.startDate.slice(0, 4)));
-    if (d.endDate) out.push(Number(d.endDate.slice(0, 4)));
-    return out;
-  }
-  if (d.fromYear != null || d.toYear != null) return [d.fromYear, d.toYear].filter((n): n is number => n != null);
-  const s = d.recordedDate ?? d.transactionDate;
+  const s = effectiveDate(d);
   return s ? [Number(s.slice(0, 4))] : [];
 };
-/** A row is in the [from, to] window (either bound optional, 'YYYY-MM-DD') if its
- *  lease TERM overlaps it — the same priority as yearMatch (lease term → from/to
- *  year span → transaction/recorded date). Bounds are inclusive. */
+/** A row is in the [from, to] window (either bound optional, 'YYYY-MM-DD') when
+ *  its effective date falls inside it. Bounds are inclusive. */
 const dateInRange = (d: PaymentRow, from: string, to: string): boolean => {
-  const lo = from || null;
-  const hi = to || null;
-  const overlaps = (sStr: string | null | undefined, eStr: string | null | undefined): boolean => {
-    const s = sStr ? sStr.slice(0, 10) : null;
-    const e = eStr ? eStr.slice(0, 10) : null;
-    if (lo && e && e < lo) return false;
-    if (hi && s && s > hi) return false;
-    return true;
-  };
-  if (d.startDate || d.endDate) return overlaps(d.startDate, d.endDate);
-  if (d.fromYear != null || d.toYear != null) {
-    const l = d.fromYear ?? d.toYear!;
-    const h = d.toYear ?? d.fromYear!;
-    return overlaps(`${Math.min(l, h)}-01-01`, `${Math.max(l, h)}-12-31`);
-  }
-  const t = d.transactionDate ?? d.recordedDate;
-  return t ? overlaps(t, t) : false;
+  const s = effectiveDate(d);
+  if (!s) return false;
+  if (from && s < from) return false;
+  if (to && s > to) return false;
+  return true;
 };
 
 export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/reports' }: { backHref?: string }) {
@@ -286,6 +278,23 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       add(itemKeyOf(d), Number(d.amount) || 0);
     }
     return t;
+  }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
+
+  // Rows inside the current period that had NO date of their own and were placed
+  // by the lease-start fallback. Reported to the RP rather than silently mixed
+  // in: on a filing period an inferred date is a figure someone has to verify.
+  const inferredRows = useMemo(() => {
+    const out: PaymentRow[] = [];
+    for (const d of rows) {
+      if (!isPeriodInferred(d)) continue;
+      if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
+      if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
+      if (dateActive) { if (!dateInRange(d, from, to)) continue; }
+      else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (!(Number(d.amount) || 0)) continue;  // zero-value placeholders aren't worth flagging
+      out.push(d);
+    }
+    return out;
   }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
 
   // Items present in the data, each resolved to a category. Unmapped / unknown
@@ -451,7 +460,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     <div className="mb-5">
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
       <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
-      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Totals recompute for the chosen year or custom date range. Session-only; use Print to export.</p>
+      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Every payment counts once, in the period its cheque falls due — the same basis as Cash Management — so a quarter can be used as a filing period. Session-only; use Print to export.</p>
     </div>
   );
 
@@ -512,6 +521,28 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           </button>
         </div>
       </div>
+
+      {/* Inferred-period warning. These rows have no cheque date, so their period
+          is the lease start rather than a real tax point — say so on the page and
+          on the print-out, because the figure below is only as good as they are. */}
+      {inferredRows.length > 0 && (
+        <div className="mb-4 rounded-xl border border-[#e5c07b] bg-[#fdf8ec] px-4 py-3">
+          <p className="text-sm font-semibold text-[#8a6d1f]">
+            {inferredRows.length} payment{inferredRows.length !== 1 ? 's' : ''} in this period ({fmtAed(inferredRows.reduce((s, d) => s + (Number(d.amount) || 0), 0))}) {inferredRows.length !== 1 ? 'have' : 'has'} no cheque date
+          </p>
+          <p className="text-xs text-[#8a6d1f] mt-1">
+            They have been placed by their lease start date. Add the real due date on the contract before using this period for a filing.
+          </p>
+          <ul className="mt-2 text-xs text-[#8a6d1f] space-y-0.5">
+            {inferredRows.map(d => (
+              <li key={d.id}>
+                {d.contractRef ?? '—'} · {d.building ?? '—'} {d.unit ?? ''} · {itemLabel(itemKeyOf(d))} · {fmtAed(Number(d.amount) || 0)}
+                {d.description ? ` · ${d.description}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Grand total banner */}
       <div className="mb-5 rounded-2xl bg-white border border-[#eeece6] px-5 py-4 flex items-baseline justify-between shadow-sm">
