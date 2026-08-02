@@ -66,8 +66,14 @@ interface ContractDetail {
   modeOfPayment: string | null;
   refundRules: string | null;
   partiesInvolved: string | null;
+  /** ⚠️ MIRRORED from the parent on a renewal child — these describe the renewal
+   *  that CREATED this lease, not a renewal of it. Use `ownRenewal*` to ask
+   *  whether THIS lease has a renewal running. */
   renewalAccepted: string | null;
   renewalStatus: string | null;
+  /** This row's own markers, never mirrored. */
+  ownRenewalAccepted?: string | null;
+  ownRenewalStatus?: string | null;
   renewalSignedDate: string | null;
   renewalNoticeId: string | null;
   renderedContent: string | null;
@@ -189,7 +195,13 @@ export default function ContractDetailPage() {
 
   const statusCfg = STATUS_CONFIG[contract.status] ?? { label: humanize(contract.status), bg: '#f4f3ef', text: '#6b6860', icon: null };
   const ejariCfg = EJARI_CONFIG[contract.ejariStatus] ?? { label: humanize(contract.ejariStatus), bg: '#f4f3ef', text: '#6b6860' };
-  const renewalCfg = contract.renewalAccepted ? (RENEWAL_CONFIG[contract.renewalAccepted] ?? null) : null;
+  // This section reports the renewal OF this lease, so it reads the row's own
+  // markers. The top-level ones are mirrored from the parent on a renewal child,
+  // which made every renewed lease report "Accepted / renewal complete" for a
+  // renewal that had never been proposed on it.
+  const ownRenewalStatus = contract.ownRenewalStatus !== undefined ? contract.ownRenewalStatus : contract.renewalStatus;
+  const ownRenewalAccepted = contract.ownRenewalAccepted !== undefined ? contract.ownRenewalAccepted : contract.renewalAccepted;
+  const renewalCfg = ownRenewalAccepted ? (RENEWAL_CONFIG[ownRenewalAccepted] ?? null) : null;
 
   const now = new Date();
   const endDate = new Date(contract.endDate);
@@ -314,8 +326,8 @@ export default function ContractDetailPage() {
       {/* Renewal */}
       <Section title="Renewal Process" icon={<RotateCcw size={18} />}>
         <Row label="Renewal Status" value={
-          contract.renewalStatus
-            ? <span className="text-sm text-[#1a1916]">{humanize(contract.renewalStatus)}</span>
+          ownRenewalStatus
+            ? <span className="text-sm text-[#1a1916]">{humanize(ownRenewalStatus)}</span>
             : <span className="text-sm text-[#9b9890]">No renewal initiated</span>
         } />
         <Row label="Customer Decision" value={
@@ -329,7 +341,7 @@ export default function ContractDetailPage() {
         <Row label="Renewal Signed" value={fmt(contract.renewalSignedDate)} />
         {contract.renewalNoticeId && <Row label="Renewal Notice ID" value={contract.renewalNoticeId} mono />}
 
-        {contract.status === 'active' && !contract.renewalStatus && (
+        {contract.status === 'active' && !ownRenewalStatus && (
           <div className="mt-4 pt-4 border-t border-[#f4f3ef]">
             <button
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"

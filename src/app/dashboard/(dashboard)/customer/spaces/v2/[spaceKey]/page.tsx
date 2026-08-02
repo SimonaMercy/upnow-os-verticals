@@ -2962,7 +2962,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     </tr>`).join('');
 
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8" /><title>Payment Plan — ${buildingName}</title>
+<html><head><meta charset="utf-8" /><title>Payment Summary — ${buildingName}</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1916;padding:32px;max-width:780px;margin:0 auto}
   h1{font-size:22px;margin:0 0 4px;letter-spacing:-0.02em} h2{font-size:13px;margin:24px 0 8px;color:#1f5a3f;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #d8f2e8;padding-bottom:4px}
@@ -2985,7 +2985,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     <button class="btn" onclick="window.print()">Print / Save as PDF</button>
     <button class="btn alt" onclick="window.close()">Close</button>
   </div>
-  <h1>Payment Plan</h1>
+  <h1>Payment Summary</h1>
   <p class="sub">${buildingName} · Issued ${plan.issuedAt ? new Date(plan.issuedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day:'numeric', month:'short', year:'numeric' }) : '—'}</p>
 
   <h2>Contract &amp; Cheque Details</h2>
@@ -3060,7 +3060,7 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
   const installments = plan.installmentCount ?? Math.max(1, plan.chequeCount - 1);
   return (
     <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
-      <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Payment plan summary</p>
+      <p style={{ fontSize: 10, color: 'var(--mute)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 10px', fontWeight: 600 }}>Payment summary</p>
 
       <div style={{ display: 'grid', gap: 6, marginBottom: items.length ? 14 : 0 }}>
         <PaymentRow label={`Annual rent${(plan.rentVatFils ?? 0) > 0 ? ' (incl. VAT)' : ''}`} amountFils={plan.rentFils + (plan.rentVatFils ?? 0)} />
@@ -4167,7 +4167,11 @@ function ActiveAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: 
           <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: 18 }}>
             <div style={{ display: 'grid', gap: 8 }}>
               {[
-                { label: 'Payment Plan',            href: `/dashboard/customer/contracts/${c.id}/print/plan`, newTab: true },
+                // "Payment Summary" — the name the document itself carries
+                // (PaymentPlanPdf's heading) and the name of the panel on the
+                // left. Calling the link "Payment Plan" made one thing look
+                // like three.
+                { label: 'Payment Summary',         href: `/dashboard/customer/contracts/${c.id}/print/plan`, newTab: true },
                 // One receipts file → a receipt per collected payment inside.
                 { label: 'Receipts',                href: `/dashboard/customer/contracts/${c.id}/print/receipt`, newTab: true },
                 { label: 'Signed Tenancy Contract', href: `/dashboard/customer/contracts/${c.id}/print`, newTab: false },

@@ -28,7 +28,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment, type CSSProperties } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
@@ -92,6 +92,9 @@ interface ContractPayment {
   chequeStatus?: string | null;
   paidAt?: string | null;
   chequeNumber?: string | null;
+  /** Cheque image / payment advice this instalment was recorded against
+   *  (`payments.document_id`). Null = a typed reference with no scan on file. */
+  documentId?: number | null;
 }
 
 interface MoveInInsp {
@@ -165,8 +168,15 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
+  /** ⚠️ On a renewal CHILD these two are MIRRORED from the parent — they say
+   *  what happened to the renewal that CREATED this lease, so one that is
+   *  simply live reads 'accepted'. Correct for the decision/rejection banners,
+   *  WRONG for "may this lease be renewed" — use `ownRenewal*` for that. */
   renewalAccepted: 'pending' | 'accepted' | 'rejected' | null;
   renewalStatus: string | null;
+  /** This row's OWN markers, never mirrored — a renewal of THIS lease. */
+  ownRenewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
+  ownRenewalStatus?: string | null;
   renewalRejectionReason?: string | null;
   /** Customer declined the renewal with intent to leave → move-out wind-down. */
   vacateAtEnd?: boolean;
@@ -219,6 +229,29 @@ interface ContractDetail {
  */
 const isRenewalChild = (c: Pick<ContractDetail, 'contractType' | 'parentContractId'>) =>
   c.contractType === 'renewal' && !!c.parentContractId;
+
+/**
+ * Does THIS lease already have a renewal of its own under way — proposed, sent,
+ * accepted, or sitting as an unsent draft? The one question every "Propose
+ * renewal" affordance needs to answer.
+ *
+ * Reads the row's OWN markers, never the top-level ones: on a renewal child the
+ * API mirrors the parent's decision into `renewalAccepted` / `renewalStatus` so
+ * the decision banners can render from either row. That mirrored value describes
+ * the renewal that CREATED this lease. Reading it here made every active renewal
+ * child look like it already had a renewal accepted, so the button vanished and
+ * a chain could never go past one hop — even though the backend allows it.
+ * Falls back to the top-level fields for a NON-child, where the two are the same.
+ */
+const hasRenewalInFlight = (c: ContractDetail): boolean => {
+  const accepted = c.ownRenewalAccepted !== undefined
+    ? c.ownRenewalAccepted
+    : (isRenewalChild(c) ? null : c.renewalAccepted);
+  const status = c.ownRenewalStatus !== undefined
+    ? c.ownRenewalStatus
+    : (isRenewalChild(c) ? null : c.renewalStatus);
+  return accepted === 'pending' || accepted === 'accepted' || status === 'draft';
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Step model
@@ -777,7 +810,7 @@ interface StepHandlers {
   onApproveDocWithExpiry: (docId: number, expiryDate: string) => Promise<void>;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
-  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string }) => Promise<void>;
+  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string; documentId?: number | null }) => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -819,6 +852,16 @@ interface StepHandlers {
   readOnlyWorkflow: boolean;
 }
 
+/** Increment the trailing number of a cheque serial, e.g. "CK001234" -> "CK001235".
+ *  Cheques come off one book, so recording the first one gives every later row a
+ *  sensible default. Mirrors the lead card's helper of the same name. */
+function nextSerial(base: string, offset = 1): string {
+  const m = base.match(/^(.*?)(\d+)$/);
+  if (!m) return base;
+  const [, prefix, digits] = m;
+  return prefix + (parseInt(digits, 10) + offset).toString().padStart(digits.length, '0');
+}
+
 /** Renewal Cheques/PDC step body (RP side). Before the customer submits, a waiting
  *  panel. Once submitted: the RP records each cheque against the payment plan
  *  (number / method / date / status via the existing payments PATCH), views the
@@ -835,23 +878,63 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   const PA_BASES = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof'];
   const chequeDocs = (h.contract.documents ?? []).filter(d => PA_BASES.includes((d.documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, '')));
 
-  const [editId, setEditId] = useState<number | null>(null);
-  const [form, setForm] = useState({ chequeNumber: '', paymentMethod: 'cheque', transactionDate: '', chequeStatus: 'pending' });
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  /** Method + reference typed against a row but NOT yet committed. Nothing is
+   *  written until "Record" — exactly like the lead card, where filling the two
+   *  fields is preparation and Record is the act of recording the cheque. */
+  const [draft, setDraft] = useState<Record<number, { method?: string; ref?: string }>>({});
+  /** Rows the RP re-opened to correct after recording. */
+  const [reopened, setReopened] = useState<Set<number>>(new Set());
+  /** The uploaded cheque whose instalment mapping is being saved. */
+  const [attachBusy, setAttachBusy] = useState<number | null>(null);
 
-  const inp: CSSProperties = { width: '100%', padding: '7px 9px', borderRadius: 8, border: '1px solid var(--mist-strong)', fontSize: 13, fontFamily: 'inherit', background: 'var(--paper)' };
-  const lbl: CSSProperties = { fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'grid', gap: 3 };
-
-  const start = (p: ContractPayment) => { setEditId(p.id); setErr(null); setForm({ chequeNumber: p.chequeNumber ?? '', paymentMethod: p.paymentMethod ?? 'cheque', transactionDate: (p.transactionDate ?? '').slice(0, 10), chequeStatus: p.chequeStatus ?? 'pending' }); };
-  const save = async (id: number) => {
-    setBusy(true); setErr(null);
-    try {
-      await h.onUpdatePayment(id, { chequeNumber: form.chequeNumber.trim() || null, paymentMethod: form.paymentMethod, transactionDate: form.transactionDate || null, chequeStatus: form.chequeStatus });
-      setEditId(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save'); } finally { setBusy(false); }
+  /** Commit a row. Returns false (and shows the reason) when the PATCH fails, so
+   *  the caller doesn't clear the draft the RP would then have to retype. */
+  const patchRow = async (id: number, patch: Parameters<StepHandlers['onUpdatePayment']>[1]): Promise<boolean> => {
+    setBusyId(id); setErr(null);
+    try { await h.onUpdatePayment(id, patch); return true; }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to record'); return false; }
+    finally { setBusyId(null); }
   };
+
+  /** Point an uploaded cheque image at the instalment it pays (or clear it).
+   *  One document belongs to one instalment, so attaching it somewhere new
+   *  detaches it from wherever it was — otherwise two rows would claim the same
+   *  scan and the "Mapped to" line would contradict itself. */
+  const mapAttachment = async (docId: number, paymentId: number | null) => {
+    setAttachBusy(docId); setErr(null);
+    try {
+      const previous = payRows.find(r => r.documentId === docId);
+      if (previous && previous.id !== paymentId) await h.onUpdatePayment(previous.id, { documentId: null });
+      if (paymentId != null) await h.onUpdatePayment(paymentId, { documentId: docId });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to map the attachment');
+    } finally { setAttachBusy(null); }
+  };
+
+  // Every payment being COLLECTED on this renewal in one numbered series — fees
+  // and rent instalments together, ordered the way the lead's Record Cheques card
+  // orders them (due date, then deposit → fee → instalment), so #3 means the same
+  // payment on both sides. Fees live on `contract.fees`, rent on `contract.payments`.
+  // The security deposit is deliberately absent: on a renewal it was collected on
+  // the previous term and carried forward, so there is no cheque to record for it
+  // here. (It is still shown, held, in the Payments record below.) A deposit that
+  // IS this contract's own payment row stays in the series.
+  const TYPE_ORDER: Record<string, number> = { security_deposit: -1, admin_fee: 0, ejari_fee: 0, commission: 0 };
+  const payRows: ContractPayment[] = [
+    ...(h.contract.payments ?? []),
+    ...(h.contract.fees ?? []),
+  ]
+    .sort((a, b) => {
+      const da = (a.transactionDate ?? '').slice(0, 10), db = (b.transactionDate ?? '').slice(0, 10);
+      if (da !== db) return da.localeCompare(db);
+      return (TYPE_ORDER[a.paymentType ?? ''] ?? 1) - (TYPE_ORDER[b.paymentType ?? ''] ?? 1);
+    });
+  // Bounced / cancelled cheques are void — they stay in the list as history but
+  // are out of the header total, the same rule the Payments table applies.
+  const payTotal = payRows.reduce((t, r) => t + (feeActive(r) ? (r.amount || 0) : 0), 0);
 
   // Cheque paperwork can already be in hand while the collection was never
   // CONFIRMED — an imported lease, or one demoted back to ISSUED after it ran.
@@ -893,48 +976,187 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {chequeDocs.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <span className="note" style={{ fontWeight: 600 }}>Customer&rsquo;s uploaded cheque{chequeDocs.length === 1 ? '' : 's'}:</span>
-          {chequeDocs.map((d, i) => (
-            <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
-              <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
-            </button>
-          ))}
+      {/* The SAME Record-Cheques card the new lease uses on the lead
+          (ChequesSection in leads/[id]): Instalment · Method · Reference ·
+          Record, one row per planned payment, numbered, with the cheque total in
+          the header. Method + reference are a draft until "Record" commits them
+          — the button means the same thing on both sides. The renewal used to
+          get a cut-down ledger instead, which is a different job from recording
+          a cheque. Shares the .paygrid / .payrow styles by name. */}
+      <div className="chqbox">
+        <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span><CreditCard size={13} style={{ verticalAlign: '-2px' }} /> Payments</span>
+          <span style={{ color: 'var(--mute)', fontWeight: 600 }}>{payRows.length} &middot; {fmtAed(payTotal)}</span>
         </div>
-      )}
-      <div style={{ display: 'grid', gap: 6 }}>
-        {rows.map(p => {
-          const editing = editId === p.id;
-          return (
-            <div key={p.id} style={{ border: '1px solid var(--mist-strong)', borderRadius: 10, padding: '10px 12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.description ?? '—'}</div>
-                  <div className="note">{fmtDate(p.transactionDate)} · {fmtAed(p.amount)}{p.chequeNumber ? ` · #${p.chequeNumber}` : ''} · {fmtMethod(p.paymentMethod)}</div>
+        {err && <div className="errline">{err}</div>}
+        <div className="paygrid">
+          <div className="payhead">
+            <span>Instalment</span><span>Method</span><span>Reference</span><span>Record</span>
+          </div>
+          {payRows.map((r, i) => {
+            const d = draft[r.id] ?? {};
+            const method = d.method ?? r.paymentMethod ?? 'cheque';
+            const reference = d.ref ?? r.chequeNumber ?? '';
+            // A row counts as recorded once its cheque reference is on the row —
+            // the contract equivalent of the lead's lead_cheques record.
+            const recorded = !!r.chequeNumber && !reopened.has(r.id);
+            return (
+              <div key={r.id} className="payrow">
+                <div className="payrow-info">
+                  <span className="payrow-n">#{i + 1}</span>
+                  <span className="payrow-lbl">
+                    <span className="payrow-desc" title={r.description ?? undefined}>{r.description ?? 'Payment'}</span>
+                    <span className="payrow-sub">
+                      {fmtAed(r.amount)}{r.transactionDate ? ` \u00b7 due ${fmtDate(r.transactionDate)}` : ''}
+                      {recorded ? ` \u00b7 ${fmtMethod(r.paymentMethod)} ${r.chequeNumber}` : ''}
+                    </span>
+                  </span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                  <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{p.chequeStatus ?? 'pending'}</span>
-                  {canEdit && !editing && <button type="button" className="mini-btn" onClick={() => start(p)}><Pencil size={12} /> Details</button>}
+                <select
+                      className="qinput payrow-ctl"
+                      aria-label={`${r.description ?? 'Payment'} method`}
+                      value={method}
+                      disabled={!canEdit || recorded}
+                      onChange={e => setDraft(v => ({ ...v, [r.id]: { ...v[r.id], method: e.target.value } }))}
+                    >
+                      {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                    <input
+                      className="qinput payrow-ctl"
+                      type="text"
+                      aria-label={`${r.description ?? 'Payment'} reference`}
+                      placeholder="Cheque # / ID…"
+                      value={reference}
+                      disabled={!canEdit || recorded}
+                      onChange={e => setDraft(v => ({ ...v, [r.id]: { ...v[r.id], ref: e.target.value } }))}
+                      // Cheques come off one book, so the rest of the series is
+                      // the same serial counting up. Fill the empty rows below
+                      // rather than making the RP type eight near-identical
+                      // numbers — same courtesy the lead card gives.
+                      onBlur={e => {
+                        const val = e.currentTarget.value.trim();
+                        if (!val) return;
+                        setDraft(v => {
+                          const next = { ...v };
+                          let step = 1;
+                          for (let k = i + 1; k < payRows.length; k++) {
+                            const t = payRows[k];
+                            if ((next[t.id]?.ref ?? t.chequeNumber ?? '').trim()) continue;
+                            next[t.id] = { ...next[t.id], ref: nextSerial(val, step) };
+                            step += 1;
+                          }
+                          return next;
+                        });
+                      }}
+                    />
+                    <div className="payrow-rec">
+                      {recorded ? (
+                        <>
+                          <select
+                            className={'qinput cstat ' + (r.chequeStatus ?? 'pending')}
+                            aria-label={`${r.description ?? 'Payment'} status`}
+                            value={r.chequeStatus ?? 'pending'}
+                            disabled={!canEdit || busyId === r.id}
+                            onChange={e => void patchRow(r.id, { chequeStatus: e.target.value })}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="cleared">Cleared</option>
+                            <option value="bounced">Bounced</option>
+                            <option value="cancelled">Cancelled</option>
+                          </select>
+                          {canEdit && (
+                            // Correct a mistyped cheque — re-opens the two fields.
+                            // Never a delete: a payment line is history, and fee
+                            // lines are never removed.
+                            <button type="button" className="mini-btn view" title="Correct this cheque"
+                              onClick={() => setReopened(prev => new Set(prev).add(r.id))}>
+                              <Pencil size={12} />
+                            </button>
+                          )}
+                        </>
+                      ) : canEdit ? (
+                        <button
+                          type="button"
+                          className="btn btn-jade btn-sm"
+                          disabled={busyId === r.id}
+                          onClick={async () => {
+                            const serial = reference.trim();
+                            if (!serial) { setErr(`Type the cheque # in Reference for #${i + 1} first`); return; }
+                            const ok = await patchRow(r.id, { chequeNumber: serial, paymentMethod: method, chequeStatus: r.chequeStatus ?? 'pending' });
+                            if (ok) {
+                              setReopened(prev => { const n = new Set(prev); n.delete(r.id); return n; });
+                              setDraft(v => { const n = { ...v }; delete n[r.id]; return n; });
+                            }
+                          }}
+                        >
+                          {busyId === r.id ? '\u2026' : 'Record'}
+                        </button>
+                      ) : (
+                        <span className={'cstat ' + (r.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{r.chequeStatus ?? 'pending'}</span>
+                  )}
                 </div>
               </div>
-              {editing && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 10 }}>
-                  <label style={lbl}>Cheque no.<input style={inp} value={form.chequeNumber} onChange={e => setForm(f => ({ ...f, chequeNumber: e.target.value }))} /></label>
-                  <label style={lbl}>Method<select style={inp} value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value }))}>{PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
-                  <label style={lbl}>Date<input style={inp} type="date" value={form.transactionDate} onChange={e => setForm(f => ({ ...f, transactionDate: e.target.value }))} /></label>
-                  <label style={lbl}>Status<select style={inp} value={form.chequeStatus} onChange={e => setForm(f => ({ ...f, chequeStatus: e.target.value }))}><option value="pending">Pending</option><option value="cleared">Cleared</option><option value="bounced">Bounced</option><option value="cancelled">Cancelled</option></select></label>
-                  <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
-                    <button className="btn btn-jade btn-sm" disabled={busy} onClick={() => void save(p.id)}><Check size={14} /> {busy ? 'Saving…' : 'Save'}</button>
-                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
-                  </div>
-                </div>
+            );
+          })}
+        </div>
+        {/* Customer-uploaded cheque images — thumbnail + View + map to the
+            instalment each one pays. Same job, same controls as the lead's
+            "Uploaded by customer" list; here the mapping is stored on the
+            payment row (payments.document_id) rather than on a lead cheque. */}
+        {chequeDocs.length > 0 && (
+          <div className="doclist" style={{ marginTop: 12 }}>
+            <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Uploaded by customer ({chequeDocs.length})</span>
+              {chequeDocs.length > 1 && (
+                <button type="button" className="linkbtn"
+                  onClick={() => openDocsTogether(chequeDocs.map(d => ({ fileUrl: d.fileUrl, displayName: d.displayName ?? 'Cheque' })))}>
+                  <Eye size={11} /> View all
+                </button>
               )}
             </div>
-          );
-        })}
+            {chequeDocs.map((doc, i) => {
+              const label = doc.displayName || `Cheque ${i + 1}`;
+              const open = () => doc.fileUrl && openDocViewer({ fileUrl: doc.fileUrl, caption: label });
+              // The instalment this scan is currently attached to, if any.
+              const mappedTo = payRows.find(r => r.documentId === doc.id);
+              return (
+                <div key={doc.id} className="uprow">
+                  <button type="button" className="upthumb" onClick={open} disabled={!doc.fileUrl} aria-label={`Preview ${label}`}>
+                    {doc.fileUrl && !doc.fileUrl.toLowerCase().split('?')[0].endsWith('.pdf')
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={doc.fileUrl} alt={label} />
+                      : <FileText size={16} />}
+                  </button>
+                  <div className="upmeta">
+                    <div className="dn">{label}</div>
+                    <div className="ds">
+                      {mappedTo
+                        ? <>Mapped to #{payRows.indexOf(mappedTo) + 1} {mappedTo.description ?? 'Payment'}{mappedTo.chequeNumber ? ` \u00b7 ${mappedTo.chequeNumber}` : ''}</>
+                        : <>Not mapped to an instalment yet</>}
+                    </div>
+                    <div className="upctl">
+                      {doc.fileUrl && <button type="button" className="mini-btn view" onClick={open}><Eye size={12} /> View</button>}
+                      <select
+                        className="qinput"
+                        style={{ width: 190 }}
+                        aria-label={`Map ${label} to an instalment`}
+                        disabled={!canEdit || attachBusy === doc.id}
+                        value={mappedTo ? String(mappedTo.id) : ''}
+                        onChange={e => void mapAttachment(doc.id, e.target.value === '' ? null : Number(e.target.value))}
+                      >
+                        <option value="">Map to instalment&hellip;</option>
+                        {payRows.map((r, k) => (
+                          <option key={r.id} value={r.id}>#{k + 1} {r.description ?? `Payment ${k + 1}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      {err && <p className="note" style={{ color: 'var(--brick)' }}>{err}</p>}
       {canEdit && (
         <button
           type="button"
@@ -2007,6 +2229,15 @@ const isFeesVat = (p: { paymentType?: string | null; description?: string | null
 const MGMT_FEE_TYPES = new Set<string>(['admin_fee', 'commission', ...RULE_FEE_DEFS.map(d => d.pt)]);
 
 
+/** The status cell's control strip — inline status <select> + Edit. `nowrap`
+ *  because the table cells set `overflow-wrap: anywhere`, which otherwise breaks
+ *  the word "Edit" one letter per line; `wrap` on the strip so the button drops
+ *  to a second line instead when the column is narrow (the same table renders in
+ *  the wide contract record AND inside the narrower renewal Cheques step card). */
+const PAY_STATUS_CELL: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', whiteSpace: 'nowrap',
+};
+
 /** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
  *  every section's columns — amounts especially — line up in one vertical grid. */
 function PayCols() {
@@ -2129,6 +2360,7 @@ function DetailsDrawer({
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
+    documentId?: number | null;
   }) => Promise<void>;
   /** DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line. */
   onDeletePayment: (paymentId: number) => Promise<void>;
@@ -2800,7 +3032,7 @@ function DetailsDrawer({
                             <td>{fmtMethod(depositRow.paymentMethod)}</td>
                             <td>{fmtDate(depositRow.transactionDate)}</td>
                             <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={PAY_STATUS_CELL}>
                                 {perms.deposits ? (
                                   <select
                                     className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}
@@ -3022,7 +3254,7 @@ function DetailsDrawer({
                           <td>{fmtMethod(p.paymentMethod)}</td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={PAY_STATUS_CELL}>
                               {perms.collections ? (
                                 <select
                                   className={'cstat ' + (p.chequeStatus ?? 'pending')}
@@ -3147,7 +3379,7 @@ function DetailsDrawer({
                             <td>{f.paymentMethod ? fmtMethod(f.paymentMethod) : '—'}</td>
                             <td>{fmtDate(f.transactionDate)}</td>
                             <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <div style={PAY_STATUS_CELL}>
                                 {perms.collections ? (
                                   <select
                                     className={'cstat ' + (f.chequeStatus ?? 'pending')}
@@ -3271,7 +3503,7 @@ function DetailsDrawer({
                             <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}</td>
                             <td>{fmtDate(p.transactionDate)}</td>
                             <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={PAY_STATUS_CELL}>
                                 {perms.collections ? (
                                   <select
                                     className={'cstat ' + (p.chequeStatus ?? 'pending')}
@@ -5780,6 +6012,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onUpdatePayment = async (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
+    documentId?: number | null;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -6290,8 +6523,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             {!showPipeline && contract.status !== 'terminated' && (() => {
               const opsBase = `${isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}/${contract.id}`;
               const canRenew = contract.status === 'active'
-                && contract.renewalAccepted !== 'pending' && contract.renewalAccepted !== 'accepted'
-                && contract.renewalStatus !== 'draft' && contract.termination?.response !== 'accepted'
+                && !hasRenewalInFlight(contract)
+                && contract.termination?.response !== 'accepted'
                 && perms.renewals;
               const canTerminate = (contract.status === 'active' || contract.status === 'expired')
                 && contract.termination?.response !== 'accepted' && perms.agreements;
@@ -6342,9 +6575,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 The backend (proposeRenewal) requires status=active, so it is not
                 shown on expired/terminated/draft rows. */}
             {showPipeline && contract.status === 'active'
-              && contract.renewalAccepted !== 'pending'
-              && contract.renewalAccepted !== 'accepted'
-              && contract.renewalStatus !== 'draft'
+              && !hasRenewalInFlight(contract)
               && contract.termination?.response !== 'accepted'
               && perms.renewals && (
               <button className="btn btn-ghost btn-sm" onClick={() => setModal('renew')}>
@@ -6967,6 +7198,47 @@ function GlobalStyle() {
       .quest-page .ptable .amt { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
       .quest-page .ptable tfoot td { border-top: 2px solid #bfe3d5; background: var(--jade-tint); font-weight: 800; }
       .quest-page .ptable tfoot .tot { color: var(--jade-deep); }
+      /* Record-payment card — the SAME markup + class names as the lead's
+         Record Cheques panel (leads/[id]), so the renewal Cheques step and the
+         new-lease cheque recording are one design. Keep the two blocks in step:
+         a change here belongs in the lead page's stylesheet too. */
+      .quest-page .chqbox { border: 1px solid var(--mist-strong); border-radius: var(--r-md); background: var(--surface); padding: 16px; }
+      .quest-page .qinput { width: 100%; font-size: 12.5px; border: 1px solid var(--mist-strong); border-radius: 9px; padding: 8px 10px; background: #fff; color: var(--ink); outline: none; }
+      .quest-page .qinput:focus { border-color: var(--jade); }
+      .quest-page .qinput:disabled { background: var(--mist); color: var(--ink-3); }
+      .quest-page .errline { font-size: 11.5px; color: var(--brick); background: var(--brick-soft); border: 1px solid var(--brick-edge); border-radius: 9px; padding: 7px 10px; margin-bottom: 8px; }
+      .quest-page .paygrid { display: grid; gap: 6px; }
+      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
+      .quest-page .payrow-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
+      .quest-page .payrow-n { font-size: 10px; font-weight: 800; color: var(--jade-deep); background: var(--jade-soft); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+      .quest-page .payrow-lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+      .quest-page .payrow-desc { font-size: 12.5px; color: var(--ink-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .quest-page .payrow-sub { font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
+      .quest-page .payrow-ctl { width: 100%; min-width: 0; }
+      .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .quest-page .payrow-rec > select { flex: 1 1 auto; min-width: 0; }
+      .quest-page .payrow-rec > .btn { flex: 1 1 auto; justify-content: center; }
+      .quest-page .payrow-rec > .mini-btn { flex: 0 0 auto; }
+      /* The step card's status control is a <select>, so it needs the pill
+         palette AND a visible control affordance the read-only .cstat pill
+         doesn't carry. Scoped to .chqbox — the record's Payments table sizes its
+         own status pills and must not grow to match. */
+      .quest-page .chqbox select.cstat { border: 1px solid var(--mist-strong); border-radius: 9px; padding: 7px 8px; font-size: 11.5px; cursor: pointer; }
+      @media (max-width: 640px) {
+        .quest-page .payhead { display: none; }
+        .quest-page .payrow { grid-template-columns: 1fr; }
+      }
+      .quest-page .linkbtn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--jade-deep); background: none; border: 0; cursor: pointer; padding: 0; }
+      .quest-page .linkbtn:hover { text-decoration: underline; }
+      .quest-page .uprow { display: flex; gap: 11px; background: #fff; border: 1px solid var(--mist-strong); border-radius: 12px; padding: 10px; }
+      .quest-page .uprow .upthumb { width: 52px; height: 52px; border-radius: 9px; border: 1px solid var(--mist-strong); overflow: hidden; background: var(--surface); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; color: var(--mute); }
+      .quest-page .uprow .upthumb:disabled { cursor: default; }
+      .quest-page .uprow .upthumb img { width: 100%; height: 100%; object-fit: cover; }
+      .quest-page .uprow .upmeta { flex: 1; min-width: 0; }
+      .quest-page .uprow .upmeta .dn { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+      .quest-page .uprow .upmeta .ds { font-size: 11px; color: var(--mute); margin-top: 1px; }
+      .quest-page .uprow .upctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
       .quest-page .cstat { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; border: 0; }
       .quest-page .cstat.cleared { background: var(--jade-soft); color: var(--jade-deep); }
       .quest-page .cstat.pending { background: var(--saffron-soft); color: var(--saffron-deep); }
