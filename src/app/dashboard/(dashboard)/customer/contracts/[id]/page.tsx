@@ -27,6 +27,7 @@ import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
 import { taxPortionOf } from '@/lib/chargeTax';
+import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 import { useBackClose } from '@/lib/useSlideOver';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 
@@ -735,12 +736,19 @@ export default function TenantContractDetailPage() {
                                   </td>
                                   <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
                                   <td className="px-2 py-2">
+                                    {/* A replaced bounce keeps the bounce tone and says so
+                                        plainly — "Bounced · Replaced". Reading it as Cleared
+                                        hid an event the customer's own history turns on (a
+                                        bounce carries a penalty), and made this row look
+                                        identical to a cheque that never failed. It is no
+                                        longer chased for money; that is decided by the
+                                        coverage rule, not by this chip. */}
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      p.chequeStatus === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
-                                      p.chequeStatus === 'bounced'   ? 'bg-red-50 text-red-700' :
-                                      p.chequeStatus === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
+                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                                      chequeStatusDisplay(p).tone === 'bounced'   ? 'bg-red-50 text-red-700' :
+                                      chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                                       'bg-amber-50 text-amber-700'
-                                    }`}>{p.chequeStatus}</span>
+                                    }`}>{chequeStatusDisplay(p).label}</span>
                                   </td>
                                   <td className="px-2 py-2 text-right">
                                     {canReceipt(p) ? (
@@ -808,12 +816,19 @@ export default function TenantContractDetailPage() {
                                   </td>
                                   <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
                                   <td className="px-2 py-2">
+                                    {/* A replaced bounce keeps the bounce tone and says so
+                                        plainly — "Bounced · Replaced". Reading it as Cleared
+                                        hid an event the customer's own history turns on (a
+                                        bounce carries a penalty), and made this row look
+                                        identical to a cheque that never failed. It is no
+                                        longer chased for money; that is decided by the
+                                        coverage rule, not by this chip. */}
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      p.chequeStatus === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
-                                      p.chequeStatus === 'bounced'   ? 'bg-red-50 text-red-700' :
-                                      p.chequeStatus === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
+                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                                      chequeStatusDisplay(p).tone === 'bounced'   ? 'bg-red-50 text-red-700' :
+                                      chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                                       'bg-amber-50 text-amber-700'
-                                    }`}>{p.chequeStatus}</span>
+                                    }`}>{chequeStatusDisplay(p).label}</span>
                                   </td>
                                   <td className="px-2 py-2 text-right">
                                     {canReceipt(p) ? (

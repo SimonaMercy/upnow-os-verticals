@@ -52,6 +52,7 @@ import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { taxPortionOf } from '@/lib/chargeTax';
+import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
@@ -3266,7 +3267,26 @@ function DetailsDrawer({
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
                             <div style={PAY_STATUS_CELL}>
-                              {perms.collections ? (
+                              {/* A bounce that has been made good still reads as
+                                  a bounce — red, and named as one — because it
+                                  is an event that happened: it carries a
+                                  penalty and it belongs in the customer's
+                                  payment history. Showing it as a green
+                                  "Cleared" made it indistinguishable from a
+                                  cheque that never failed. What it says instead
+                                  is what became of it. Whether it is still OPEN
+                                  WORK is a separate question, answered by
+                                  cheque-replacement's coverage rule, not by
+                                  this chip. The dropdown is withheld on those
+                                  rows on purpose: flipping a settled bounce's
+                                  status without first voiding its replacement
+                                  would leave the rent counted twice. The stored
+                                  status is unchanged underneath. */}
+                              {chequeStatusDisplay(p).settledBounce ? (
+                                <span className={'cstat ' + chequeStatusDisplay(p).tone}>
+                                  {chequeStatusDisplay(p).label}
+                                </span>
+                              ) : perms.collections ? (
                                 <select
                                   className={'cstat ' + (p.chequeStatus ?? 'pending')}
                                   style={{ cursor: 'pointer' }}

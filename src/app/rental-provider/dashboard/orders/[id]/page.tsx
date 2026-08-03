@@ -11,6 +11,7 @@ import {
   ChevronRight, FileCheck, Banknote, Lock, Download, Receipt,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
+import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
 interface Payment {
@@ -485,13 +486,17 @@ export default function ContractDetailPage() {
                     <td className="px-2 py-3 text-[#6b6860] whitespace-nowrap">{fmt(p.transactionDate)}</td>
                     <td className="px-2 py-3">
                       <div className="flex items-center gap-2">
+                      {/* A bounce already made good stays red and stays named a
+                          bounce — "Bounced · Replaced". It is no longer chased
+                          for money, but it did happen, and reading it as
+                          Cleared made it look like a cheque that never failed. */}
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        p.chequeStatus === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
-                        p.chequeStatus === 'bounced' ? 'bg-[#fee2e2] text-[#b91c1c]' :
-                        p.chequeStatus === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
+                        chequeStatusDisplay(p).tone === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                        chequeStatusDisplay(p).tone === 'bounced' ? 'bg-[#fee2e2] text-[#b91c1c]' :
+                        chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                         'bg-[#fef3c7] text-[#92400e]'
                       }`}>
-                        {p.chequeStatus.charAt(0).toUpperCase() + p.chequeStatus.slice(1)}
+                        {chequeStatusDisplay(p).label}
                       </span>
                       {(p.chequeStatus === 'cleared' || p.paymentMethod === 'cash') && (
                         <button
