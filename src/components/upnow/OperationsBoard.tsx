@@ -95,6 +95,9 @@ const QUICK: Record<string, { path: string; label: string }> = {
   pdc: { path: 'confirm-pdc', label: 'Confirm PDC' },
   utility: { path: 'utility/mark-on-file', label: 'Mark utility on file' },
   ejari: { path: 'ejari/mark-registered', label: 'Mark Contract Registration on file' },
+  // A rented room has no handover to inspect — let the RP say so instead of
+  // leaving the card parked on a step nobody will ever complete.
+  move_in: { path: 'move-in/mark-on-file', label: 'Mark move-in on file' },
 };
 
 function fmtShort(dateStr: string | null) {
