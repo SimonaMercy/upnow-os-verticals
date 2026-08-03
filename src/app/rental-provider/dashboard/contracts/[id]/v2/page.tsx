@@ -40,7 +40,7 @@ import {
   User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
-  Trash2, Plus,
+  Trash2, Plus, Link2,
 } from 'lucide-react';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
@@ -97,6 +97,15 @@ interface ContractPayment {
   /** Cheque image / payment advice this instalment was recorded against
    *  (`payments.document_id`). Null = a typed reference with no scan on file. */
   documentId?: number | null;
+  /** The BOUNCED cheque this row replaces (`payments.replaces_payment_id`). The
+   *  link is what takes the bounce off the dashboards — until it exists, the
+   *  landlord keeps being chased for rent the customer has already made good. */
+  replacesPaymentId?: number | null;
+  /** What this row should READ as. Same as chequeStatus except on a bounce that
+   *  has since been covered: 'cleared' once the replacement money is banked,
+   *  'replaced' while that cheque is still pending. Server-derived so every
+   *  surface agrees; `chequeStatus` remains the stored truth. */
+  effectiveStatus?: string | null;
 }
 
 interface MoveInInsp {
@@ -2337,6 +2346,9 @@ function ReceiptRefTag({ refs, id, kind = 'payment' }: { refs: PaymentRefs; id: 
  *  the Rental Income rail offers rental income only. */
 const REC_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'rental_income',   label: 'Rental income' },
+  // Only ever offered when the popup is opened FOR a VAT row (recTypes gates the
+  // list) — replacing a bounced VAT cheque must not re-file it as rent.
+  { value: 'vat',             label: 'VAT' },
   { value: 'security_deposit', label: 'Security deposit' },
   { value: 'admin_fee',       label: 'Admin fee' },
   { value: 'ejari_fee',       label: 'Contract Registration fee' },
@@ -2373,12 +2385,14 @@ function DetailsDrawer({
   onRecordPayment: (body: {
     description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
     chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
+    /** The bounced cheque on this contract that this payment makes good. */
+    replacesPaymentId?: number | null;
   }) => Promise<void>;
   /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / VAT / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
-    documentId?: number | null;
+    documentId?: number | null; replacesPaymentId?: number | null;
   }) => Promise<void>;
   /** DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line. */
   onDeletePayment: (paymentId: number) => Promise<void>;
@@ -2421,6 +2435,8 @@ function DetailsDrawer({
   const [rec, setRec] = useState({
     description: '', amount: '', paymentType: 'rental_income',
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
+    // '' = an ordinary cheque; an id = this one makes good that bounced cheque.
+    replacesPaymentId: '' as number | '',
   });
   // Which payment types this popup may offer. The popup is opened from a SEGMENT
   // rail ("Add" on Rental Income), so it only ever writes into that segment —
@@ -2431,9 +2447,37 @@ function DetailsDrawer({
   const [statusBusy, setStatusBusy] = useState<number | null>(null);
   // ── Inline cheque editor — correct amount / reference / description on existing rows ──
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque', transactionDate: '' });
+  const [editForm, setEditForm] = useState({
+    amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque', transactionDate: '',
+    // '' = an ordinary cheque; an id = this row pays off that bounced cheque.
+    replacesPaymentId: '' as number | '',
+  });
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
+  // ── Attribute an existing payment to the bounce it pays off ──
+  // Separate from the cheque editor on purpose: the payments that settle a
+  // bounce are usually already CLEARED, and a cleared row has no Edit button —
+  // its amount/reference are locked because a receipt was minted against them.
+  // Linking changes none of that, so it gets its own affordance rather than
+  // unlocking the money fields on a receipted row.
+  const [linkingId, setLinkingId] = useState<number | null>(null);
+  const [linkValue, setLinkValue] = useState<number | ''>('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkErr, setLinkErr] = useState<string | null>(null);
+  const startLink = (p: ContractPayment) => {
+    setLinkingId(p.id); setLinkErr(null); setLinkValue(p.replacesPaymentId ?? '');
+  };
+  const saveLink = async (paymentId: number) => {
+    setLinkBusy(true); setLinkErr(null);
+    try {
+      await onUpdatePayment(paymentId, { replacesPaymentId: linkValue === '' ? null : linkValue });
+      setLinkingId(null);
+    } catch (e) {
+      setLinkErr(e instanceof Error ? e.message : 'Could not link this payment');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
   const startEdit = (p: ContractPayment) => {
     setEditingId(p.id); setEditErr(null);
     setEditForm({
@@ -2442,6 +2486,7 @@ function DetailsDrawer({
       description: p.description ?? '',
       paymentMethod: p.paymentMethod ?? 'cheque',
       transactionDate: p.transactionDate ? p.transactionDate.slice(0, 10) : '',
+      replacesPaymentId: p.replacesPaymentId ?? '',
     });
   };
   const saveEdit = async (paymentId: number) => {
@@ -2455,6 +2500,9 @@ function DetailsDrawer({
         description: editForm.description.trim() || null,
         paymentMethod: editForm.paymentMethod,
         transactionDate: editForm.transactionDate || null,
+        // null unlinks — the corrective path when a row was attributed to the
+        // wrong bounce (the bounce goes straight back to being owed).
+        replacesPaymentId: editForm.replacesPaymentId === '' ? null : editForm.replacesPaymentId,
       });
       setEditingId(null);
     } catch (e) {
@@ -2475,8 +2523,9 @@ function DetailsDrawer({
         paymentMethod: rec.paymentMethod,
         chequeNumber: rec.chequeNumber.trim() || undefined,
         transactionDate: rec.transactionDate || undefined,
+        replacesPaymentId: rec.replacesPaymentId === '' ? undefined : rec.replacesPaymentId,
       });
-      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '' });
+      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '' });
       setShowRec(false);
     } catch (e) {
       setRecErr(e instanceof Error ? e.message : 'Failed to record payment');
@@ -2772,9 +2821,88 @@ function DetailsDrawer({
   // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
   // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
   const openRecordFor = (paymentType: string) => {
-    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '' }));
+    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '', replacesPaymentId: '' }));
     setRecTypes([paymentType]);
     setShowAddFee(false); setRecErr(null); setShowRec(true);
+  };
+  // "Record replacement" on a bounced row — the same popup, pre-filled and
+  // pre-linked. Recording the new cheque this way is what settles the bounce:
+  // the link is what stops the dashboards counting it, and it must cover the
+  // full face value (a part-payment leaves the balance owed, so the API rejects
+  // it and the bounce stays open).
+  const openReplacementFor = (p: ContractPayment) => {
+    setRec({
+      description: `Payment against bounced cheque${p.chequeNumber ? ` No. ${p.chequeNumber}` : ''}`,
+      // Pre-fill what is still SHORT, not the face value — on a bounce already
+      // part-paid, the face value would over-collect.
+      amount: String(shortfallOf(p)),
+      paymentType: p.paymentType ?? 'rental_income',
+      paymentMethod: p.paymentMethod ?? 'cheque',
+      chequeNumber: '',
+      transactionDate: '',
+      replacesPaymentId: p.id,
+    });
+    setRecTypes([p.paymentType ?? 'rental_income']);
+    setShowAddFee(false); setRecErr(null); setShowRec(true);
+  };
+  // The bounce → replacement links, both directions, so each row can say which
+  // cheques settled it / which one it goes against. A cancelled replacement
+  // doesn't count — that cheque was voided, so the bounce is owed again.
+  //
+  // A bounce may be settled by SEVERAL payments (10,000 + 7,500 against a 17,500
+  // cheque), so it is the SUM that matters: the bounce stays open for whatever is
+  // still short. Mirrors cheque-replacement.ts on the backend.
+  const replacementsOf = new Map<number, ContractPayment[]>();
+  const replacedRow = new Map<number, ContractPayment>();
+  for (const r of payments) {
+    if (r.replacesPaymentId == null) continue;
+    if ((r.chequeStatus ?? '').toLowerCase() === 'cancelled') continue;
+    replacementsOf.set(r.replacesPaymentId, [...(replacementsOf.get(r.replacesPaymentId) ?? []), r]);
+    const target = payments.find(t => t.id === r.replacesPaymentId);
+    if (target) replacedRow.set(r.id, target);
+  }
+  /** Money recorded against a bounced cheque so far. */
+  const coveredOf = (id: number) => (replacementsOf.get(id) ?? []).reduce((s, r) => s + (r.amount || 0), 0);
+  /** What is still owed on a bounced cheque (0 = fully made good). */
+  const shortfallOf = (p: ContractPayment) => Math.max(0, (p.amount || 0) - coveredOf(p.id));
+  /** Bounced cheques still short of being made good. */
+  const unreplacedBounced = payments.filter(
+    p => (p.chequeStatus ?? '').toLowerCase() === 'bounced' && shortfallOf(p) > 1,
+  );
+  /**
+   * The bounces an EXISTING row may be pointed at, and what each still needs.
+   *
+   * Computed with `rowId`'s own contribution taken out, so the row's current
+   * target stays in the list (re-saving an edit must not silently unlink it) and
+   * the amount shown is what would still be owed if this row moved elsewhere.
+   * Two part-payments against one bounce is the normal case here: the first is
+   * linked while the bounce is short by the full amount, the second while it is
+   * short by the remainder.
+   */
+  const linkTargetsFor = (rowId: number) => {
+    const me = payments.find(p => p.id === rowId);
+    const myAmount = me?.amount || 0;
+    const myDate = me?.transactionDate ? new Date(me.transactionDate.slice(0, 10)).getTime() : null;
+    return payments
+      .filter(b => (b.chequeStatus ?? '').toLowerCase() === 'bounced' && b.id !== rowId)
+      .map(b => {
+        const mine = (replacementsOf.get(b.id) ?? []).find(r => r.id === rowId)?.amount ?? 0;
+        return { row: b, owed: Math.max(0, (b.amount || 0) - (coveredOf(b.id) - mine)) };
+      })
+      // Same two guards the API enforces, so the list never offers a link that
+      // would be rejected — or worse, one that looks plausible and is wrong:
+      //  • money collected before the cheque bounced cannot be its replacement
+      //    (an ordinary earlier instalment would otherwise settle it on paper
+      //    while its money is already spoken for), 30 days of slack for a bank
+      //    that returns a cheque early;
+      //  • a payment larger than the shortfall belongs to something else too.
+      .filter(o => {
+        if (o.owed <= 1) return false;
+        if (myAmount > o.owed + 1) return false;
+        const bounceDate = o.row.transactionDate ? new Date(o.row.transactionDate.slice(0, 10)).getTime() : null;
+        if (myDate != null && bounceDate != null && myDate < bounceDate - 30 * 86_400_000) return false;
+        return true;
+      });
   };
   const openFeeFor = (paymentType: string) => {
     const auto = feeAutoAmount(paymentType);
@@ -3277,6 +3405,26 @@ function DetailsDrawer({
                           <td>
                             {p.description ?? '—'}
                             <ReceiptRefTag refs={paymentRefs} id={p.id} />
+                            {/* Both ends of a bounce → replacement pair, so the
+                                table itself says why a bounced cheque is no
+                                longer being chased — and, when it is only part
+                                paid, exactly how much is still short. */}
+                            {(replacementsOf.get(p.id)?.length ?? 0) > 0 && (
+                              <span className="note" style={{ display: 'block', fontSize: 11 }}>
+                                {shortfallOf(p) > 1
+                                  ? `Part-replaced — ${fmtAed(coveredOf(p.id))} of ${fmtAed(p.amount)} · ${fmtAed(shortfallOf(p))} still owed`
+                                  : `Replaced by ${replacementsOf.get(p.id)!
+                                      .map(r => (r.chequeNumber ? `cheque ${r.chequeNumber}` : `payment #${r.id}`))
+                                      .join(' + ')}`}
+                              </span>
+                            )}
+                            {replacedRow.get(p.id) && (
+                              <span className="note" style={{ display: 'block', fontSize: 11 }}>
+                                Replaces bounced {replacedRow.get(p.id)!.chequeNumber
+                                  ? `cheque ${replacedRow.get(p.id)!.chequeNumber}`
+                                  : `payment #${replacedRow.get(p.id)!.id}`}
+                              </span>
+                            )}
                           </td>
                           <td className="amt">
                             {fmtAed(p.amount)}
@@ -3337,9 +3485,76 @@ function DetailsDrawer({
                                   <Pencil size={12} /> Edit
                                 </button>
                               )}
+                              {/* The one action a bounced cheque actually needs.
+                                  Recording the new cheque here links the pair, so
+                                  the lease stops showing as in arrears. */}
+                              {perms.collections && (p.chequeStatus ?? '') === 'bounced' && shortfallOf(p) > 1 && (
+                                <button
+                                  type="button"
+                                  className="mini-btn view"
+                                  title="Record the money the customer handed over against this cheque"
+                                  onClick={() => openReplacementFor(p)}
+                                >
+                                  <CreditCard size={12} /> {coveredOf(p.id) > 0 ? 'Record balance' : 'Record replacement'}
+                                </button>
+                              )}
+                              {/* The other half of the job: a payment already on
+                                  the ledger being attributed to the bounce it
+                                  paid off. Offered on any non-bounced row while
+                                  a bounce is short — including CLEARED rows,
+                                  which is the common shape (the money landed and
+                                  was banked before anyone connected it), and the
+                                  only route for a bounce cleared in two
+                                  instalments: link each payment in turn. */}
+                              {perms.collections && (p.chequeStatus ?? '') !== 'bounced'
+                                && (linkTargetsFor(p.id).length > 0 || p.replacesPaymentId != null) && (
+                                <button
+                                  type="button"
+                                  className="mini-btn view"
+                                  title={p.replacesPaymentId != null
+                                    ? 'Change or remove which bounced cheque this payment goes against'
+                                    : 'Record that this payment goes against a bounced cheque'}
+                                  onClick={() => linkingId === p.id ? setLinkingId(null) : startLink(p)}
+                                >
+                                  <Link2 size={12} /> {p.replacesPaymentId != null ? 'Linked' : 'Link to bounce'}
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
+                        {linkingId === p.id && (
+                          <tr>
+                            <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
+                              <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                <p className="subhead">Which bounced cheque does this payment go against?</p>
+                                <div className="field" style={{ margin: 0 }}>
+                                  <select
+                                    className="input"
+                                    value={linkValue === '' ? '' : String(linkValue)}
+                                    onChange={e => setLinkValue(e.target.value === '' ? '' : Number(e.target.value))}
+                                  >
+                                    <option value="">No — an ordinary cheque</option>
+                                    {linkTargetsFor(p.id).map(({ row: b, owed }) => (
+                                      <option key={b.id} value={b.id}>
+                                        {b.chequeNumber ? `Cheque ${b.chequeNumber}` : `Payment #${b.id}`} · {fmtAed(owed)} still owed{(b.amount || 0) !== owed ? ` of ${fmtAed(b.amount)}` : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+                                    Several payments can go against one bounced cheque — link each as it arrives, and the bounce stops being chased once they add up to it. Amounts, references and receipts are untouched.
+                                  </span>
+                                </div>
+                                {linkErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{linkErr}</p>}
+                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                  <button className="btn btn-jade btn-sm" disabled={linkBusy} onClick={() => void saveLink(p.id)}>
+                                    <Check size={14} /> {linkBusy ? 'Saving…' : 'Save link'}
+                                  </button>
+                                  <button className="btn btn-ghost btn-sm" disabled={linkBusy} onClick={() => { setLinkingId(null); setLinkErr(null); }}>Cancel</button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                         {editingId === p.id && (
                           <tr>
                             <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
@@ -3371,6 +3586,37 @@ function DetailsDrawer({
                                       onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
                                   </div>
                                 </div>
+                                {/* Attribute a payment ALREADY on the ledger to the
+                                    bounce it pays off. The record-payment popup can
+                                    only link at the moment of entry, and that is not
+                                    how this usually happens: the money arrives, whoever
+                                    is on collections books it as an ordinary cheque, and
+                                    the connection to the bounce is made afterwards —
+                                    often twice, when a customer clears a bounce in two
+                                    instalments. Without this field that attribution had
+                                    no home in the UI at all. */}
+                                {perms.collections && (linkTargetsFor(p.id).length > 0 || editForm.replacesPaymentId !== '') && (
+                                  <div className="field" style={{ marginTop: 10 }}>
+                                    <label>Goes against a bounced cheque</label>
+                                    <select
+                                      className="input"
+                                      value={editForm.replacesPaymentId === '' ? '' : String(editForm.replacesPaymentId)}
+                                      onChange={e => setEditForm(v => ({ ...v, replacesPaymentId: e.target.value === '' ? '' : Number(e.target.value) }))}
+                                    >
+                                      <option value="">No — an ordinary cheque</option>
+                                      {linkTargetsFor(p.id).map(({ row: b, owed }) => (
+                                        <option key={b.id} value={b.id}>
+                                          {b.chequeNumber ? `Cheque ${b.chequeNumber}` : `Payment #${b.id}`} · {fmtAed(owed)} still owed{(b.amount || 0) !== owed ? ` of ${fmtAed(b.amount)}` : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+                                      {editForm.replacesPaymentId === ''
+                                        ? 'Link this payment to a bounced cheque so the bounce stops being chased once the amounts against it add up.'
+                                        : 'Several payments may go against one bounce — link each as it arrives. Choosing “No” here unlinks this one, and the bounce goes straight back to being owed.'}
+                                    </span>
+                                  </div>
+                                )}
                                 {showVat && (
                                   <p className="note" style={{ marginTop: 2 }}>VAT ({contract.rentVatRate ?? 0}%) is recalculated from the corrected amount automatically.</p>
                                 )}
@@ -3760,6 +4006,32 @@ function DetailsDrawer({
                       <div className="field" style={{ margin: 0 }}><label>Date</label>
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
                       </div>
+                      {/* Offered only when there is a bounce left to settle. A
+                          linked cheque takes the bounced one off the "Overdue /
+                          Bounced" KPI, the manager's action list and the arrears
+                          totals — so nobody chases rent that has been made good. */}
+                      {(unreplacedBounced.length > 0 || rec.replacesPaymentId !== '') && (
+                        <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+                          <label>Goes against a bounced cheque</label>
+                          <select
+                            className="input"
+                            value={rec.replacesPaymentId === '' ? '' : String(rec.replacesPaymentId)}
+                            onChange={e => setRec(v => ({ ...v, replacesPaymentId: e.target.value === '' ? '' : Number(e.target.value) }))}
+                          >
+                            <option value="">No — this is a new cheque</option>
+                            {unreplacedBounced.map(b => (
+                              <option key={b.id} value={b.id}>
+                                {b.chequeNumber ? `Cheque ${b.chequeNumber}` : `Payment #${b.id}`} · {fmtAed(shortfallOf(b))} still owed{coveredOf(b.id) > 0 ? ` of ${fmtAed(b.amount)}` : ''}{b.transactionDate ? ` · due ${fmtDate(b.transactionDate)}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {rec.replacesPaymentId !== '' && (
+                            <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+                              The bounced cheque stays in the ledger as history and stops counting as arrears once the amounts recorded against it add up to what it was for — pay it off in one cheque or several.
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {recErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{recErr}</p>}
                         </div>
                         <div className="mf">
@@ -6123,6 +6395,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onRecordPayment = async (body: {
     description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
     chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
+    /** The bounced cheque on this contract that this payment makes good. */
+    replacesPaymentId?: number | null;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments`, {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -6138,7 +6412,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onUpdatePayment = async (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
-    documentId?: number | null;
+    documentId?: number | null; replacesPaymentId?: number | null;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },

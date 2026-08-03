@@ -18,18 +18,37 @@ export type ReportsYear = number | 'all';
 export const CURRENT_YEAR = new Date().getFullYear();
 /** Earliest year offered in the picker (matches the matrix / deposit controls). */
 const EARLIEST_YEAR = 2023;
+/**
+ * Latest year offered. Held at the current year deliberately: a future year lists
+ * renewals that are DUE but have no lease behind them yet, so the register reads
+ * as though next year were already contracted. Reverted from CURRENT_YEAR + 1 on
+ * 3 Aug 2026 for that reason — raise it only alongside a report that can state
+ * clearly which rows are projected rather than recorded.
+ */
+export const LATEST_YEAR = CURRENT_YEAR;
 
 const KEY = 'upnow.reports.year';
 const EVT = 'upnow:reports-year';
 
-/** Descending list of selectable years (current first), used by the header picker. */
+/**
+ * Descending list of selectable years (newest first) — the SINGLE source for
+ * every year picker in the reports module.
+ *
+ * It was not always: ReportDetailView carried four inline copies of this range,
+ * three capped at the current year and one, built from a different formula, that
+ * reached a year further. Which picker a report happened to render decided which
+ * years you could pick. Anything needing ascending order reverses a copy;
+ * nothing rebuilds the range.
+ */
 export const REPORT_YEARS: number[] = Array.from(
-  { length: CURRENT_YEAR - EARLIEST_YEAR + 1 },
-  (_, i) => CURRENT_YEAR - i,
+  { length: LATEST_YEAR - EARLIEST_YEAR + 1 },
+  (_, i) => LATEST_YEAR - i,
 );
 
 function isValidYear(n: number): boolean {
-  return Number.isInteger(n) && n >= EARLIEST_YEAR && n <= CURRENT_YEAR + 1;
+  // Keyed off LATEST_YEAR so the validator and the picker can never disagree
+  // about how far forward a year may go — they did before, and the picker lost.
+  return Number.isInteger(n) && n >= EARLIEST_YEAR && n <= LATEST_YEAR;
 }
 
 /** Read the stored year. SSR-safe: returns the current year on the server. */

@@ -221,16 +221,16 @@ function ManagerMultiOverview() {
             note: [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null].filter(Boolean).join(', '),
             term: term(i), date: i.date, href: opsHref(i),
           })} />
-        {/* Ended leases still holding the customer's money. The amount is the
-            point of the row — it is what the manager refunds to close it — so it
-            is stated rather than left as a generic "not settled". */}
+        {/* Terminated leases with no settlement recorded. Where a deposit is
+            held the amount IS the row — it is what gets refunded to close it —
+            so it is stated rather than left as a generic "not settled". */}
         <ActionBucket icon={Scale} color="#0d9488" label="Settlement Pending" href={`/dashboard/manager/contracts${scopeQ()}`}
           loading={actionLoading} bucket={action?.settlementPending} dateLabel="ended"
           render={i => ({
             title: place(i), name: i.tenant,
             note: Number(i.deposit) > 0
               ? `AED ${Number(i.deposit).toLocaleString('en-AE')} held — refund to close`
-              : 'Balance outstanding',
+              : 'No settlement recorded — no deposit held',
             term: term(i), date: i.date,
             href: `/dashboard/manager/contracts/${i.id}/settlement${scopeQ(i.rpId)}`,
           })} />

@@ -5,13 +5,18 @@ import { useEffect, useState, useMemo } from 'react';
 import { Search, X, DollarSign, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 
-type RecvStatus = 'scheduled' | 'due' | 'overdue' | 'received';
+// 'replaced' = a bounced cheque the customer has since made good with another
+// cheque (payments.replaces_payment_id). The row stays visible as history, but it
+// is neither owed nor collected — the replacement row carries the money — so it
+// counts toward none of the totals below.
+type RecvStatus = 'scheduled' | 'due' | 'overdue' | 'received' | 'replaced';
 
 const STATUS_LABELS: Record<RecvStatus, string> = {
   scheduled: 'Scheduled',
   due:       'Due Today',
   overdue:   'Overdue',
   received:  'Received',
+  replaced:  'Replaced',
 };
 
 const STATUS_STYLE: Record<RecvStatus, string> = {
@@ -19,6 +24,7 @@ const STATUS_STYLE: Record<RecvStatus, string> = {
   due:       'bg-[#fef3c7] text-[#92400e]',
   overdue:   'bg-[#fee2e2] text-[#b91c1c]',
   received:  'bg-[#d8f2e8] text-[#1a7a5a]',
+  replaced:  'bg-[#f4f3ef] text-[#6b6860]',
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -107,9 +113,12 @@ export default function ReceivablesPage() {
   });
 
   // Summary stats across all items (not filtered)
-  const totalAmount    = items.reduce((s, r) => s + r.amount, 0);
+  // A replaced bounce is carried by the cheque that replaced it — counting it as
+  // billed would show the same rent twice and depress the collection rate.
+  const billable       = items.filter(r => r.status !== 'replaced');
+  const totalAmount    = billable.reduce((s, r) => s + r.amount, 0);
   const totalReceived  = items.filter(r => r.status === 'received').reduce((s, r) => s + r.amount, 0);
-  const totalOutstanding = items.filter(r => r.status !== 'received').reduce((s, r) => s + r.amount, 0);
+  const totalOutstanding = billable.filter(r => r.status !== 'received').reduce((s, r) => s + r.amount, 0);
   const totalOverdue   = items.filter(r => r.status === 'overdue').reduce((s, r) => s + r.amount, 0);
   const collectionRate = totalAmount > 0 ? Math.round((totalReceived / totalAmount) * 100) : 0;
 
@@ -139,7 +148,7 @@ export default function ReceivablesPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         {[
-          { label: 'Total Billed',     value: fmtAed(totalAmount),      sub: `${items.length} records` },
+          { label: 'Total Billed',     value: fmtAed(totalAmount),      sub: `${billable.length} records` },
           { label: 'Collected',        value: fmtAed(totalReceived),    sub: 'amount received' },
           { label: 'Outstanding',      value: fmtAed(totalOutstanding), sub: 'pending payment' },
           { label: 'Overdue',          value: fmtAed(totalOverdue),     sub: `${items.filter(r => r.status === 'overdue').length} records`, highlight: totalOverdue > 0 },

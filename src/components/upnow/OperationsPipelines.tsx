@@ -372,10 +372,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const cardsByTab = useMemo(() => {
     const passC = (c: OpsContract) =>
       (filterAsset === 'all' || c.property.buildingName === filterAsset)
-      // A settlement debt outlives the year its lease ran in: the year filter
-      // scopes lease ACTIVITY, but money still held is owed until it is paid, so
-      // leaving it behind a year picker is how these went unnoticed.
-      && (c.settlementOwed || contractInYear(c))
+      && contractInYear(c)
       && matchSearch([c.ref, tenantDisplayName(c.tenant), c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]);
     const passL = (l: OpsLead) =>
       (filterAsset === 'all' || l.unit?.property?.buildingName === filterAsset)

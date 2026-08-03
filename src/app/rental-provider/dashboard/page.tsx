@@ -397,6 +397,9 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     try {
       const res = await fetch(`/api/${manager ? `manager/receivables?rp=${manager.rp}` : 'contracts/receivables'}`, { credentials: 'include' });
       const data = res.ok ? await res.json() : [];
+      // 'replaced' rows are bounces the customer has already made good with
+      // another cheque — the KPI excludes them, so the drill-down must too or the
+      // count and the list would disagree.
       const rows = (Array.isArray(data) ? data : []).filter((p: { status?: string }) => p.status === 'overdue');
       setDrill({
         title: `Overdue / bounced · ${rows.length}`,

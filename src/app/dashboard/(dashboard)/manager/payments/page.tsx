@@ -125,6 +125,10 @@ const STATUS_LABELS: Record<string, string> = {
   cleared:        'Cleared',
   paid:           'Paid',
   bounced:        'Bounced',
+  // A bounce the customer made good with a cheque that has not cleared yet. It
+  // is settled — nobody should chase it — but the money is not in, so it must
+  // not read as Cleared. (Once that cheque clears the row simply says Cleared.)
+  replaced:       'Replaced',
   cancelled:      'Cancelled',
 };
 
@@ -137,6 +141,7 @@ const STATUS_STYLE: Record<string, string> = {
   pending:        'bg-[#fef3c7] text-[#92400e]',
   forfeited:      'bg-[#fee2e2] text-[#b91c1c]',
   bounced:        'bg-[#fee2e2] text-[#b91c1c]',
+  replaced:       'bg-[#f4f3ef] text-[#6b6860]',
   cancelled:      'bg-[#f4f3ef] text-[#6b6860]',
 };
 

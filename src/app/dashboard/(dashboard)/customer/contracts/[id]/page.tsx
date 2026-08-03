@@ -55,6 +55,9 @@ interface ContractPayment {
   charges: number;
   chequeNumber: string | null;
   chequeStatus: string;
+  /** Server-derived display status — a bounce that has been made good reads as
+   *  'cleared' (money banked) or 'replaced' (new cheque still pending). */
+  effectiveStatus?: string | null;
   payerName: string | null;
   transactionDate: string | null;
   createdAt: string;
@@ -312,6 +315,9 @@ export default function TenantContractDetailPage() {
   // or the individual payment has cleared. Matches the agreed trigger.
   const receiptHref = (p: ContractPayment) => `/dashboard/customer/contracts/${contract!.id}/print/receipt?pid=${p.id}`;
   const canReceipt = (p: ContractPayment) => p.chequeStatus === 'cleared' || !!contract?.pdcConfirmed;
+  /** What a cheque row should read as — see ContractPayment.effectiveStatus. */
+  const chequeState = (p: { chequeStatus: string; effectiveStatus?: string | null }) =>
+    p.effectiveStatus ?? p.chequeStatus;
 
   // ── Actions ───────────────────────────────────────────────────────────────
 

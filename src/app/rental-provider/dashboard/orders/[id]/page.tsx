@@ -23,6 +23,9 @@ interface Payment {
   charges: number;
   chequeNumber: string | null;
   chequeStatus: string;
+  /** Server-derived display status — a made-good bounce reads 'cleared' (money
+   *  banked) or 'replaced' (its new cheque still pending). */
+  effectiveStatus?: string | null;
   payerName: string | null;
   transactionDate: string | null;
   createdAt: string;

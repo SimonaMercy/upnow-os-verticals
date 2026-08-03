@@ -17,7 +17,7 @@ import {
   Building2, Check, ChevronDown, Info,
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
-import { getReportsYear, useReportsYear, yearToRange, yearForMatrix } from '@/components/upnow/reportsYear';
+import { getReportsYear, useReportsYear, yearToRange, yearForMatrix, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts } from '@/components/upnow/ReportCharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
@@ -189,12 +189,16 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     { key: 'monthLabel', label: 'Month' },
     { key: 'leases', label: 'Leases up for renewal', align: 'right', type: 'number' },
     { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+    // The ceiling the month's renewals could reach — read against Annual rent it
+    // is the uplift on the table.
+    { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
     { key: 'inProgress', label: 'In progress', align: 'right', type: 'number' },
     { key: 'notStarted', label: 'Not started', align: 'right', type: 'number' },
   ],
   totals: [
     { key: 'totalLeases', label: 'Renewals', type: 'number', keep: true },
     { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
+    { key: 'marketRentFils', label: 'Market Rent', type: 'aed' },
     { key: 'inProgress', label: 'In progress', type: 'number' },
     { key: 'notStarted', label: 'Not started', type: 'number' },
     { key: 'renewed', label: 'Renewed', type: 'number', keep: true },
@@ -209,8 +213,13 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
       { key: 'tenantName', label: 'Customer' },
       { key: 'unitLabel', label: 'Unit' },
       { key: 'buildingName', label: 'Property' },
-      { key: 'endDate', label: 'Lease ends', type: 'date' },
+      // The lease on file — always the CURRENT term. A row bucketed into a future
+      // month shows the term it is renewing FROM, which is the only term that
+      // actually exists; the month heading carries the when.
+      { key: 'term', label: 'Term' },
       { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      // Market Rent beside contracted rent = the uplift available at renewal.
+      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
       { key: 'stage', label: 'Renewal', type: 'stage' },
     ],
   },
@@ -339,7 +348,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   'contract-status': {
     title: 'Contract Status - Monthly',
     tagline: 'Your monthly contract status sheet — all twelve months in one report.',
-    description: 'Every month of the selected year, the contracts turning over in it: a term COMMENCING that month (the new or renewed agreement) or a term whose renewal falls DUE that month — it ended on the last day of the month before — with nothing recorded yet. One line per unit per month; when a new agreement exists it is the line and shows its term, rent and cheques, otherwise the expiring term is shown with its rent carried over. Status reads Renewed (the agreement is executed — the lease is running, or both sides have signed), For signature (the agreement exists but is not fully signed — a customer signature with no landlord counter-signature still counts as out for signature), Pending (the cycle is up and no new agreement has been recorded) or Move-out (the customer is leaving — terminated, vacating at the end, or the renewal was rejected; no rent or cheques carry forward). Customer signed and Landlord signed are shown separately so you can see which side is holding. NO. OF PAYMENTS counts rent cheques actually on file — a payment row only counts once it carries a cheque number, so a renewal still at notice or draft stage with a generated plan and no cheques reads blank and lands in "Awaiting cheques". Contract Registration shows Completed only when the status is registered AND the certificate is on file; a cycle with no new agreement is always pending, since the expiring term\'s certificate does not register the next one. ANNUAL RENT is the month\'s whole book. COLLECTED is rent already banked on that term (cleared cheques), OVERDUE is rent whose cheque date has passed without clearing — actually owed — and UPCOMING is the rest of the term\'s cheques, dated later and not due yet (a term starting in August is paid in October, January and April, so that money is not owed in August). All three describe the term governing the cycle, never the expiring one, so a line with no agreement yet shows neither. A line still at draft or notice stage carries a proposed rent with no cheque behind it — the Awaiting cheques figure counts those, and the Cheques filter isolates them. Use the Month / Status / Stage / Signed by / Cheques / Registration filters to narrow the sheet — every figure in the month headers and the tiles is recomputed for what you filtered to.',
+    description: 'Every month of the selected year, the contracts turning over in it: a term COMMENCING that month (the new or renewed agreement) or a term whose renewal falls DUE that month — it ended on the last day of the month before — with nothing recorded yet. One line per unit per month; when a new agreement exists it is the line and shows its term, rent and cheques, otherwise the expiring term is shown with its rent carried over. Status reads Renewed (the agreement is executed — the lease is running, or both sides have signed), For signature (the agreement exists but is not fully signed — a customer signature with no landlord counter-signature still counts as out for signature), Pending (the cycle is up and no new agreement has been recorded) or Move-out (the customer is leaving — terminated, vacating at the end, or the renewal was rejected; no rent or cheques carry forward). Customer signed and Landlord signed are shown separately so you can see which side is holding. NO. OF PAYMENTS counts rent cheques actually on file — a payment row only counts once it carries a cheque number, so a renewal still at notice or draft stage with a generated plan and no cheques reads blank and lands in "Awaiting cheques". Contract Registration shows Completed only when the status is registered AND the certificate is on file; a cycle with no new agreement is always pending, since the expiring term\'s certificate does not register the next one. ANNUAL RENT is the month\'s whole book. COLLECTED is rent already banked on that term (cleared cheques), OVERDUE is rent whose cheque date has passed without clearing — actually owed — and UPCOMING is the rest of the term\'s cheques, dated later and not due yet (a term starting in August is paid in October, January and April, so that money is not owed in August). All three describe the term governing the cycle, never the expiring one, so a line with no agreement yet shows neither. A line still at draft or notice stage carries a proposed rent with no cheque behind it — the Awaiting cheques figure counts those. Narrow the sheet with the Year, Lease type, Property and Month filters — every figure in the month headers and the tiles is recomputed for what you filtered to.',
     endpoint: '/api/reports/contract-status',
     buildingLeaseFilter: true,
     contractStatusFilters: true,
@@ -350,8 +359,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
       { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
-      { key: 'overdueFils', label: 'Overdue', align: 'right', type: 'aed', keep: true },
-      { key: 'upcomingFils', label: 'Upcoming', align: 'right', type: 'aed' },
       { key: 'installments', label: 'Cheques', align: 'right', type: 'number' },
       { key: 'awaitingCheques', label: 'Awaiting cheques', align: 'right', type: 'number', keep: true },
       { key: 'ejariPending', label: 'Registration pending', align: 'right', type: 'number' },
@@ -361,8 +368,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'contracts', label: 'Contracts', type: 'number', keep: true },
       { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
       { key: 'collectedFils', label: 'Rent collected', type: 'aed', keep: true },
-      { key: 'overdueFils', label: 'Rent overdue', type: 'aed', keep: true },
-      { key: 'upcomingFils', label: 'Rent upcoming', type: 'aed', keep: true },
       { key: 'installments', label: 'Cheques on file', type: 'number', keep: true },
       { key: 'awaitingCheques', label: 'Awaiting cheques', type: 'number', keep: true },
       { key: 'signed', label: 'Signed agreements', type: 'number', keep: true },
@@ -388,8 +393,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'leaseType', label: 'Type', type: 'stage' },
         { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
         { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
-        { key: 'overdueFils', label: 'Overdue', align: 'right', type: 'aed' },
-        { key: 'upcomingFils', label: 'Upcoming', align: 'right', type: 'aed' },
         { key: 'installments', label: 'No. of payments', align: 'right', type: 'number' },
         { key: 'signatures', label: 'Signatures', type: 'stage' },
         { key: 'stage', label: 'Stage', type: 'stage' },
@@ -661,8 +664,16 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'contractRef', label: 'Contract' },
         { key: 'unitLabel', label: 'Unit' },
         { key: 'tenantName', label: 'Customer' },
-        { key: 'endDate', label: 'Lease ends', type: 'date' },
+        // The lease on file — always the CURRENT term; see Renewal Plan - Monthly.
+        { key: 'term', label: 'Term' },
         { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        // Market Rent beside contracted rent = the uplift available at this
+        // renewal. Same source as Rent vs Asking and the Portfolio page.
+        { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
+        // Annual rent is the CONTRACTED rent on the unit, so a renewal that is
+        // only proposed shows 0 — the stage says why, and matches Renewal Plan -
+        // Monthly's own Renewal column.
+        { key: 'stage', label: 'Renewal', type: 'stage' },
       ],
     },
     totals: [
@@ -934,8 +945,15 @@ const TENANT_SCOPED = new Set<ReportSlug>([
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-// Current calendar year — used by the year dropdown (yearRange reports).
-const CURRENT_YEAR = new Date().getFullYear();
+/** The month an Upcoming Renewals window runs through — "Nov 2026". The backend
+ *  extends every window to that month's end so the last group is never a partial
+ *  month; this puts the same fact on the option the user is choosing. */
+const monthEndLabel = (windowDays: number): string => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + windowDays);
+  return new Intl.DateTimeFormat('en-AE', { month: 'short', year: 'numeric' }).format(d);
+};
 // Reports that default to a single day (today) rather than the whole year — a
 // daily activity view (e.g. Manager Performance).
 const DAILY_DEFAULT_SLUGS = new Set<ReportSlug>(['manager-performance']);
@@ -985,6 +1003,10 @@ const STAGE_STYLE: Record<string, string> = {
   available:   'bg-[#dcfce7] text-[#166534]',
   rejected:    'bg-[#fee2e2] text-[#b91c1c]',
   renewed:     'bg-[#dcfce7] text-[#166534]',  // renewal completed — new term already running
+  // A fresh letting commencing this year, NOT a renewal of the sitting tenancy:
+  // the unit had gone vacant and was re-let. Blue rather than the renewal green,
+  // so the two read apart at a glance on the renewal calendar.
+  new_lease:   'bg-[#dbeafe] text-[#1e40af]',
   // contract-status lifecycle (leases-by-year register)
   issued:      'bg-[#dbeafe] text-[#1e40af]',  // signed/issued, term not yet started
   terminated:  'bg-[#fee2e2] text-[#b91c1c]',  // ended early
@@ -1897,7 +1919,7 @@ export function ReportDetailView({
             <div className={fGroup}>
               <span className={fLabel}>Year</span>
               <select className={fSelect} value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Year">
-                {(dataYears ? [...dataYears].reverse() : Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i)).map(y => <option key={y} value={y}>{y}</option>)}
+                {(dataYears ? [...dataYears].reverse() : REPORT_YEARS).map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           )}
@@ -1909,7 +1931,7 @@ export function ReportDetailView({
                 onChange={e => { const v = e.target.value; if (v === 'all') { setFrom(''); setTo(''); } else { setFrom(`${v}-01-01`); setTo(`${v}-12-31`); } }}
                 aria-label="Year">
                 <option value="all">All years</option>
-                {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => <option key={y} value={y}>{y}</option>)}
+                {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           )}
@@ -1919,7 +1941,13 @@ export function ReportDetailView({
               <select className={fSelect} value={leaseWindow}
                 onChange={e => { const w = Number(e.target.value); setLeaseWindow(w); if (urlBase) router.replace(`${urlBase}/lease-expiry?window=${w}`); }}
                 aria-label="Window">
-                {[30, 60, 90, 180, 365].map(w => <option key={w} value={w}>{w} days</option>)}
+                {/* The window runs to the end of the month it lands in, so every
+                    month in view is complete. Naming that month makes the option
+                    self-explanatory — "90 days" alone gave no hint that November
+                    was included whole. */}
+                {[30, 60, 90, 180, 365].map(w => (
+                  <option key={w} value={w}>{`${w} days · to ${monthEndLabel(w)}`}</option>
+                ))}
               </select>
             </div>
           )}
@@ -2092,67 +2120,11 @@ export function ReportDetailView({
                   ))}
                 </select>
               </div>
-              <div className={fGroup}>
-                <span className={fLabel}>Status</span>
-                <select className={fSelect} aria-label="Status" value={csStatus} onChange={e => setCsStatus(e.target.value)}>
-                  <option value="all">All statuses</option>
-                  <option value="renewed">Renewed</option>
-                  <option value="for_signature">For signature</option>
-                  <option value="pending">Pending</option>
-                  <option value="move_out">Move-out</option>
-                </select>
-              </div>
-              <div className={fGroup}>
-                <span className={fLabel}>Stage</span>
-                <select className={fSelect} aria-label="Stage" value={csStage} onChange={e => setCsStage(e.target.value)}>
-                  <option value="all">All stages</option>
-                  <option value="not_started">Not started</option>
-                  <option value="draft">Draft</option>
-                  <option value="notice_sent">Notice sent</option>
-                  <option value="kyc">KYC</option>
-                  <option value="payment_plan">Payment plan</option>
-                  <option value="cheques">Cheques / PDC</option>
-                  <option value="customer_signature">Customer signature</option>
-                  <option value="landlord_signature">Landlord signature</option>
-                  <option value="both_signatures">Both signatures</option>
-                  <option value="registration">Contract Registration</option>
-                  <option value="utility">Utility account</option>
-                  <option value="move_in">Move-in</option>
-                  <option value="ready_to_activate">Ready to activate</option>
-                  <option value="completed">Completed</option>
-                  <option value="termination">Termination acceptance</option>
-                  <option value="move_out_inspection">Move-out inspection</option>
-                  <option value="bill_clearance">Bills cleared</option>
-                  <option value="settlement">Deposit settlement</option>
-                </select>
-              </div>
-              <div className={fGroup}>
-                <span className={fLabel}>Signed by</span>
-                <select className={fSelect} aria-label="Signed by" value={csSignature} onChange={e => setCsSignature(e.target.value)}>
-                  <option value="all">Anyone</option>
-                  <option value="both">Customer &amp; landlord</option>
-                  <option value="customer_only">Customer only</option>
-                  <option value="landlord_only">Landlord only</option>
-                  <option value="none">Neither</option>
-                </select>
-              </div>
-              <div className={fGroup}>
-                <span className={fLabel}>Cheques</span>
-                <select className={fSelect} aria-label="Cheques" value={csCheques} onChange={e => setCsCheques(e.target.value)}>
-                  <option value="all">All</option>
-                  <option value="on_file">On file</option>
-                  <option value="missing">Not recorded</option>
-                </select>
-              </div>
-              <div className={fGroup}>
-                <span className={fLabel}>Registration</span>
-                <select className={fSelect} aria-label="Registration" value={csRegistration} onChange={e => setCsRegistration(e.target.value)}>
-                  <option value="all">All</option>
-                  <option value="completed">Completed</option>
-                  <option value="pending">Pending</option>
-                  <option value="not_applicable">Not applicable</option>
-                </select>
-              </div>
+              {/* Status / Stage / Signed by / Cheques / Registration were removed
+                  from this sheet (3 Aug) — the landlord filters it by Year, Lease
+                  type, Property and Month. The backend still accepts every one of
+                  those query params, so a saved link or a future control keeps
+                  working; only the UI is gone. */}
             </>
           )}
         </>
@@ -2348,7 +2320,7 @@ export function ReportDetailView({
             }}
             className="text-xs font-semibold border border-[#e8e6e0] rounded-lg px-3 py-1.5 bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
             <option value="all">All years</option>
-            {Array.from({ length: CURRENT_YEAR - 2022 }, (_, i) => CURRENT_YEAR - i).map(y => (
+            {REPORT_YEARS.map(y => (
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
@@ -2381,7 +2353,7 @@ export function ReportDetailView({
       {!simpleFilterBar && def.controlKey === 'year' && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Year:</span>
-          {(dataYears ?? Array.from({ length: CURRENT_YEAR - 2021 }, (_, i) => 2023 + i)).map(y => (
+          {(dataYears ?? [...REPORT_YEARS].reverse()).map(y => (
             <button key={y} onClick={() => setYear(y)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
               {y}
