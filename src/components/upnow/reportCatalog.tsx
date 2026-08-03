@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ListChecks, CalendarDays, Activity,
+  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -43,6 +43,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'vacancy-analysis',   title: 'Vacant Units',         description: 'Vacant units with last rent, market rent and asking rent at stake.',              Icon: MapPin,       available: true,  group: 'portfolio' },
   // ── Leasing Activity ───────────────────────────────────────────────────
   { slug: 'leasing-activity',   title: 'Contract Registration Activity', description: 'New leases per month, rent signed, and Contract Registration status.',                 Icon: CalendarClock, available: true, group: 'leasing', hidden: true },
+  { slug: 'contract-status',    title: 'Contract Status - Monthly', description: 'The monthly contract status sheet for a whole year — every month, the contracts turning over that month with property, customer, unit, term, annual rent and cheques, each marked Renewed / For signature / Pending / Move-out, plus the month\'s signed-agreement and Contract Registration counts.', Icon: ClipboardCheck, available: true, group: 'leasing' },
   { slug: 'leases-by-year',     title: 'Leases - Monthly',           description: 'The annual lease register grouped by commencement month — expand a month to see the leases that began then, with customer, unit, term dates, rent and status.', Icon: FileText, available: true, group: 'leasing' },
   { slug: 'new-leases-matrix',  title: 'Lease Summary - Yearly',       description: 'Property × month grid of leases commencing each month of the year (the matrix companion to Contract Registration Activity), with new-lease counts and annual rent per property.', Icon: CalendarClock, available: true, group: 'leasing' },
   { slug: 'lease-revenue-by-year', title: 'Lease Revenue by Year', description: 'Each lease\'s rent allocated to the calendar years its term actually covers — driven by the lease period, not the signing date. One row per lease with a column per year, a Summary-by-Year rollup, renewal chains grouped together, and a 90-day expiry flag for chasing renewals. Exportable to CSV.', Icon: TrendingUp, available: true, group: 'leasing', hidden: true },

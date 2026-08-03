@@ -8,9 +8,9 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
+type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'contract-status' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -38,6 +38,16 @@ interface DrilldownSpec {
   columns: Column[];
   /** Item field whose value is a contract id → row links to the contract. */
   contractIdKey?: string;
+  /** Item field holding a truthy flag: when set, the row's link opens the
+   *  Operations worklist entry rather than the lease page — the record is still
+   *  being progressed there, which is where the work happens. */
+  opsLinkKey?: string;
+  /** When set, the lines are broken into sub-blocks under this field's value —
+   *  e.g. a property sub-heading inside each month. Items must already arrive
+   *  sorted by it. */
+  groupByKey?: string;
+  groupByLabel?: string;
+
 }
 
 interface ReportDef {
@@ -80,6 +90,10 @@ interface ReportDef {
    *  honours an `occupancy=occupied|vacant|all` query param (default all).
    *  Occupied narrows Annual Rent to passing/in-place rent; Vacant to hold-over. */
   occupancyFilter?: boolean;
+  /** Contract Status — expose the derived states (status, who has signed,
+   *  cheques on file, registration) as server-side filters. */
+  contractStatusFilters?: boolean;
+
   /** Turn one column of a flat table into a deep link to the record the row
    *  represents — no drill-down needed. `idKey` is the row field holding the
    *  target id; the cell in `colKey` becomes the link. target 'unit' links are
@@ -112,7 +126,7 @@ interface Column {
   key: string;
   label: string;
   align?: 'left' | 'right' | 'center';
-  type?: 'aed' | 'date' | 'number' | 'bucket' | 'stage' | 'rate' | 'delta';
+  type?: 'aed' | 'date' | 'number' | 'bucket' | 'stage' | 'rate' | 'delta' | 'stack';
   width?: string;
   /** Show this column even when every value is 0 — its 0 is meaningful (e.g. "Days left"). */
   keep?: boolean;
@@ -305,6 +319,67 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'endDate', label: 'End', type: 'date' },
         { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
         { key: 'status', label: 'Status', type: 'stage' },
+      ],
+    },
+  },
+  'contract-status': {
+    title: 'Contract Status - Monthly',
+    tagline: 'Your monthly contract status sheet — all twelve months in one report.',
+    description: 'Every month of the selected year, the contracts turning over in it: a term COMMENCING that month (the new or renewed agreement) or a term whose renewal falls DUE that month — it ended on the last day of the month before — with nothing recorded yet. One line per unit per month; when a new agreement exists it is the line and shows its term, rent and cheques, otherwise the expiring term is shown with its rent carried over. Status reads Renewed (the agreement is executed — the lease is running, or both sides have signed), For signature (the agreement exists but is not fully signed — a customer signature with no landlord counter-signature still counts as out for signature), Pending (the cycle is up and no new agreement has been recorded) or Move-out (the customer is leaving — terminated, vacating at the end, or the renewal was rejected; no rent or cheques carry forward). Customer signed and Landlord signed are shown separately so you can see which side is holding. NO. OF PAYMENTS counts rent cheques actually on file — a payment row only counts once it carries a cheque number, so a renewal still at notice or draft stage with a generated plan and no cheques reads blank and lands in "Awaiting cheques". Contract Registration shows Completed only when the status is registered AND the certificate is on file; a cycle with no new agreement is always pending, since the expiring term\'s certificate does not register the next one. ANNUAL RENT is the month\'s whole book. COLLECTED is rent already banked on that term (cleared cheques), OVERDUE is rent whose cheque date has passed without clearing — actually owed — and UPCOMING is the rest of the term\'s cheques, dated later and not due yet (a term starting in August is paid in October, January and April, so that money is not owed in August). All three describe the term governing the cycle, never the expiring one, so a line with no agreement yet shows neither. A line still at draft or notice stage carries a proposed rent with no cheque behind it — the Awaiting cheques figure counts those, and the Cheques filter isolates them. Use the Month / Status / Stage / Signed by / Cheques / Registration filters to narrow the sheet — every figure in the month headers and the tiles is recomputed for what you filtered to.',
+    endpoint: '/api/reports/contract-status',
+    buildingLeaseFilter: true,
+    contractStatusFilters: true,
+    layout: 'grouped',
+    controlKey: 'year',
+    columns: [
+      { key: 'monthLabel', label: 'Month' },
+      { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
+      { key: 'overdueFils', label: 'Overdue', align: 'right', type: 'aed', keep: true },
+      { key: 'upcomingFils', label: 'Upcoming', align: 'right', type: 'aed' },
+      { key: 'installments', label: 'Cheques', align: 'right', type: 'number' },
+      { key: 'awaitingCheques', label: 'Awaiting cheques', align: 'right', type: 'number', keep: true },
+      { key: 'ejariPending', label: 'Registration pending', align: 'right', type: 'number' },
+      { key: 'moveOuts', label: 'Move-out', align: 'right', type: 'number' },
+    ],
+    totals: [
+      { key: 'contracts', label: 'Contracts', type: 'number', keep: true },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
+      { key: 'collectedFils', label: 'Rent collected', type: 'aed', keep: true },
+      { key: 'overdueFils', label: 'Rent overdue', type: 'aed', keep: true },
+      { key: 'upcomingFils', label: 'Rent upcoming', type: 'aed', keep: true },
+      { key: 'installments', label: 'Cheques on file', type: 'number', keep: true },
+      { key: 'awaitingCheques', label: 'Awaiting cheques', type: 'number', keep: true },
+      { key: 'signed', label: 'Signed agreements', type: 'number', keep: true },
+      { key: 'customerSigned', label: 'Customer signed', type: 'number', keep: true },
+      { key: 'landlordSigned', label: 'Landlord signed', type: 'number', keep: true },
+      { key: 'ejariDone', label: 'Registered', type: 'number', keep: true },
+      { key: 'ejariPending', label: 'Registration pending', type: 'number', keep: true },
+      { key: 'nonEjari', label: 'Not registrable', type: 'number' },
+      { key: 'moveOuts', label: 'Move-out', type: 'number', keep: true },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'monthLabel',
+      countLabel: 'contracts',
+      contractIdKey: 'contractId',
+      // Unit · customer · term ride in one stacked cell and the property is the
+      // block heading, so the pipeline columns get the width.
+      groupByKey: 'buildingName',
+      groupByLabel: 'Property',
+      opsLinkKey: 'inOperations',
+      columns: [
+        { key: 'lease', label: 'Unit · Customer · Term', type: 'stack' },
+        { key: 'leaseType', label: 'Type', type: 'stage' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
+        { key: 'overdueFils', label: 'Overdue', align: 'right', type: 'aed' },
+        { key: 'upcomingFils', label: 'Upcoming', align: 'right', type: 'aed' },
+        { key: 'installments', label: 'No. of payments', align: 'right', type: 'number' },
+        { key: 'signatures', label: 'Signatures', type: 'stage' },
+        { key: 'stage', label: 'Stage', type: 'stage' },
+        { key: 'ejari', label: 'Registration', type: 'stage' },
       ],
     },
   },
@@ -834,6 +909,38 @@ const STAGE_STYLE: Record<string, string> = {
   // contract-status lifecycle (leases-by-year register)
   issued:      'bg-[#dbeafe] text-[#1e40af]',  // signed/issued, term not yet started
   terminated:  'bg-[#fee2e2] text-[#b91c1c]',  // ended early
+  // monthly Contract Status sheet — the live Operations lane the cycle sits in
+  // not_started / draft reuse the neutral greys defined above (same meaning here)
+  notice_sent:        'bg-[#fef3c7] text-[#854d0e]',  // notice with the customer, awaiting acceptance
+  kyc:                'bg-[#e0f2fe] text-[#0369a1]',
+  payment_plan:       'bg-[#e0f2fe] text-[#0369a1]',
+  cheques:            'bg-[#e0e7ff] text-[#3730a3]',
+  customer_signature: 'bg-[#fef3c7] text-[#854d0e]',  // waiting on the customer
+  both_signatures:    'bg-[#fef3c7] text-[#854d0e]',  // neither side has signed
+  // combined Signatures cell — named by who is still outstanding ('signed' reuses
+  // the blue defined above)
+  // new letting vs renewal of the sitting term
+  new:                'bg-[#e0f2fe] text-[#0369a1]',
+  renewal:            'bg-[#ede9fe] text-[#5b21b6]',
+  amendment:          'bg-[#f4f3ef] text-[#6b6860]',
+  awaiting_customer:  'bg-[#fef3c7] text-[#854d0e]',
+  awaiting_landlord:  'bg-[#e0e7ff] text-[#3730a3]',
+  awaiting_both:      'bg-[#fee2e2] text-[#b91c1c]',
+  landlord_signature: 'bg-[#e0e7ff] text-[#3730a3]',  // waiting on you
+  registration:       'bg-[#e0f2fe] text-[#0369a1]',
+  utility:            'bg-[#e0f2fe] text-[#0369a1]',
+  move_in:            'bg-[#e0f2fe] text-[#0369a1]',
+  termination:        'bg-[#fee2e2] text-[#b91c1c]',
+  move_out_inspection:'bg-[#fee2e2] text-[#b91c1c]',
+  bill_clearance:     'bg-[#fee2e2] text-[#b91c1c]',
+  settlement:         'bg-[#fee2e2] text-[#b91c1c]',
+  in_progress:        'bg-[#f4f3ef] text-[#6b6860]',
+  ready_to_activate:  'bg-[#dbeafe] text-[#1e40af]',
+  // monthly Contract Status sheet — the cycle's state and its registration
+  for_signature:  'bg-[#dbeafe] text-[#1e40af]',  // new agreement out, not signed yet
+  move_out:       'bg-[#fee2e2] text-[#b91c1c]',  // customer leaving — nothing carries forward
+  completed:      'bg-[#dcfce7] text-[#166534]',  // Contract Registration done (certificate on file)
+  not_applicable: 'bg-[#f4f3ef] text-[#6b6860]',  // registration doesn't apply to this contract
   // security-deposit lifecycle
   holding:            'bg-[#dbeafe] text-[#1e40af]',  // held against a live lease
   pending_settlement: 'bg-[#fef3c7] text-[#854d0e]',  // lease ended → refund/deduct it
@@ -880,6 +987,18 @@ function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
     return v > 0
       ? <span className="text-red-600 inline-flex items-center gap-1"><TrendingDown size={11} /> {fmtAed(Math.abs(v))}</span>
       : <span className="text-[#1a7a5a] inline-flex items-center gap-1"><TrendingUp size={11} /> {fmtAed(Math.abs(v))}</span>;
+  }
+  // Several fields folded into one cell — newline-separated, first line leads.
+  if (type === 'stack') {
+    const lines = String(value).split('\n').filter(Boolean);
+    return (
+      <span className="block leading-snug">
+        <span className="block font-medium text-[#1a1916]">{lines[0]}</span>
+        {lines.slice(1).map((l, i) => (
+          <span key={i} className={`block ${i === 0 ? 'text-[#4a4742]' : 'text-[11px] text-[#9b9890]'}`}>{l}</span>
+        ))}
+      </span>
+    );
   }
   if (type === 'bucket') {
     const cls = BUCKET_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
@@ -941,6 +1060,7 @@ export function ReportDetailView({
   urlBase,
 }: ReportDetailViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const sp = useSearchParams();
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
@@ -977,6 +1097,15 @@ export function ReportDetailView({
   const [occupancy, setOccupancy] = useState<'all' | 'occupied' | 'vacant'>(
     () => (sp?.get('occupancy') === 'all' ? 'all' : sp?.get('occupancy') === 'vacant' ? 'vacant' : 'occupied'),
   );
+  // Contract Status: the derived states as filters (status / who has signed /
+  // cheques on file / registration). All default to 'all' and are only sent when
+  // narrowed, so a bare link always shows the whole sheet.
+  const [csStatus, setCsStatus] = useState<string>(() => sp?.get('cstatus') ?? 'all');
+  const [csSignature, setCsSignature] = useState<string>(() => sp?.get('signature') ?? 'all');
+  const [csCheques, setCsCheques] = useState<string>(() => sp?.get('cheques') ?? 'all');
+  const [csRegistration, setCsRegistration] = useState<string>(() => sp?.get('registration') ?? 'all');
+  const [csStage, setCsStage] = useState<string>(() => sp?.get('stage') ?? 'all');
+  const [csMonth, setCsMonth] = useState<string>(() => sp?.get('month') ?? 'all');
   const [drill, setDrill] = useState<Record<string, unknown> | null>(null);
   const [drillFilter, setDrillFilter] = useState<string | null>(null);
   const [vacantList, setVacantList] = useState<{ title: string; units: VacantUnit[] } | null>(null);
@@ -986,8 +1115,17 @@ export function ReportDetailView({
   // Fee-taxation building + leasing-model filters. [] buildings = all; lease
   // types default to both selected (= all). Inline reclassify bumps refreshTick
   // to refetch so the rows reflect the building's new leasing model.
-  const [selectedBuildings, setSelectedBuildings] = useState<number[]>([]);
-  const [selectedLeaseTypes, setSelectedLeaseTypes] = useState<LeaseType[]>([...ALL_LEASE_TYPES]);
+  // Seeded from the address so a refresh restores the property / leasing-model
+  // choice along with the rest of the filters.
+  const [selectedBuildings, setSelectedBuildings] = useState<number[]>(
+    () => (sp?.get('buildings') ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0),
+  );
+  const [selectedLeaseTypes, setSelectedLeaseTypes] = useState<LeaseType[]>(() => {
+    const raw = (sp?.get('leaseTypes') ?? '').split(',').filter(Boolean) as LeaseType[];
+    const picked = raw.filter(t => (ALL_LEASE_TYPES as readonly string[]).includes(t));
+    return picked.length ? picked : [...ALL_LEASE_TYPES];
+  });
+
   const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
   const [classifyingId, setClassifyingId] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -1060,13 +1198,45 @@ export function ReportDetailView({
     if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
     if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
     if (def.occupancyFilter) url += (url.includes('?') ? '&' : '?') + 'occupancy=' + occupancy;
+    if (def.contractStatusFilters) {
+      const st = new URLSearchParams();
+      if (csStatus !== 'all') st.set('cstatus', csStatus);
+      if (csSignature !== 'all') st.set('signature', csSignature);
+      if (csCheques !== 'all') st.set('cheques', csCheques);
+      if (csRegistration !== 'all') st.set('registration', csRegistration);
+      if (csStage !== 'all') st.set('stage', csStage);
+      if (csMonth !== 'all') st.set('month', csMonth);
+      const q = st.toString();
+      if (q) url += (url.includes('?') ? '&' : '?') + q;
+    }
     if (extraQuery) url += (url.includes('?') ? '&' : '?') + extraQuery;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+
+  // Keep the chosen filters in the URL. A refresh — or a link pasted to someone
+  // else — then lands on the same view instead of resetting to the default. Only
+  // narrowed values are written, so a clean report keeps a clean address.
+  useEffect(() => {
+    if (!def?.contractStatusFilters || !pathname) return;
+    const qs = new URLSearchParams();
+    if (csMonth !== 'all') qs.set('month', csMonth);
+    if (csStatus !== 'all') qs.set('cstatus', csStatus);
+    if (csStage !== 'all') qs.set('stage', csStage);
+    if (csSignature !== 'all') qs.set('signature', csSignature);
+    if (csCheques !== 'all') qs.set('cheques', csCheques);
+    if (csRegistration !== 'all') qs.set('registration', csRegistration);
+    if (def.controlKey === 'year') qs.set('year', String(year));
+    if (selectedBuildings.length) qs.set('buildings', selectedBuildings.join(','));
+    if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
+      qs.set('leaseTypes', selectedLeaseTypes.join(','));
+    const next = qs.toString();
+    if (next === (sp?.toString() ?? '')) return;
+    router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
+  }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, selectedBuildings, selectedLeaseTypes]);
 
   // Close the building filter menu on an outside click.
   useEffect(() => {
@@ -1217,8 +1387,12 @@ export function ReportDetailView({
     return data.rows
       .map(row => {
         const items = (row[dd.childKey] as Record<string, unknown>[] | undefined) ?? [];
+        // The sub-group value (e.g. the property) is a heading, not a column —
+        // search it too, or filtering by building would find nothing.
+        const searchKeys = [...dd.columns.map(c => c.key), ...(dd.groupByKey ? [dd.groupByKey] : [])];
         const matched = !needle ? items : items.filter(it =>
-          dd.columns.some(c => String(it[c.key] ?? '').toLowerCase().includes(needle)));
+          searchKeys.some(k => String(it[k] ?? '').toLowerCase().includes(needle)));
+
         // When a search is active, recompute the header summary columns from the
         // visible (matched) items so the month chips equal the rows shown beneath:
         // a count column → number of matched rows; a money column → their sum.
@@ -1391,6 +1565,8 @@ export function ReportDetailView({
     const fmtCell = (raw: unknown, type?: Column['type']) => {
       if (type === 'aed' || type === 'delta') return raw == null ? '' : (Number(raw) / 100).toFixed(2);
       if (type === 'date') return raw ? new Date(String(raw)).toISOString().slice(0, 10) : '';
+      // A stacked cell would break the row across lines in a spreadsheet.
+      if (type === 'stack') return raw == null ? '' : String(raw).split('\n').join(' · ');
       return raw ?? '';
     };
 
@@ -1494,10 +1670,19 @@ export function ReportDetailView({
     // Grouped layout: export one row per child lease, prefixed with its group.
     if (def.layout === 'grouped' && def.drilldown) {
       const dd = def.drilldown;
-      const headers = [dd.titleLabel ?? 'Month', ...dd.columns.map(c => c.label)];
+      const headers = [
+        dd.titleLabel ?? 'Month',
+        ...(dd.groupByKey ? [dd.groupByLabel ?? 'Group'] : []),
+        ...dd.columns.map(c => c.label),
+      ];
       const rows = groups.flatMap(g =>
-        g.items.map(it => [String(g.row[dd.titleKey] ?? ''), ...dd.columns.map(c => fmtCell(it[c.key], c.type))]),
+        g.items.map(it => [
+          String(g.row[dd.titleKey] ?? ''),
+          ...(dd.groupByKey ? [String(it[dd.groupByKey] ?? '')] : []),
+          ...dd.columns.map(c => fmtCell(it[c.key], c.type)),
+        ]),
       );
+
       downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
       return;
     }
@@ -1712,6 +1897,81 @@ export function ReportDetailView({
                 <option value="terminated">Terminated</option>
               </select>
             </div>
+          )}
+          {def.contractStatusFilters && (
+            <>
+              <div className={fGroup}>
+                <span className={fLabel}>Month</span>
+                <select className={fSelect} aria-label="Month" value={csMonth} onChange={e => setCsMonth(e.target.value)}>
+                  <option value="all">All months</option>
+                  {['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                    'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                    <option key={m} value={String(i + 1)}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Status</span>
+                <select className={fSelect} aria-label="Status" value={csStatus} onChange={e => setCsStatus(e.target.value)}>
+                  <option value="all">All statuses</option>
+                  <option value="renewed">Renewed</option>
+                  <option value="for_signature">For signature</option>
+                  <option value="pending">Pending</option>
+                  <option value="move_out">Move-out</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Stage</span>
+                <select className={fSelect} aria-label="Stage" value={csStage} onChange={e => setCsStage(e.target.value)}>
+                  <option value="all">All stages</option>
+                  <option value="not_started">Not started</option>
+                  <option value="draft">Draft</option>
+                  <option value="notice_sent">Notice sent</option>
+                  <option value="kyc">KYC</option>
+                  <option value="payment_plan">Payment plan</option>
+                  <option value="cheques">Cheques / PDC</option>
+                  <option value="customer_signature">Customer signature</option>
+                  <option value="landlord_signature">Landlord signature</option>
+                  <option value="both_signatures">Both signatures</option>
+                  <option value="registration">Contract Registration</option>
+                  <option value="utility">Utility account</option>
+                  <option value="move_in">Move-in</option>
+                  <option value="ready_to_activate">Ready to activate</option>
+                  <option value="completed">Completed</option>
+                  <option value="termination">Termination acceptance</option>
+                  <option value="move_out_inspection">Move-out inspection</option>
+                  <option value="bill_clearance">Bills cleared</option>
+                  <option value="settlement">Deposit settlement</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Signed by</span>
+                <select className={fSelect} aria-label="Signed by" value={csSignature} onChange={e => setCsSignature(e.target.value)}>
+                  <option value="all">Anyone</option>
+                  <option value="both">Customer &amp; landlord</option>
+                  <option value="customer_only">Customer only</option>
+                  <option value="landlord_only">Landlord only</option>
+                  <option value="none">Neither</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Cheques</span>
+                <select className={fSelect} aria-label="Cheques" value={csCheques} onChange={e => setCsCheques(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="on_file">On file</option>
+                  <option value="missing">Not recorded</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Registration</span>
+                <select className={fSelect} aria-label="Registration" value={csRegistration} onChange={e => setCsRegistration(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="completed">Completed</option>
+                  <option value="pending">Pending</option>
+                  <option value="not_applicable">Not applicable</option>
+                </select>
+              </div>
+            </>
           )}
           {def.occupancyFilter && (
             <div className={fGroup}>
@@ -2035,9 +2295,12 @@ export function ReportDetailView({
                   className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left hover:bg-[#fafaf8] print:hover:bg-transparent">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <ChevronRight size={16} className={`text-[#9b9890] transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
-                    <span className={`text-sm font-bold ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`}>{String(g.row[dd.titleKey] ?? '')}</span>
+                    <span className={`text-sm font-bold whitespace-nowrap ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`}>{String(g.row[dd.titleKey] ?? '')}</span>
                   </div>
-                  <div className="flex items-center gap-4 shrink-0">
+                  {/* Wraps rather than overflowing — a report with many summary
+                      figures would otherwise push the last ones off the edge. */}
+                  <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 min-w-0">
+
                     {def.columns.filter(c => c.key !== dd.titleKey).map(c => (
                       <span key={c.key} className="text-xs whitespace-nowrap hidden sm:inline">
                         <span className="text-[#9b9890]">{c.label}: </span>
@@ -2059,8 +2322,23 @@ export function ReportDetailView({
                         </tr>
                       </thead>
                       <tbody>
-                        {g.items.map((it, idx) => (
-                          <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        {g.items.map((it, idx) => {
+                          // Sub-heading whenever the grouped-by value changes.
+                          const prev = idx > 0 ? g.items[idx - 1] : null;
+                          const subHead = dd.groupByKey && (!prev || prev[dd.groupByKey] !== it[dd.groupByKey])
+                            ? String(it[dd.groupByKey] ?? '—')
+                            : null;
+                          const span = dd.columns.length + (dd.contractIdKey ? 1 : 0);
+                          return (
+                          <Fragment key={`b${idx}`}>
+                          {subHead && (
+                            <tr className="border-t border-[#e3e0d9] bg-[#faf9f6]">
+                              <td colSpan={span} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#6b6860]">
+                                {subHead}
+                              </td>
+                            </tr>
+                          )}
+                          <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                             {dd.columns.map(c => (
                               <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
                                 <CellValue value={it[c.key]} type={c.type} />
@@ -2068,18 +2346,27 @@ export function ReportDetailView({
                             ))}
                             {dd.contractIdKey && (
                               <td className="px-3 py-2.5 text-right print:hidden">
-                                {it[dd.contractIdKey] != null && (
-                                  <Link
-                                    href={`${contractsBase}/${it[dd.contractIdKey]}/v2`}
-                                    className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
-                                    title="Open contract">
-                                    Open <ExternalLink size={12} />
-                                  </Link>
-                                )}
+                                {it[dd.contractIdKey] != null && (() => {
+                                  // While the record is still on the Operations
+                                  // worklist, that is where the work happens.
+                                  const inOps = !!(dd.opsLinkKey && it[dd.opsLinkKey]);
+                                  return (
+                                    <Link
+                                      href={inOps
+                                        ? `${contractsBase.replace(/\/contracts$/, '/operations')}/${it[dd.contractIdKey]}`
+                                        : `${contractsBase}/${it[dd.contractIdKey]}/v2`}
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                                      title={inOps ? 'Open in Operations' : 'Open contract'}>
+                                      {inOps ? 'Operations' : 'Open'} <ExternalLink size={12} />
+                                    </Link>
+                                  );
+                                })()}
                               </td>
                             )}
                           </tr>
-                        ))}
+                          </Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
