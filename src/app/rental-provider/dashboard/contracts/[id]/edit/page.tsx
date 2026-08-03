@@ -349,6 +349,10 @@ export default function EditContractPage() {
                     : discountType === 'fixed'   ? Math.min(discRaw, listedNum)
                     : 0;
   const rentNum = Math.max(0, listedNum - discountAmt);
+  // The 2 dp the backend + the numeric(12,2) columns keep. Everything that
+  // validates or SENDS a rent figure uses these, never the raw input.
+  const listedAed = Math.round(listedNum * 100) / 100;
+  const rentAed = Math.round(rentNum * 100) / 100;
   const inst = Number(installments) || 1;
   const chequeAmount = inst > 0 ? rentNum / inst : 0;
   // Rent VAT (commercial/industrial) is collected as SEPARATE VAT cheque(s), so the
@@ -378,8 +382,17 @@ export default function EditContractPage() {
     if (signedLocked) { setError('This contract has been signed and can no longer be edited.'); return; }
     if (!startDate || !endDate) { setError('Start and end dates are required.'); return; }
     if (new Date(startDate) >= new Date(endDate)) { setError('End date must be after the start date.'); return; }
-    if (listedNum <= 0) { setError('Listed rent must be greater than zero.'); return; }
-    if (rentNum <= 0) { setError('The discount cannot be equal to or greater than the rent.'); return; }
+    // A rent-free tenancy is legitimate — staff accommodation, a grace period —
+    // so zero is allowed here. Refusing it is what pushed a landlord to type
+    // 0.001 to get a zero past this check (prod, 3 Aug 2026): a sub-cent value
+    // clears a bare `> 0`, then stores as 0.00 in a numeric(12,2) column, and
+    // the backend's schedule rebuild saw it as positive on the way in and as
+    // nothing on the way out — leaving an ACTIVE lease with no cheques at all.
+    // Validate the 2 dp that actually get SAVED, and let zero through.
+    if (listedAed < 0) { setError('Listed rent cannot be negative.'); return; }
+    // A discount that cancels the whole rent is a data-entry slip; a genuinely
+    // rent-free lease is entered as a zero rent, not as a 100% discount.
+    if (discountType !== 'none' && rentAed <= 0) { setError('The discount cannot be equal to or greater than the rent.'); return; }
     setSaving(true);
     try {
       const opt = (v: string) => (v.trim() === '' ? undefined : Number(v));
@@ -390,7 +403,7 @@ export default function EditContractPage() {
         contractEndDate: endDate,
         // Send listed rent + discount; the backend recomputes net annual rent =
         // contract value = listed − discount. discountType:null clears a discount.
-        listedRent: listedNum,
+        listedRent: listedAed,
         discountType: discountType === 'none' ? null : discountType,
         discountValue: discountType === 'none' ? 0 : discRaw,
         securityDepositAmount: opt(securityDeposit),
