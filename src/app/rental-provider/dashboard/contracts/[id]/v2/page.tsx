@@ -2804,6 +2804,15 @@ function DetailsDrawer({
   // restated the agreed rent (contract 81: a 77,000 lease shown as 78,000).
   const grandDeposit = contract.contractType === 'renewal' ? 0 : (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0);
   const paymentsGrandTotal = grandDeposit + rentGross + managementFeeTotal + thirdPartyTotal;
+  // What the tenancy was AGREED at, split back out of the grand total above. A
+  // penalty is real money and belongs in the ledger, but rolling it into a single
+  // figure meant a bounced cheque silently restated the rent: contract 81, a 77,000
+  // lease, totalled 78,000 because of two 500 penalties. Showing both — agreed, plus
+  // what the lease has since incurred — keeps the arithmetic honest AND keeps the
+  // agreed figure legible, instead of making the reader choose which one is a lie.
+  const incurredChargesTotal = feeRows.reduce(
+    (s, f) => s + (feeActive(f) && INCURRED_FEE_TYPES.has(f.paymentType ?? '') ? (f.amount || 0) : 0), 0);
+  const leaseAgreedTotal = paymentsGrandTotal - incurredChargesTotal;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
   //    assembled from the contract's recorded rent cheques, fees, and deposit.
   //    Replaces the old origin-lead "offer" snapshot in the receipt modal.
@@ -3686,10 +3695,28 @@ function DetailsDrawer({
                     )}
                   </div>
 
-                  {/* Grand total — all four segments summed (deposit · rent · management · third party) */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
-                    <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(paymentsGrandTotal)}</span>
+                  {/* Grand total — all four segments summed (deposit · rent · management · third party).
+                      When the lease has incurred penalties, the agreed figure is shown
+                      above it: one number cannot answer both "what was this agreed at?"
+                      and "what has been charged on it?", and collapsing them let a
+                      bounced cheque restate the rent. */}
+                  <div style={{ marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+                    {incurredChargesTotal > 0 && (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 7 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Lease Total</span>
+                          <span style={{ fontSize: 13.5, fontWeight: 700, color: '#1a1916', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(leaseAgreedTotal)}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 9, borderBottom: '1px dashed #cfdcd6' }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: '#6b6860' }}>Charges incurred</span>
+                          <span style={{ fontSize: 13.5, fontWeight: 700, color: '#b3541e', fontVariantNumeric: 'tabular-nums' }}>+ {fmtAed(incurredChargesTotal)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: incurredChargesTotal > 0 ? 9 : 0 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
+                      <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(paymentsGrandTotal)}</span>
+                    </div>
                   </div>
 
                   {/* Record-payment popup (Flow 1) */}
