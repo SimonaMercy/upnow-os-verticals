@@ -52,11 +52,15 @@ const GROUPS: { key: 'kyc' | 'financial' | 'contract' | 'other'; label: string }
   { key: 'other',     label: 'Other documents' },
 ];
 
-export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, onClose }: {
+export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, rp, onClose }: {
   /** Needed when `documents` isn't preloaded — the modal fetches the customer detail itself. */
   tenantId?: number | null;
   tenantName?: string | null;
   documents?: CustomerDoc[];
+  /** Manager view: the landlord this record belongs to, when the host page already
+   *  knows it (e.g. the contract's landlord). Beats the ?rp= query param, which is
+   *  empty under "All landlords". */
+  rp?: number | string | null;
   /** When provided, documents are grouped per lease (ref + period) instead of by category. */
   leases?: LeaseMeta[];
   /** Hide KYC docs (e.g. the tenant page already shows them in its own section). */
@@ -77,12 +81,15 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isManager = (pathname ?? '').startsWith('/dashboard/manager');
-  const rpParam = searchParams.get('rp');
+  // Under "All landlords" there is no ?rp= to scope by. Prefer the landlord the
+  // host page already resolved from the record; otherwise send no rp at all and
+  // let the backend resolve it from the customer (an empty rp= is a 400).
+  const rpParam = (rp != null && rp !== '' ? String(rp) : null) ?? searchParams.get('rp');
 
   useEffect(() => {
     if (docs || !tenantId) return;
     const url = isManager
-      ? `/api/manager/tenants/${tenantId}?rp=${rpParam ?? ''}`
+      ? `/api/manager/tenants/${tenantId}${rpParam ? `?rp=${rpParam}` : ''}`
       : `/api/contracts/tenants/${tenantId}`;
     fetch(url, { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status === 403 ? 'Not available for this account.' : `Error ${r.status}`)))

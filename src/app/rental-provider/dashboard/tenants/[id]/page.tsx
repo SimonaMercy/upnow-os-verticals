@@ -66,6 +66,9 @@ type CustomerDetail = {
   leases: Lease[];
   notes?: Note[];
   documents: Doc[];
+  /** Manager view only: the landlord the backend scoped this record to. Set even
+   *  when we asked without ?rp= (manager on "All landlords"). */
+  rpId?: number;
 };
 
 const fmtAed = (n: number | null | undefined) => `AED ${Number(n ?? 0).toLocaleString('en-AE')}`;
@@ -148,18 +151,24 @@ export default function CustomerDetailPage() {
   const isManager = (pathname ?? '').startsWith('/dashboard/manager');
   const rpParam = searchParams.get('rp');
   const listHref = isManager ? '/dashboard/manager/tenants' : '/rental-provider/dashboard/tenants';
+  // "All landlords" leaves ?rp= empty. Send NO rp rather than an empty one — the
+  // read endpoint then resolves the landlord from the customer record itself and
+  // echoes it back as `rpId` (see rpScopeForCustomer).
   const detailUrl = isManager
-    ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
+    ? `/api/manager/tenants/${params?.id}${rpParam ? `?rp=${rpParam}` : ''}`
     : `/api/contracts/tenants/${params?.id}`;
+  const [data, setData] = useState<CustomerDetail | null>(null);
+  // Writes and cross-page links still carry an explicit landlord: the one from the
+  // switcher, else the one the detail fetch resolved.
+  const rpScope = rpParam || (data?.rpId != null ? String(data.rpId) : '');
   const editUrl = isManager
-    ? `/api/manager/tenants/${params?.id}?rp=${rpParam ?? ''}`
+    ? `/api/manager/tenants/${params?.id}?rp=${rpScope}`
     : `/api/contracts/tenants/${params?.id}`;
   // Contract "View" links must stay inside whichever portal we're rendered in.
   // Managers scope the (RP-only) contract page via /manager + ?rp=<landlord>.
   const contractHref = (leaseId: number | string) => isManager
-    ? `/dashboard/manager/contracts/${leaseId}/v2?rp=${rpParam ?? ''}`
+    ? `/dashboard/manager/contracts/${leaseId}/v2${rpScope ? `?rp=${rpScope}` : ''}`
     : `/rental-provider/dashboard/contracts/${leaseId}/v2`;
-  const [data, setData] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -231,7 +240,7 @@ export default function CustomerDetailPage() {
       // the chain is a valid target — the backend resolves the shared journal.
       // Manager acts on the landlord-scoped endpoint (?rp=) via /api/manager/*.
       const res = await fetch(
-        isManager ? `/api/manager/contracts/${noteLeaseId}/notes?rp=${rpParam ?? ''}` : `/api/contracts/${noteLeaseId}/notes`, {
+        isManager ? `/api/manager/contracts/${noteLeaseId}/notes?rp=${rpScope}` : `/api/contracts/${noteLeaseId}/notes`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: text }),

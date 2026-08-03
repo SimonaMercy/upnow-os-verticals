@@ -4077,6 +4077,9 @@ function DetailsDrawer({
                 <CustomerDocsModal
                   tenantId={contract.tenant.id}
                   tenantName={contract.tenant.name}
+                  /* Manager on "All landlords": scope the fetch by THIS contract's
+                     landlord instead of the (empty) ?rp= query param. */
+                  rp={contract.landlord?.id ?? null}
                   onClose={() => setShowDocsHistory(false)}
                 />
               )}
@@ -6247,7 +6250,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // the rp scope from ?rp= falling back to the contract's landlord id). The
   // backend already 403s a manager who lacks the flag — this just hides the
   // button so they never see an action they can't take.
-  const rpScope = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
+  // `?rp=` arrives EMPTY (not absent) when the manager is on "All landlords", so
+  // fall back on falsy — `??` would keep the empty string and gate every action off.
+  const rpScope = searchParams.get('rp') || (contract.landlord?.id != null ? String(contract.landlord.id) : '');
   const mgrCan = (flag: Parameters<typeof managerCanForRp>[0]) =>
     !isManagerView || (rpScope !== '' && managerCanForRp(flag, Number(rpScope)));
   const perms: ActorPerms = {
@@ -6553,7 +6558,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 the executed agreement is read-only). For a manager the rp scope is
                 carried so the edit page's customer picker reads /manager/tenants/*?rp=. */}
             {showPipeline && contract.status !== 'terminated' && !editLocked && (() => {
-              const rpForEdit = searchParams.get('rp') ?? (contract.landlord?.id != null ? String(contract.landlord.id) : '');
+              // `||` not `??` — "All landlords" sends an EMPTY ?rp=, not a missing one.
+              const rpForEdit = searchParams.get('rp') || (contract.landlord?.id != null ? String(contract.landlord.id) : '');
               const canEdit = !isManagerView
                 || (rpForEdit !== '' && managerCanForRp('canManageAgreements', Number(rpForEdit)));
               if (!canEdit) return null;
