@@ -10,9 +10,11 @@
  */
 import { CalendarClock, Loader2 } from 'lucide-react';
 
-export function DocExpiryField({ value, onChange, saving, disabled, className, autoFocus }: {
+export function DocExpiryField({ value, onChange, onCommit, saving, disabled, className, autoFocus }: {
   value: string;
   onChange: (v: string) => void;
+  /** Fired on blur — the point the entered date has settled and can be saved. */
+  onCommit?: (v: string) => void;
   saving?: boolean;
   disabled?: boolean;
   className?: string;
@@ -30,6 +32,7 @@ export function DocExpiryField({ value, onChange, saving, disabled, className, a
           disabled={disabled}
           autoFocus={autoFocus}
           onChange={e => onChange(e.target.value)}
+          onBlur={e => onCommit?.(e.target.value)}
           className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30 disabled:opacity-50"
         />
         {saving && <Loader2 size={13} className="animate-spin text-[#9b9890]" />}

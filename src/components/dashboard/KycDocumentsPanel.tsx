@@ -245,8 +245,11 @@ export function KycDocumentsPanel({
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
-  const load = () => {
-    setLoading(true);
+  // `silent` refetches without the skeleton. Saving an expiry reloads while the
+  // field is still focused — flipping `loading` there replaces the whole panel
+  // and throws away the date being typed.
+  const load = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     setLoadError(false);
     apiGet<KycData>(profileApiPath)
       .then(setData)
@@ -254,7 +257,7 @@ export function KycDocumentsPanel({
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, [profileApiPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [profileApiPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Browser Back closes the document viewer instead of navigating away; ESC /
   // backdrop / X route through the same path. Active only while it is open.
@@ -276,18 +279,33 @@ export function KycDocumentsPanel({
     fileInputRef.current?.click();
   };
 
-  // Update the per-doc expiry. Persist immediately to a doc already on file; a
-  // not-yet-uploaded slot keeps it in state and sends it with the upload.
-  const handleExpiryChange = async (item: KycChecklistItem, v: string) => {
+  // Update the per-doc expiry. Persist to a doc already on file; a not-yet-uploaded
+  // slot keeps it in state and sends it with the upload.
+  //
+  // A native date input fires onChange on EVERY segment touched and reports '' until
+  // day, month and year are all filled — saving on each of those events reloaded the
+  // panel mid-edit and wiped the half-typed date. So the value is committed only once
+  // it settles: a beat after the last keystroke, or on blur.
+  const expiryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const savedExpiry = useRef<Record<string, string>>({});
+
+  const commitExpiry = async (item: KycChecklistItem, v: string) => {
+    clearTimeout(expiryTimers.current[item.key]);
+    if (item.documentId == null) return;
+    if ((savedExpiry.current[item.key] ?? toDateInput(item.expiryDate)) === v) return;
+    setExpirySaving(item.key);
+    try {
+      await apiPatch(`/documents/${item.documentId}`, { expiryDate: v || null });
+      savedExpiry.current[item.key] = v;
+      load({ silent: true });
+    } catch { /* leave the entered value; the next upload will carry it */ }
+    finally { setExpirySaving(null); }
+  };
+
+  const handleExpiryChange = (item: KycChecklistItem, v: string) => {
     setExpiryByKey((p) => ({ ...p, [item.key]: v }));
-    if (item.documentId != null) {
-      setExpirySaving(item.key);
-      try {
-        await apiPatch(`/documents/${item.documentId}`, { expiryDate: v || null });
-        load();
-      } catch { /* leave the entered value; the next upload will carry it */ }
-      finally { setExpirySaving(null); }
-    }
+    clearTimeout(expiryTimers.current[item.key]);
+    expiryTimers.current[item.key] = setTimeout(() => { void commitExpiry(item, v); }, 700);
   };
 
   // Expiry UI for a doc row — shown only for identity / licence docs. When a
@@ -317,7 +335,7 @@ export function KycDocumentsPanel({
     }
     return (
       <div className={indentClass}>
-        <DocExpiryField value={expiry} onChange={(v) => handleExpiryChange(item, v)} saving={expirySaving === item.key} className="mt-2" />
+        <DocExpiryField value={expiry} onChange={(v) => handleExpiryChange(item, v)} onCommit={(v) => { void commitExpiry(item, v); }} saving={expirySaving === item.key} className="mt-2" />
       </div>
     );
   };
@@ -540,7 +558,7 @@ export function KycDocumentsPanel({
           </p>
           <button
             type="button"
-            onClick={load}
+            onClick={() => load()}
             className="mt-1 text-sm underline underline-offset-2"
             style={{ color: "var(--color-primary)" }}
           >

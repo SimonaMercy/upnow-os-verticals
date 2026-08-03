@@ -173,9 +173,12 @@ export default function CustomerDetailPage() {
   // backfill; the override never drops below the derived count (those docs exist).
   const [occupantOverride, setOccupantOverride] = useState<number | null>(null);
 
-  const load = useCallback(() => {
+  // `silent` refetches in the background. A popup that saves (KYC expiry, upload)
+  // asks for fresh data while it is still open — flipping `loading` there would
+  // swap the whole page for "Loading customer…" and unmount the popup mid-edit.
+  const load = useCallback((opts?: { silent?: boolean }) => {
     if (!params?.id) return;
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     fetch(detailUrl, { credentials: 'include' })
       .then(r => { if (!r.ok) throw new Error(r.status === 403 ? 'This customer has no contracts with this landlord.' : `Error ${r.status}`); return r.json() as Promise<CustomerDetail>; })
       .then(setData)
@@ -1156,7 +1159,7 @@ export default function CustomerDetailPage() {
           ownerId={Number(params.id)}
           slots={uploadDoc.slots}
           onClose={() => setUploadDoc(null)}
-          onChanged={load}
+          onChanged={() => load({ silent: true })}
         />
       )}
 
