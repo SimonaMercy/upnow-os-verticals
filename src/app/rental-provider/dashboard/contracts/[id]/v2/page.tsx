@@ -2223,6 +2223,12 @@ const RULE_FEE_DEFS: { pt: string; label: string; feeK: string; pctK: string; mo
   { pt: 'unit_transfer_fee', label: 'Unit transfer', feeK: 'unitTransferFee', pctK: 'unitTransferPct' },
 ];
 const RULE_FEE_LABELS: Record<string, string> = Object.fromEntries(RULE_FEE_DEFS.map(d => [d.pt, d.label]));
+/** Charges the tenancy INCURS along the way — a bounced cheque, a late renewal, a
+ *  replacement access card. Real money, and they belong in the ledger; but they are
+ *  not part of what the tenancy was CONTRACTED to pay, so the pass leaves them out
+ *  of "Total payable" (contract 81 read AED 78,000 for a lease agreed at 77,000,
+ *  the extra 1,000 being two bounced-cheque penalties and no leasing fee at all). */
+const INCURRED_FEE_TYPES = new Set<string>(RULE_FEE_DEFS.map(d => d.pt));
 
 /* ── Payment segmentation — ONE source of truth ────────────────────────────
  * The plan table, the receipts and the live-lease summary must never disagree
@@ -2640,7 +2646,7 @@ function DetailsDrawer({
     ...(feesVatPaymentRows as typeof feeRows),
   ];
   // Bounced / cancelled cheques are void — excluded from every section total and the
-  // grand total, exactly as the header's Total payable does, so the two never diverge.
+  // grand total, the same rule the header pass applies to the rent.
   const managementFeeTotal = managementFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0);
   const otherActiveGross = otherPaymentRows.reduce((s, p) => s + (feeActive(p) ? (p.amount || 0) : 0), 0);
   const thirdPartyTotal = thirdPartyFeeRows.reduce((s, f) => s + (feeActive(f) ? (f.amount || 0) : 0), 0) + otherActiveGross;
@@ -2785,9 +2791,17 @@ function DetailsDrawer({
   const rentVat   = rentScheduleRows.reduce((s, p) => s + (countsToTotal(p) ? (p.vatAmount || 0) : 0), 0);
   const rentNet   = rentGross - rentVat;
   const showVat   = (contract.rentVatRate ?? 0) > 0 || rentVat > 0;
-  // All four segments summed — identical to the header pass's "Total payable" so the two
-  // never disagree: rent + management + third party, plus the deposit ONLY when it is this
-  // contract's own (a renewal carries it forward, never re-collected → excluded here too).
+  // All four segments summed: rent + management + third party, plus the deposit ONLY
+  // when it is this contract's own (a renewal carries it forward, never re-collected
+  // → excluded here too).
+  //
+  // This is the LEDGER total — everything charged on the lease, penalties included —
+  // so it exceeds the header pass's "Total payable" whenever the tenancy has incurred
+  // one. That is deliberate: the pass states what the tenancy was AGREED at, this
+  // states what it has been CHARGED. The pass prints the difference underneath
+  // ("+ X charges incurred") so the gap reads as an answer rather than a discrepancy.
+  // They used to be forced equal, which meant a bounced-cheque penalty silently
+  // restated the agreed rent (contract 81: a 77,000 lease shown as 78,000).
   const grandDeposit = contract.contractType === 'renewal' ? 0 : (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0);
   const paymentsGrandTotal = grandDeposit + rentGross + managementFeeTotal + thirdPartyTotal;
   // ── Current payment plan (live) — what the customer is actually paying NOW,
@@ -5357,7 +5371,14 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
   const nonDeposit = rows.filter(p => p.paymentType !== 'security_deposit');
   const otherItems = nonDeposit.filter(p => p.paymentType === 'other');
   const rentItems = nonDeposit.filter(p => p.paymentType !== 'other');
-  const feeItems = contract.fees ?? [];
+  // The pass answers "what was this tenancy agreed at?", so only CONTRACTED fees
+  // count — admin, Contract Registration, commission. Penalties and mid-lease
+  // charges are money the lease incurred later; they stay in the ledger below
+  // (and in its grand total, which answers the different question "what has been
+  // charged on this lease?") but must not restate the agreed figure.
+  const allFeeItems = contract.fees ?? [];
+  const feeItems = allFeeItems.filter(f => !INCURRED_FEE_TYPES.has(f.paymentType ?? ''));
+  const incurredGross = g(allFeeItems.filter(f => INCURRED_FEE_TYPES.has(f.paymentType ?? '')));
   const computedRentVat = contract.rentVatRate ? Math.round((contract.annualRent || 0) * Number(contract.rentVatRate)) / 100 : 0;
   const hasRentRows = rentItems.length > 0;
   const rentGross = hasRentRows ? g(rentItems) : (contract.annualRent || 0) + computedRentVat;
@@ -5430,6 +5451,10 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
             {!isRenewal && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Security deposit</span><b style={{ color: 'var(--ink)' }}>{deposit > 0 ? aed(deposit) : '—'}</b></div>}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px dashed var(--mist-strong)', paddingTop: 4, marginTop: 2 }}><span style={{ fontWeight: 700 }}>Total payable</span><b style={{ color: 'var(--jade-deep)', fontSize: 13 }}>{aed(totalPayable)}</b></div>
             {totalVat > 0 && <div style={{ fontSize: 9, color: 'var(--mute)', textAlign: 'right' }}>incl. {aed(totalVat)} VAT</div>}
+            {/* The ledger's grand total below legitimately exceeds this one when the
+                lease has incurred penalties. Say so, or the two figures read as a
+                bug and someone "fixes" the pass back into overstating the rent. */}
+            {incurredGross > 0 && <div style={{ fontSize: 9, color: 'var(--mute)', textAlign: 'right' }}>+ {aed(incurredGross)} charges incurred — see Fees</div>}
           </div>
         </div>
       </div>
