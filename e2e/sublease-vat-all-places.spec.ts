@@ -34,21 +34,26 @@ test('Fee & VAT report counts the pass-through tax', async ({ page }) => {
     items: Array<{ contractId: number; otherNetFils: number; otherVatFils: number; totalVatFils: number }>;
   };
 
-  const cid393 = data.items.find(i => i.contractId === 393);
-  expect(cid393, 'CID-393 present in the report').toBeTruthy();
+  // The report buckets by the period each payment falls DUE, so one contract can
+  // now span several period rows (CID-393's rent runs into the next year). Sum
+  // the contract's rows before comparing — a `find` would grab whichever period
+  // came first, which for CID-393 is the tail year holding rent but no VAT.
+  const sumFor = (cid: number, key: 'otherNetFils' | 'otherVatFils' | 'totalVatFils') =>
+    data.items.filter(i => i.contractId === cid).reduce((s, i) => s + i[key], 0);
+
+  expect(data.items.some(i => i.contractId === 393), 'CID-393 present in the report').toBeTruthy();
   // 29,000 levy + 250 Ejari-free... the levy and Fire-Fighting style charges are
   // net; only the 1,450 is tax.
-  expect(cid393!.otherNetFils).toBe(29_000_00);
-  expect(cid393!.otherVatFils).toBe(1_450_00);
+  expect(sumFor(393, 'otherNetFils')).toBe(29_000_00);
+  expect(sumFor(393, 'otherVatFils')).toBe(1_450_00);
   // Rent VAT 7,250 (its own cheque) + the 1,450 pass-through tax.
-  expect(cid393!.totalVatFils).toBe(8_700_00);
+  expect(sumFor(393, 'totalVatFils')).toBe(8_700_00);
 
   // CID-332: the 20%-worded LEVY must stay net — 21,000 + 2,500 Fire Fighting
   // net, 1,050 + 5,250 tax.
-  const cid332 = data.items.find(i => i.contractId === 332);
-  expect(cid332, 'CID-332 present').toBeTruthy();
-  expect(cid332!.otherNetFils).toBe(23_500_00);
-  expect(cid332!.otherVatFils).toBe(6_300_00);
+  expect(data.items.some(i => i.contractId === 332), 'CID-332 present').toBeTruthy();
+  expect(sumFor(332, 'otherNetFils')).toBe(23_500_00);
+  expect(sumFor(332, 'otherVatFils')).toBe(6_300_00);
 
   expect(data.totals.otherVatFils).toBeGreaterThan(0);
   console.log('fee-taxation totals otherNet/otherVat/totalVat:',

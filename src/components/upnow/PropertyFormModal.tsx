@@ -509,6 +509,34 @@ export function categoryDisplayLabel(id: string | null | undefined): string {
   return SPACE_CATEGORIES.find((c) => c.id === id)?.label ?? LEGACY_CATEGORY_LABELS[id] ?? id;
 }
 
+/**
+ * Leasing models offered in the add / edit property form.
+ *
+ * NOTE — "Property management" is PARKED for the next development cycle, so it
+ * is hidden from the picker. What it needs — the owner as a party (owner spine,
+ * signatory, cheque recipient, owner statement, owner rent kept out of RP
+ * revenue) — lives on `feat/leasing-type-segregation`, which was reverted out
+ * of main until its migrations reach prod. Offering the model here without it
+ * gives the RP a managed building the platform then treats as its own. See
+ * "Business Decision Reports/LEASING_TYPE_SEGREGATION_CHECKLIST.md".
+ *
+ * Nothing else is removed: the `management` value stays valid end-to-end — the
+ * enum, stored `properties.leasing_type`, the Managed grouping/badges, report
+ * filters and the management-agreement document slot all still work. A building
+ * already classified as managed keeps the option visible when edited, so an
+ * edit can never silently reclassify it. To re-enable, drop `hidden` below.
+ */
+const LEASING_MODELS = [
+  { id: 'direct',     label: 'Direct lease',        desc: 'You own this building and lease it directly to tenants.',  attach: 'Title Deed',             hidden: false },
+  { id: 'sub',        label: 'Sub-lease',           desc: 'You head-lease this building, then sub-lease its units.',  attach: 'Head-lease Agreement',   hidden: false },
+  { id: 'management', label: 'Property management', desc: 'You manage this building on behalf of its owner.',         attach: 'Management Agreement',   hidden: true  },
+] as const;
+
+/** Options a user may pick, plus the current value when it is a hidden legacy one. */
+function visibleLeasingModels(current: PropertyFormData['leasingType']) {
+  return LEASING_MODELS.filter((m) => !m.hidden || m.id === current);
+}
+
 export interface PropertyFormData {
   buildingName: string;
   spaceCategory: string;
@@ -1163,16 +1191,14 @@ export function PropertyFields({
           )}
         </div>
 
-        {/* Leasing model — direct / sub / management. Editable in both add & edit
-            (unlike Category, which locks). Drives the Fee & VAT report's split. */}
+        {/* Leasing model — direct / sub. Property management is hidden pending
+            the next development cycle (see LEASING_MODELS above). Editable in
+            both add & edit (unlike Category, which locks). Drives the Fee & VAT
+            report's split. */}
         <div>
           <FieldLabel label="Leasing model" required />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            {([
-              { id: 'direct',     label: 'Direct lease',        desc: 'You own this building and lease it directly to tenants.',  attach: 'Title Deed' },
-              { id: 'sub',        label: 'Sub-lease',           desc: 'You head-lease this building, then sub-lease its units.',  attach: 'Head-lease Agreement' },
-              { id: 'management', label: 'Property management', desc: 'You manage this building on behalf of its owner.',         attach: 'Management Agreement' },
-            ] as const).map(opt => {
+          <div className={cn('grid grid-cols-1 gap-2.5', visibleLeasingModels(value.leasingType).length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+            {visibleLeasingModels(value.leasingType).map(opt => {
               const on = value.leasingType === opt.id;
               return (
                 <button

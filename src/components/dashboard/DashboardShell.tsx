@@ -63,10 +63,23 @@ type NavItem =
   // `match` lists extra path prefixes that also activate the item — for sections
   // whose detail pages live under a different route than the nav href (e.g. the
   // Leases list is /orders but a lease opens at /contracts/:id/v2).
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey; match?: string[] }
+  // `hidden` parks a section: the entry stays here (route, icon, position) but
+  // is dropped from the rail. See the HIDDEN note below.
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey; match?: string[]; hidden?: true }
   | { divider: true }
   | { section: string };
 
+/**
+ * HIDDEN sections (3 Aug 2026) — parked for a later development cycle:
+ * **AMC & Vendors**, **Communications** and **Analytics**. They carry
+ * `hidden: true` below, which drops them from the rail for every role while
+ * leaving the entry (route, icon, ordering) recorded in place. The pages,
+ * routes and APIs are untouched and still reachable by URL, so nothing is lost
+ * and un-hiding is a one-word edit. Applied to the manager rail too, since the
+ * manager portal mirrors the RP one. NOTE: Reports still carries a "View
+ * analytics" cross-link (`reports/page.tsx`) — deliberately left, since Reports
+ * is where Analytics belongs once it returns.
+ */
 const NAV: Record<UserRole, NavItem[]> = {
   customer: [
     { label: 'My Spaces',   href: '/dashboard/customer/spaces',   icon: BedDouble },
@@ -86,10 +99,10 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
-    { label: 'AMC & Vendors',    href: '/rental-provider/dashboard/amc',            icon: Wrench },
-    { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare },
+    { label: 'AMC & Vendors',    href: '/rental-provider/dashboard/amc',            icon: Wrench, hidden: true },
+    { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare, hidden: true },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
-    { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart },
+    { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
     { label: 'Restoration List', href: '/rental-provider/dashboard/restoration-list', icon: Receipt },
     { divider: true },
     { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
@@ -124,8 +137,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
     { label: 'Restoration List', href: '/dashboard/manager/restoration-list', icon: Receipt, requirePerm: 'canManageInspections' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
-    { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports' },
-    { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance' },
+    { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
+    { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance', hidden: true },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
   ],
   technician: [
@@ -258,7 +271,9 @@ function Sidebar({
   const scopeRp = role === 'manager' ? navSearchParams.get('rp') : null;
   const withScope = (href: string) =>
     scopeRp && href.startsWith('/dashboard/manager') ? `${href}?rp=${scopeRp}` : href;
-  const rawNav = NAV[role] ?? [];
+  // Parked sections (see the HIDDEN note on NAV) drop out for every role, ahead
+  // of the manager permission filter so an emptied section header still goes.
+  const rawNav = (NAV[role] ?? []).filter(item => !('hidden' in item && item.hidden));
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
   // withholds, say, all Finance permissions doesn't leave an empty "Finance").

@@ -5,14 +5,14 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
-  Building2, FileText, Eye, Users, AlertTriangle, ChevronRight,
-  RefreshCw, LogIn, LogOut, XCircle, Wrench, Clock,
-  PenLine, Stamp, Banknote, Scale,
+  Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight,
+  RefreshCw, LogIn, LogOut, XCircle, Clock,
+  PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useManagerPermissions, type RpPermissions } from '@/contexts/ManagerPermissionsContext';
-import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { DashboardPage, StatCard, SectionHeader } from '@/components/dashboard/DashboardWidgets';
 
 interface OverviewStats {
   properties:      number;
@@ -23,33 +23,43 @@ interface OverviewStats {
 }
 
 interface ActionItem {
-  id: number; tenant?: string; unit?: string | null; building?: string | null;
-  vendor?: string; category?: string | null; doc?: string; reason?: string | null; date?: string | null;
+  id: number; rpId?: number; parentId?: number | null; tenantId?: number;
+  tenant?: string; unit?: string | null; building?: string | null;
+  startDate?: string | null; endDate?: string | null;
+  vendor?: string; category?: string | null; doc?: string; docName?: string | null;
+  reason?: string | null; date?: string | null;
   awaitingTenant?: boolean; awaitingLandlord?: boolean; need?: string | null;
-  bounced?: number; overdue?: number;
+  bounced?: number; overdue?: number; deposit?: string | number | null;
 }
-interface Bucket { count: number; items: ActionItem[] }
+interface Bucket { count: number; items: ActionItem[]; truncated?: boolean }
 interface ActionCenter {
   days: number;
+  openLeads: Bucket;
   awaitingSignature: Bucket; registrationPending: Bucket;
-  renewals: Bucket; terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
+  renewals: Bucket; renewalOffersOut: Bucket;
+  terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
   chequesAttention: Bucket; settlementPending: Bucket;
   amcExpired: Bucket; delayedFollowups: Bucket;
 }
 
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '');
-
-function permLabel(key: string) {
-  return key.replace('can', '').replace(/([A-Z])/g, ' $1').trim();
-}
+/** Compact form for the lease term, where the row shows both ends at once. */
+const fmtDShort = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: '2-digit' }) : '');
+const term = (i: ActionItem) =>
+  i.startDate || i.endDate ? `${fmtDShort(i.startDate)} → ${fmtDShort(i.endDate)}` : undefined;
+/** Names the side the manager has to chase, so "Awaiting Signature" says whose. */
+const signer = (i: ActionItem) => {
+  const who = [i.awaitingTenant ? 'customer' : null, i.awaitingLandlord ? 'landlord' : null].filter(Boolean);
+  return who.length ? `Waiting on ${who.join(' & ')}` : 'Waiting on signature';
+};
+const place = (i: ActionItem) => [i.unit ? `Unit ${i.unit}` : null, i.building].filter(Boolean).join(' · ');
 
 /**
  * Manager home — always the manager's own dashboard layout (headline stats +
- * action center + landlords list); it never swaps into the RP/landlord
- * dashboard component. Selecting a landlord in the switcher (?rp=) scopes the
- * headline stats and Action Center to that landlord, matching every other
- * manager page; "All landlords" (no ?rp=) shows the cross-landlord aggregate.
- * The "Your Landlords" list always covers every managed landlord.
+ * Action Center); it never swaps into the RP/landlord dashboard component.
+ * Selecting a landlord in the switcher (?rp=) scopes the headline stats and
+ * Action Center to that landlord, matching every other manager page; "All
+ * landlords" (no ?rp=) shows the cross-landlord aggregate.
  */
 export default function ManagerOverview() {
   return <ManagerMultiOverview />;
@@ -57,7 +67,7 @@ export default function ManagerOverview() {
 
 function ManagerMultiOverview() {
   const { user }                            = useAuth();
-  const { rps, loading: permsLoading, can } = useManagerPermissions();
+  const { rps, loading: permsLoading } = useManagerPermissions();
   const searchParams                        = useSearchParams();
   const [stats, setStats]                   = useState<OverviewStats | null>(null);
   const [statsLoading, setStatsLoading]     = useState(true);
@@ -92,6 +102,25 @@ function ManagerMultiOverview() {
 
   const loading = statsLoading || permsLoading;
 
+  // Every Action Center row links straight to the page that clears it. Two rules
+  // hold throughout:
+  //  - The landlord scope is ALWAYS explicit. Under "All landlords" the rows come
+  //    from several landlords at once, so the link takes the row's own `rpId`
+  //    rather than the page scope — a manager page opened without a landlord has
+  //    nothing to resolve against.
+  //  - Anything that is a step in the lease's setup/wind-down pipeline (sign,
+  //    Ejari, utility, move-in, renew, terminate, move-out) goes to Operations,
+  //    which is the full working view where those steps are actually performed.
+  //    Only the buckets with a dedicated screen — settlement, AMC, customer
+  //    documents — go elsewhere.
+  const scopeQ = (rpId?: number, extra?: string) => {
+    const rp = rpId ?? scopedRp ?? null;
+    const parts = [rp != null ? `rp=${rp}` : null, extra ?? null].filter(Boolean);
+    return parts.length ? `?${parts.join('&')}` : '';
+  };
+  const opsHref = (i: ActionItem, extra?: string) =>
+    `/dashboard/manager/operations/${i.id}${scopeQ(i.rpId, extra)}`;
+
   return (
     <DashboardPage
       title={`Welcome back, ${name}`}
@@ -103,12 +132,23 @@ function ManagerMultiOverview() {
             : `Managing properties for ${rps.length} landlord${rps.length !== 1 ? 's' : ''}`
       }
     >
+      {/* Bucket lists scroll but show no bar: the track eats into a card this
+          narrow, and a row cut off at the fold already signals there is more. */}
+      <style>{`
+        .mgr-bucket-list { scrollbar-width: none; -ms-overflow-style: none; }
+        .mgr-bucket-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
+      `}</style>
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Properties"       value={loading ? '—' : stats?.properties      ?? 0} icon={Building2} color="primary" />
-        <StatCard label="Units"            value={loading ? '—' : stats?.units           ?? 0} icon={Users}     color="neutral" />
+        <StatCard label="Units"            value={loading ? '—' : stats?.units           ?? 0} icon={DoorOpen}  color="neutral" />
         <StatCard label="Active Contracts" value={loading ? '—' : stats?.activeContracts ?? 0} icon={FileText}  color="gold" />
-        <StatCard label="Open Viewings"    value={loading ? '—' : stats?.openLeads       ?? 0} icon={Eye}       color="neutral" />
+        {/* This is the open-LEADS count (every lead not yet converted/issued/
+            rejected), not a viewings-only figure — "Viewings" is a legacy alias
+            that now just redirects to Leads, so the old label named a page that
+            no longer exists. */}
+        <StatCard label="Open Leads"       value={loading ? '—' : stats?.openLeads       ?? 0} icon={Eye}       color="neutral" />
       </div>
 
       {/* Action Center */}
@@ -123,137 +163,139 @@ function ManagerMultiOverview() {
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-        <ActionBucket icon={PenLine} color="#7c3aed" label="Awaiting Signature" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.awaitingSignature}
+        {/* Leads open the pipeline, so they lead the Action Center. The row's
+            note is the lead's own stage and the date is when it last moved —
+            oldest first from the API, so whatever has gone quiet is on top. */}
+        <ActionBucket icon={UserPlus} color="#0d9488" label="Leads to progress" href={`/dashboard/manager/leads${scopeQ()}`}
+          loading={actionLoading} bucket={action?.openLeads} dateLabel="last moved"
           render={i => ({
-            title: i.tenant ?? `Contract #${i.id}`,
-            sub: [
-              [i.awaitingTenant ? 'Customer' : null, i.awaitingLandlord ? 'Landlord' : null].filter(Boolean).join(' & ') + ' to sign',
-              [i.unit, i.building].filter(Boolean).join(' · '),
-            ].filter(Boolean).join(' — '),
-            date: i.date,
+            title: place(i) || i.tenant || `Lead #${i.id}`,
+            name: place(i) ? i.tenant : undefined,
+            note: i.need, date: i.date,
+            href: `/dashboard/manager/leads/${i.id}${scopeQ(i.rpId)}`,
           })} />
-        <ActionBucket icon={Stamp} color="#0891b2" label="Registration Pending" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.registrationPending}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.need, [i.unit, i.building].filter(Boolean).join(' · ')].filter(Boolean).join(' — '), date: i.date })} />
-        <ActionBucket icon={LogIn} color="#2563eb" label="Move-ins (inspection due)" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.moveIns}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={RefreshCw} color="#2e9f82" label={`Renewals (≤${days}d)`} href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.renewals}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={XCircle} color="#b91c1c" label="Termination Requests" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.terminationRequests}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: i.reason ?? [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={LogOut} color="#b45309" label="Move-outs (inspection due)" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.moveOuts}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={Banknote} color="#dc2626" label="Bounced / Overdue Cheques" href="/dashboard/manager/receivables"
-          loading={actionLoading} bucket={action?.chequesAttention}
+        <ActionBucket icon={PenLine} color="#7c3aed" label="Awaiting Signature" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.awaitingSignature} dateLabel="issued"
+          render={i => ({ title: place(i), name: i.tenant, note: signer(i), term: term(i), date: i.date, href: opsHref(i) })} />
+        <ActionBucket icon={Stamp} color="#0891b2" label="Registration Pending" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.registrationPending} dateLabel="from"
+          render={i => ({ title: place(i), name: i.tenant, note: i.need, term: term(i), date: i.date, href: opsHref(i) })} />
+        <ActionBucket icon={LogIn} color="#2563eb" label="Move-ins (inspection due)" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.moveIns} dateLabel="starts"
+          render={i => ({ title: place(i), name: i.tenant, note: 'Move-in inspection not submitted', term: term(i), date: i.date, href: opsHref(i) })} />
+        {/* Renewals to raise: nothing proposed yet, so the row deep-links into the
+            renewal flow itself (?action=renew) rather than the lease's front page. */}
+        {/* An active lease already past its end date with no renewal sent is the
+            most overdue item in this bucket, so it is called out as such rather
+            than reading like any other upcoming expiry. */}
+        <ActionBucket icon={RefreshCw} color="#2e9f82" label={`Renewals to raise (≤${days}d)`} href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.renewals} dateLabel="expires"
+          render={i => {
+            const overdue = !!i.date && new Date(i.date) < new Date(new Date().toDateString());
+            return {
+              title: place(i), name: i.tenant,
+              note: overdue ? `OVERDUE — ${i.need ?? 'lease already ended'}` : i.need,
+              term: term(i), date: i.date, href: opsHref(i, 'action=renew'),
+            };
+          }} />
+        {/* Offer already out — the renewal workflow lives on the PARENT lease, so
+            link there, not at the pending renewal draft. The term shown is the
+            OFFERED one; the date is when the lease it replaces runs out. */}
+        <ActionBucket icon={MailQuestion} color="#0369a1" label="Renewal Offers — Awaiting Reply" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.renewalOffersOut} dateLabel="current ends"
           render={i => ({
-            title: i.tenant ?? `Contract #${i.id}`,
-            sub: [
-              [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null].filter(Boolean).join(', '),
-              [i.unit, i.building].filter(Boolean).join(' · '),
-            ].filter(Boolean).join(' — '),
-            date: i.date,
+            title: place(i), name: i.tenant, note: 'Waiting on customer to accept',
+            term: term(i), date: i.date,
+            href: `/dashboard/manager/operations/${i.parentId ?? i.id}${scopeQ(i.rpId)}`,
           })} />
-        <ActionBucket icon={Scale} color="#0d9488" label="Settlement Pending" href="/dashboard/manager/contracts"
-          loading={actionLoading} bucket={action?.settlementPending}
-          render={i => ({ title: i.tenant ?? `Contract #${i.id}`, sub: [i.unit, i.building].filter(Boolean).join(' · '), date: i.date })} />
-        <ActionBucket icon={Wrench} color="#9a3412" label="AMC Expired" href="/dashboard/manager/amc"
-          loading={actionLoading} bucket={action?.amcExpired}
-          render={i => ({ title: i.vendor ?? `AMC #${i.id}`, sub: (i.category ?? '').replace(/_/g, ' '), date: i.date })} />
-        <ActionBucket icon={Clock} color="#92400e" label="Delayed Follow-ups" href="/dashboard/manager/tenants"
-          loading={actionLoading} bucket={action?.delayedFollowups}
-          render={i => ({ title: i.tenant ?? `Tenant #${i.id}`, sub: `${(i.doc ?? '').replace(/_/g, ' ')} not uploaded`, date: i.date })} />
+        <ActionBucket icon={XCircle} color="#b91c1c" label="Termination Requests" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.terminationRequests} dateLabel="requested"
+          render={i => ({ title: place(i), name: i.tenant, note: i.reason ?? 'Awaiting your response', term: term(i), date: i.date, href: opsHref(i) })} />
+        <ActionBucket icon={LogOut} color="#b45309" label="Move-outs (inspection due)" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.moveOuts} dateLabel="moves out"
+          render={i => ({ title: place(i), name: i.tenant, note: 'Move-out inspection not submitted', term: term(i), date: i.date, href: opsHref(i) })} />
+        <ActionBucket icon={Banknote} color="#dc2626" label="Bounced / Overdue Cheques" href={`/dashboard/manager/receivables${scopeQ()}`}
+          loading={actionLoading} bucket={action?.chequesAttention} dateLabel="oldest due"
+          render={i => ({
+            title: place(i), name: i.tenant,
+            note: [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null].filter(Boolean).join(', '),
+            term: term(i), date: i.date, href: opsHref(i),
+          })} />
+        {/* Ended leases still holding the customer's money. The amount is the
+            point of the row — it is what the manager refunds to close it — so it
+            is stated rather than left as a generic "not settled". */}
+        <ActionBucket icon={Scale} color="#0d9488" label="Settlement Pending" href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.settlementPending} dateLabel="ended"
+          render={i => ({
+            title: place(i), name: i.tenant,
+            note: Number(i.deposit) > 0
+              ? `AED ${Number(i.deposit).toLocaleString('en-AE')} held — refund to close`
+              : 'Balance outstanding',
+            term: term(i), date: i.date,
+            href: `/dashboard/manager/contracts/${i.id}/settlement${scopeQ(i.rpId)}`,
+          })} />
+        {/* AMC Expired is deliberately NOT on this dashboard — vendor contracts
+            are not lease work and every historically-expired AMC qualified, so the
+            card was permanently full of items nobody was chasing. It lives on
+            /dashboard/manager/amc, where it can be worked properly. The
+            `amcExpired` bucket is still returned by the API for that page. */}
+        {/* Follow-ups are not leases — no unit, so the requested document takes
+            the prominent line the unit number holds everywhere else. */}
+        <ActionBucket icon={Clock} color="#92400e" label="Delayed Follow-ups" href={`/dashboard/manager/tenants${scopeQ()}`}
+          loading={actionLoading} bucket={action?.delayedFollowups} dateLabel="requested"
+          render={i => ({
+            title: (i.docName ?? i.doc ?? 'Document').replace(/_/g, ' '),
+            name: i.tenant, note: 'Requested but not uploaded', date: i.date,
+            href: i.tenantId ? `/dashboard/manager/tenants/${i.tenantId}${scopeQ(i.rpId)}` : undefined,
+          })} />
       </div>
 
-      {/* Landlords */}
-      <SectionHeader title="Your Landlords" />
-      <div className="mb-8">
-        {loading ? (
-          <DashboardEmpty message="Loading your landlords…" />
-        ) : rps.length === 0 ? (
+      {/* The "Your Landlords" list is gone: the LandlordSwitcher in the header
+          already names every landlord and is where scope actually gets changed,
+          so the list repeated it below a full screen of work.
+          The nothing-assigned state stays — without it a manager with no landlord
+          would get a dashboard of empty cards and no reason why. */}
+      {!loading && rps.length === 0 && (
+        <div
+          className="rounded-2xl p-10 flex flex-col items-center justify-center text-center bg-white mb-8"
+          style={{ boxShadow: 'var(--shadow-sm)', minHeight: 160 }}
+        >
           <div
-            className="rounded-2xl p-10 flex flex-col items-center justify-center text-center bg-white"
-            style={{ boxShadow: 'var(--shadow-sm)', minHeight: 160 }}
+            className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
+            style={{ backgroundColor: '#fef9eb' }}
           >
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
-              style={{ backgroundColor: '#fef9eb' }}
-            >
-              <AlertTriangle size={22} style={{ color: 'var(--color-gold)' }} />
-            </div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>No landlords assigned yet</p>
-            <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-400)' }}>
-              Ask your landlord to invite you via their Team settings.
-            </p>
+            <AlertTriangle size={22} style={{ color: 'var(--color-gold)' }} />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3">
-            {rps.map((rp: RpPermissions) => {
-              const propCount = stats?.rps.find(r => r.id === rp.rentalProviderId)?.propertyCount ?? 0;
-              const granted   = Object.entries(rp.permissions).filter(([, v]) => v).map(([k]) => permLabel(k));
-              const card = (
-                <div
-                  className="flex items-center gap-4 p-4 bg-white rounded-2xl hover:shadow-md transition-shadow"
-                  style={{ boxShadow: 'var(--shadow-sm)' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary-50)' }}
-                  >
-                    <Building2 size={18} style={{ color: 'var(--color-primary)' }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{rp.rpName}</p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>
-                      {propCount} propert{propCount !== 1 ? 'ies' : 'y'}
-                    </p>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {granted.slice(0, 4).map(p => (
-                        <span
-                          key={p}
-                          className="text-[10px] rounded-full px-2 py-0.5"
-                          style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary-dark)' }}
-                        >
-                          {p}
-                        </span>
-                      ))}
-                      {granted.length > 4 && (
-                        <span className="text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>+{granted.length - 4} more</span>
-                      )}
-                      {granted.length === 0 && (
-                        <span className="text-[10px]" style={{ color: 'var(--color-gold)' }}>No permissions set</span>
-                      )}
-                    </div>
-                  </div>
-                  {can('canListProperties') && (
-                    <ChevronRight size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                  )}
-                </div>
-              );
-              return can('canListProperties') ? (
-                <Link key={rp.rentalProviderId} href={`/dashboard/manager/properties?rp=${rp.rentalProviderId}`}>{card}</Link>
-              ) : (
-                <div key={rp.rentalProviderId}>{card}</div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>No landlords assigned yet</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-400)' }}>
+            Ask your landlord to invite you via their Team settings.
+          </p>
+        </div>
+      )}
 
     </DashboardPage>
   );
 }
 
+/**
+ * One Action Center card.
+ *
+ * Rows read location-first: the unit number is the prominent line, because a
+ * manager works a building and identifies a lease by its unit — the customer's
+ * name is context, not the heading. Under it sit the name, the reason this row
+ * is here (including WHO is being waited on), and on the right the lease term
+ * plus the one date this bucket turns on, labelled so it can't be misread.
+ */
 function ActionBucket({
-  icon: Icon, color, label, href, loading, bucket, render,
+  icon: Icon, color, label, href, loading, bucket, render, dateLabel,
 }: {
   icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
   color: string; label: string; href: string; loading: boolean;
-  bucket?: Bucket; render: (i: ActionItem) => { title: string; sub?: string; date?: string | null };
+  bucket?: Bucket; dateLabel?: string;
+  render: (i: ActionItem) => {
+    title: string; name?: string; note?: string | null;
+    term?: string; date?: string | null; href?: string;
+  };
 }) {
   const count = bucket?.count ?? 0;
   const items = bucket?.items ?? [];
@@ -266,32 +308,62 @@ function ActionBucket({
         <span className="text-xs font-semibold flex-1" style={{ color: 'var(--color-neutral-700)' }}>{label}</span>
         <span className="text-xl font-bold" style={{ color: count ? color : 'var(--color-neutral-300)' }}>{loading ? '—' : count}</span>
       </div>
-      <div className="flex-1">
+      {/* The card holds its ENTIRE queue and scrolls it, rather than showing the
+          first few and hiding the rest behind "View all" — a bucket's whole point
+          is that the manager can see everything outstanding without leaving the
+          dashboard. The cap keeps every card the same height in the grid, so a
+          26-row bucket doesn't stretch the row it sits in. */}
+      <div className="mgr-bucket-list flex-1 overflow-y-auto" style={{ maxHeight: 260 }}>
         {loading ? (
           <p className="text-xs py-3 text-center" style={{ color: 'var(--color-neutral-300)' }}>Loading…</p>
         ) : count === 0 ? (
           <p className="text-xs py-3 text-center" style={{ color: 'var(--color-neutral-300)' }}>Nothing pending</p>
         ) : (
           <div className="space-y-1">
-            {items.slice(0, 4).map(i => {
+            {items.map(i => {
               const r = render(i);
-              return (
-                <div key={i.id} className="flex items-center justify-between gap-2 py-1 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
+              const row = (
+                <div className="flex items-start justify-between gap-3 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
                   <div className="min-w-0">
-                    <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-800)' }}>{r.title}</p>
-                    {r.sub && <p className="text-[11px] truncate" style={{ color: 'var(--color-neutral-400)' }}>{r.sub}</p>}
+                    <p className="text-[13px] font-semibold truncate leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{r.title || '—'}</p>
+                    {r.name && <p className="text-[10px] truncate leading-tight" style={{ color: 'var(--color-neutral-400)' }}>{r.name}</p>}
+                    {r.note && <p className="text-[11px] truncate leading-tight mt-0.5 font-medium" style={{ color }}>{r.note}</p>}
                   </div>
-                  {r.date && <span className="text-[11px] shrink-0" style={{ color: 'var(--color-neutral-400)' }}>{fmtD(r.date)}</span>}
+                  <div className="shrink-0 text-right">
+                    {r.term && <p className="text-[10px] tabular-nums leading-tight" style={{ color: 'var(--color-neutral-500)' }}>{r.term}</p>}
+                    {r.date && (
+                      <p className="text-[10px] tabular-nums leading-tight" style={{ color: 'var(--color-neutral-400)' }}>
+                        {dateLabel ? `${dateLabel} ` : ''}{fmtD(r.date)}
+                      </p>
+                    )}
+                  </div>
                 </div>
+              );
+              // Each row opens the item it names. A row without an `href` (an
+              // older payload missing the ids the link needs) stays inert rather
+              // than becoming a link to nowhere.
+              return r.href ? (
+                <Link key={i.id} href={r.href} className="block rounded-lg -mx-1 px-1 hover:bg-[var(--color-base-50,#faf9f7)] transition-colors">
+                  {row}
+                </Link>
+              ) : (
+                <div key={i.id}>{row}</div>
               );
             })}
           </div>
         )}
       </div>
       {count > 0 && (
-        <Link href={href} className="flex items-center gap-1 text-[11px] font-medium mt-2" style={{ color }}>
-          View all ({count}) <ChevronRight size={12} />
-        </Link>
+        <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--color-base-100)' }}>
+          {bucket?.truncated && (
+            <p className="text-[10px] mb-1" style={{ color: 'var(--color-gold)' }}>
+              Showing the first {items.length} of {count}
+            </p>
+          )}
+          <Link href={href} className="flex items-center gap-1 text-[11px] font-medium" style={{ color }}>
+            Open in {href.split('?')[0].split('/').pop()?.replace(/-/g, ' ')} <ChevronRight size={12} />
+          </Link>
+        </div>
       )}
     </div>
   );

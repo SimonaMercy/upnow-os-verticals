@@ -23,6 +23,22 @@ const NOTIF_LABELS: Record<NotifKey, { title: string; description: string }> = {
 };
 const NOTIF_KEYS: NotifKey[] = ['newInquiry', 'chequeReminder', 'renewalAlert', 'maintenanceUpdate', 'promotional'];
 
+/**
+ * "Notification Preferences" card — HIDDEN 3 Aug 2026 until it is wired.
+ *
+ * The five toggles were never connected to anything: they are local state with
+ * hardcoded defaults, no request is made when one is flipped, and they reset on
+ * reload. Nothing consumes them either — `notification_preferences` (migr 0002)
+ * has no code referencing it, notifications carry no category, and no sender
+ * checks a preference. Shown, the card promised control it did not have ("turn
+ * off Cheque Reminders" still sent them).
+ *
+ * The markup below is left intact and switched off here, so turning it back on
+ * once the preferences persist is a one-word edit. The Customer Correspondence
+ * card on the same tab is unaffected — that one really does save.
+ */
+const SHOW_NOTIF_PREFS: boolean = false;
+
 /* ─────────────────────────────────────────────────────────────
    Fee rules types
 ───────────────────────────────────────────────────────────── */
@@ -1458,6 +1474,8 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Hidden until the toggles persist — see SHOW_NOTIF_PREFS. */}
+        {SHOW_NOTIF_PREFS && (
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
           <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about.</p>
@@ -1473,6 +1491,7 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+        )}
         </div>
       )}
 

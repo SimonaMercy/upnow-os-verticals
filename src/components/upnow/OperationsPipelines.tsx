@@ -99,8 +99,12 @@ const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 // so they're not tracked again as New Lease lanes.) No terminal "Ready to
 // activate" lane: once every gate is done the lease awaits activation on the
 // contract page, so it drops off this board (see allGatesDone below).
+// No Cheques / PDC lane: cheques are collected in the LEAD flow, whose last lane
+// is Payment Confirmation Ready — tracking them again here just duplicated the
+// same work on a second board (the reason KYC + Payment plan aren't lanes here
+// either). Renewals keep their Cheques / PDC lane: a renewal has no lead, so that
+// board is the only place its cheques are worked.
 const NEW_STAGES: StageDef[] = [
-  { key: 'pdc',          title: 'Cheques / PDC',     keys: ['pdc'] },
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
   { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
   { key: 'utility',      title: 'Utility',           keys: ['utility'] },
@@ -368,7 +372,10 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const cardsByTab = useMemo(() => {
     const passC = (c: OpsContract) =>
       (filterAsset === 'all' || c.property.buildingName === filterAsset)
-      && contractInYear(c)
+      // A settlement debt outlives the year its lease ran in: the year filter
+      // scopes lease ACTIVITY, but money still held is owed until it is paid, so
+      // leaving it behind a year picker is how these went unnoticed.
+      && (c.settlementOwed || contractInYear(c))
       && matchSearch([c.ref, tenantDisplayName(c.tenant), c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]);
     const passL = (l: OpsLead) =>
       (filterAsset === 'all' || l.unit?.property?.buildingName === filterAsset)

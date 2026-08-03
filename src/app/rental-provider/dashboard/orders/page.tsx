@@ -31,7 +31,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Search, Plus, X, FileText, ChevronLeft, ChevronRight,
+  Search, X, FileText, ChevronLeft, ChevronRight,
   Bell, Download, Clock, Shield, Coins, Calendar, Pencil, Info,
 } from 'lucide-react';
 import { tenantDisplayName } from '@/lib/tenantName';
@@ -360,11 +360,12 @@ function Row({
 // ────────────────────────────────────────────────────────────────────────────
 
 export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
-  // Manager portal is per-landlord: "New contract" needs canCreateContracts and
-  // the row Edit needs canManageAgreements on the acting landlord. The RP (no
-  // `manager` prop) owns their own contracts, so both are allowed.
+  // The Leases register is a read/edit surface for everyone — landlord and
+  // manager alike. Leases are STARTED in Operations (and from a lead), not
+  // here, so there is no create affordance on this page at all. The row Edit
+  // needs canManageAgreements on the acting landlord in manager mode; the RP
+  // (no `manager` prop) owns their own contracts, so it is always allowed.
   const { canForRp } = useManagerPermissions();
-  const canCreate    = !manager || canForRp('canCreateContracts', manager.rp);
   const canEditTerms = !manager || canForRp('canManageAgreements', manager.rp);
   // Base route for detail/edit/new links + the API source. In manager mode the
   // page reuses the landlord-scoped /manager/contracts endpoints and links into
@@ -560,7 +561,6 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
               </select>
             </div>
             <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
-            {canCreate && <Link href={`${contractBase}/new`} className="btn btn-primary"><Plus size={14} /> New contract</Link>}
           </div>
         </div>
 

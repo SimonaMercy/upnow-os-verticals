@@ -11,7 +11,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, FileText, Loader2, Search, Plus } from 'lucide-react';
+import { ArrowLeft, FileText, Loader2, Search } from 'lucide-react';
 
 interface RpContract {
   id: number;
@@ -86,13 +86,9 @@ export default function ContractsListPage() {
               <p className="text-[11px] text-[#9b9890] mt-0.5">{loading ? 'Loading…' : `${filtered.length} contract${filtered.length === 1 ? '' : 's'}`}</p>
             </div>
           </div>
-          <Link
-            href="/rental-provider/dashboard/contracts/new"
-            className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-xl text-white"
-            style={{ background: '#2e9f82' }}
-          >
-            <Plus size={14} /> New Contract
-          </Link>
+          {/* No "New Contract" here — contract lists are read/edit surfaces.
+              Leases start from a lead or the Add-customer flow, mirroring the
+              Leases register. */}
         </div>
       </div>
 

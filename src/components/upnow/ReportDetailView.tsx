@@ -22,7 +22,7 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'contract-status' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
+type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'contract-status' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'payment-record' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -47,7 +47,13 @@ interface DrilldownSpec {
    *  sorted by it. */
   groupByKey?: string;
   groupByLabel?: string;
-
+  /** Columns belonging to the PARENT record (the lease) rather than the line.
+   *  Printed once at the top of each block and blanked on continuation rows —
+   *  the merged-cell shape the landlord's own sheet uses, so an annual rent is
+   *  not repeated against every cheque on the lease. Needs `contractIdKey`.
+   *  Computed at render time, so it survives filtering and sorting; the CSV
+   *  export keeps every value on every row so the file stays machine-readable. */
+  mergeKeys?: string[];
 }
 
 interface ReportDef {
@@ -70,6 +76,10 @@ interface ReportDef {
   layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix' | 'chequeMatrix';
   /** Optional caution banner shown above the report (e.g. data-quality notes). */
   dataNote?: string;
+  /** Show `dataNote` behind the ⓘ instead of as a banner across the top. For a
+   *  note long enough to dominate the page (Fee & VAT), the banner buries the
+   *  numbers the report exists to show. */
+  dataNoteInInfo?: boolean;
   /** When set, render the Property + leasing-model (direct/sub/management)
    *  multi-select filters. The backend returns a `buildings` option list and
    *  honours `buildings=` / `leaseTypes=` query params. Enabled on every report
@@ -93,7 +103,6 @@ interface ReportDef {
   /** Contract Status — expose the derived states (status, who has signed,
    *  cheques on file, registration) as server-side filters. */
   contractStatusFilters?: boolean;
-
   /** Turn one column of a flat table into a deep link to the record the row
    *  represents — no drill-down needed. `idKey` is the row field holding the
    *  target id; the cell in `colKey` becomes the link. target 'unit' links are
@@ -140,8 +149,10 @@ interface TotalSpec {
   keep?: boolean;
 }
 
-/** ⓘ — explanations live behind this, keeping pages executive-clean. */
-function InfoTip({ text, align = 'left' }: { text: string; align?: 'left' | 'right' }) {
+/** ⓘ — explanations live behind this, keeping pages executive-clean. Pass `note`
+ *  to fold a report's data note in behind the same icon instead of running it as
+ *  a banner across the top of the page. */
+function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex print:hidden">
@@ -155,9 +166,12 @@ function InfoTip({ text, align = 'left' }: { text: string; align?: 'left' | 'rig
       </button>
       {open && (
         <span
-          className={`absolute z-40 top-full mt-2 ${align === 'right' ? 'right-0' : 'left-0'} w-80 max-w-[80vw] bg-white border border-[#e3e0d9] rounded-xl shadow-xl p-3.5 text-xs leading-relaxed text-[#4a4742] whitespace-normal`}
+          className={`absolute z-40 top-full mt-2 ${align === 'right' ? 'right-0' : 'left-0'} ${note ? 'w-[30rem]' : 'w-80'} max-w-[80vw] max-h-[70vh] overflow-y-auto bg-white border border-[#e3e0d9] rounded-xl shadow-xl p-3.5 text-xs leading-relaxed text-[#4a4742] whitespace-normal`}
           style={{ boxShadow: '0 12px 32px rgba(20,18,15,.16)' }}>
           {text}
+          {note && (
+            <span className="block mt-2.5 pt-2.5 border-t border-[#eeece6] text-[#6b6860]">{note}</span>
+          )}
         </span>
       )}
     </span>
@@ -412,9 +426,69 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
   },
 
+  'payment-record': {
+    title: 'Payment Record - Monthly',
+    tagline: 'Your monthly collections handover sheet \u2014 all twelve months in one report.',
+    description: 'Every month of the selected year, the leases that COMMENCED in it and every cheque taken for them \u2014 whatever date each cheque falls due. This is why it will not agree with Cash Management or Payment Grouping, and is not meant to: those report money falling due inside a date range, this reports the paperwork collected on a month\u2019s new leases. A lease signed on 1 August sits under August even though its fees were paid in June, its first cheque is dated July and its last falls the following May. Only lines carrying a cheque number or bank reference are counted \u2014 on a handover record, no reference means nothing was physically received, which is what separates a collected cheque from a drafted payment plan. Each month header carries that month\u2019s division: leases, cheques and the split into rent, admin, registration, deposit, commission, third party and service charge. Expand a month for the individual cheques; pick the year above.',
+    endpoint: '/api/reports/payment-record',
+    buildingLeaseFilter: true,
+    layout: 'grouped',
+    controlKey: 'year',
+    columns: [
+      { key: 'monthLabel', label: 'Month' },
+      { key: 'leases', label: 'Leases', align: 'right', type: 'number' },
+      { key: 'cheques', label: 'Cheques', align: 'right', type: 'number' },
+      { key: 'rentFils', label: 'Rent', align: 'right', type: 'aed' },
+      { key: 'adminFils', label: 'Admin', align: 'right', type: 'aed' },
+      { key: 'registrationFils', label: 'Registration', align: 'right', type: 'aed' },
+      { key: 'depositFils', label: 'Security deposit', align: 'right', type: 'aed' },
+      { key: 'commissionFils', label: 'Commission', align: 'right', type: 'aed' },
+      { key: 'othersFils', label: 'Third party', align: 'right', type: 'aed' },
+      { key: 'serviceChargeFils', label: 'Service charge', align: 'right', type: 'aed' },
+      { key: 'totalFils', label: 'Total collected', align: 'right', type: 'aed' },
+    ],
+    totals: [
+      { key: 'leases', label: 'Leases', type: 'number', keep: true },
+      { key: 'cheques', label: 'Cheques', type: 'number', keep: true },
+      { key: 'totalFils', label: 'Total collected', type: 'aed', keep: true },
+      { key: 'rentFils', label: 'Rent', type: 'aed', keep: true },
+      { key: 'adminFils', label: 'Admin', type: 'aed' },
+      { key: 'registrationFils', label: 'Registration', type: 'aed' },
+      { key: 'depositFils', label: 'Security deposit', type: 'aed' },
+      { key: 'commissionFils', label: 'Commission', type: 'aed' },
+      { key: 'othersFils', label: 'Third party', type: 'aed' },
+      { key: 'serviceChargeFils', label: 'Service charge', type: 'aed' },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'monthLabel',
+      countLabel: 'cheques',
+      contractIdKey: 'contractId',
+      filterKey: 'category',
+      // Property → Annual rent describe the LEASE, so they print once per lease
+      // block exactly as they do on the landlord's sheet; only the cheque
+      // columns repeat down the block.
+      mergeKeys: ['buildingName', 'unitLabel', 'tenantName', 'startDate', 'endDate', 'annualRentFils'],
+      columns: [
+        { key: 'buildingName', label: 'Property' },
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'startDate', label: 'Start', type: 'date' },
+        { key: 'endDate', label: 'End', type: 'date' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'category', label: 'Payment type', type: 'stage' },
+        { key: 'description', label: 'Description' },
+        { key: 'installment', label: 'Installment' },
+        { key: 'chequeNumber', label: 'Cheque no' },
+        { key: 'chequeDate', label: 'Cheque date', type: 'date' },
+        { key: 'amountFils', label: 'Amount collected', align: 'right', type: 'aed' },
+      ],
+    },
+  },
+
   'rent-collection': {
     title: 'Cash Management',
-    description: 'The collection matrix — every unit down the side (each unit once, its current lease), the twelve months of the year across the top, with each unit\'s annual rent. Each cell is that month\'s rent cheque, coloured by status (collected / pending / bounced), with a row total, and year-to-date expected vs received. Deduped to the latest lease per unit, so the Annual Rent total reconciles with the Portfolio page. Pick the year above.',
+    description: 'The collection matrix — the twelve months of the year across the top, each cell that month\'s rent cheque coloured by status (collected / pending / bounced), with a row total and year-to-date expected vs received. Every lease with rent falling due in the year is listed, so a unit that changed lease mid-year shows both and the month columns equal the cash actually due — a unit re-let in August no longer loses the outgoing lease\'s earlier cheques. Annual Rent is carried only on each unit\'s CURRENT lease, so that total stays one-per-unit and still reconciles with the Portfolio page; a superseded lease shows a dash. Cancelled cheques are excluded from every figure (never receivable) and reported separately. Pick the year above.',
     endpoint: '/api/reports/rent-collection',
     buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
@@ -431,6 +505,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+      // Excluded from every figure above — shown so it is visibly excluded, not lost.
+      { key: 'cancelledFils', label: 'Cancelled (excluded)', type: 'aed' },
+      // Inside Total rent, but not yet a cheque anyone can bank.
+      { key: 'noChequeNumberFils', label: 'No cheque number yet', type: 'aed' },
     ],
   },
 
@@ -769,10 +847,11 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Fee & VAT (Taxation)',
     description: 'One-off fees, rent VAT and third-party pass-throughs, bucketed by the period each payment falls due — net, VAT and the output VAT to file. Group by quarter and the period is a VAT filing period: a lease running across a year-end splits across the quarters its cheques fall in, rather than landing wholly in the quarter it was signed. Admin & commission are VAT-able (5%); Contract Registration is exempt; rent VAT applies to commercial/industrial leases; a sub-leased building also carries the head lessor\'s levy and the 5% charged on it. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
     endpoint: '/api/reports/fee-taxation',
+    dataNoteInInfo: true,
     feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
-    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT is the contract\'s own VAT cheques where it raises them; on older contracts with VAT embedded it is annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), spread across that contract\'s rent cheques so it falls due when the rent does. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
+    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Leases are narrowed to those that can carry output VAT — a lease qualifies if it has a rent VAT rate, raises VAT cheques, or records VAT on any of its rows, so exempt residential rent stays out and appears the moment a standard-rated fee is charged on it. Switch to "Incl. exempt" to see every lease. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT is the contract\'s own VAT cheques where it raises them; on older contracts with VAT embedded it is annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), spread across that contract\'s rent cheques so it falls due when the rent does. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
     columns: [
       { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
@@ -1125,7 +1204,6 @@ export function ReportDetailView({
     const picked = raw.filter(t => (ALL_LEASE_TYPES as readonly string[]).includes(t));
     return picked.length ? picked : [...ALL_LEASE_TYPES];
   });
-
   const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
   const [classifyingId, setClassifyingId] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -1135,6 +1213,8 @@ export function ReportDetailView({
   // rows + items; granularity re-buckets server-side so it refetches.
   const [feeView, setFeeView] = useState<'overall' | 'detailed'>('overall');
   const [granularity, setGranularity] = useState<'year' | 'quarter'>(() => (sp?.get('groupBy') === 'quarter' ? 'quarter' : 'year'));
+  // Fee & VAT only: hide exempt leases (the default) or include them.
+  const [vatScope, setVatScope] = useState<'applicable' | 'all'>(() => (sp?.get('vatScope') === 'all' ? 'all' : 'applicable'));
   // RP portal can reclassify a building's leasing model inline; managers can't.
   const canClassify = endpointBase === '/api/reports';
 
@@ -1188,6 +1268,9 @@ export function ReportDetailView({
         extra.set('leaseTypes', selectedLeaseTypes.join(','));
       // Year/Quarter grouping is a Fee & VAT control only.
       if (def.feeTaxationControls && granularity === 'quarter') extra.set('groupBy', 'quarter');
+      // Likewise the VAT scope — the backend already defaults to applicable-only,
+      // so only the explicit "all" needs sending.
+      if (def.feeTaxationControls && vatScope === 'all') extra.set('vatScope', 'all');
       const s = extra.toString();
       if (s) url += (url.includes('?') ? '&' : '?') + s;
     }
@@ -1215,7 +1298,7 @@ export function ReportDetailView({
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, refreshTick]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope, refreshTick]);
 
   // Keep the chosen filters in the URL. A refresh — or a link pasted to someone
   // else — then lands on the same view instead of resetting to the default. Only
@@ -1392,7 +1475,6 @@ export function ReportDetailView({
         const searchKeys = [...dd.columns.map(c => c.key), ...(dd.groupByKey ? [dd.groupByKey] : [])];
         const matched = !needle ? items : items.filter(it =>
           searchKeys.some(k => String(it[k] ?? '').toLowerCase().includes(needle)));
-
         // When a search is active, recompute the header summary columns from the
         // visible (matched) items so the month chips equal the rows shown beneath:
         // a count column → number of matched rows; a money column → their sum.
@@ -1421,6 +1503,9 @@ export function ReportDetailView({
     if (!search.trim() && !propertyFilter) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
     const colTotals = new Array(monthCount).fill(0);
     let scheduled = 0, collected = 0, outstanding = 0, bounced = 0, annualRent = 0, ytdExpected = 0, ytdReceived = 0;
+    let noChequeNo = 0, superseded = 0;
+    // Distinct UNITS, not rows — a unit re-let mid-year contributes two rows.
+    const unitKeys = new Set<string>();
     sorted.forEach(row => {
       scheduled += Number(row.totalFils ?? 0);
       collected += Number(row.collectedFils ?? 0);
@@ -1428,6 +1513,9 @@ export function ReportDetailView({
       annualRent += Number(row.annualRentFils ?? 0);
       ytdExpected += Number(row.ytdExpectedFils ?? 0);
       ytdReceived += Number(row.ytdReceivedFils ?? 0);
+      noChequeNo += Number(row.noChequeNumberFils ?? 0);
+      if (row.isCurrentLease === false) superseded += 1;
+      unitKeys.add(`${String(row.buildingName ?? '')}|${String(row.unitLabel ?? row.contractId)}`);
       const cells = (row.cells as { amountFils: number; status: string | null }[] | undefined) ?? [];
       cells.forEach((c, ci) => {
         if (ci < monthCount) colTotals[ci] += Number(c.amountFils) || 0;
@@ -1437,7 +1525,7 @@ export function ReportDetailView({
     return {
       columnTotals: colTotals,
       totals: {
-        customers: sorted.length,
+        customers: unitKeys.size,
         annualRentFils: annualRent,
         scheduledFils: scheduled,
         ytdExpectedFils: ytdExpected,
@@ -1446,6 +1534,11 @@ export function ReportDetailView({
         outstandingFils: outstanding,
         bouncedFils: bounced,
         collectionRate: scheduled > 0 ? Math.round((collected / scheduled) * 1000) / 10 : 0,
+        // Cancelled is filter-independent (it never enters a row), so the tile
+        // keeps the server figure rather than showing 0 once a filter is on.
+        cancelledFils: Number(data.totals?.cancelledFils ?? 0),
+        noChequeNumberFils: noChequeNo,
+        supersededLeases: superseded,
       } as Record<string, number>,
     };
   }, [def.layout, data, search, sorted, propertyFilter]);
@@ -1574,36 +1667,40 @@ export function ReportDetailView({
     // total and the year-to-date expected / received columns.
     if (def.layout === 'matrix') {
       const months = data.months ?? [];
-      const headers = ['Unit', 'Property', 'Start', 'End', 'Annual rent', ...months, 'Total', 'YTD Expected', 'YTD Received'];
+      const headers = ['Unit', 'Property', 'Lease', 'Start', 'End', 'Annual rent', ...months, 'Total', 'YTD Expected', 'YTD Received', 'No cheque number'];
       const rows = sorted.map(row => {
         const cells = (row.cells as { amountFils: number }[]) ?? [];
         return [
           String(row.unitLabel ?? ''),
           String(row.buildingName ?? ''),
+          row.isCurrentLease === false ? 'Superseded' : 'Current',
           row.contractStartDate ? String(row.contractStartDate) : '',
           row.contractEndDate ? String(row.contractEndDate) : '',
-          (Number(row.annualRentFils) / 100).toFixed(2),
+          // Annual rent sits on the current lease only — blank, not 0, elsewhere.
+          row.isCurrentLease === false ? '' : (Number(row.annualRentFils) / 100).toFixed(2),
           ...cells.map(c => (Number(c.amountFils) / 100).toFixed(2)),
           (Number(row.totalFils) / 100).toFixed(2),
           (Number(row.ytdExpectedFils) / 100).toFixed(2),
           (Number(row.ytdReceivedFils) / 100).toFixed(2),
+          (Number(row.noChequeNumberFils) / 100).toFixed(2),
         ];
       });
       rows.push([
-        'Total', '', '', '',
+        'Total', '', '', '', '',
         (Number(matrixView?.totals?.annualRentFils ?? data.totals?.annualRentFils ?? 0) / 100).toFixed(2),
         ...(matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
         (Number(matrixView?.totals?.scheduledFils ?? data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
         (Number(matrixView?.totals?.ytdExpectedFils ?? data.totals?.ytdExpectedFils ?? 0) / 100).toFixed(2),
         (Number(matrixView?.totals?.ytdReceivedFils ?? data.totals?.ytdReceivedFils ?? 0) / 100).toFixed(2),
+        (Number(matrixView?.totals?.noChequeNumberFils ?? data.totals?.noChequeNumberFils ?? 0) / 100).toFixed(2),
       ]);
       // Cumulative — running total of the monthly column totals.
       let csvRun = 0;
       const csvCum = (matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (csvRun += Number(t) || 0));
       rows.push([
-        'Cumulative', '', '', '', '',
+        'Cumulative', '', '', '', '', '',
         ...csvCum.map(t => (t / 100).toFixed(2)),
-        (csvRun / 100).toFixed(2), '', '',
+        (csvRun / 100).toFixed(2), '', '', '',
       ]);
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -1744,7 +1841,7 @@ export function ReportDetailView({
           )}
           <h1 className="text-xl font-bold text-[#1a1916] flex items-center gap-2">
             {def.title}
-            <InfoTip text={def.description} />
+            <InfoTip text={def.description} note={def.dataNoteInInfo ? def.dataNote : undefined} />
           </h1>
           {def.tagline && <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{def.tagline}</p>}
         </div>
@@ -1772,8 +1869,8 @@ export function ReportDetailView({
         {data && <p className="text-xs text-gray-500 mt-1">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>}
       </div>
 
-      {/* Data-quality caution banner */}
-      {def.dataNote && (
+      {/* Data-quality caution banner — unless the report folds it behind the ⓘ. */}
+      {def.dataNote && !def.dataNoteInInfo && (
         <div className="flex items-start gap-2 mb-4 px-3.5 py-2.5 rounded-xl bg-[#fef3c7] border border-[#fcd34d] text-[#854d0e] text-xs print:bg-white">
           <AlertCircle size={14} className="shrink-0 mt-0.5" />
           <span>{def.dataNote}</span>
@@ -1983,6 +2080,81 @@ export function ReportDetailView({
               </select>
             </div>
           )}
+          {def.contractStatusFilters && (
+            <>
+              <div className={fGroup}>
+                <span className={fLabel}>Month</span>
+                <select className={fSelect} aria-label="Month" value={csMonth} onChange={e => setCsMonth(e.target.value)}>
+                  <option value="all">All months</option>
+                  {['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                    'August', 'September', 'October', 'November', 'December'].map((m, i) => (
+                    <option key={m} value={String(i + 1)}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Status</span>
+                <select className={fSelect} aria-label="Status" value={csStatus} onChange={e => setCsStatus(e.target.value)}>
+                  <option value="all">All statuses</option>
+                  <option value="renewed">Renewed</option>
+                  <option value="for_signature">For signature</option>
+                  <option value="pending">Pending</option>
+                  <option value="move_out">Move-out</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Stage</span>
+                <select className={fSelect} aria-label="Stage" value={csStage} onChange={e => setCsStage(e.target.value)}>
+                  <option value="all">All stages</option>
+                  <option value="not_started">Not started</option>
+                  <option value="draft">Draft</option>
+                  <option value="notice_sent">Notice sent</option>
+                  <option value="kyc">KYC</option>
+                  <option value="payment_plan">Payment plan</option>
+                  <option value="cheques">Cheques / PDC</option>
+                  <option value="customer_signature">Customer signature</option>
+                  <option value="landlord_signature">Landlord signature</option>
+                  <option value="both_signatures">Both signatures</option>
+                  <option value="registration">Contract Registration</option>
+                  <option value="utility">Utility account</option>
+                  <option value="move_in">Move-in</option>
+                  <option value="ready_to_activate">Ready to activate</option>
+                  <option value="completed">Completed</option>
+                  <option value="termination">Termination acceptance</option>
+                  <option value="move_out_inspection">Move-out inspection</option>
+                  <option value="bill_clearance">Bills cleared</option>
+                  <option value="settlement">Deposit settlement</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Signed by</span>
+                <select className={fSelect} aria-label="Signed by" value={csSignature} onChange={e => setCsSignature(e.target.value)}>
+                  <option value="all">Anyone</option>
+                  <option value="both">Customer &amp; landlord</option>
+                  <option value="customer_only">Customer only</option>
+                  <option value="landlord_only">Landlord only</option>
+                  <option value="none">Neither</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Cheques</span>
+                <select className={fSelect} aria-label="Cheques" value={csCheques} onChange={e => setCsCheques(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="on_file">On file</option>
+                  <option value="missing">Not recorded</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Registration</span>
+                <select className={fSelect} aria-label="Registration" value={csRegistration} onChange={e => setCsRegistration(e.target.value)}>
+                  <option value="all">All</option>
+                  <option value="completed">Completed</option>
+                  <option value="pending">Pending</option>
+                  <option value="not_applicable">Not applicable</option>
+                </select>
+              </div>
+            </>
+          )}
         </>
       )}
 
@@ -2053,6 +2225,28 @@ export function ReportDetailView({
           ))}
           <span className="text-[11px] text-[#9b9890] ml-1">
             {feeView === 'detailed' ? 'Every contract — verify the totals add up' : 'Totals per ' + (granularity === 'quarter' ? 'quarter' : 'year')}
+          </span>
+        </div>
+      )}
+
+      {/* VAT scope — exempt residential leases are hidden by default so what is
+          left is what a return is actually built from. */}
+      {def.feeTaxationControls && (
+        <div className={ctrlRowCls}>
+          <span className={ctrlLabelCls}>Leases:</span>
+          {([
+            { id: 'applicable', label: 'VAT-applicable only' },
+            { id: 'all',        label: 'Incl. exempt' },
+          ] as const).map(v => (
+            <button key={v.id} onClick={() => setVatScope(v.id)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${vatScope === v.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              {v.label}
+            </button>
+          ))}
+          <span className="text-[11px] text-[#9b9890] ml-1">
+            {vatScope === 'applicable'
+              ? 'Only leases that can carry output VAT — exempt residential rent is hidden.'
+              : 'Every lease, including exempt residential rent that adds nothing to a return.'}
           </span>
         </div>
       )}
@@ -2300,7 +2494,6 @@ export function ReportDetailView({
                   {/* Wraps rather than overflowing — a report with many summary
                       figures would otherwise push the last ones off the edge. */}
                   <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 min-w-0">
-
                     {def.columns.filter(c => c.key !== dd.titleKey).map(c => (
                       <span key={c.key} className="text-xs whitespace-nowrap hidden sm:inline">
                         <span className="text-[#9b9890]">{c.label}: </span>
@@ -2323,8 +2516,14 @@ export function ReportDetailView({
                       </thead>
                       <tbody>
                         {g.items.map((it, idx) => {
-                          // Sub-heading whenever the grouped-by value changes.
+                          // Lease-level columns show once per block. `sameBlock`
+                          // is derived from the rendered array, so filtering the
+                          // list re-computes which row starts a block.
                           const prev = idx > 0 ? g.items[idx - 1] : null;
+                          const sameBlock = !!dd.mergeKeys?.length && !!dd.contractIdKey && !!prev
+                            && prev[dd.contractIdKey] === it[dd.contractIdKey];
+                          const merged = new Set(dd.mergeKeys ?? []);
+                          // Sub-heading whenever the grouped-by value changes.
                           const subHead = dd.groupByKey && (!prev || prev[dd.groupByKey] !== it[dd.groupByKey])
                             ? String(it[dd.groupByKey] ?? '—')
                             : null;
@@ -2338,10 +2537,10 @@ export function ReportDetailView({
                               </td>
                             </tr>
                           )}
-                          <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                          <tr className={`hover:bg-[#fafaf8] ${sameBlock ? 'border-t border-[#f7f5f1]' : 'border-t border-[#e3e0d9]'}`}>
                             {dd.columns.map(c => (
-                              <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
-                                <CellValue value={it[c.key]} type={c.type} />
+                              <td key={c.key} className={`px-3 ${sameBlock ? 'py-1.5' : 'py-2'} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                                {sameBlock && merged.has(c.key) ? null : <CellValue value={it[c.key]} type={c.type} />}
                               </td>
                             ))}
                             {dd.contractIdKey && (
@@ -2411,7 +2610,15 @@ export function ReportDetailView({
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.annualRentFils))}</td>
+                      {/* Annual rent belongs to the unit's CURRENT lease. A lease
+                          superseded during the year still lists its cash, but a
+                          figure here would double-count the unit — so it reads as
+                          a dash with the reason on hover. */}
+                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">
+                        {row.isCurrentLease === false
+                          ? <span className="text-[#9b9890]" title="Superseded during the year — annual rent sits on this unit's current lease">—</span>
+                          : fmtAmt(Number(row.annualRentFils))}
+                      </td>
                       {cells.map((c, ci) => (
                         <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
                           {c.amountFils ? (

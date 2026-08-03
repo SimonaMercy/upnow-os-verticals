@@ -46,3 +46,7 @@ playwright-report-fullcycle/
 
 # Playwright journey suite — ephemeral run state (holds portal magic-link tokens)
 e2e/journey/.state.json
+
+# Screenshots written by the *-shot specs — regenerated on every run, and they
+# carry real customer names from the dev clone. Never commit them.
+e2e/__shots__/

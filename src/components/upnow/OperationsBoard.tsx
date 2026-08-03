@@ -52,6 +52,9 @@ export interface OpsContract {
   /** Active lease whose termination was accepted — back on Operations for
    *  move-out + settlement (NOT a setup card; no "Mark active"). */
   windDown?: boolean;
+  /** Ended lease still holding the customer's deposit. Owed until it is
+   *  refunded, so surfaces that scope by year must exempt it. */
+  settlementOwed?: boolean;
   /** Active lease with a termination request pending acceptance (Terminated pipeline, "Requested"). */
   terminationRequested?: boolean;
   lockedAt: string | null;
