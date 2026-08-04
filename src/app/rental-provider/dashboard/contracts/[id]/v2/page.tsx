@@ -53,6 +53,7 @@ import { SignatureBlock, type SignaturePayload } from '@/components/upnow/Signat
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { taxPortionOf } from '@/lib/chargeTax';
 import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
+import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequeReplacementGroups';
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
@@ -60,7 +61,7 @@ import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans, installmentLabel } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
-import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
+import { recomputeSubleaseCharges, classifySubleaseCharge } from '@/lib/subleaseCharges';
 import { configuredFeeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -227,7 +228,14 @@ interface ContractDetail {
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null; hasPoa?: boolean; poaPersonName?: string | null };
   property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
-  unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
+  unit: {
+    id: number | null; number: string | null; name: string | null; type: string | null;
+    floor: string | null; bedrooms: number | null; bathrooms: number | null;
+    /** Extra charges configured on the UNIT (sub-lease pass-through, service
+     *  charge, …). The renewal form offers any of these the current lease isn't
+     *  already billing — see the ProposeRenewalModal `extras` seed. */
+    additionalPayments?: { label: string; amount: number; vat?: number }[];
+  };
   documents: ContractDoc[];
   payments: ContractPayment[];
   /** One-off leasing fees (admin / ejari / commission) — stored as their own
@@ -2683,6 +2691,17 @@ function DetailsDrawer({
   // never inside the rent schedule (only rent + Rental VAT live there).
   const feesVatPaymentRows = rentRows.filter(p => isFeesVat(p));
   const rentScheduleRows = rentRows.filter(p => (p.paymentType ?? '') !== 'other' && !isFeesVat(p));
+  // Same rows, re-ordered so every payment recorded against a bounced cheque sits
+  // directly beneath it instead of at its own due date — see
+  // chequeReplacementGroups.ts for why date order tells the story wrong.
+  const rentScheduleGroups = groupReplacementsUnderBounce(rentScheduleRows);
+  // Instalment numbering counts the schedule's own cheques. A replacement is part
+  // of the bounce above it, not a further instalment, so it takes no number.
+  const rentRowNumber = new Map<number, number>();
+  for (const g of rentScheduleGroups) if (g.depth === 0) rentRowNumber.set(g.row.id, rentRowNumber.size + 1);
+  /** Rows that head a group — the tint starts on the bounce, not on its first replacement. */
+  const rentGroupHeadIds = new Set(rentScheduleGroups.map(g => g.parent?.id).filter((id): id is number => id != null));
+  const rentReplacementCount = rentScheduleGroups.filter(g => g.depth > 0).length;
   const otherGross = otherPaymentRows.reduce((s, p) => s + (p.amount || 0), 0);
   // Fees split into the two segregation groups so the working table reads in the SAME
   // four sections as the plan/receipts: Admin + Commission → Management Fee; Ejari
@@ -3397,12 +3416,28 @@ function DetailsDrawer({
                           </Fragment>
                         );
                       })()}
-                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length ? `${rentScheduleRows.length} cheque${rentScheduleRows.length === 1 ? '' : 's'}` : undefined} onAdd={perms.collections ? () => openRecordFor('rental_income') : undefined} />
-                      {rentScheduleRows.map((p, i) => (
+                      {/* Counted the way the rows now read: the instalments, then
+                          the payments made against a bounce among them — "6
+                          cheques" against a schedule numbered 1–4 invited the
+                          reader to hunt for two missing instalments. */}
+                      <PaySegRail title="Rental Income" extra={rentScheduleRows.length
+                        ? `${rentRowNumber.size} cheque${rentRowNumber.size === 1 ? '' : 's'}`
+                          + (rentReplacementCount ? ` · ${rentReplacementCount} replacement${rentReplacementCount === 1 ? '' : 's'}` : '')
+                        : undefined} onAdd={perms.collections ? () => openRecordFor('rental_income') : undefined} />
+                      {rentScheduleGroups.map(({ row: p, depth, parent }) => (
                         <Fragment key={p.id}>
-                        <tr>
-                          <td>{i + 1}</td>
+                        {/* A bounce and the payments made against it are shown as
+                            one tinted block — the replacements indented beneath
+                            the cheque they settle, instead of scattered to their
+                            own due dates. See chequeReplacementGroups.ts. */}
+                        <tr className={depth > 0 ? 'replgrp replkid' : rentGroupHeadIds.has(p.id) ? 'replgrp' : undefined}>
                           <td>
+                            {depth > 0
+                              ? <span className="replarrow" title="Recorded against the bounced cheque above">↳</span>
+                              : rentRowNumber.get(p.id)}
+                          </td>
+                          <td style={depth > 0 ? { paddingLeft: 8 + Math.min(depth, MAX_REPLACEMENT_DEPTH) * 16 } : undefined}>
+                            {depth > 0 && <span className="repltag">Replacement</span>}
                             {p.description ?? '—'}
                             <ReceiptRefTag refs={paymentRefs} id={p.id} />
                             {/* Both ends of a bounce → replacement pair, so the
@@ -3418,7 +3453,11 @@ function DetailsDrawer({
                                       .join(' + ')}`}
                               </span>
                             )}
-                            {replacedRow.get(p.id) && (
+                            {/* Spelled out only when the pair could NOT be shown
+                                together — the bounce sits in another section, or
+                                was filtered out of this table. Under its own
+                                bounce the indent already says it. */}
+                            {parent == null && replacedRow.get(p.id) && (
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>
                                 Replaces bounced {replacedRow.get(p.id)!.chequeNumber
                                   ? `cheque ${replacedRow.get(p.id)!.chequeNumber}`
@@ -5261,29 +5300,67 @@ function RenewalProposeModal({
   // separate cheque on top of rent + fees. Posted as `extraCharges`.
   //
   // A renewal continues THIS lease, so it repeats the current lease's Third Party
-  // ('other') charges — the sub-lease charge, service charge, etc. We carry them
-  // from the PARENT lease's own payment rows (deliberately NOT re-derived from the
-  // unit: a new lease reads the unit, a renewal shows what this contract already
-  // charges). Rent VAT is skipped — the renewal recomputes it as its own cheque,
-  // so carrying it forward would double-count. Every line stays editable/removable.
+  // ('other') charges — the sub-lease charge, service charge, etc. Two sources,
+  // in this order:
+  //
+  //   1. The PARENT lease's own payment rows — what this contract actually
+  //      charges today, amounts and all.
+  //   2. The UNIT's configured charges, for anything source 1 doesn't already
+  //      cover. This used to be excluded on the reasoning that "a new lease reads
+  //      the unit, a renewal shows what this contract already charges" — but a
+  //      lease that was IMPORTED has no charge rows to show (its cheques were
+  //      keyed straight in as bare rent), so a sub-leased unit's 20% pass-through
+  //      silently vanished from every renewal of it. The unit is the standing
+  //      configuration; the renewal offers it and the RP deletes any line that
+  //      doesn't apply to this term.
+  //
+  // Rent VAT is skipped — the renewal recomputes it as its own cheque, so carrying
+  // it forward would double-count. Every line stays editable/removable.
   //
   // Carrying the AMOUNT forward is right for a flat charge but wrong for the
   // sub-lease pass-through lines, whose labels declare them a percentage of the
   // rent — and a renewal is exactly where the rent changes. Those two re-derive
   // from the net rent below (and again whenever the rent field moves), so the
-  // offer can never quote last year's percentage.
+  // offer can never quote last year's percentage, nor the unit's Market Price
+  // percentage when the lease is let for less.
   const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>(() => {
     // Carried charges fall due on the FIRST installment date (same as the rent
     // cheque #1 / fees), computed the same way the schedule below does.
     const firstDue = buildInstallmentDueDates(
       iso(ns), iso(ne), contract.numberOfInstallments ?? 4, contract.preferredChequeDays ?? [],
     )[0] ?? iso(ns);
-    return (contract.payments ?? [])
+    const carried = (contract.payments ?? [])
       .filter(p => (p.paymentType ?? '') === 'other')
       .filter(p => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase()))
       .filter(p => (p.amount ?? 0) > 0)
       .filter(p => !(/rent/i.test(p.description ?? '') && /vat/i.test(p.description ?? '')))
       .map(p => ({ description: (p.description ?? '').trim(), amount: String(p.amount ?? ''), dueDate: firstDue }));
+
+    // Identity of a charge, for "does the lease already bill this?". The two
+    // sub-lease lines are matched by what they ARE, not by their text: RPs
+    // hand-type those labels and live data holds several spellings, so
+    // "20% on sub lease" and "Sub-lease charge (20%)" must not both be offered.
+    // Everything else falls back to its normalised label.
+    const chargeKey = (label: string) => {
+      const sub = classifySubleaseCharge(label);
+      return sub ? `sublease:${sub.kind}` : label.trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+    const already = new Set(carried.map(c => chargeKey(c.description)));
+    const fromUnit = (contract.unit.additionalPayments ?? [])
+      // Gross: the unit stores a charge's own VAT beside it, while an extras line
+      // carries a single amount (the sub-lease VAT is its own labelled row, so
+      // this only bites on a unit charge that declares inline VAT).
+      .map(p => ({ description: (p.label ?? '').trim(), amount: (Number(p.amount) || 0) + (Number(p.vat) || 0) }))
+      .filter(p => {
+        if (!p.description || p.amount <= 0) return false;
+        const k = chargeKey(p.description);
+        if (already.has(k)) return false;
+        already.add(k); // a unit listing the same charge twice still offers it once
+        return true;
+      })
+      .map(p => ({ description: p.description, amount: String(p.amount), dueDate: firstDue }));
+
+    return [...carried, ...fromUnit];
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -5584,7 +5661,7 @@ function RenewalProposeModal({
             <button type="button" className="btn btn-ghost btn-sm" onClick={addExtra}><Plus size={13} /> Add charge</button>
           </div>
           {extras.length > 0 && (
-            <p className="note mut" style={{ marginTop: 0, marginBottom: 8 }}>Carried forward from the current lease (e.g. sub-lease charge, service charge). Each is billed under Third Party — edit or remove any that don’t apply.</p>
+            <p className="note mut" style={{ marginTop: 0, marginBottom: 8 }}>Carried forward from the current lease, plus any charge configured on the unit that it isn’t already billing (e.g. sub-lease charge, service charge). Each is billed under Third Party — edit or remove any that don’t apply to this term.</p>
           )}
           {extras.map((e, i) => (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 150px 32px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
@@ -7654,6 +7731,15 @@ function GlobalStyle() {
       .quest-page .ptable .amt { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
       .quest-page .ptable tfoot td { border-top: 2px solid #bfe3d5; background: var(--jade-tint); font-weight: 800; }
       .quest-page .ptable tfoot .tot { color: var(--jade-deep); }
+      /* Bounce → replacement group. The bounced cheque and every payment recorded
+         against it share one warm band with a brick rail down its left edge, so
+         the pair reads as a single event rather than as unrelated rent lines
+         sitting at their own due dates. */
+      .quest-page .ptable tr.replgrp > td { background: var(--brick-soft); border-bottom-color: var(--brick-edge); }
+      .quest-page .ptable tr.replgrp > td:first-child { box-shadow: inset 3px 0 0 var(--brick); }
+      .quest-page .ptable tr.replkid > td { font-size: 12px; }
+      .quest-page .ptable .replarrow { color: var(--brick); font-weight: 800; }
+      .quest-page .ptable .repltag { display: inline-block; margin-right: 6px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--brick-deep); background: #fff; border: 1px solid var(--brick-edge); border-radius: 99px; padding: 1px 7px; vertical-align: 1px; }
       /* Record-payment card — the SAME markup + class names as the lead's
          Record Cheques panel (leads/[id]), so the renewal Cheques step and the
          new-lease cheque recording are one design. Keep the two blocks in step:

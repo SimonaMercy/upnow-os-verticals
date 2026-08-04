@@ -85,6 +85,9 @@ interface RawPayment {
   paymentType?: string | null; description?: string | null; amount?: number | null;
   vatAmount?: number | null; chequeNumber?: string | null; cheque_number?: string | null;
   transactionDate?: string | null; chequeStatus?: string | null; paymentMethod?: string | null;
+  /** Set when this row re-pays a BOUNCED cheque rather than being an instalment
+   *  of its own (`payments.replaces_payment_id`). */
+  replacesPaymentId?: number | null;
 }
 interface RawContract {
   contractType?: string | null; fees?: RawPayment[] | null;
@@ -108,7 +111,13 @@ const toRow = (p: RawPayment): SegPaymentInput => ({
  *  (renewals carry the deposit forward and never re-collect it). */
 export function segRowsFromContract(contract: RawContract, payments: RawPayment[]): SegPaymentInput[] {
   const isRenewal = (contract.contractType ?? '').toLowerCase() === 'renewal';
-  let rows: SegPaymentInput[] = [...payments.map(toRow), ...(contract.fees ?? []).map(toRow)];
+  // A payment recorded against a BOUNCED cheque is not an instalment of the plan —
+  // it re-pays one the plan already lists. Including it numbered a 4-instalment
+  // lease up to 5 and totalled 225,000 on a 180,000 tenancy, on screen and in the
+  // PDF the customer receives. The bounced instalment itself stays, at face value:
+  // it is one of the four the lease was agreed at, whatever happened to the cheque.
+  const scheduled = payments.filter(p => p.replacesPaymentId == null);
+  let rows: SegPaymentInput[] = [...scheduled.map(toRow), ...(contract.fees ?? []).map(toRow)];
   // Renewals carry the deposit forward (read-only, never re-collected) — drop any
   // deposit row so no Security Deposit section shows, matching the receipts.
   if (isRenewal) rows = rows.filter(r => (r.paymentType ?? '').toLowerCase() !== 'security_deposit');
