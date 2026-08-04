@@ -947,16 +947,15 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
       ],
     },
+    // Five figures. The question this report answers is "what am I leaving on the
+    // table" — occupancy for context, how many units sit under the asking price,
+    // and the three money lines. Rent compared / Earning nothing / In renewal /
+    // Holding over are lease-state breakdowns, and they are already on every row
+    // and in the Position badge on each unit; as tiles they only competed with the
+    // uplift figure the report exists to show.
     totals: [
-      { key: 'units', label: 'Leased units', type: 'number' },
-      // Split on the OPEN LEASE, same as the Position badges — a tile counting
-      // by the unit's availability flag beside a badge counting by lease state
-      // is two taxonomies on one page.
-      { key: 'notEarning', label: 'Earning nothing', type: 'number' },
-      { key: 'inRenewal', label: 'In renewal', type: 'number' },
-      { key: 'holdingOver', label: 'Holding over', type: 'number' },
+      { key: 'occupiedUnits', label: 'Occupied units', type: 'number' },
       { key: 'belowMarket', label: 'Below asking', type: 'number' },
-      { key: 'aboveMarket', label: 'Above asking', type: 'number' },
       { key: 'currentRentFils', label: 'Annual Rent', type: 'aed' },
       { key: 'marketRentFils', label: 'Market Price', type: 'aed' },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
