@@ -1284,7 +1284,7 @@ export function ReportDetailView({
   const slug = slugProp as ReportSlug;
   const def = REPORTS[slug];
 
-  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[]; availableYears?: number[] } | null>(null);
+  const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; monthKeys?: string[]; currentMonth?: string; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[]; availableYears?: number[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -1633,55 +1633,59 @@ export function ReportDetailView({
       .filter(g => g.items.length > 0);
   }, [def, data, search]);
 
-  // Rent-roll matrix: when a search needle narrows the visible customers, the
-  // footer (per-month + grand total), the KPI chips and the CSV "Total" row must
-  // reflect the rows shown. Per-row totalFils/collectedFils/outstandingFils are
-  // exact; bounced is summed from the bounced-ranked cells (best available).
+  // Cash Management matrix: when a search needle or the property dropdown narrows
+  // the visible units, the footer (per-month + grand total), the KPI tiles, the
+  // reconciliation panels and the CSV "Total" row must all reflect the rows shown.
+  // Every figure is recomputed by the SAME rule the server uses, so a filtered
+  // sheet reconciles exactly as the unfiltered one does — including the
+  // late/not-yet-due split, which depends on where the current month falls.
   const matrixView = useMemo(() => {
     if (def.layout !== 'matrix' || !data) return null;
     const monthCount = (data.months ?? []).length;
     if (!search.trim() && !propertyFilter) return { columnTotals: data.columnTotals ?? [], totals: data.totals };
     const colTotals = new Array(monthCount).fill(0);
-    let scheduled = 0, collected = 0, outstanding = 0, bounced = 0, annualRent = 0, ytdExpected = 0, ytdReceived = 0;
-    let noChequeNo = 0, superseded = 0;
-    // Distinct UNITS, not rows — a unit re-let mid-year contributes two rows.
+    const sum = (k: string) => sorted.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+    // Distinct UNITS, not rows — a unit re-let mid-schedule contributes two rows.
     const unitKeys = new Set<string>();
+    // What has fallen due against what cleared on it: cells up to and including
+    // the current Dubai month, cleared cheques only — the server's own rule.
+    const monthKeys = data.monthKeys ?? [];
+    const thisMonth = data.currentMonth ?? '';
+    let dueToDate = 0, receivedToDate = 0;
     sorted.forEach(row => {
-      scheduled += Number(row.totalFils ?? 0);
-      collected += Number(row.collectedFils ?? 0);
-      outstanding += Number(row.outstandingFils ?? 0);
-      annualRent += Number(row.annualRentFils ?? 0);
-      ytdExpected += Number(row.ytdExpectedFils ?? 0);
-      ytdReceived += Number(row.ytdReceivedFils ?? 0);
-      noChequeNo += Number(row.noChequeNumberFils ?? 0);
-      if (row.isCurrentLease === false) superseded += 1;
-      unitKeys.add(`${String(row.buildingName ?? '')}|${String(row.unitLabel ?? row.contractId)}`);
-      const cells = (row.cells as { amountFils: number; status: string | null }[] | undefined) ?? [];
+      unitKeys.add(row.unitId != null
+        ? `u${String(row.unitId)}`
+        : `${String(row.buildingName ?? '')}|${String(row.unitLabel ?? row.contractId)}`);
+      const cells = (row.cells as { amountFils: number; cheques?: { amountFils: number; status: string | null }[] }[] | undefined) ?? [];
       cells.forEach((c, ci) => {
         if (ci < monthCount) colTotals[ci] += Number(c.amountFils) || 0;
-        if (c.status === 'bounced') bounced += Number(c.amountFils) || 0;
+        if (thisMonth && monthKeys[ci] && monthKeys[ci] > thisMonth) return;
+        dueToDate += Number(c.amountFils) || 0;
+        for (const q of c.cheques ?? []) if (q.status === 'cleared') receivedToDate += Number(q.amountFils) || 0;
       });
     });
-    return {
-      columnTotals: colTotals,
-      totals: {
-        customers: unitKeys.size,
-        annualRentFils: annualRent,
-        scheduledFils: scheduled,
-        ytdExpectedFils: ytdExpected,
-        ytdReceivedFils: ytdReceived,
-        collectedFils: collected,
-        outstandingFils: outstanding,
-        bouncedFils: bounced,
-        collectionRate: scheduled > 0 ? Math.round((collected / scheduled) * 1000) / 10 : 0,
-        // Cancelled is filter-independent (it never enters a row), so the tile
-        // keeps the server figure rather than showing 0 once a filter is on.
-        cancelledFils: Number(data.totals?.cancelledFils ?? 0),
-        noChequeNumberFils: noChequeNo,
-        supersededLeases: superseded,
-      } as Record<string, number>,
+    const totalFils = sum('totalFils');
+    const bouncedOwedFils = sum('bouncedOwedFils');
+    const totals: Record<string, number> = {
+      units: unitKeys.size,
+      annualRentFils: sum('annualRentFils'),
+      totalFils,
+      clearedFils: sum('clearedFils'),
+      pendingFils: sum('pendingFils'),
+      bouncedOwedFils,
+      bouncedReplacedFils: sum('bouncedReplacedFils'),
+      // What reconciles against contracted rent: a bounce nobody replaced is
+      // still owed and sits outside Total.
+      receivableFils: totalFils + bouncedOwedFils,
+      dueToDateFils: dueToDate,
+      receivedToDateFils: receivedToDate,
+      lateFils: dueToDate - receivedToDate,
+      notYetDueFils: totalFils - dueToDate,
     };
-  }, [def.layout, data, search, sorted, propertyFilter]);
+    // Any trailing column the report declares that isn't one of the above.
+    for (const c of def.matrixTrailing ?? []) if (!(c.key in totals)) totals[c.key] = sum(c.key);
+    return { columnTotals: colTotals, totals };
+  }, [def.layout, def.matrixTrailing, data, search, sorted, propertyFilter]);
 
   // One matrix row. Extracted so the grouped body (property bar → units →
   // subtotal) and the flat body render identically instead of drifting.
@@ -2003,77 +2007,180 @@ export function ReportDetailView({
       return raw ?? '';
     };
 
-    // Matrix layout: unit + property + annual rent, a column per month, then
-    // total and the year-to-date expected / received columns.
+    // Money cell for a column whose `type` decides the unit: fils → AED with two
+    // decimals, a count left as a count.
+    const fmtByType = (c: { type?: string }, v: unknown) =>
+      c.type === 'number' ? String(Number(v) || 0) : ((Number(v) || 0) / 100).toFixed(2);
+
+    // Split the visible rows into the property blocks the sheet is grouped into,
+    // in the order they appear on screen. Empty when the report isn't grouped.
+    const matrixGroups = () => {
+      const key = def.matrixGroupKey;
+      const order: string[] = [];
+      const map = new Map<string, Record<string, unknown>[]>();
+      if (!key) return { order, map };
+      for (const r of sorted) {
+        const g = String(r[key] ?? '—');
+        if (!map.has(g)) { map.set(g, []); order.push(g); }
+        map.get(g)!.push(r);
+      }
+      return { order, map };
+    };
+
+    // The reconciliation panels printed under the sheet — the arithmetic the
+    // report exists to prove ("what is actually late", "rent against cheques").
+    // Appended after a blank line so the grid above stays a clean rectangle.
+    const panelRows = (): string[][] => {
+      if (!def.summaryPanels) return [];
+      const view = matrixView ?? chequeView;
+      const out: string[][] = [[]];
+      for (const panel of def.summaryPanels) {
+        out.push([panel.title]);
+        for (const r of panel.rows) {
+          const v = r.key ? (view?.totals?.[r.key] ?? data.totals?.[r.key]) : undefined;
+          out.push([r.label, v == null ? '' : (Number(v) / 100).toFixed(2)]);
+        }
+        out.push([]);
+      }
+      return out;
+    };
+
+    // Matrix layout (Cash Management): the sheet as it reads on screen — each
+    // property block with its own subtotal, the grand total, the cumulative line
+    // and the reconciliation panels. The trailing columns are the report's own
+    // `matrixTrailing`, so the file can never drift from the page again.
     if (def.layout === 'matrix') {
       const months = data.months ?? [];
-      const headers = ['Unit', 'Property', 'Lease', 'Start', 'End', 'Annual rent', ...months, 'Total', 'YTD Expected', 'YTD Received', 'No cheque number'];
-      const rows = sorted.map(row => {
+      const trailing = def.matrixTrailing ?? [
+        { key: 'totalFils', label: 'Total' },
+        { key: 'ytdExpectedFils', label: 'YTD Expected' },
+        { key: 'ytdReceivedFils', label: 'YTD Received' },
+      ];
+      const headers = ['Property', 'Unit', 'Customer', 'Start', 'End', 'Annual rent', ...months, ...trailing.map(c => c.label)];
+      const lineFor = (row: Record<string, unknown>) => {
         const cells = (row.cells as { amountFils: number }[]) ?? [];
         return [
-          String(row.unitLabel ?? ''),
           String(row.buildingName ?? ''),
-          row.isCurrentLease === false ? 'Superseded' : 'Current',
+          String(row.unitLabel ?? ''),
+          String(row.customer ?? ''),
           row.contractStartDate ? String(row.contractStartDate) : '',
           row.contractEndDate ? String(row.contractEndDate) : '',
-          // Annual rent sits on the current lease only — blank, not 0, elsewhere.
-          row.isCurrentLease === false ? '' : (Number(row.annualRentFils) / 100).toFixed(2),
-          ...cells.map(c => (Number(c.amountFils) / 100).toFixed(2)),
-          (Number(row.totalFils) / 100).toFixed(2),
-          (Number(row.ytdExpectedFils) / 100).toFixed(2),
-          (Number(row.ytdReceivedFils) / 100).toFixed(2),
-          (Number(row.noChequeNumberFils) / 100).toFixed(2),
+          ((Number(row.annualRentFils) || 0) / 100).toFixed(2),
+          ...months.map((_, i) => ((Number(cells[i]?.amountFils) || 0) / 100).toFixed(2)),
+          ...trailing.map(c => fmtByType(c, row[c.key])),
         ];
-      });
+      };
+      const subtotalFor = (label: string, group: Record<string, unknown>[]) => {
+        const cols = new Array(months.length).fill(0);
+        for (const r of group) {
+          ((r.cells as { amountFils: number }[]) ?? []).forEach((c, i) => {
+            if (i < months.length) cols[i] += Number(c.amountFils) || 0;
+          });
+        }
+        const add = (k: string) => group.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+        return [
+          label, '', '', '', '',
+          (add('annualRentFils') / 100).toFixed(2),
+          ...cols.map(t => (t / 100).toFixed(2)),
+          ...trailing.map(c => fmtByType(c, add(c.key))),
+        ];
+      };
+      const rows: string[][] = [];
+      const { order, map } = matrixGroups();
+      if (order.length) {
+        for (const g of order) {
+          rows.push(...map.get(g)!.map(lineFor));
+          rows.push(subtotalFor(`${g} subtotal`, map.get(g)!));
+        }
+      } else {
+        rows.push(...sorted.map(lineFor));
+      }
+      const t = matrixView?.totals ?? data.totals ?? {};
+      const colTotals = matrixView?.columnTotals ?? data.columnTotals ?? [];
       rows.push([
         'Total', '', '', '', '',
-        (Number(matrixView?.totals?.annualRentFils ?? data.totals?.annualRentFils ?? 0) / 100).toFixed(2),
-        ...(matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (Number(t) / 100).toFixed(2)),
-        (Number(matrixView?.totals?.scheduledFils ?? data.totals?.scheduledFils ?? 0) / 100).toFixed(2),
-        (Number(matrixView?.totals?.ytdExpectedFils ?? data.totals?.ytdExpectedFils ?? 0) / 100).toFixed(2),
-        (Number(matrixView?.totals?.ytdReceivedFils ?? data.totals?.ytdReceivedFils ?? 0) / 100).toFixed(2),
-        (Number(matrixView?.totals?.noChequeNumberFils ?? data.totals?.noChequeNumberFils ?? 0) / 100).toFixed(2),
+        ((Number(t.annualRentFils) || 0) / 100).toFixed(2),
+        ...colTotals.map(v => ((Number(v) || 0) / 100).toFixed(2)),
+        ...trailing.map(c => fmtByType(c, t[c.key])),
       ]);
       // Cumulative — running total of the monthly column totals.
       let csvRun = 0;
-      const csvCum = (matrixView?.columnTotals ?? data.columnTotals ?? []).map(t => (csvRun += Number(t) || 0));
       rows.push([
         'Cumulative', '', '', '', '', '',
-        ...csvCum.map(t => (t / 100).toFixed(2)),
-        (csvRun / 100).toFixed(2), '', '', '',
+        ...colTotals.map(v => ((csvRun += Number(v) || 0) / 100).toFixed(2)),
+        ...trailing.map(() => ''),
       ]);
+      rows.push(...panelRows());
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
     }
 
-    // Cheque-schedule matrix: building + unit + customer, one column per cheque
-    // date (up to the widest lease), a column per month (cheque count), then the
-    // total cheque count.
+    // Cheque-schedule matrix: property + unit + customer, one column per cheque
+    // date (up to the widest lease), a column per month (cheque count), the total
+    // count and the face value behind it — with the same property subtotals and
+    // reconciliation panels the page shows.
     if (def.layout === 'chequeMatrix') {
       const months = data.months ?? [];
       const maxCheques = data.maxCheques ?? 0;
       const chequeCols = Array.from({ length: maxCheques }, (_, i) => `Cheque ${i + 1}`);
-      const headers = ['Building', 'Unit', 'Start', 'End', 'Customer', ...chequeCols, ...months, 'Total cheques'];
-      const rows = sorted.map(row => {
+      // The money behind the counts. It is on every row and the tiles quote it,
+      // so a schedule exported without it can't be reconciled against anything.
+      const valueCols = [
+        { key: 'valueFils', label: 'Cheque value' },
+        { key: 'clearedFils', label: 'Cleared' },
+        { key: 'pendingFils', label: 'Pending' },
+        { key: 'bouncedOwedFils', label: 'Bounced · still owed' },
+        { key: 'bouncedReplacedFils', label: 'Bounced · replaced' },
+      ];
+      const headers = ['Property', 'Unit', 'Customer', 'Start', 'End', ...chequeCols, ...months, 'Total cheques', ...valueCols.map(c => c.label)];
+      const lineFor = (row: Record<string, unknown>) => {
         const dates = (row.chequeDates as string[]) ?? [];
         const counts = (row.monthCounts as number[]) ?? [];
         return [
           String(row.buildingName ?? ''),
           String(row.unitLabel ?? ''),
+          String(row.customer ?? ''),
           row.contractStartDate ? String(row.contractStartDate) : '',
           row.contractEndDate ? String(row.contractEndDate) : '',
-          String(row.customer ?? ''),
           ...Array.from({ length: maxCheques }, (_, i) => dates[i] ?? ''),
-          ...counts.map(n => String(Number(n) || 0)),
+          ...months.map((_, i) => String(Number(counts[i]) || 0)),
           String(Number(row.totalCheques) || 0),
+          ...valueCols.map(c => ((Number(row[c.key]) || 0) / 100).toFixed(2)),
         ];
-      });
+      };
+      const subtotalFor = (label: string, group: Record<string, unknown>[]) => {
+        const cols = new Array(months.length).fill(0);
+        for (const r of group) {
+          ((r.monthCounts as number[]) ?? []).forEach((n, i) => { if (i < months.length) cols[i] += Number(n) || 0; });
+        }
+        const add = (k: string) => group.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+        return [
+          label, '', '', '', '',
+          ...Array.from({ length: maxCheques }, () => ''),
+          ...cols.map(n => String(n)),
+          String(add('totalCheques')),
+          ...valueCols.map(c => (add(c.key) / 100).toFixed(2)),
+        ];
+      };
+      const rows: string[][] = [];
+      const { order, map } = matrixGroups();
+      if (order.length) {
+        for (const g of order) {
+          rows.push(...map.get(g)!.map(lineFor));
+          rows.push(subtotalFor(`${g} subtotal`, map.get(g)!));
+        }
+      } else {
+        rows.push(...sorted.map(lineFor));
+      }
+      const t = chequeView?.totals ?? data.totals ?? {};
       rows.push([
         'Total', '', '', '', '',
         ...Array.from({ length: maxCheques }, () => ''),
-        ...(chequeView?.columnTotals ?? data.columnTotals ?? []).map(t => String(Number(t) || 0)),
-        String(Number(chequeView?.totals?.totalCheques ?? data.totals?.totalCheques) || 0),
+        ...(chequeView?.columnTotals ?? data.columnTotals ?? []).map(v => String(Number(v) || 0)),
+        String(Number(t.totalCheques) || 0),
+        ...valueCols.map(c => ((Number(t[c.key]) || 0) / 100).toFixed(2)),
       ]);
+      rows.push(...panelRows());
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
     }
@@ -2104,7 +2211,10 @@ export function ReportDetailView({
       return;
     }
 
-    // Grouped layout: export one row per child lease, prefixed with its group.
+    // Grouped layout: one row per child lease, prefixed with its group — then the
+    // section headings themselves. The month/property bar carries figures no
+    // detail line holds (awaiting cheques, registration pending, move-outs …),
+    // so a file with only the detail loses half of what the page states.
     if (def.layout === 'grouped' && def.drilldown) {
       const dd = def.drilldown;
       const headers = [
@@ -2112,13 +2222,24 @@ export function ReportDetailView({
         ...(dd.groupByKey ? [dd.groupByLabel ?? 'Group'] : []),
         ...dd.columns.map(c => c.label),
       ];
-      const rows = groups.flatMap(g =>
+      const rows: string[][] = groups.flatMap(g =>
         g.items.map(it => [
           String(g.row[dd.titleKey] ?? ''),
           ...(dd.groupByKey ? [String(it[dd.groupByKey] ?? '')] : []),
-          ...dd.columns.map(c => fmtCell(it[c.key], c.type)),
+          ...dd.columns.map(c => String(fmtCell(it[c.key], c.type))),
         ]),
       );
+      // Section summary, exactly the columns the headings show, plus their total.
+      rows.push([]);
+      rows.push([`Summary by ${dd.groupNoun ?? 'month'}`]);
+      rows.push(def.columns.map(c => c.label));
+      for (const g of groups) rows.push(def.columns.map(c => String(fmtCell(g.row[c.key], c.type))));
+      rows.push(def.columns.map((c, i) => {
+        if (i === 0) return 'Total';
+        if (c.type !== 'aed' && c.type !== 'number' && c.type !== 'delta') return '';
+        const n = groups.reduce((s, g) => s + (Number(g.row[c.key]) || 0), 0);
+        return c.type === 'number' ? String(n) : (n / 100).toFixed(2);
+      }));
 
       downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
       return;
