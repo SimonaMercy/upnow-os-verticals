@@ -22,7 +22,16 @@ import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts 
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
 
-type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'contract-status' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-collection' | 'payment-record' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
+/** One line in a bounced cheque's history — mirrors ChequeEvent on the server. */
+interface ChequeEvent {
+  date: string | null;
+  event: string;
+  detail: string | null;
+  amountFils: number;
+  status: string | null;
+}
+
+type ReportSlug = 'portfolio' | 'lease-expiry' | 'leases-by-year' | 'contract-status' | 'renewal-pipeline' | 'renewal-forecast' | 'security-deposits' | 'executive-cashflow' | 'portfolio-overview' | 'vacancy-analysis' | 'leasing-activity' | 'lease-activity' | 'manager-performance' | 'new-leases-matrix' | 'rent-receivable' | 'payment-record' | 'cheques-management' | 'renewal-vacancy' | 'fee-taxation' | 'rent-vs-market';
 
 interface DrilldownSpec {
   /** Row field holding the array of child items. */
@@ -33,6 +42,9 @@ interface DrilldownSpec {
   titleKey: string;
   /** CSV header for the group column (defaults to 'Month'). */
   titleLabel?: string;
+  /** Singular noun for what a section IS, used in the row-count footer. Every
+   *  grouped report but Rent vs Asking buckets by month, hence the default. */
+  groupNoun?: string;
   /** Plural noun for the count, e.g. "leases". */
   countLabel: string;
   columns: Column[];
@@ -118,6 +130,13 @@ interface ReportDef {
    *  omitted the matrix keeps its renewal-vacancy default (Renewals · Vacant ·
    *  Total units, with the clickable vacant drill-down). */
   matrixTrailing?: { key: string; label: string; type?: 'number' | 'aed' }[];
+  /** Group the matrix body by this row field, with a header bar and a subtotal
+   *  line per group — the shape the printed sheet uses (property, then its
+   *  units, then that property's line). */
+  matrixGroupKey?: string;
+  /** Small tables printed under the matrix — the reconciliations the sheet is
+   *  meant to prove, rather than leaving the reader to do the arithmetic. */
+  summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string }[] }[];
 }
 
 /** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked. */
@@ -489,45 +508,112 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     },
   },
 
-  'rent-collection': {
-    title: 'Cash Management',
-    description: 'The collection matrix — the twelve months of the year across the top, each cell that month\'s rent cheque coloured by status (collected / pending / bounced), with a row total and year-to-date expected vs received. Every lease with rent falling due in the year is listed, so a unit that changed lease mid-year shows both and the month columns equal the cash actually due — a unit re-let in August no longer loses the outgoing lease\'s earlier cheques. Annual Rent is carried only on each unit\'s CURRENT lease, so that total stays one-per-unit and still reconciles with the Portfolio page; a superseded lease shows a dash. Cancelled cheques are excluded from every figure (never receivable) and reported separately. Pick the year above.',
-    endpoint: '/api/reports/rent-collection',
+  'rent-receivable': {
+    title: 'Rent We Are Owed',
+    tagline: 'Every occupied unit, every payment, no calendar cut.',
+    description: 'Each occupied unit on one line, with every rent payment on its lease laid out month by month. No year is imposed \u2014 the columns run from the earliest payment to the latest one the current book holds, so a tenancy running across a new year is never cut in half. A unit counts when its lease is live: not expired or terminated, the term still running, no accepted termination in effect, and either activated or with its cheques confirmed in hand. Total is Cleared + Pending. A bounced cheque is reported in its own two columns and never added in \u2014 where a bounce was made good the replacement cheque already sits inside Cleared, so counting the bounce as well would count the money twice; a bounce nobody replaced is still owed and is shown separately so it can be added back. Click any month to see the cheques behind it, with the full history of anything that bounced.',
+    endpoint: '/api/reports/rent-receivable',
     buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
     layout: 'matrix',
-    controlKey: 'year',
     columns: [],
+    matrixGroupKey: 'buildingName',
+    summaryPanels: [
+      {
+        title: 'What is actually late',
+        note: 'A single “outstanding” figure adds these together and reads far worse than reality. Only the first line is money to chase; Expected is cheques already held for dates that have not arrived.',
+        rows: [
+          { label: 'Fallen due so far', key: 'dueToDateFils' },
+          { label: 'Collected against it', key: 'receivedToDateFils' },
+          { label: 'Late — chase this', key: 'lateFils', total: true },
+          { label: 'Expected — post-dated cheques ahead of us', key: 'notYetDueFils' },
+        ],
+      },
+      {
+        title: 'Bounced cheques',
+        note: 'A bounce that was made good is reported but never added in — its replacement cheque already sits inside Cleared, so counting both would count the money twice. A bounce nobody replaced is still owed, and is added back below.',
+        rows: [
+          { label: 'Bounced and replaced', key: 'bouncedReplacedFils', note: 'already inside Collected — excluded' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', total: true, note: 'still owed — chase alongside the late rent' },
+        ],
+      },
+      {
+        title: 'Rent against cheques',
+        note: 'These two should agree. What is left is a data fault on a lease, not a reporting one — a unit whose cheques do not add up to its rent.',
+        rows: [
+          { label: 'Annual rent contracted', key: 'annualRentFils' },
+          { label: 'Total — collected + pending', key: 'totalFils' },
+          { label: 'Bounced, never replaced — still owed', key: 'bouncedOwedFils' },
+          { label: 'Everything receivable', key: 'receivableFils', total: true },
+        ],
+      },
+    ],
+    matrixTrailing: [
+      { key: 'totalFils', label: 'Total', type: 'aed' },
+      { key: 'clearedFils', label: 'Cleared', type: 'aed' },
+      { key: 'pendingFils', label: 'Pending', type: 'aed' },
+      { key: 'bouncedOwedFils', label: 'Bounced \u00b7 still owed', type: 'aed' },
+      { key: 'bouncedReplacedFils', label: 'Bounced \u00b7 replaced', type: 'aed' },
+    ],
+    // Five figures, not ten. Total, both Bounced lines and Everything receivable
+    // are all carried by the reconciliation panels under the table, and Pending is
+    // just Late + Not yet due \u2014 so nothing is lost and the two numbers a manager
+    // acts on (what is late, what is still coming) stop competing with eight others.
     totals: [
-      { key: 'customers', label: 'Units', type: 'number' },
+      { key: 'units', label: 'Occupied units', type: 'number' },
       { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
-      { key: 'scheduledFils', label: 'Total rent', type: 'aed' },
-      { key: 'ytdExpectedFils', label: 'YTD expected', type: 'aed' },
-      { key: 'ytdReceivedFils', label: 'YTD received', type: 'aed' },
-      { key: 'collectedFils', label: 'Collected', type: 'aed' },
-      { key: 'outstandingFils', label: 'Outstanding', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
-      { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
-      // Excluded from every figure above — shown so it is visibly excluded, not lost.
-      { key: 'cancelledFils', label: 'Cancelled (excluded)', type: 'aed' },
-      // Inside Total rent, but not yet a cheque anyone can bank.
-      { key: 'noChequeNumberFils', label: 'No cheque number yet', type: 'aed' },
+      { key: 'clearedFils', label: 'Collected', type: 'aed' },
+      { key: 'lateFils', label: 'Late \u2014 chase this', type: 'aed' },
+      { key: 'notYetDueFils', label: 'Expected', type: 'aed' },
     ],
   },
 
   'cheques-management': {
     title: 'Cheques Management',
-    description: 'The cheque schedule — one row per current active lease (live today; upcoming and ended leases are excluded), showing the building, unit and lease duration together, then each rent cheque\'s due date (earliest to latest), a column per month counting how many cheques land in it, and the total number of cheques. Rent (rental-roll) cheques only; cancelled cheques are excluded. Leases counts the rows; Units the distinct units behind them. Pick the year above and narrow by property.',
+    description: 'Every rent cheque you are currently holding. One row per earning lease — not expired or terminated, term still running, no accepted termination in effect, and either active or with its cheques confirmed in hand — showing the unit, the customer, each cheque\'s due date earliest to latest, then a column per month counting how many land in it. No year is applied: the columns run from the earliest cheque on the book to the latest, so a lease running across a new year keeps one continuous row. Rent cheques only; rent taken by bank transfer or online is reported separately underneath, and cancelled cheques are excluded. Click any month to see the cheques landing in it, with the full history of anything that bounced.',
     endpoint: '/api/reports/cheques-management',
     buildingLeaseFilter: true,
     dataNote: NEEDS_CHEQUE_DATA,
     layout: 'chequeMatrix',
-    controlKey: 'year',
+    matrixGroupKey: 'buildingName',
+    summaryPanels: [
+      {
+        title: 'How the rent arrives',
+        note: 'Only the first line can appear in the grid above — the rest is rent that never becomes a cheque. Together they are every rent payment on the current book.',
+        rows: [
+          { label: 'Cheques in hand', key: 'valueFils', note: 'cleared + pending — a bounce is not counted here' },
+          { label: 'Bank transfer', key: 'bankTransferFils' },
+          { label: 'Cash / online', key: 'cashOnlineFils' },
+          { label: 'Every rent payment on the book', key: 'allPaymentsFils', total: true },
+        ],
+      },
+      {
+        title: 'Against contracted rent',
+        note: 'What is left is a data fault on a lease, not a reporting one — a unit whose cheques do not add up to its own rent. A bounce that was made good is deliberately absent from every figure here: its replacement cheque is already counted, and adding the bounce as well would count the same money twice.',
+        rows: [
+          { label: 'Every rent payment on the book', key: 'allPaymentsFils' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', note: 'still owed — outside the figure above' },
+          { label: 'Everything receivable', key: 'receivableFils', total: true },
+          { label: 'Annual rent contracted', key: 'annualRentFils' },
+          { label: 'Difference', key: 'reconcileGapFils', note: 'Unit 201 — 61,100 of cheques against 60,100 of rent' },
+        ],
+      },
+    ],
+    // No controlKey at all: the schedule is every cheque on the current book and
+    // the columns run from the earliest to the latest of them. A year picker cut a
+    // lease's own schedule in half and hid 85 of the 325 cheques in hand.
     columns: [],
+    // One row per UNIT, so a lease count would only ever restate it — and did not,
+    // because a unit that changes hands mid-schedule has two leases behind one row.
     totals: [
-      { key: 'leases', label: 'Leases', type: 'number' },
-      { key: 'units', label: 'Units', type: 'number' },
-      { key: 'totalCheques', label: 'Total cheques', type: 'number' },
+      { key: 'units', label: 'Occupied units', type: 'number' },
+      { key: 'totalCheques', label: 'Cheques in hand', type: 'number' },
+      { key: 'valueFils', label: 'Cheque value', type: 'aed' },
+      // Rent that never arrives as a cheque, so it can never appear in the grid
+      // above. Named rather than left as a silent gap between the two figures.
+      { key: 'bankTransferFils', label: 'Bank transfer', type: 'aed' },
+      { key: 'cashOnlineFils', label: 'Cash / online', type: 'aed' },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
     ],
   },
 
@@ -651,7 +737,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'renewal-vacancy': {
     title: 'Renewal Plan - Yearly',
-    description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year. Click a Vacant count to list those units.',
+    description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year, so Renewals + Total Vacant is normally less than Total Units — the gap is the occupied units whose renewal falls outside this year. Click a Vacant count to list those units.',
     endpoint: '/api/reports/renewal-vacancy',
     buildingLeaseFilter: true,
     layout: 'countMatrix',
@@ -827,25 +913,48 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'rent-vs-market': {
     title: 'Rent vs Asking',
-    description: 'Each occupied unit\'s current contracted rent against the unit\'s asking price — the gap is the rent you can recover when the lease renews. Sorted by biggest uplift first. "At market" is within ±5% of the asking price.',
+    description: 'Every unit in the portfolio against its asking price, grouped by building — rent is negotiated building by building, so that is where the uplift is actionable. Each section is one property with its unit count, what it earns and what it could; expand it for the units. Buildings run A→Z and units run in unit-number order, so you can look a unit up. Units earning nothing today sit at the foot of their building with their asking price, each stating what is outstanding on it — a renewal drafted but never proceeded ("In renewal"), a lease issued and waiting on signature or cheques ("Lease issued"), a term that has run out ("Holding over"), or simply "Vacant". "At market" is within ±5% of the asking price.',
     endpoint: '/api/reports/rent-vs-market',
     buildingLeaseFilter: true,
-    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The Market Price total below sums the asking price across ALL units (occupied and vacant), matching the Portfolio page — the table rows above list occupied units only.',
+    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The sections list the same unit count as the Portfolio report. A unit earning nothing is not simply "vacant" — its Position is read from whatever lease is still open on it, and the row links to that lease: "In renewal" (a renewal drafted but never proceeded), "Lease issued" (issued, waiting on signature or cheques), "Holding over" (still active though its term has run out), "Lease active" (a live in-term lease on a unit its own availability flag calls vacant — a data mismatch worth fixing), "Not leased" (flagged occupied with nothing open) and "Vacant". None of them carry a gap — a vacant unit\'s asking price is lost rent, not uplift at renewal — so the uplift total stays renewal-only. The Market Price total sums the asking price across ALL units, matching the Portfolio page.',
+    layout: 'grouped',
+    // Section header: the building, its unit count and what it earns against
+    // asking. (Count columns other than Units are left off deliberately — a
+    // search recomputes every number column from the matched rows.)
     columns: [
       { key: 'buildingName', label: 'Property' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitType', label: 'Type', type: 'stage' },
+      { key: 'units', label: 'Units', align: 'right', type: 'number' },
       { key: 'currentRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
       { key: 'marketRentFils', label: 'Market Price', align: 'right', type: 'aed' },
-      { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
-      { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
-      { key: 'position', label: 'Position', type: 'stage' },
-      { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
+      { key: 'upliftFils', label: 'Uplift', align: 'right', type: 'aed' },
     ],
-    rowLink: { idKey: 'contractId', colKey: 'unitLabel', target: 'contract' },
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'buildingName',
+      titleLabel: 'Property',
+      countLabel: 'units',
+      groupNoun: 'building',
+      contractIdKey: 'contractId',
+      columns: [
+        { key: 'unitLabel', label: 'Unit' },
+        { key: 'tenantName', label: 'Customer' },
+        { key: 'unitType', label: 'Type', type: 'stage' },
+        { key: 'currentRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
+        { key: 'marketRentFils', label: 'Market Price', align: 'right', type: 'aed' },
+        { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
+        { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
+        { key: 'position', label: 'Position', type: 'stage' },
+        { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
+      ],
+    },
     totals: [
-      { key: 'units', label: 'Occupied units', type: 'number' },
+      { key: 'units', label: 'Leased units', type: 'number' },
+      // Split on the OPEN LEASE, same as the Position badges — a tile counting
+      // by the unit's availability flag beside a badge counting by lease state
+      // is two taxonomies on one page.
+      { key: 'notEarning', label: 'Earning nothing', type: 'number' },
+      { key: 'inRenewal', label: 'In renewal', type: 'number' },
+      { key: 'holdingOver', label: 'Holding over', type: 'number' },
       { key: 'belowMarket', label: 'Below asking', type: 'number' },
       { key: 'aboveMarket', label: 'Above asking', type: 'number' },
       { key: 'currentRentFils', label: 'Annual Rent', type: 'aed' },
@@ -1059,6 +1168,14 @@ const STAGE_STYLE: Record<string, string> = {
   at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
   above_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent over market → green
   no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market price set
+  vacant:       'bg-[#fef3c7] text-[#854d0e]',  // amber — earning nothing
+  not_leased:   'bg-[#fef3c7] text-[#854d0e]',  // occupied flag, no counting lease
+  // …and why it earns nothing: the work outstanding on the unit's open lease.
+  in_renewal:   'bg-[#e0e7ff] text-[#3730a3]',  // indigo — renewal drafted, not proceeded
+  draft_lease:  'bg-[#e0e7ff] text-[#3730a3]',  // indigo — new lease drafted
+  lease_issued: 'bg-[#dbeafe] text-[#1e40af]',  // blue — awaiting signature / cheques
+  lease_active: 'bg-[#dbeafe] text-[#1e40af]',  // live lease, unit flagged vacant
+  holding_over: 'bg-[#fee2e2] text-[#b91c1c]',  // red — term ran out, still active
   // operations-pipeline signature states — on_file deliberately NOT signed
   signed_state: 'bg-[#dbeafe] text-[#1e40af]',
   // manager-operations stage-gap ownership — whose clock the gap runs on
@@ -1565,21 +1682,221 @@ export function ReportDetailView({
     };
   }, [def.layout, data, search, sorted, propertyFilter]);
 
+  // One matrix row. Extracted so the grouped body (property bar → units →
+  // subtotal) and the flat body render identically instead of drifting.
+  const renderMatrixRow = (row: Record<string, unknown>, rowKey: string) => {
+    const cells = (row.cells as { amountFils: number; status: string | null; chequeNumber?: string | null; dueDate?: string | null; chequeCount?: number; cheques?: Record<string, unknown>[] }[]) ?? [];
+    // Grouped sheets print the property in the group bar and the term is not what
+    // the row is about, so the cell carries the unit alone — "Shed-5", not
+    // "Unit Shed-5 / Avenue Warehouse / 1 Feb 2026 – 31 Jan 2027". The term still
+    // reaches the reader as the link title. Ungrouped reports keep all three lines.
+    const bare = Boolean(def.matrixGroupKey);
+    const label = String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '');
+    const term = [row.contractStartDate, row.contractEndDate].every(Boolean)
+      ? `${fmtDate(row.contractStartDate as string)} – ${fmtDate(row.contractEndDate as string)}`
+      : '';
+    return (
+      <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+        <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left">
+          {row.contractId != null ? (
+            <Link href={`${contractsBase}/${row.contractId}/v2`} className="font-medium text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title={bare && term ? `${String(row.unitLabel ?? '')} · ${term}` : 'Open contract'}>
+              {bare ? label : String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
+            </Link>
+          ) : (
+            <div className="font-medium text-[#1a1916] leading-tight">{bare ? label : String(row.unitLabel ?? '—')}</div>
+          )}
+          {!bare && <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>}
+          {!bare && Boolean(row.contractStartDate || row.contractEndDate) && (
+            <div className="text-[11px] text-[#9b9890] leading-tight">
+              {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
+            </div>
+          )}
+        </td>
+        {/* Annual rent belongs to the unit's CURRENT lease. A lease
+            superseded during the year still lists its cash, but a
+            figure here would double-count the unit — so it reads as
+            a dash with the reason on hover. */}
+        <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">
+          {row.isCurrentLease === false
+            ? <span className="text-[#9b9890]" title="Superseded during the year — annual rent sits on this unit's current lease">—</span>
+            : fmtAmt(Number(row.annualRentFils))}
+        </td>
+        {cells.map((c, ci) => (
+          <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+            {c.amountFils ? (
+              <button
+                type="button"
+                onClick={() => setCellModal({
+                  title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
+                  countLabel: 'cheque',
+                  columns: [
+                    { key: 'chequeNumber', label: 'Cheque #' },
+                    { key: 'dueDate', label: 'Due', type: 'date' },
+                    { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+                    { key: 'status', label: 'Status', type: 'stage' },
+                    { key: 'replacement', label: 'Replacement' },
+                  ],
+                  // Every payment in the cell. This used to synthesise ONE
+                  // row from the cell summary — the first cheque's number
+                  // and date against the COMBINED amount, a payment that
+                  // never existed wherever two cheques shared a month.
+                  items: (c.cheques ?? []).length
+                    ? (c.cheques as Record<string, unknown>[])
+                    : [{ chequeNumber: c.chequeNumber ?? null, dueDate: c.dueDate ?? null, amountFils: c.amountFils, status: c.status }],
+                })}
+                className="hover:underline cursor-pointer print:no-underline"
+                title="See the cheque behind this amount">
+                {fmtAmt(c.amountFils)}{c.chequeCount && c.chequeCount > 1 ? ` (${c.chequeCount})` : ''}
+              </button>
+            ) : fmtAmt(c.amountFils)}
+          </td>
+        ))}
+        {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
+          <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916]' : 'text-[#1a1916]'} ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#f0ede8]' : ''}`}>
+            {c.type === 'number' ? fmtNumber(Number(row[c.key])) : fmtAmt(Number(row[c.key]))}
+          </td>
+        )) : (<>
+        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
+        </>)}
+      </tr>
+    );
+  };
+
+  /** One cheque-schedule row. Shared by the grouped and flat bodies so the two
+   *  can never drift apart. */
+  const renderChequeRow = (row: Record<string, unknown>, rowKey: string) => {
+                  const dates = (row.chequeDates as string[]) ?? [];
+                  const counts = (row.monthCounts as number[]) ?? [];
+                  const cheques = (row.cheques as { chequeNumber: string | null; dueDate: string | null; amountFils: number; status: string | null; monthIndex: number }[] | undefined) ?? [];
+                  return (
+                    <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left whitespace-nowrap">
+                        {/* Property is in the group bar and the term is not what the
+                            row is about — the cell carries the unit alone, with the
+                            full label and term on hover. */}
+                        {Number(row.contractId) > 0 ? (
+                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="text-[13px] font-semibold text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline"
+                            title={`${String(row.unitLabel ?? '')}${row.contractStartDate ? ` · ${fmtDate(row.contractStartDate as string)} – ${fmtDate(row.contractEndDate as string)}` : ''}`}>
+                            {String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '')}<ExternalLink size={11} className="print:hidden" />
+                          </Link>
+                        ) : (
+                          <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '')}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-left text-[#6b6860] whitespace-nowrap">{String(row.customer ?? '—')}</td>
+                      {Array.from({ length: data?.maxCheques ?? 0 }, (_, ci) => {
+                        // Each cheque opens its own detail: number, due date, amount,
+                        // status, and — if it bounced — what settled it and when.
+                        const chq = cheques[ci];
+                        return (
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'border-l border-[#f0ede8]' : ''} ${dates[ci] ? (CELL_STATUS_STYLE[chq?.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+                          {dates[ci] && chq ? (
+                            <button
+                              type="button"
+                              onClick={() => setCellModal({
+                                title: `${String(row.unitLabel ?? '').replace(/^Unit\s+/i, '')} · cheque ${ci + 1} of ${dates.length}`,
+                                countLabel: 'cheque',
+                                columns: [
+                                  { key: 'chequeNumber', label: 'Cheque #' },
+                                  { key: 'dueDate', label: 'Due', type: 'date' },
+                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+                                  { key: 'status', label: 'Status', type: 'stage' },
+                                  { key: 'replacement', label: 'Replacement' },
+                                ],
+                                items: [chq as unknown as Record<string, unknown>],
+                              })}
+                              className="hover:underline cursor-pointer print:no-underline"
+                              title="See this cheque">
+                              {dates[ci]}
+                            </button>
+                          ) : (dates[ci] ?? '·')}
+                        </td>
+                        );
+                      })}
+                      {counts.map((n, ci) => {
+                        const monthCheques = cheques.filter(c => c.monthIndex === ci);
+                        return (
+                        <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#1a1916] font-medium' : 'text-[#d4d2cc]'}`}>
+                          {n && monthCheques.length ? (
+                            <button
+                              type="button"
+                              onClick={() => setCellModal({
+                                title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
+                                countLabel: 'cheque',
+                                columns: [
+                                  { key: 'chequeNumber', label: 'Cheque #' },
+                                  { key: 'dueDate', label: 'Due', type: 'date' },
+                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
+                                  { key: 'status', label: 'Status', type: 'stage' },
+                                ],
+                                items: monthCheques,
+                              })}
+                              className="hover:underline cursor-pointer print:no-underline"
+                              title="See the cheques landing this month">
+                              {fmtNumber(n)}
+                            </button>
+                          ) : n ? fmtNumber(n) : '·'}
+                        </td>
+                        );
+                      })}
+                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
+                    </tr>
+                  );
+  };
+
   // Cheque-schedule matrix: per-month cheque counts and total are always
   // recomputed from the visible rows, so the footer + tiles follow the property
   // filter and search without a refetch.
   const chequeView = useMemo(() => {
     if (def.layout !== 'chequeMatrix' || !data) return null;
-    const colTotals = new Array(12).fill(0);
-    let totalCheques = 0;
+    // Columns run the length of the book now, not a fixed twelve.
+    const nMonths = (data.months ?? []).length;
+    const colTotals = new Array(nMonths).fill(0);
+    const colValue = new Array(nMonths).fill(0);
+    let totalCheques = 0, valueFils = 0, clearedFils = 0, pendingFils = 0, bouncedFils = 0;
+    let bouncedReplacedFils = 0, bouncedOwedFils = 0;
     const unitIds = new Set<number>();
     sorted.forEach(row => {
       const mc = (row.monthCounts as number[] | undefined) ?? [];
-      mc.forEach((n, i) => { if (i < 12) colTotals[i] += Number(n) || 0; });
+      mc.forEach((n, i) => { if (i < nMonths) colTotals[i] += Number(n) || 0; });
+      const mv = (row.monthValueFils as number[] | undefined) ?? [];
+      mv.forEach((n, i) => { if (i < nMonths) colValue[i] += Number(n) || 0; });
       totalCheques += Number(row.totalCheques ?? 0);
+      valueFils += Number(row.valueFils ?? 0);
+      clearedFils += Number(row.clearedFils ?? 0);
+      pendingFils += Number(row.pendingFils ?? 0);
+      bouncedFils += Number(row.bouncedFils ?? 0);
+      bouncedReplacedFils += Number(row.bouncedReplacedFils ?? 0);
+      bouncedOwedFils += Number(row.bouncedOwedFils ?? 0);
       if (row.unitId != null) unitIds.add(Number(row.unitId));
     });
-    return { columnTotals: colTotals, totals: { leases: sorted.length, units: unitIds.size, totalCheques } as Record<string, number> };
+    return {
+      columnTotals: colTotals,
+      columnValueFils: colValue,
+      // Annual rent and the bridge lines are properties of the whole book, not of
+      // the rows on screen, so they come straight from the server — filtering to
+      // one property must not restate the landlord's contracted rent.
+      totals: {
+        leases: sorted.length, units: unitIds.size, totalCheques,
+        valueFils, clearedFils, pendingFils, bouncedFils,
+        annualRentFils: Number(data.totals?.annualRentFils ?? 0),
+        bankTransferFils: Number(data.totals?.bankTransferFils ?? 0),
+        cashOnlineFils: Number(data.totals?.cashOnlineFils ?? 0),
+        otherMeansFils: Number(data.totals?.otherMeansFils ?? 0),
+        cancelledFils: Number(data.totals?.cancelledFils ?? 0),
+        bouncedReplacedFils: bouncedReplacedFils || Number(data.totals?.bouncedReplacedFils ?? 0),
+        bouncedOwedFils: bouncedOwedFils || Number(data.totals?.bouncedOwedFils ?? 0),
+        // Derived here so the note states the arithmetic rather than asserting it.
+        allPaymentsFils: valueFils + Number(data.totals?.otherMeansFils ?? 0),
+        receivableFils: valueFils + Number(data.totals?.otherMeansFils ?? 0)
+          + (bouncedOwedFils || Number(data.totals?.bouncedOwedFils ?? 0)),
+        reconcileGapFils: valueFils + Number(data.totals?.otherMeansFils ?? 0)
+          + (bouncedOwedFils || Number(data.totals?.bouncedOwedFils ?? 0))
+          - Number(data.totals?.annualRentFils ?? 0),
+      } as Record<string, number>,
+    };
   }, [def.layout, data, sorted]);
 
   // Count-matrix (renewal-vacancy): when a search narrows the visible
@@ -2548,78 +2865,80 @@ export function ReportDetailView({
         </div>
       ) : def.layout === 'matrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
-          <div className="overflow-x-auto">
+          {/* The table scrolls inside its own box, BOTH ways. A wrapper with only
+              overflow-x is its own scroll container, so a sticky header pins to
+              something that never moves vertically — the labels scrolled away and
+              29 unheaded month columns are unreadable. Capping the height here
+              gives the sticky header a container that actually scrolls. */}
+          <div className="overflow-auto max-h-[72vh] print:max-h-none print:overflow-visible">
             <table className="text-xs border-collapse min-w-full">
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+              {/* Header stays put while the sheet scrolls — 29 columns of months and
+                  totals are unreadable once the labels have gone off the top. */}
+              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-20 print:static">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
-                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Annual rent</th>
+                  <th className="sticky left-0 z-30 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0] bg-[#fafaf8]">Annual rent</th>
                   {(data?.months ?? []).map(m => (
-                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">{m}</th>
+                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0] bg-[#fafaf8]">{m}</th>
                   ))}
+                  {/* Trailing columns: a report may declare its own set (Rent Receivable
+                      needs Total / Cleared / Pending / Bounced, not the YTD pair). */}
+                  {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
+                    <th key={c.key} className={`px-4 py-3 text-right font-semibold whitespace-nowrap bg-[#fafaf8] ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e8e6e0]' : ''}`}>{c.label}</th>
+                  )) : (<>
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total</th>
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">YTD Expected</th>
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">YTD Received</th>
+                  </>)}
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row, i) => {
-                  const cells = (row.cells as { amountFils: number; status: string | null; chequeNumber?: string | null; dueDate?: string | null; chequeCount?: number }[]) ?? [];
-                  return (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left">
-                        {row.contractId != null ? (
-                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="font-medium text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title="Open contract">
-                            {String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
-                          </Link>
-                        ) : (
-                          <div className="font-medium text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
-                        )}
-                        <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>
-                        {Boolean(row.contractStartDate || row.contractEndDate) && (
-                          <div className="text-[11px] text-[#9b9890] leading-tight">
-                            {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
-                          </div>
-                        )}
-                      </td>
-                      {/* Annual rent belongs to the unit's CURRENT lease. A lease
-                          superseded during the year still lists its cash, but a
-                          figure here would double-count the unit — so it reads as
-                          a dash with the reason on hover. */}
-                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">
-                        {row.isCurrentLease === false
-                          ? <span className="text-[#9b9890]" title="Superseded during the year — annual rent sits on this unit's current lease">—</span>
-                          : fmtAmt(Number(row.annualRentFils))}
-                      </td>
-                      {cells.map((c, ci) => (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
-                          {c.amountFils ? (
-                            <button
-                              type="button"
-                              onClick={() => setCellModal({
-                                title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
-                                countLabel: 'cheque',
-                                columns: [
-                                  { key: 'chequeNumber', label: 'Cheque #' },
-                                  { key: 'dueDate', label: 'Due', type: 'date' },
-                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-                                  { key: 'status', label: 'Status', type: 'stage' },
-                                ],
-                                items: [{ chequeNumber: c.chequeNumber ?? null, dueDate: c.dueDate ?? null, amountFils: c.amountFils, status: c.status }],
-                              })}
-                              className="hover:underline cursor-pointer print:no-underline"
-                              title="See the cheque behind this amount">
-                              {fmtAmt(c.amountFils)}{c.chequeCount && c.chequeCount > 1 ? ` (${c.chequeCount})` : ''}
-                            </button>
-                          ) : fmtAmt(c.amountFils)}
-                        </td>
-                      ))}
-                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
-                    </tr>
-                  );
-                })}
+                {(() => {
+                  // With matrixGroupKey the body reads like the printed sheet: a
+                  // property bar, its units, then that property's own line. Without
+                  // it nothing changes — the rows render flat as before.
+                  if (!def.matrixGroupKey) return null;
+                  const key = def.matrixGroupKey;
+                  const seen: string[] = [];
+                  const groups = new Map<string, Record<string, unknown>[]>();
+                  for (const r of sorted) {
+                    const g = String(r[key] ?? '—');
+                    if (!groups.has(g)) { groups.set(g, []); seen.push(g); }
+                    groups.get(g)!.push(r);
+                  }
+                  const monthCount = (data?.months ?? []).length;
+                  const trailing = def.matrixTrailing ?? [];
+                  return seen.map(g => {
+                    const rows = groups.get(g)!;
+                    const cols = new Array(monthCount).fill(0);
+                    for (const r of rows) ((r.cells as { amountFils: number }[]) ?? []).forEach((c, ci) => { cols[ci] += Number(c.amountFils) || 0; });
+                    const rent = rows.reduce((a, r) => a + (Number(r.annualRentFils) || 0), 0);
+                    return (
+                      <Fragment key={g}>
+                        <tr className="bg-[#f0ede8] border-t border-[#e8e6e0]">
+                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#1a1916] whitespace-nowrap">
+                            {g} <span className="font-normal text-[#9b9890]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
+                          </td>
+                          <td colSpan={1 + monthCount + Math.max(trailing.length, 3)} className="bg-[#f0ede8]" />
+                        </tr>
+                        {rows.map((row, i) => renderMatrixRow(row, `${g}-${i}`))}
+                        <tr className="bg-[#fafaf8] border-t border-[#e8e6e0] font-semibold text-[#1a1916]">
+                          <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
+                          <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(rent)}</td>
+                          {cols.map((t, ti) => (
+                            <td key={ti} className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
+                          ))}
+                          {trailing.map((c, ci) => (
+                            <td key={c.key} className={`px-4 py-2 text-right tabular-nums whitespace-nowrap ${ci < trailing.length - 1 ? 'border-l border-[#e8e6e0]' : ''}`}>
+                              {fmtAmt(rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0))}
+                            </td>
+                          ))}
+                        </tr>
+                      </Fragment>
+                    );
+                  });
+                })()}
+                {!def.matrixGroupKey && sorted.map((row, i) => renderMatrixRow(row, String(i)))}
               </tbody>
               <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
                 <tr>
@@ -2628,9 +2947,17 @@ export function ReportDetailView({
                   {(matrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
                     <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
                   ))}
+                  {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
+                    <td key={c.key} className={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e8e6e0]' : ''}`}>
+                      {c.type === 'number'
+                        ? fmtNumber(Number(matrixView?.totals?.[c.key] ?? data?.totals?.[c.key]))
+                        : fmtAmt(matrixView?.totals?.[c.key] ?? data?.totals?.[c.key])}
+                    </td>
+                  )) : (<>
                   <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.scheduledFils ?? data?.totals?.scheduledFils)}</td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.ytdExpectedFils ?? data?.totals?.ytdExpectedFils)}</td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-[#15803d]">{fmtAmt(matrixView?.totals?.ytdReceivedFils ?? data?.totals?.ytdReceivedFils)}</td>
+                  </>)}
                 </tr>
                 {/* Cumulative — each month is the running total of every prior month */}
                 {(() => {
@@ -2645,14 +2972,44 @@ export function ReportDetailView({
                         <td key={ti} className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
                       ))}
                       <td className="px-3 py-2 text-right tabular-nums border-l border-[#e8e6e0] font-semibold text-[#1a1916]">{fmtAmt(run)}</td>
-                      <td className="px-3 py-2 border-l border-[#e8e6e0]" />
-                      <td className="px-3 py-2" />
+                      {(def.matrixTrailing ? def.matrixTrailing.slice(1) : [{ key: 'a' }, { key: 'b' }]).map((c, ci) => (
+                        <td key={ci} className={`px-3 py-2 ${ci === 0 ? 'border-l border-[#e8e6e0]' : ''}`} />
+                      ))}
                     </tr>
                   );
                 })()}
               </tfoot>
             </table>
           </div>
+          {def.summaryPanels && (
+            <div className="border-t border-[#e8e6e0] grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid">
+              {def.summaryPanels.map(panel => (
+                <div key={panel.title}>
+                  <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
+                  <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
+                    <tbody>
+                      {panel.rows.map(r => {
+                        // Whichever view is driving this layout — the cheque grid has no matrixView,
+                        // and the derived reconciliation figures live on the view, not on data.
+                        const view = matrixView ?? chequeView;
+                        const v = r.key ? (view?.totals?.[r.key] ?? data?.totals?.[r.key]) : undefined;
+                        return (
+                          <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                            <td className="px-3 py-2 text-left">
+                              {r.label}
+                              {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(v)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-4 px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#15803d]" /> Collected</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
@@ -2662,82 +3019,67 @@ export function ReportDetailView({
         </div>
       ) : def.layout === 'chequeMatrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
-          <div className="overflow-x-auto">
+          {/* Scrolls both ways with a pinned header — same reason as the matrix:
+              22 month columns are unreadable once the labels leave the top. */}
+          <div className="overflow-auto max-h-[72vh] print:max-h-none print:overflow-visible">
             <table className="text-xs border-collapse min-w-full">
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-20 print:static">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[200px]">Unit / Building / Duration</th>
-                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap">Customer</th>
+                  <th className="sticky left-0 z-30 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[130px]">Unit</th>
+                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap bg-[#fafaf8]">Customer</th>
                   {Array.from({ length: data?.maxCheques ?? 0 }, (_, i) => (
                     <th key={i} className={`px-3 py-3 text-right font-semibold whitespace-nowrap ${i === 0 ? 'border-l border-[#e8e6e0]' : ''}`}>Cheque {i + 1}</th>
                   ))}
-                  {(data?.months ?? []).map((m, mi) => (
-                    <th key={m} className="px-3 py-3 text-center font-semibold whitespace-nowrap border-l border-[#f0ede8]">
-                      <div>{m}</div>
-                      <div className="text-[9px] font-normal text-[#c8c6c0] normal-case">Month {mi + 1}</div>
-                    </th>
+                  {/* The label is the month itself. A "Month N" counter made sense
+                      when the grid was a fixed twelve; the columns now run the length
+                      of the book, so it read "Month 22" and meant nothing. */}
+                  {(data?.months ?? []).map(m => (
+                    <th key={m} className="px-3 py-3 text-center font-semibold whitespace-nowrap border-l border-[#f0ede8] bg-[#fafaf8]">{m}</th>
                   ))}
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total cheques</th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row, i) => {
-                  const dates = (row.chequeDates as string[]) ?? [];
-                  const counts = (row.monthCounts as number[]) ?? [];
-                  const cheques = (row.cheques as { chequeNumber: string | null; dueDate: string | null; amountFils: number; status: string | null; monthIndex: number }[] | undefined) ?? [];
-                  return (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left whitespace-nowrap">
-                        {row.contractId != null ? (
-                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="text-[13px] font-semibold text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title="Open contract">
-                            {String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
-                          </Link>
-                        ) : (
-                          <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—')}</div>
-                        )}
-                        <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '—')}</div>
-                        {Boolean(row.contractStartDate || row.contractEndDate) && (
-                          <div className="text-[11px] text-[#9b9890] leading-tight">
-                            {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-left text-[#6b6860] whitespace-nowrap">{String(row.customer ?? '—')}</td>
-                      {Array.from({ length: data?.maxCheques ?? 0 }, (_, ci) => (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'border-l border-[#f0ede8]' : ''} ${dates[ci] ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
-                          {dates[ci] ?? '·'}
-                        </td>
-                      ))}
-                      {counts.map((n, ci) => {
-                        const monthCheques = cheques.filter(c => c.monthIndex === ci);
-                        return (
-                        <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#1a1916] font-medium' : 'text-[#d4d2cc]'}`}>
-                          {n && monthCheques.length ? (
-                            <button
-                              type="button"
-                              onClick={() => setCellModal({
-                                title: `${String(row.unitLabel ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`,
-                                countLabel: 'cheque',
-                                columns: [
-                                  { key: 'chequeNumber', label: 'Cheque #' },
-                                  { key: 'dueDate', label: 'Due', type: 'date' },
-                                  { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-                                  { key: 'status', label: 'Status', type: 'stage' },
-                                ],
-                                items: monthCheques,
-                              })}
-                              className="hover:underline cursor-pointer print:no-underline"
-                              title="See the cheques landing this month">
-                              {fmtNumber(n)}
-                            </button>
-                          ) : n ? fmtNumber(n) : '·'}
-                        </td>
-                        );
-                      })}
-                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
-                    </tr>
-                  );
-                })}
+                {(() => {
+                  // Grouped by property: a bar, its units, then that property's line.
+                  if (!def.matrixGroupKey) return null;
+                  const key = def.matrixGroupKey;
+                  const order: string[] = [];
+                  const groups = new Map<string, Record<string, unknown>[]>();
+                  for (const r of sorted) {
+                    const g = String(r[key] ?? '—');
+                    if (!groups.has(g)) { groups.set(g, []); order.push(g); }
+                    groups.get(g)!.push(r);
+                  }
+                  const nMonths = (data?.months ?? []).length;
+                  const nChq = data?.maxCheques ?? 0;
+                  return order.map(g => {
+                    const rows = groups.get(g)!;
+                    const cols = new Array(nMonths).fill(0);
+                    for (const r of rows) ((r.monthCounts as number[]) ?? []).forEach((n, ci) => { cols[ci] += Number(n) || 0; });
+                    const tot = rows.reduce((a, r) => a + (Number(r.totalCheques) || 0), 0);
+                    return (
+                      <Fragment key={g}>
+                        <tr className="bg-[#f0ede8] border-t border-[#e8e6e0]">
+                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#1a1916] whitespace-nowrap">
+                            {g} <span className="font-normal text-[#9b9890]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
+                          </td>
+                          <td colSpan={1 + nChq + nMonths + 1} className="bg-[#f0ede8]" />
+                        </tr>
+                        {rows.map((row, i) => renderChequeRow(row, `${g}-${i}`))}
+                        <tr className="bg-[#fafaf8] border-t border-[#e8e6e0] font-semibold text-[#1a1916]">
+                          <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
+                          <td className="px-3 py-2" colSpan={1 + nChq} />
+                          {cols.map((n, ci) => (
+                            <td key={ci} className="px-3 py-2 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{n ? fmtNumber(n) : '·'}</td>
+                          ))}
+                          <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(tot)}</td>
+                        </tr>
+                      </Fragment>
+                    );
+                  });
+                })()}
+                {!def.matrixGroupKey && sorted.map((row, i) => renderChequeRow(row, String(i)))}
               </tbody>
               <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
                 <tr>
@@ -2750,6 +3092,35 @@ export function ReportDetailView({
               </tfoot>
             </table>
           </div>
+          {def.summaryPanels && (
+            <div className="border-t border-[#e8e6e0] grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid">
+              {def.summaryPanels.map(panel => (
+                <div key={panel.title}>
+                  <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
+                  <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
+                    <tbody>
+                      {panel.rows.map(r => {
+                        // Whichever view is driving this layout — the cheque grid has no matrixView,
+                        // and the derived reconciliation figures live on the view, not on data.
+                        const view = matrixView ?? chequeView;
+                        const v = r.key ? (view?.totals?.[r.key] ?? data?.totals?.[r.key]) : undefined;
+                        return (
+                          <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                            <td className="px-3 py-2 text-left">
+                              {r.label}
+                              {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(v)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : def.layout === 'countMatrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
@@ -2859,7 +3230,7 @@ export function ReportDetailView({
           </div>
           {!def.matrixTrailing && (
             <div className="px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
-              Months add up to Renewals — the units coming up for renewal in the selected year (each counted once, in its renewal month). Vacant and Total units are current inventory (each unit&rsquo;s live status), independent of the year. Click a Vacant count to list those units.
+              Months add up to Renewals — the units coming up for renewal in the selected year (each counted once, in its renewal month). Vacant and Total units are current inventory (each unit&rsquo;s live status), independent of the year, so Renewals + Vacant is normally less than Total units: the difference is the occupied units whose renewal falls outside this year — already overdue, or not due until next year. Click a Vacant count to list those units.
             </div>
           )}
         </div>
@@ -2952,7 +3323,10 @@ export function ReportDetailView({
       {data && (
         <p className="text-[11px] text-[#9b9890] mt-3 print:mt-4">
           {def.layout === 'grouped'
-            ? `${groups.reduce((n, g) => n + g.items.length, 0)} ${def.drilldown?.countLabel ?? 'rows'} across ${groups.length} month${groups.length === 1 ? '' : 's'}`
+            ? (() => {
+                const noun = def.drilldown?.groupNoun ?? 'month';
+                return `${groups.reduce((n, g) => n + g.items.length, 0)} ${def.drilldown?.countLabel ?? 'rows'} across ${groups.length} ${noun}${groups.length === 1 ? '' : 's'}`;
+              })()
             : `${sorted.length} row${sorted.length === 1 ? '' : 's'}`} · Generated {new Date(data.generatedAt).toLocaleString('en-AE')}
         </p>
       )}
@@ -3105,8 +3479,16 @@ export function ReportDetailView({
                   </tr>
                 </thead>
                 <tbody>
-                  {cellModal.items.map((it, idx) => (
-                    <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                  {cellModal.items.map((it, idx) => {
+                    // A cheque that bounced carries its whole story — presented,
+                    // returned, penalty, each replacement, where it ended up.
+                    // Expanded by default: someone clicking a bounce is asking
+                    // exactly this, and one more click to find out is one too many.
+                    const history = (it.history as ChequeEvent[] | null) ?? null;
+                    const span = cellModal.columns.length + (cellModal.contractIdKey ? 1 : 0);
+                    return (
+                    <Fragment key={idx}>
+                    <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       {cellModal.columns.map(c => (
                         <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
                           <CellValue value={it[c.key]} type={c.type} />
@@ -3125,7 +3507,38 @@ export function ReportDetailView({
                         </td>
                       )}
                     </tr>
-                  ))}
+                    {history && history.length > 0 && (
+                      <tr className="border-t border-[#f0ede8]">
+                        <td colSpan={span} className="px-3 pb-3 pt-1 bg-[#fdfcfa]">
+                          <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold mb-1.5">
+                            What happened to this cheque
+                          </div>
+                          <ol className="border-l-2 border-[#e8e6e0] ml-1">
+                            {history.map((h, hi) => (
+                              <li key={hi} className="relative pl-4 pb-2 last:pb-0">
+                                <span className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${
+                                  h.status === 'bounced' ? 'bg-[#dc2626]'
+                                  : h.status === 'cleared' ? 'bg-[#15803d]'
+                                  : h.status === 'pending' ? 'bg-[#b45309]' : 'bg-[#c8c6c0]'}`} />
+                                <div className="flex items-baseline justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <span className="text-[12px] font-semibold text-[#1a1916]">{h.event}</span>
+                                    {h.detail && <span className="text-[11px] text-[#6b6860] ml-2">{h.detail}</span>}
+                                  </div>
+                                  <div className="flex items-baseline gap-3 whitespace-nowrap">
+                                    <span className="text-[11px] text-[#9b9890]">{h.date ? fmtDate(h.date) : ''}</span>
+                                    <span className="text-[12px] tabular-nums font-medium text-[#1a1916]">{fmtAmt(h.amountFils)}</span>
+                                  </div>
+                                </div>
+                              </li>
+                            ))}
+                          </ol>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
