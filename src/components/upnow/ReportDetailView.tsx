@@ -509,7 +509,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
 
   'rent-receivable': {
-    title: 'Rent We Are Owed',
+    title: 'Cash Management',
     tagline: 'Every occupied unit, every payment, no calendar cut.',
     description: 'Each occupied unit on one line, with every rent payment on its lease laid out month by month. No year is imposed \u2014 the columns run from the earliest payment to the latest one the current book holds, so a tenancy running across a new year is never cut in half. A unit counts when its lease is live: not expired or terminated, the term still running, no accepted termination in effect, and either activated or with its cheques confirmed in hand. Total is Cleared + Pending. A bounced cheque is reported in its own two columns and never added in \u2014 where a bounce was made good the replacement cheque already sits inside Cleared, so counting the bounce as well would count the money twice; a bounce nobody replaced is still owed and is shown separately so it can be added back. Click any month to see the cheques behind it, with the full history of anything that bounced.',
     endpoint: '/api/reports/rent-receivable',
