@@ -606,14 +606,16 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     // One row per UNIT, so a lease count would only ever restate it — and did not,
     // because a unit that changes hands mid-schedule has two leases behind one row.
     totals: [
+      // Same opening pair as every other collection report: how many units, and
+      // what they are contracted at. Everything after is this report's own.
       { key: 'units', label: 'Occupied units', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
       { key: 'totalCheques', label: 'Cheques in hand', type: 'number' },
       { key: 'valueFils', label: 'Cheque value', type: 'aed' },
       // Rent that never arrives as a cheque, so it can never appear in the grid
       // above. Named rather than left as a silent gap between the two figures.
       { key: 'bankTransferFils', label: 'Bank transfer', type: 'aed' },
       { key: 'cashOnlineFils', label: 'Cash / online', type: 'aed' },
-      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
     ],
   },
 
@@ -924,8 +926,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'units', label: 'Units', align: 'right', type: 'number' },
-      { key: 'currentRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market Price', align: 'right', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed' },
       { key: 'upliftFils', label: 'Uplift', align: 'right', type: 'aed' },
     ],
     drilldown: {
@@ -939,8 +941,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'unitLabel', label: 'Unit' },
         { key: 'tenantName', label: 'Customer' },
         { key: 'unitType', label: 'Type', type: 'stage' },
-        { key: 'currentRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
-        { key: 'marketRentFils', label: 'Market Price', align: 'right', type: 'aed' },
+        { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+        { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed' },
         { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
         { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
         { key: 'position', label: 'Position', type: 'stage' },
@@ -955,10 +957,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     // uplift figure the report exists to show.
     totals: [
       { key: 'occupiedUnits', label: 'Occupied units', type: 'number' },
-      { key: 'belowMarket', label: 'Below asking', type: 'number' },
-      { key: 'currentRentFils', label: 'Annual Rent', type: 'aed' },
-      { key: 'marketRentFils', label: 'Market Price', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual rent', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market price', type: 'aed' },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
+      { key: 'belowMarket', label: 'Below asking', type: 'number' },
     ],
   },
 
