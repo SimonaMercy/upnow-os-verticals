@@ -91,7 +91,12 @@ interface RawPayment {
 }
 interface RawContract {
   contractType?: string | null; fees?: RawPayment[] | null;
-  securityDeposit?: { amount?: number | null; dueDate?: string | null; recordedDate?: string | null } | null;
+  /** The deposit REGISTER record — since migration 0191 a deposit is never a
+   *  `payments` row, so every cheque fact the plan shows comes from here. */
+  securityDeposit?: {
+    amount?: number | null; dueDate?: string | null; recordedDate?: string | null;
+    chequeNumber?: string | null; paymentMethod?: string | null; chequeStatus?: string | null;
+  } | null;
   securityDepositHeld?: number | null; securityDepositAmount?: number | null;
 }
 
@@ -106,9 +111,12 @@ const toRow = (p: RawPayment): SegPaymentInput => ({
   paymentMethod: p.paymentMethod ?? null,
 });
 
-/** Every payment + one-off fee row the four groups build from. On non-renewals with
- *  a recorded deposit but no deposit payment row, a Security Deposit line is synthesised
- *  (renewals carry the deposit forward and never re-collect it). */
+/** Every payment + one-off fee row the four groups build from. The Security Deposit
+ *  line is ALWAYS synthesised from the register on a non-renewal — deposits stopped
+ *  being `payments` rows in migration 0191 — and carries the register's own cheque
+ *  number, method, date and status, so the plan does not print a deposit line with
+ *  an em-dash where its reference and payer should be. (Renewals carry the deposit
+ *  forward and never re-collect it, so they show no deposit line at all.) */
 export function segRowsFromContract(contract: RawContract, payments: RawPayment[]): SegPaymentInput[] {
   const isRenewal = (contract.contractType ?? '').toLowerCase() === 'renewal';
   // A payment recorded against a BOUNCED cheque is not an instalment of the plan —
@@ -123,9 +131,15 @@ export function segRowsFromContract(contract: RawContract, payments: RawPayment[
   if (isRenewal) rows = rows.filter(r => (r.paymentType ?? '').toLowerCase() !== 'security_deposit');
   const hasDeposit = rows.some(r => (r.paymentType ?? '').toLowerCase() === 'security_deposit');
   if (!isRenewal && !hasDeposit) {
-    const amt = Number(contract.securityDeposit?.amount ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
-    if (amt > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: amt,
-      chequeNumber: null, transactionDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? null });
+    const sd = contract.securityDeposit;
+    const amt = Number(sd?.amount ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
+    if (amt > 0) rows.push({
+      paymentType: 'security_deposit', description: 'Security Deposit', amount: amt,
+      chequeNumber: sd?.chequeNumber ?? null,
+      paymentMethod: sd?.paymentMethod ?? null,
+      chequeStatus: sd?.chequeStatus ?? null,
+      transactionDate: sd?.dueDate ?? sd?.recordedDate ?? null,
+    });
   }
   return rows;
 }

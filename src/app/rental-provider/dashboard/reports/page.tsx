@@ -13,7 +13,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-  Search, X, BarChart2, CalendarRange, LineChart,
+  Search, X, BarChart2, CalendarRange,
 } from 'lucide-react';
 import DataExports from './DataExports';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
@@ -39,10 +39,7 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">
-            Open any report to view, filter and export it.{' '}
-            <Link href="/rental-provider/dashboard/analytics" className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
-              <LineChart size={12} /> View analytics
-            </Link>
+            Open any report to view, filter and export it.
           </p>
         </div>
         {/* Hub-wide year (shared with Analytics) — the default period each

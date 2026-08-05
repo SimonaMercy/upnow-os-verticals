@@ -12,7 +12,7 @@
  *   5. Waiting too long right now — live stuck records with who's holding
  *      them (manager / customer / landlord).
  *   6. Stage timing + average working day (evaluation sections).
- *   7. Manager activity — date by date. EVERY audited action, not just the
+ *   7. Manager activity. EVERY audited action, not just the
  *      four pipelines (create/update/delete across properties, units, listings,
  *      documents, AMC, templates, team, settings, notes …). Repeated identical
  *      actions on one record collapse into a single "×N" line; page-view
@@ -842,10 +842,10 @@ export function ManagerOperationsReport({
             </div>
           </section>
 
-          {/* ── 9. Manager activity, date by date ── */}
+          {/* ── 9. Manager activity ── */}
           <section className="mt-5">
             <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-3.5">
-              <h2 className="text-sm font-bold text-[#1a1916]">Manager activity — date by date</h2>
+              <h2 className="text-sm font-bold text-[#1a1916]">Manager activity</h2>
               <p className="text-xs text-[#6b6860] mt-0.5">
                 The full day for each person, newest first — signing in, pages opened, and every create/edit/delete
                 across leads, contracts, payments, listings, documents, templates and settings. Repeated saves of the

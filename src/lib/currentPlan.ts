@@ -32,7 +32,11 @@ export interface PlanContract {
   discountAmount?: number | null;
   listedRent?: number | null;
   numberOfInstallments?: number | null;
-  securityDeposit?: { amount?: number | null; dueDate?: string | null; recordedDate?: string | null } | null;
+  securityDeposit?: {
+    amount?: number | null; dueDate?: string | null; recordedDate?: string | null;
+    /** The deposit cheque's own state — since 0191 this is the only row that has one. */
+    chequeStatus?: string | null;
+  } | null;
   securityDepositHeld?: number | null;
   securityDepositAmount?: number | null;
   fees?: PlanPayment[] | null;
@@ -49,12 +53,14 @@ export function buildCurrentPlan(contract: PlanContract, payments: PlanPayment[]
     .sort((a, b) => (a.transactionDate ?? '').localeCompare(b.transactionDate ?? ''));
   const feeRows = contract.fees ?? [];
   const feeGross = feeRows.reduce((s, p) => s + (p.amount || 0), 0);
-  const depositRow = (payments ?? []).find(p => p.paymentType === 'security_deposit');
+  // The deposit comes from the register record (migration 0191 — it is no longer
+  // a payment row), then the contract's held/agreed figures.
+  const depositRecord = contract.securityDeposit ?? null;
   // Renewals carry the deposit from the original lease (never re-collected), so it
   // must not appear as a new line / instalment in the renewal's payment plan.
   const depositForPlan = contract.contractType === 'renewal'
     ? 0
-    : (depositRow?.amount ?? contract.securityDeposit?.amount ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
+    : (depositRecord?.amount ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
 
   let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commNet = 0, commVat = 0;
   const customFees: { label: string; netFils: number; vatFils: number }[] = [];
@@ -74,7 +80,7 @@ export function buildCurrentPlan(contract: PlanContract, payments: PlanPayment[]
     // custom charges would all read as rent instalments. `type` follows suit.
     ...rentRows.map(p => ({ amountFils: toFils(p.amount ?? 0), vatFils: toFils(p.vatAmount ?? 0), dueDate: p.transactionDate ?? '', description: p.description ?? 'Rent', type: (p.paymentType === 'rental_income' ? 'installment' : 'fee') as 'installment' | 'fee', paymentType: p.paymentType ?? null, status: p.chequeStatus ?? null })),
     ...feeRows.map(f => ({ amountFils: toFils(f.amount ?? 0), vatFils: toFils(f.vatAmount ?? 0), dueDate: f.transactionDate ?? '', description: f.description || feeLabel(f.paymentType), type: 'fee' as const, paymentType: f.paymentType ?? null, status: f.chequeStatus ?? null })),
-    ...(depositForPlan > 0 ? [{ amountFils: toFils(depositForPlan), vatFils: 0, dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '', description: 'Security deposit', type: 'security_deposit' as const, paymentType: 'security_deposit', status: depositRow?.chequeStatus ?? null }] : []),
+    ...(depositForPlan > 0 ? [{ amountFils: toFils(depositForPlan), vatFils: 0, dueDate: contract.securityDeposit?.dueDate ?? contract.securityDeposit?.recordedDate ?? '', description: 'Security deposit', type: 'security_deposit' as const, paymentType: 'security_deposit', status: depositRecord?.chequeStatus ?? null }] : []),
   ].map((it, i) => ({ ...it, index: i + 1 }));
 
   // Headline rent = the contract's agreed current rent (annualRent is NET), so it

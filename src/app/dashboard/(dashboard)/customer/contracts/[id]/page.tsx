@@ -93,6 +93,14 @@ interface ContractDetail {
   discountType: 'percent' | 'fixed' | null;
   discountAmount: number | null;
   securityDepositAmount: number | null;
+  /** The deposit REGISTER record — the only place a deposit lives (migration
+   *  0191). Resolved across the tenancy chain, so a renewal still shows the
+   *  deposit collected on the original lease. */
+  securityDeposit?: {
+    depositId: number; amount: number; chequeNumber: string | null;
+    paymentMethod: string | null; chequeStatus: string | null;
+    recordedDate: string | null; dueDate: string | null;
+  } | null;
   numberOfInstallments: number | null;
   // Installment plans the landlord offers (Settings → Rules). Empty = all allowed.
   allowedInstallments?: number[] | null;
@@ -294,7 +302,9 @@ export default function TenantContractDetailPage() {
   // notes below have to read it through the shared rule (see lib/chargeTax).
   const vatOf = (p: { paymentType?: string | null; description?: string | null; vatAmount?: number | null; amount: number }) =>
     taxPortionOf(p, p.amount);
-  const depositPayment = (contract?.payments ?? []).find(p => p.paymentType === 'security_deposit');
+  // The deposit is a register record, never a payment row (0191) — one place to
+  // read it from, and the one that carries the receipt number.
+  const deposit = contract?.securityDeposit ?? null;
 
   // ── Timeline step states (mirrors RP 6-step journey) ────────────────────
   function ss(prevDone: boolean, thisDone: boolean): TLState {
@@ -678,22 +688,24 @@ export default function TenantContractDetailPage() {
 
                     {/* Security Deposit (read-only) */}
                     <SectionCard title="Security Deposit" icon={DirhamSign}>
-                      {depositPayment ? (
+                      {deposit ? (
                         <>
-                          <Row label="Amount" value={fmtAed(depositPayment.amount)} />
-                          <Row label="Method" value={depositPayment.paymentMethod} />
+                          <Row label="Amount" value={fmtAed(deposit.amount)} />
+                          <Row label="Method" value={deposit.paymentMethod} />
                           <Row label="Status" value={
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              depositPayment.chequeStatus === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
-                              depositPayment.chequeStatus === 'bounced' ? 'bg-red-50 text-red-700' :
+                              deposit.chequeStatus === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                              deposit.chequeStatus === 'bounced' ? 'bg-red-50 text-red-700' :
                               'bg-amber-50 text-amber-700'
-                            }`}>{depositPayment.chequeStatus}</span>
+                            }`}>{deposit.chequeStatus ?? 'pending'}</span>
                           } />
                           {/* Renewals carry the deposit forward (read-only) — no fresh deposit
-                              receipt, so don't advertise a "View Receipt" link for it. */}
-                          {contract.contractType !== 'renewal' && canReceipt(depositPayment) && (
+                              receipt, so don't advertise a "View Receipt" link for it.
+                              `?kind=deposit` rather than a payment id: the deposit is a register
+                              record and its receipt is numbered against that, not a cheque row. */}
+                          {contract.contractType !== 'renewal' && (deposit.chequeStatus === 'cleared' || contract.pdcConfirmed) && (
                             <a
-                              href={receiptHref(depositPayment)}
+                              href={`/dashboard/customer/contracts/${contract.id}/print/receipt?kind=deposit`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors"

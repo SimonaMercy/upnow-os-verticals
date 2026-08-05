@@ -144,6 +144,17 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('q') ?? '';
   });
+  // Seeded from `?unit=` (see lib/unitHref.ts) so a link elsewhere — the
+  // dashboard's vacant/occupied unit rows, a lead, a contract — opens THAT
+  // unit's preview directly. This replaces the standalone /units/{id} page,
+  // which rendered the same unit a second, differently-maintained way.
+  // Held in state, not read on every render, because it is a ONE-SHOT: once the
+  // preview is open, closing it must not immediately reopen it.
+  const [deepLinkUnitId, setDeepLinkUnitId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const n = Number(new URLSearchParams(window.location.search).get('unit'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
   const [view, setView] = useState<'grid' | 'row'>('row');
   // Primary axis: 'unit' = a flat list of every individual unit grouped by
   // building (default), 'type' = layout cards grouped by unit type (pricing).
@@ -405,6 +416,20 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       leaseTerms: null, termsVersion: null, unpricedCount: 0, unitCount: 1, sampleUnitId: u.id,
       floorPlanUrl: u.floorPlanUrl ?? null, flags: [],
     } as Plan);
+
+  // The `?unit=` deep link, resolved DURING RENDER rather than in an effect.
+  // The by-unit view (the default) eagerly loads every in-scope property, so the
+  // unit appears here as soon as its property lands — no effect, no extra render
+  // pass, and no setState-in-effect. If the id matches nothing in scope (a stale
+  // link, or another landlord's unit) nothing opens and the reader simply lands
+  // on the workspace.
+  const deepLinkUnit = deepLinkUnitId == null ? null
+    : Object.values(unitsByProperty).flat().find(u => u.id === deepLinkUnitId) ?? null;
+  // An explicitly-opened preview wins; the deep link is only the initial one.
+  // Closing clears BOTH, so a dismissed deep link cannot re-open itself.
+  const activePreview = unitPreview
+    ?? (deepLinkUnit ? { plan: planForUnit(deepLinkUnit), unit: deepLinkUnit } : null);
+  const closePreview = () => { setUnitPreview(null); setDeepLinkUnitId(null); };
 
   const inScopePropIds = propertyId != null ? [propertyId] : (data?.properties.map(p => p.id) ?? []);
   const perUnitLoading = mode === 'unit'
@@ -1073,28 +1098,30 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         />
       )}
 
-      {/* Read-only unit preview. */}
-      {unitPreview && (
+      {/* Read-only unit preview — opened by a row click, or by `?unit=` on the
+          URL (see activePreview). This is where a unit is READ; the standalone
+          /dashboard/units/{id} page that used to do it as well is gone. */}
+      {activePreview && (
         <UnitPreviewModal
-          propertyId={unitPreview.plan.propertyId}
-          propertyName={unitPreview.plan.buildingName}
-          leasingType={leasingByProperty.get(unitPreview.plan.propertyId) ?? null}
+          propertyId={activePreview.plan.propertyId}
+          propertyName={activePreview.plan.buildingName}
+          leasingType={leasingByProperty.get(activePreview.plan.propertyId) ?? null}
           fetchBase={manager ? '/manager/properties' : undefined}
           fetchQuery={manager ? rpQ : undefined}
-          unit={unitPreview.unit}
+          unit={activePreview.unit}
           contract={(() => {
             // Prefer the active lease; else fall back to the most recent contract
             // (the list is sorted createdAt DESC) so a now-vacant unit still shows
             // its last tenancy.
-            const forUnit = contracts.filter(x => x.unit?.id === unitPreview.unit.id);
+            const forUnit = contracts.filter(x => x.unit?.id === activePreview.unit.id);
             const c = forUnit.find(x => x.contractActive) ?? forUnit[0];
             return c ? { id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive } : null;
           })()}
           contracts={contracts
-            .filter(x => x.unit?.id === unitPreview.unit.id)
+            .filter(x => x.unit?.id === activePreview.unit.id)
             .map(c => ({ id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive }))}
-          onEdit={canEdit ? () => { setUnitModal({ plan: unitPreview.plan, editingUnit: unitPreview.unit }); setUnitPreview(null); } : undefined}
-          onClose={() => setUnitPreview(null)}
+          onEdit={canEdit ? () => { setUnitModal({ plan: activePreview.plan, editingUnit: activePreview.unit }); closePreview(); } : undefined}
+          onClose={closePreview}
         />
       )}
     </div>

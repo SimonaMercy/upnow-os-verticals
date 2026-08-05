@@ -13,6 +13,7 @@
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
+import { unitHref } from '@/lib/unitHref';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -299,7 +300,7 @@ export function DataGapsView({
                         <MissingChip label="Floor plan" on={u.noFloorPlan} /><MissingChip label="Images" on={u.noImages} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
-                        <Link href={`/rental-provider/dashboard/units/${u.unitId}`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                        <Link href={unitHref(u.unitId)} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
                       </td>
                     </tr>
                   ))}

@@ -791,12 +791,11 @@ export function UnitPreviewModal({
               </Link>
             )}
             <div style={{ flex: 1 }} />
-            {!isManagerView && (
-              <Link href={`/rental-provider/dashboard/units/${unit.id}`}
-                style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: '#fff', background: C.green, padding: '12px 22px', borderRadius: 11, textDecoration: 'none', boxShadow: '0 6px 16px rgba(26,154,100,.26)' }}>
-                Open full page <ExternalLink size={13} />
-              </Link>
-            )}
+            {/* No "Open full page" any more. It pointed at the standalone
+                /dashboard/units/{id} page, which was a second rendering of the
+                unit maintained alongside this one; that page is gone and THIS
+                is where a unit is read, so the button would now link the reader
+                back to what they are already looking at. */}
           </footer>
         </div>
       </div>

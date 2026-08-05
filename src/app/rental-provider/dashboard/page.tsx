@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { contractHref, type ContractSurface } from '@/lib/contractHref';
+import { unitHref } from '@/lib/unitHref';
 import Link from 'next/link';
 
 interface DashboardStats {
@@ -95,9 +96,13 @@ interface UnitRow {
   listingStatus: string;
   /** Who is in it and until when — populated for OCCUPIED units only (see the
    *  API's UnitTenancy). `daysToEnd` is signed: negative means the term has
-   *  lapsed while the unit is still occupied, i.e. an overdue renewal. */
+   *  lapsed while the unit is still occupied, i.e. an overdue renewal.
+   *  `daysToStart` is positive only on an incoming signed tenancy — the lease
+   *  that has the unit marked occupied before the tenant has moved in. */
   contractId?: number | null;
   tenant?: string | null;
+  startsOn?: string | null;
+  daysToStart?: number | null;
   endsOn?: string | null;
   daysToEnd?: number | null;
   /** Vacancy duration + cost — populated for vacant units only (see the API's
@@ -172,6 +177,10 @@ interface ArrearsCheque {
   buildingName: string | null;
   /** >0 only on a bounce PART made good — the remainder is still owed. */
   coveredAmount: number;
+  /** `locked_at IS NOT NULL` on the cheque's lease — which of the two contract
+   *  surfaces the row opens. Server-decided; the client cannot see `locked_at`.
+   *  Optional so an older payload falls back to the register rather than 404ing. */
+  locked?: boolean;
 }
 
 /** A cheque behind the Receivables KPI. `state` splits the headline into the
@@ -186,6 +195,8 @@ interface ReceivableCheque {
   customer: string | null;
   unitLabel: string | null;
   buildingName: string | null;
+  /** Which contract surface the row opens — see ArrearsCheque.locked. */
+  locked?: boolean;
 }
 
 interface FinancialSummary {
@@ -220,8 +231,20 @@ interface UpcomingRenewal {
   contractId: number;
   unitLabel: string;
   tenantName: string | null;
+  /** The EXPIRING term. `startDate` is optional because older payloads only
+   *  carried the end date. */
+  startDate?: string | null;
   endDate: string;
+  /** The term that was OFFERED — the renewal record's own dates. Null until a
+   *  renewal exists (notice due / vacating). */
+  renewalStartDate?: string | null;
+  renewalEndDate?: string | null;
   daysUntilEnd: number;
+  /** The term has already ended with the renewal still unanswered. These sit
+   *  OUTSIDE the horizon (they are behind us, not ahead), and are in the list
+   *  because a renewal is still a renewal once its parent term runs out — that
+   *  is the state the Operations board counts and this card used to miss. */
+  lapsed?: boolean;
   renewalStatus: string | null;
   /** The offer has actually gone out and is waiting on the customer — the API
    *  decides this (it can see `renewalAccepted`, which is not sent to us). */
@@ -328,8 +351,14 @@ interface ManagerLane {
   name: string | null;
   lastAt: string | null;
   /** Actions per Dubai day across ALL of that day's rows — including the ones
-   *  the per-day cap left out, so a capped day still reports its real total. */
+   *  the per-day cap left out, so a capped day still reports its real total.
+   *  CHANGES only; pages opened are counted in `dayViews`. */
   dayTotals: Array<{ day: string; count: number }>;
+  /** Pages opened per Dubai day. Deliberately NOT folded into `dayTotals`:
+   *  reading a page is not work delivered, and adding the two would let a busy
+   *  reader outrank a manager who actually moved leases. Optional so the panel
+   *  survives a payload from a build that predates the reading side. */
+  dayViews?: Array<{ day: string; count: number }>;
   entries: FeedEntry[];
 }
 interface ManagerFeed {
@@ -487,11 +516,11 @@ function VacancyBars({ units, totals, manager }: {
               </div>
             </>
           );
-          // The manager portal has no standalone unit-detail page, so the row is
-          // non-navigating there rather than dead-linking into an RP-only route.
-          return manager
-            ? <div key={u.id} className="block px-3 py-2.5 rounded-lg">{inner}</div>
-            : <Link key={u.id} href={`/rental-provider/dashboard/units/${u.id}`} {...NEW_TAB} className="block px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">{inner}</Link>;
+          // Both portals navigate now. The row used to be dead in the manager
+          // portal because the old standalone unit page was an RP-only route;
+          // the destination is the Units workspace, which the manager portal
+          // renders too, so there is no RP-only surface left to dead-end on.
+          return <Link key={u.id} href={unitHref(u.id, manager)} {...NEW_TAB} className="block px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">{inner}</Link>;
         })}
       </div>
     </div>
@@ -862,31 +891,45 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     const rows = units
       .filter(u => u.availability === 'occupied')
       .sort((a, b) => (a.daysToEnd ?? Number.POSITIVE_INFINITY) - (b.daysToEnd ?? Number.POSITIVE_INFINITY));
-    const lapsed = rows.filter(u => (u.daysToEnd ?? 1) < 0).length;
-    const soon = rows.filter(u => (u.daysToEnd ?? 1) >= 0 && (u.daysToEnd ?? 1) <= 90).length;
+    // A term that has not started yet is not a term running out — the unit reads
+    // occupied because an incoming lease is signed, and counting it as lapsed or
+    // as "ends within 90 days" would put a renewal task on a tenancy that has
+    // not begun.
+    const incoming = (u: UnitRow) => (u.daysToStart ?? 0) > 0;
+    const lapsed = rows.filter(u => !incoming(u) && (u.daysToEnd ?? 1) < 0).length;
+    const soon = rows.filter(u => !incoming(u) && (u.daysToEnd ?? 1) >= 0 && (u.daysToEnd ?? 1) <= 90).length;
+    const starting = rows.filter(incoming).length;
     setDrill({
       title: `Occupied units · ${rows.length}`,
       note: [
         'Sorted by the term ending soonest.',
         lapsed ? `${lapsed} ${lapsed === 1 ? 'term has' : 'terms have'} already lapsed — the unit is still occupied, so ${lapsed === 1 ? 'that renewal is' : 'those renewals are'} overdue.` : '',
         soon ? `${soon} more ${soon === 1 ? 'ends' : 'end'} within 90 days.` : '',
+        starting ? `${starting} ${starting === 1 ? 'unit is held for a signed tenancy that has' : 'units are held for signed tenancies that have'} not started yet.` : '',
       ].filter(Boolean).join(' '),
       groups: [{
         rows: rows.map(u => {
           const d = u.daysToEnd;
+          const s = u.daysToStart;
+          const notStarted = incoming(u);
           return {
             key: u.id,
             title: u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`),
             subtitle: [
               u.tenant ?? 'No customer on the lease',
               u.building,
-              u.endsOn ? `ends ${fmtDayMonthYear(u.endsOn)}` : 'no end date on file',
+              // An incoming tenancy is dated by when it BEGINS. Leading with the
+              // 2027 end date of a lease nobody has moved into yet reads as a
+              // term already running.
+              notStarted && u.startsOn ? `starts ${fmtDayMonthYear(u.startsOn)}`
+                : u.endsOn ? `ends ${fmtDayMonthYear(u.endsOn)}` : 'no end date on file',
             ].filter(Boolean).join(' · '),
-            // The unit's own page for a manager (no unit route there), the lease
-            // otherwise — the lease is what the row is actually about.
+            // The lease is what an occupied row is about; with no lease on it,
+            // the unit itself is. Both portals resolve, so neither is a dead row.
             href: u.contractId != null ? `${contractBase}/${u.contractId}/v2`
-              : manager ? undefined : `/rental-provider/dashboard/units/${u.id}`,
-            badges: d == null ? [{ label: 'no term', tone: 'gray' as BadgeTone }]
+              : unitHref(u.id, manager),
+            badges: notStarted ? [{ label: `starts in ${fmtDuration(s as number)}`, tone: 'indigo' as BadgeTone }]
+              : d == null ? [{ label: 'no term', tone: 'gray' as BadgeTone }]
               : d < 0 ? [{ label: `lapsed ${Math.abs(d)}d`, tone: 'red' as BadgeTone }]
               : d <= 30 ? [{ label: `${d}d left`, tone: 'red' as BadgeTone }]
               : d <= 90 ? [{ label: `${d}d left`, tone: 'amber' as BadgeTone }]
@@ -936,23 +979,57 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
       : n <= 30 ? { label: `${n}d left`, tone: 'red' }
       : n <= 60 ? { label: `${n}d left`, tone: 'amber' }
       : { label: `${n}d left`, tone: 'green' };
-    // Group by the month the lease ends (renewal due month) so the RP sees
-    // priority at a glance; soonest month first.
+    // THE TERM ON THE ROW IS THE ONE BEING OFFERED, not the one running out.
+    //
+    // A notice on Room-10 offers 1 Sep 2026 → 31 Aug 2027; the lease it replaces
+    // runs 1 Sep 2025 → 31 Aug 2026. The row showed the expiring lease, so every
+    // Notice Sent line named a term a year behind the notice the manager sent.
+    // Where no renewal record exists yet (notice due / vacating) there is only
+    // the expiring term to show, and it is labelled as such rather than left to
+    // pass for the new one.
+    const termDay = (iso: string) =>
+      new Date(iso).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
+    const term = (x: UpcomingRenewal) =>
+      x.renewalStartDate && x.renewalEndDate
+        ? `Renews ${termDay(x.renewalStartDate)} → ${termDay(x.renewalEndDate)}`
+        : x.startDate
+          ? `Current term ${termDay(x.startDate)} → ${termDay(x.endDate)}`
+          : `Current term ends ${termDay(x.endDate)}`;
+    // GROUPED BY THE MONTH THE RENEWAL STARTS — the same anchor as the Renewal
+    // Forecast report, so the two views agree.
+    //
+    // Grouping by the expiring lease's end month put the ten leases ending
+    // 31 Aug under "August" while the forecast counts their renewals under
+    // September (they commence 1 Sep): the whole popup sat one month behind the
+    // report it is read alongside. Falls back to end + 1 day where nothing is
+    // drafted yet — identical on this book, since a renewal picks up the day the
+    // term stops. Date arithmetic on the date PART only: these are 'YYYY-MM-DD'
+    // strings and a local-time Date would shift the day, hence the month.
+    const nextDay = (iso: string) => {
+      const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    };
+    const monthKey = (x: UpcomingRenewal) =>
+      (x.renewalStartDate ?? nextDay(x.endDate)).slice(0, 7);
     const byMonth = new Map<string, UpcomingRenewal[]>();
     for (const x of list) {
-      const d = new Date(x.endDate);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const key = monthKey(x);
       const arr = byMonth.get(key) ?? [];
       arr.push(x); byMonth.set(key, arr);
     }
     const groups = [...byMonth.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([key, items]) => ({
-        label: `${new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' })} · ${items.length}`,
+        // "Renewals starting …", not a bare month: a row whose renewal is not
+        // drafted yet shows its EXPIRING term, and under a bare "September 2026"
+        // a term reading 2025 → 2026 looks misfiled. The header says what the
+        // month is measuring.
+        label: `Renewals starting ${new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' })} · ${items.length}`,
         rows: items.map(x => ({
           key: x.contractId,
           title: x.unitLabel,
-          subtitle: `Ends ${new Date(x.endDate).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} · ${x.tenantName ?? 'Tenant'}`,
+          subtitle: `${term(x)} · ${x.tenantName ?? 'Tenant'}`,
           // Opens the record that HAS the work: a drafted-but-unlocked renewal
           // goes to Operations, anything blessed goes to its lease page. It used
           // to hard-code the lease route for the expiring parent, which landed
@@ -968,15 +1045,24 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           badges: [bucketBadge(x.bucket), daysBadge(x.daysUntilEnd)],
         })),
       }));
+    // Rows whose term has already ended. The horizon in the title describes the
+    // rest of the list but not these, so when any are present the title says so
+    // instead of filing an expired lease under "next 180 days".
+    const lapsed = list.filter(r => r.lapsed ?? r.daysUntilEnd < 0).length;
+    const span = lapsed
+      ? `next ${renewalWindow} days + ${lapsed} past term end`
+      : `next ${renewalWindow} days`;
     setDrill({
       title: meta
-        ? `${meta.label} · ${list.length} — next ${renewalWindow} days`
-        : `Renewals due · ${list.length} — next ${renewalWindow} days`,
+        ? `${meta.label} · ${list.length} — ${span}`
+        : `Renewals due · ${list.length} — ${span}`,
       note: !list.length
         ? `No leases end in the next ${renewalWindow} days.`
         : meta
-          ? `${meta.hint.charAt(0).toUpperCase()}${meta.hint.slice(1)} — grouped by lease-end month, soonest first.`
-          : `${renewalsSent} sent · ${renewalsPending} pending — grouped by lease-end month, soonest first. Propose a renewal before they lapse.`,
+          ? `${meta.hint.charAt(0).toUpperCase()}${meta.hint.slice(1)} — grouped by the month the new term starts, the same anchor as the Renewal Forecast report. Dates are the term being offered.${
+              lapsed ? ` ${lapsed} ${lapsed === 1 ? 'lease has' : 'leases have'} already passed term end with the renewal unanswered.` : ''
+            }`
+          : `${renewalsSent} sent · ${renewalsPending} pending — grouped by the month the new term starts, the same anchor as the Renewal Forecast report. Propose a renewal before they lapse.`,
       groups,
     });
   };
@@ -1023,7 +1109,8 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           title: c.customer ?? 'Customer',
           subtitle: `${c.unitLabel ? `${c.unitLabel} · ` : ''}${c.buildingName ?? ''} · due ${day(c.dueDate)}${c.chequeNumber ? ` · #${c.chequeNumber}` : ''}`,
           amount: fmt(c.amount),
-          href: `${contractBase}/${c.contractId}/v2`,
+          // Same rule as the arrears rows — the lease's own surface.
+          href: contractHref(c.contractId, c.locked === false ? 'operations' : 'lease', manager),
         })),
       })),
     });
@@ -1079,7 +1166,15 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
               // the whole face value being outstanding.
               + `${c.coveredAmount > 0 ? ` · ${fmt(c.coveredAmount)} already recovered` : ''}`,
             amount: fmt(c.amount),
-            href: `${contractBase}/${c.contractId}/v2`,
+            // The lease's OWN surface, not a hard-coded register route. An
+            // unpaid cheque on a lease still in setup is worked in Operations,
+            // and sending it to /contracts/{id}/v2 landed the reader on the
+            // trimmed read-only record — the exact failure contractHref exists
+            // to stop (see lib/contractHref.ts).
+            // `undefined` (an older payload) keeps the register route it always
+            // used, so the link degrades to the previous behaviour rather than
+            // to a wrong guess.
+            href: contractHref(c.contractId, c.locked === false ? 'operations' : 'lease', manager),
           };
         }),
       }],
@@ -1825,7 +1920,7 @@ function ActivitySkeleton({ rows = 5 }: { rows?: number }) {
 }
 
 /** Activity category chip tint. Same palette and same grouping as the Manager
- *  Operations report's "Manager activity — date by date" section, because this
+ *  Operations report's "Manager activity" section, because this
  *  panel is that section: a landlord who reads both should not have to learn
  *  two colour systems for one vocabulary. */
 const CATEGORY_TINT: Record<string, string> = {
@@ -1883,6 +1978,12 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
     return acc;
   }, { renewed: 0, noticeSent: 0, noticeDue: 0, vacating: 0 } as Record<RenewalBucket, number>);
   const total = RENEWAL_BUCKETS.reduce((n, b) => n + (counts[b.key] ?? 0), 0);
+  // Leases already past their term end with the renewal unanswered. They ARE
+  // counted in the tiles (they are outstanding renewals, and the tiles have to
+  // agree with the Operations board), but the subtitle says "coming up in the
+  // next N days" — which is not true of them — so the overdue ones are named
+  // separately rather than being quietly folded into a forward-looking count.
+  const lapsedCount = list.filter(r => r.lapsed ?? r.daysUntilEnd < 0).length;
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)] flex flex-col">
@@ -1890,7 +1991,14 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
         <div>
           <h3 className="text-base font-bold text-[var(--neutral-900)]">Upcoming Renewals</h3>
           <p className="text-xs text-[var(--neutral-400)] mt-0.5">
-            {loading ? 'Loading…' : `${total} lease${total === 1 ? '' : 's'} coming up in the next ${windowDays} days`}
+            {loading
+              ? 'Loading…'
+              : `${total - lapsedCount} lease${total - lapsedCount === 1 ? '' : 's'} coming up in the next ${windowDays} days`}
+            {!loading && lapsedCount > 0 && (
+              <span className="text-[var(--error)] font-semibold">
+                {' · '}{lapsedCount} past term end
+              </span>
+            )}
           </p>
         </div>
         <select
@@ -2060,8 +2168,8 @@ function ManagerTimePerDay({ data }: { data: ManagerTimeData | null }) {
 /** Live manager activity — what the people running this portfolio are doing,
  *  re-read every 5 seconds.
  *
- *  Laid out as the Manager Operations report's "Manager activity — date by
- *  date" section: one block per manager, rows under the day they happened on,
+ *  Laid out as the Manager Operations report's "Manager activity" section:
+ *  one block per manager, rows under the day they happened on,
  *  each row time · category · action · ×N · record, and clicking one opens what
  *  actually changed. The difference between the two is the window, not the
  *  shape — this one is always the last N actions and refreshes itself.
@@ -2112,7 +2220,7 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
     <div className="bg-white rounded-2xl shadow-sm border border-[var(--base-200)] overflow-hidden">
       <div className="px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2.5">
-          <h3 className="text-[15px] font-bold text-[var(--neutral-900)]">Manager activity — date by date</h3>
+          <h3 className="text-[15px] font-bold text-[var(--neutral-900)]">Manager activity</h3>
           {/* The dot is the only thing that says the panel is live, so it is
               paired with the word — a pulsing dot alone is decoration. */}
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-400)]">
@@ -2123,7 +2231,7 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
             Live
           </span>
         </div>
-        <span className="text-xs text-[var(--neutral-400)]">Your managers, today · refreshes every 5s · click a row to see what changed</span>
+        <span className="text-xs text-[var(--neutral-400)]">Your managers, today — pages opened and changes made · refreshes every 5s · click a row to see what changed</span>
       </div>
       {error && !feed ? (
         <div className="px-6 pb-6"><SectionError message="Couldn't load manager activity." onRetry={onRetry} /></div>
@@ -2152,14 +2260,19 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
               byDay.set(e.day, arr);
             }
             const totalFor = new Map(m.dayTotals?.map(d => [d.day, d.count]) ?? []);
+            const viewsFor = new Map(m.dayViews?.map(d => [d.day, d.count]) ?? []);
             const days = feedWindow.map(day => ({
               day,
               rows: byDay.get(day) ?? [],
               // The day's REAL total, not the number of rows shown: a day capped
               // at 10 still says 34 happened.
               total: totalFor.get(day) ?? 0,
+              // Pages opened that day, counted beside the actions and never
+              // inside them — opening a page is not work delivered.
+              views: viewsFor.get(day) ?? 0,
             }));
             const actions = m.dayTotals?.reduce((s, d) => s + d.count, 0) ?? 0;
+            const pages = m.dayViews?.reduce((s, d) => s + d.count, 0) ?? 0;
             return (
               // The divider between columns is a left border on all but the
               // first, so it appears only where two columns actually meet.
@@ -2170,18 +2283,28 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
                       acted before — when that was. "0 actions" alone cannot tell
                       a manager who is idle today from one who has never worked
                       here, and those are different problems. */}
+                  {/* Pages read sit beside the actions, never added to them: a
+                      manager can open forty pages and change nothing, and those
+                      are two different days. Reading alone still counts as
+                      present, so a day with only views says so rather than
+                      falling through to "nothing today". */}
                   <span className="text-[11px] text-[var(--neutral-400)] tabular-nums shrink-0">
                     {actions > 0
-                      ? `${actions} action${actions === 1 ? '' : 's'} today · last ${ago(m.lastAt!)}`
+                      ? `${actions} action${actions === 1 ? '' : 's'}${pages > 0 ? ` · ${pages} page${pages === 1 ? '' : 's'}` : ''} today · last ${ago(m.lastAt!)}`
+                      : pages > 0
+                      ? `${pages} page${pages === 1 ? '' : 's'} read today · no changes`
                       : m.lastAt ? `nothing today · last seen ${ago(m.lastAt)}` : 'nothing yet'}
                   </span>
                 </div>
-                {days.map(({ day, rows, total }) => (
+                {days.map(({ day, rows, total, views }) => (
                   <div key={day}>
                     <div className="px-5 py-1.5 border-t border-[var(--base-200)] flex items-baseline justify-between gap-2">
-                      <span className={`text-[11.5px] font-bold ${total ? 'text-[var(--neutral-700)]' : 'text-[var(--neutral-400)]'}`}>{fmtDayHeading(day)}</span>
+                      <span className={`text-[11.5px] font-bold ${total || views ? 'text-[var(--neutral-700)]' : 'text-[var(--neutral-400)]'}`}>{fmtDayHeading(day)}</span>
                       <span className="text-[11px] text-[var(--neutral-400)] tabular-nums shrink-0">
-                        {total ? `${total} action${total === 1 ? '' : 's'}` : 'no activity'}
+                        {[
+                          total ? `${total} action${total === 1 ? '' : 's'}` : null,
+                          views ? `${views} page${views === 1 ? '' : 's'}` : null,
+                        ].filter(Boolean).join(' · ') || 'no activity'}
                       </span>
                     </div>
                     {/* A day with nothing on it still gets its heading and says
@@ -2191,12 +2314,23 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
                       <p className="px-5 py-2 text-[11.5px] text-[var(--neutral-400)] border-t border-[var(--base-200)]/60">—</p>
                     )}
                     {/* When the cap trimmed the day, say what is not on screen
-                        rather than letting 10 of 34 read as the whole day. */}
-                    {total > rows.reduce((s, e) => s + (e.repeats ?? 1), 0) && (
-                      <p className="px-5 pt-1.5 text-[11px] text-[var(--neutral-400)]">
-                        showing the latest {rows.length} of {total}
-                      </p>
-                    )}
+                        rather than letting 10 of 34 read as the whole day. The
+                        two sides are capped separately, so they are reported
+                        separately — "10 of 34" against a merged list would be
+                        true of neither. */}
+                    {(() => {
+                      const shownActions = rows.filter(e => e.category !== 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
+                      const shownViews = rows.filter(e => e.category === 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
+                      const trimmed = [
+                        total > shownActions ? `${shownActions} of ${total} actions` : null,
+                        views > shownViews ? `${shownViews} of ${views} pages` : null,
+                      ].filter(Boolean);
+                      return trimmed.length ? (
+                        <p className="px-5 pt-1.5 text-[11px] text-[var(--neutral-400)]">
+                          showing the latest {trimmed.join(' · ')}
+                        </p>
+                      ) : null;
+                    })()}
                     {rows.map(e => {
                       const to = openHref(e);
                       const n = e.repeats ?? 1;
@@ -2265,8 +2399,15 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
             </div>
             <div className="overflow-y-auto p-5">
               {/* Most actions capture no diff. Saying so is the honest answer —
-                  an empty table would read as "nothing changed". */}
-              {!detail.entry.changes?.length ? (
+                  an empty table would read as "nothing changed". A page view is
+                  the one row where that sentence would be misleading rather than
+                  merely thin: nothing was changed because nothing was meant to
+                  be, so it says what it actually was. */}
+              {detail.entry.category === 'Viewing' ? (
+                <p className="text-sm text-[var(--neutral-500)] text-center py-6">
+                  Opened this page{(detail.entry.repeats ?? 1) > 1 ? ` ${detail.entry.repeats} times` : ''} — nothing was changed.
+                </p>
+              ) : !detail.entry.changes?.length ? (
                 <p className="text-sm text-[var(--neutral-400)] text-center py-6">
                   This action recorded no field-level changes.
                 </p>

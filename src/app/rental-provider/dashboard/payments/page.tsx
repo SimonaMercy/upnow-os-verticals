@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, Calendar } from 'lucide-react';
+import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, Calendar, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 import { taxPortionOf } from '@/lib/chargeTax';
@@ -14,23 +14,29 @@ import { BasisNote } from '@/components/upnow/reportCatalog';
  *  (Contract Registration, Fees VAT and pass-throughs the RP collects on behalf of
  *  others) and Other — with a per-category subtotal and a per-type breakdown inside
  *  the multi-type categories. The category breakdown doubles as the top-level filter
- *  (click a summary card). Security-deposit rows keep their held/returned status,
- *  settlement and detail drawer; others are read-only. */
+ *  (click a summary card).
+ *
+ *  TWO TABS: Payments (money that moved) and Security Deposits (money being held).
+ *  Deposit rows keep their held/returned status, settlement and detail drawer;
+ *  every other row is read-only. */
 
 // ─── Categories (top level) ───────────────────────────────────────────────
-type CategoryKey = 'rental_income' | 'security_deposit' | 'management_fee' | 'third_party' | 'others';
+// Security Deposit is deliberately NOT one of these. It is money the landlord
+// HOLDS for the customer, not money the tenancy earned or the customer owes, and
+// it has a life the payment categories do not model — a settlement, a proof, a
+// held→returned status, a carry-forward across a renewal. It gets its own TAB,
+// with its own totals, so its money can never be added to the ledger's.
+type CategoryKey = 'rental_income' | 'management_fee' | 'third_party' | 'others';
 
-const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'security_deposit', 'management_fee', 'third_party', 'others'];
+const CATEGORY_ORDER: CategoryKey[] = ['rental_income', 'management_fee', 'third_party', 'others'];
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   rental_income:    'Rental Income',
-  security_deposit: 'Security Deposit',
   management_fee:   'Management Fee',
   third_party:      'Third Party',
   others:           'Other',
 };
 const CATEGORY_SUB: Record<CategoryKey, string> = {
   rental_income:    'rent',
-  security_deposit: 'deposits',
   management_fee:   'admin · commission · penalties',
   third_party:      'VAT · Contract Registration · pass-throughs',
   others:           'uncategorised',
@@ -89,7 +95,6 @@ const OWNERSHIP_LABEL: Record<string, string> = { direct: 'Own Property', sub: '
 // Route a sub-item key (from itemKeyOf) to its top-level category. Unmapped types
 // fall through to Other, so nothing is ever silently dropped.
 function categoryOf(itemKey: string): CategoryKey {
-  if (itemKey === 'security_deposit') return 'security_deposit';
   if (RENTAL_TYPES.includes(itemKey)) return 'rental_income';
   if (MANAGEMENT_TYPES.includes(itemKey)) return 'management_fee';
   if (THIRD_PARTY_TYPES.includes(itemKey)) return 'third_party';
@@ -122,6 +127,18 @@ const TYPE_LABELS: Record<string, string> = {
   other:                    'Other',
 };
 const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// Why a listed row is not in the subtotal. Every one of these is money the
+// landlord does NOT have: voided, superseded by a replacement, or returned by the
+// bank and never made good. The row keeps its line — this is a ledger — and the
+// reason is on the amount, so a struck-through figure is never a mystery.
+const EXCLUDED_WHY: Record<string, string> = {
+  cancelled:        'Cancelled — voided, never collected, so not in any subtotal',
+  'bounce-replaced': 'Bounced and made good — the replacement cheque carries this money instead',
+  // Cash Management reports the same cheque as "bounced, still owed" beside its
+  // total rather than inside it; this page now agrees with it.
+  'bounced-owed':   'Bounced and not made good — no replacement cheque has been recorded, so the money is still owed and is not counted as collected',
+};
 
 // The Contract-Registration (ejari) fee was historically recorded under several
 // free-text descriptions ("Ejari fee", "Ejari Fee", "Contract Registration Fee"…).
@@ -188,7 +205,7 @@ interface PaymentRow {
   // answer — a ledger that hides rows is not one — but the category subtotals
   // honour it, so they agree with Payment Grouping and Fee & VAT.
   countsTowardTotals?: boolean;
-  excludedReason?: 'cancelled' | 'bounce-replaced' | null;
+  excludedReason?: 'cancelled' | 'bounce-replaced' | 'bounced-owed' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
@@ -225,12 +242,47 @@ function fmtDate(d: string | null) {
   return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/** A row belongs to year Y if its lease TERM overlaps Y — the same scope as the
- *  Tenancy Contracts page. Falls back to from/to year, then the transaction year. */
+// A deposit has no collection date to filter on — `recorded_date` is NULL across
+// the register and `due_date` is the cheque's written / refund date, scattered
+// 2001→2026 (see the Security Deposits report, which for the same reason carries
+// no year filter at all). Deposit rows therefore stay on the lease TERM; every
+// other row is filtered on the period it falls DUE.
+const isDepositRow = (d: { paymentType?: string | null }) => (d.paymentType ?? '') === 'security_deposit';
+
+// The deposits tab's top-level buckets — the same role the payment CATEGORIES
+// play on the other tab, so both tabs read as one design: a row of cards that
+// summarise, and clicking one filters. A deposit's bucket is its lifecycle state:
+// still the landlord's to give back, or already dealt with.
+const SETTLED_DEPOSIT = new Set(['returned', 'partial_return', 'forfeited']);
+type DepositBucket = 'all' | 'held' | 'settled';
+const depositBucketOf = (d: { status: string }): Exclude<DepositBucket, 'all'> =>
+  SETTLED_DEPOSIT.has(d.status) ? 'settled' : 'held';
+
+/** The year a payment belongs to: the period it falls DUE — its tax point, the
+ *  same basis Payment Grouping and Fee & VAT bucket on, so a year selected here
+ *  means the same money there.
+ *
+ *  This used to match any row whose lease TERM overlapped Y, which is not a
+ *  period basis at all. Now that the ledger lists one live lease per unit, every
+ *  lease overlaps the current year and "2026" quietly meant "all years"
+ *  (AED 7,163,920 against 5,329,285 actually due); "2027" showed 3,921,700
+ *  against 883,300. Before the scope fix it was worse — 2026 read 13,838,695,
+ *  of which 6,413,819 was cheques dated 2025 or 2027. */
 function yearMatch(
-  d: { startDate: string | null; endDate: string | null; fromYear: number | null; toYear: number | null; recordedDate: string | null },
+  d: {
+    paymentType?: string | null;
+    startDate: string | null; endDate: string | null;
+    fromYear: number | null; toYear: number | null;
+    transactionDate?: string | null; recordedDate: string | null;
+  },
   y: number,
 ): boolean {
+  if (!isDepositRow(d)) {
+    const due = d.transactionDate ?? d.recordedDate;
+    // A payment with no date yet belongs to no year — it shows under All years
+    // only, rather than being silently attributed to one.
+    return due ? Number(due.slice(0, 4)) === y : false;
+  }
   if (d.startDate || d.endDate) {
     const s = d.startDate ? Number(d.startDate.slice(0, 4)) : -Infinity;
     const e = d.endDate ? Number(d.endDate.slice(0, 4)) : Infinity;
@@ -245,10 +297,16 @@ function yearMatch(
   return false;
 }
 
-/** Collect every lease/transaction year present for the year dropdown. */
+/** Every year the dropdown can offer — built on the SAME rule yearMatch applies,
+ *  or the picker offers a year that selects nothing. */
 function allYears(rows: PaymentRow[]): number[] {
   const set = new Set<number>();
   for (const d of rows) {
+    if (!isDepositRow(d)) {
+      const due = d.transactionDate ?? d.recordedDate;
+      if (due) set.add(Number(due.slice(0, 4)));
+      continue;
+    }
     if (d.startDate || d.endDate) {
       if (d.startDate) set.add(Number(d.startDate.slice(0, 4)));
       if (d.endDate) set.add(Number(d.endDate.slice(0, 4)));
@@ -263,12 +321,21 @@ function allYears(rows: PaymentRow[]): number[] {
   return [...set].filter(n => Number.isFinite(n) && n > 0).sort((a, b) => b - a);
 }
 
+/** The two things this screen answers, one tab each: money that MOVED (the
+ *  ledger) and money the landlord is HOLDING (deposits). They share nothing but
+ *  the source call — different totals, different statuses, different meaning of
+ *  a date — which is exactly why they are not one list. */
+type Tab = 'payments' | 'deposits';
+
 export default function PaymentsPage() {
   const [rows, setRows]       = useState<PaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [tab, setTab]         = useState<Tab>('payments');
   const [search, setSearch]   = useState('');
   const [filterCategory, setFilterCategory] = useState<'all' | CategoryKey>('all');
+  // The deposits tab's equivalent of filterCategory — driven by its own cards.
+  const [filterDeposit, setFilterDeposit]   = useState<DepositBucket>('all');
   const [filterStatus, setFilterStatus]     = useState('all');
   const [filterBuilding, setFilterBuilding] = useState('all');
   const [filterOwnership, setFilterOwnership] = useState<'all' | 'direct' | 'sub' | 'management'>('all');
@@ -320,7 +387,14 @@ export default function PaymentsPage() {
   );
 
   const buildings = useMemo(() => [...new Set(rows.map(d => d.building).filter(b => b !== '—'))], [rows]);
-  const statuses  = useMemo(() => [...new Set(yearScoped.map(d => d.status))], [yearScoped]);
+  // The two tabs have DIFFERENT status vocabularies — a deposit is held/returned/
+  // forfeited, a payment is cleared/pending/bounced — so the dropdown offers only
+  // the states the visible tab can actually be in. Offering both made most of the
+  // list select nothing.
+  const statuses = useMemo(
+    () => [...new Set(yearScoped.filter(d => isDepositRow(d) === (tab === 'deposits')).map(d => d.status))],
+    [yearScoped, tab],
+  );
 
   // Everything EXCEPT the category filter — the category cards summarise this, and
   // the category filter narrows it down to the chosen category.
@@ -345,14 +419,21 @@ export default function PaymentsPage() {
   // sub-item key (rental vs fees VAT; Contract Registration stays a single item)
   // and routed by categoryOf — mirroring the Payment Grouping report exactly, so
   // the two surfaces reconcile one-to-one.
+  // Deposits leave the ledger here, before anything is categorised or counted —
+  // they are held money and live in their own TAB with their own total. Both sets
+  // are computed whatever the active tab, so each tab can show the other's size
+  // without recomputing the filter chain.
+  const depositRows = useMemo(() => scoped.filter(isDepositRow), [scoped]);
+  const ledgerRows  = useMemo(() => scoped.filter(r => !isDepositRow(r)), [scoped]);
+
   const catRowsMap = useMemo(() => {
-    const m: Record<CategoryKey, PaymentRow[]> = { rental_income: [], security_deposit: [], management_fee: [], third_party: [], others: [] };
-    for (const r of scoped) {
+    const m: Record<CategoryKey, PaymentRow[]> = { rental_income: [], management_fee: [], third_party: [], others: [] };
+    for (const r of ledgerRows) {
       const itemKey = itemKeyOf(r);
       m[categoryOf(itemKey)].push({ ...r, itemKey });
     }
     return m;
-  }, [scoped]);
+  }, [ledgerRows]);
 
   /** A row belongs in a money total unless the server says otherwise (voided, or
    *  a bounce whose replacement is already in the list). An older API response
@@ -364,20 +445,37 @@ export default function PaymentsPage() {
   // rows stay in the LIST below and out of these figures — that is the whole
   // difference between a ledger and a statement.
   const catTotals = useMemo(() => {
-    const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, third_party: 0, others: 0 };
+    const t: Record<CategoryKey, number> = { rental_income: 0, management_fee: 0, third_party: 0, others: 0 };
     for (const cat of CATEGORY_ORDER) t[cat] = catRowsMap[cat].filter(counts).reduce((s, r) => s + r.amount, 0);
     return t;
   }, [catRowsMap]);
   // Named beside the cards so a subtotal that no longer matches the rows under it
   // is explained rather than looking like a bug.
   const excludedTotal = useMemo(
-    () => scoped.filter(r => !counts(r)).reduce((s, r) => s + r.amount, 0),
-    [scoped],
+    () => ledgerRows.filter(r => !counts(r)).reduce((s, r) => s + r.amount, 0),
+    [ledgerRows],
   );
-  const excludedCount = useMemo(() => scoped.filter(r => !counts(r)).length, [scoped]);
+  const excludedCount = useMemo(() => ledgerRows.filter(r => !counts(r)).length, [ledgerRows]);
+  // "Held" is the live obligation — a settled deposit has been returned or kept
+  // and is no longer the landlord's to give back, so it is listed but not held.
   const depositsHeld = useMemo(
-    () => scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held' && counts(d)).reduce((s, d) => s + d.amount, 0),
-    [scoped],
+    () => depositRows.filter(d => d.status === 'held' && counts(d)).reduce((s, d) => s + d.amount, 0),
+    [depositRows],
+  );
+  const depositsTotal = useMemo(
+    () => depositRows.filter(counts).reduce((s, d) => s + d.amount, 0),
+    [depositRows],
+  );
+  // The rows the deposits table actually lists. The three totals above are
+  // computed over the UNFILTERED set, so every card keeps showing its own amount
+  // whichever one is selected — exactly how the category cards behave.
+  const depositShown = useMemo(
+    () => (filterDeposit === 'all' ? depositRows : depositRows.filter(d => depositBucketOf(d) === filterDeposit)),
+    [depositRows, filterDeposit],
+  );
+  const depositShownTotal = useMemo(
+    () => depositShown.filter(counts).reduce((s, d) => s + d.amount, 0),
+    [depositShown],
   );
 
   // Category blocks in canonical order; the category card acts as the filter.
@@ -399,15 +497,35 @@ export default function PaymentsPage() {
   );
   const shownCount = useMemo(() => groups.reduce((s, g) => s + g.rows.length, 0), [groups]);
 
-  const hasFilters = filterCategory !== 'all' || filterStatus !== 'all' || filterBuilding !== 'all' || filterOwnership !== 'all' || search !== '';
-  const clearFilters = () => { setFilterCategory('all'); setFilterStatus('all'); setFilterBuilding('all'); setFilterOwnership('all'); setSearch(''); };
+  const hasFilters = filterCategory !== 'all' || filterDeposit !== 'all' || filterStatus !== 'all' || filterBuilding !== 'all' || filterOwnership !== 'all' || search !== '';
+  const clearFilters = () => { setFilterCategory('all'); setFilterDeposit('all'); setFilterStatus('all'); setFilterBuilding('all'); setFilterOwnership('all'); setSearch(''); };
+
+  // Switching tab drops the filters whose vocabulary does not survive the move —
+  // a payment status means nothing on deposits, and each tab's top-level bucket
+  // means nothing on the other. Search, building, ownership and year DO carry
+  // across: "this building, this year" is the same question on either tab.
+  const goTab = (t: Tab) => { setTab(t); setFilterStatus('all'); setFilterCategory('all'); setFilterDeposit('all'); };
+
+  const TABS: { key: Tab; label: string; count: number; total: number }[] = [
+    { key: 'payments', label: 'Payments',          count: ledgerRows.length,  total: CATEGORY_ORDER.reduce((s, c) => s + catTotals[c], 0) },
+    { key: 'deposits', label: 'Security Deposits', count: depositRows.length, total: depositsHeld },
+  ];
+
+  // The deposits tab's cards. Same shape as `cards` below — label, value, sub —
+  // so both tabs render through the identical markup. "On record" is the reset
+  // card: it CONTAINS the other two rather than sitting beside them, which is
+  // why it leads and why the sub-line says so.
+  const depositCards: { key: DepositBucket; label: string; value: number; sub: string }[] = [
+    { key: 'all',     label: 'On record', value: depositsTotal,               sub: 'every deposit — contains both' },
+    { key: 'held',    label: 'Held now',  value: depositsHeld,                sub: 'refundable at move-out' },
+    { key: 'settled', label: 'Settled',   value: depositsTotal - depositsHeld, sub: 'returned, part-returned or kept' },
+  ];
 
   const detail = detailId !== null ? rows.find(d => d.id === detailId) ?? null : null;
 
   // Top-level category cards (the first is the "all / total" reset).
   const cards: { key: CategoryKey; label: string; value: number; sub: string }[] = [
     { key: 'rental_income',    label: CATEGORY_LABELS.rental_income,       value: catTotals.rental_income, sub: CATEGORY_SUB.rental_income },
-    { key: 'security_deposit', label: CATEGORY_LABELS.security_deposit,    value: catTotals.security_deposit, sub: `held ${fmtAed(depositsHeld)}` },
     { key: 'management_fee',   label: CATEGORY_LABELS.management_fee,      value: catTotals.management_fee, sub: CATEGORY_SUB.management_fee },
     { key: 'third_party',      label: CATEGORY_LABELS.third_party,         value: catTotals.third_party,   sub: CATEGORY_SUB.third_party },
     { key: 'others',           label: CATEGORY_LABELS.others,              value: catTotals.others,        sub: CATEGORY_SUB.others },
@@ -419,12 +537,16 @@ export default function PaymentsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Payments</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Every payment across your rental agreements — by category. Click a card to filter.</p>
-          <BasisNote slug="payments" className="mt-1 max-w-3xl" />
+          <p className="text-sm text-[#6b6860] mt-0.5">
+            {tab === 'payments'
+              ? 'Every payment across your rental agreements — by category. Click a card to filter.'
+              : 'Every deposit you are holding on a customer’s behalf. Click a row for its proofs, move-in condition and settlement.'}
+          </p>
+          <BasisNote slug={tab === 'payments' ? 'payments' : 'security-deposits'} className="mt-1 max-w-3xl" />
         </div>
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]"
-            title="Scope the page by lease year">
+            title="Scope the page by the year a payment falls due (deposits, which carry no collection date, by their lease term)">
             <Calendar size={14} />
             <select value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter payments by year"
               className="bg-transparent text-sm font-semibold text-[#1a1916] focus:outline-none cursor-pointer pr-1 py-1">
@@ -439,7 +561,34 @@ export default function PaymentsPage() {
         </div>
       </div>
 
+      {/* ── Tabs ────────────────────────────────────────────────────────────
+          Money that MOVED vs money being HELD. Deposits used to sit under the
+          ledger, which read as one continuous list and invited the two totals to
+          be added together — they must never be. */}
+      <div className="flex items-center gap-1 border-b border-[#e8e6e0] mb-6">
+        {TABS.map(t => {
+          const active = tab === t.key;
+          return (
+            <button key={t.key} type="button" onClick={() => goTab(t.key)}
+              aria-current={active ? 'page' : undefined}
+              className={`relative -mb-px px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
+                active ? 'border-[#2e9f82] text-[#1a1916]' : 'border-transparent text-[#6b6860] hover:text-[#1a1916]'}`}>
+              {t.label}
+              <span className={`ml-2 text-xs font-medium ${active ? 'text-[#2e9f82]' : 'text-[#9b9890]'}`}>
+                {t.count}
+              </span>
+            </button>
+          );
+        })}
+        <span className="ml-auto pb-2 text-xs text-[#9b9890]">
+          {tab === 'payments'
+            ? `${fmtAed(TABS[0].total)} counted`
+            : `${fmtAed(depositsHeld)} held now`}
+        </span>
+      </div>
+
       {/* Category cards = the top-level filter. Click to narrow the ledger. */}
+      {tab === 'payments' && (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         {cards.map(c => {
           const active = filterCategory === c.key;
@@ -453,6 +602,27 @@ export default function PaymentsPage() {
           );
         })}
       </div>
+      )}
+
+      {/* Deposit cards — the deposits tab's category cards, same markup and the
+          same click-to-filter behaviour. The one difference is meaning: On record
+          CONTAINS Held now and Settled, so these three are a total and its two
+          parts, never three figures to add. */}
+      {tab === 'deposits' && (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
+          {depositCards.map(c => {
+            const active = filterDeposit === c.key;
+            return (
+              <button key={c.key} type="button" onClick={() => setFilterDeposit(active ? 'all' : c.key)}
+                className={`text-left bg-white rounded-2xl p-5 shadow-sm border transition-all cursor-pointer hover:border-[#2e9f82] ${active ? 'border-[#2e9f82] ring-1 ring-[#2e9f82]' : 'border-[#f0ede8]'}`}>
+                <div className="text-xs text-[#6b6860] font-medium">{c.label}</div>
+                <div className="font-bold text-xl text-[#1a1916] mt-1 truncate">{fmtAed(c.value)}</div>
+                <div className="text-xs text-[#9b9890] mt-0.5 truncate">{c.sub}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Secondary filters */}
       <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm border border-[#f0ede8]">
@@ -494,19 +664,21 @@ export default function PaymentsPage() {
 
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm text-[#6b6860]">
-          {shownCount} line{shownCount !== 1 ? 's' : ''}
-          {filterCategory !== 'all' ? ` · ${CATEGORY_LABELS[filterCategory]}` : ''}
+          {tab === 'payments' ? shownCount : depositShown.length} line{(tab === 'payments' ? shownCount : depositShown.length) !== 1 ? 's' : ''}
+          {tab === 'payments' && filterCategory !== 'all' ? ` · ${CATEGORY_LABELS[filterCategory]}` : ''}
+          {tab === 'deposits' && filterDeposit !== 'all' ? ` · ${depositCards.find(c => c.key === filterDeposit)?.label}` : ''}
         </span>
         {/* Every line is listed; the subtotals count only what was collectible.
             Saying so here is what lets this page and the reports be compared. */}
-        {excludedCount > 0 && (
+        {tab === 'payments' && excludedCount > 0 && (
           <span className="text-xs text-[#6b6860]">
-            {excludedCount} line{excludedCount !== 1 ? 's' : ''} ({fmtAed(excludedTotal)}) listed but not counted — cancelled, or a bounce its replacement already covers
+            {excludedCount} line{excludedCount !== 1 ? 's' : ''} ({fmtAed(excludedTotal)}) listed but not counted — cancelled, a bounce its replacement already covers, or a bounce that was never made good
           </span>
         )}
       </div>
 
       {/* Ledger */}
+      {tab === 'payments' && (
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-[#f0ede8]">
         {loading ? (
           <div className="flex items-center justify-center py-16">
@@ -550,6 +722,93 @@ export default function PaymentsPage() {
           </div>
         )}
       </div>
+      )}
+
+      {/* ── Security deposits — its own tab, never a payment category ──────────
+          Money the landlord holds on the customer's behalf: it is not income, it
+          is not receivable, and it never joins the ledger's subtotals. A tab
+          rather than a section under the ledger, so the two totals can never be
+          read as one running list. */}
+      {tab === 'deposits' && (
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-[#f0ede8]">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 size={22} className="animate-spin text-[#2e9f82]" />
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
+              <p className="text-sm text-red-600">{error}</p>
+              <button onClick={load} className="text-xs text-[#2e9f82] font-medium hover:underline cursor-pointer">Retry</button>
+            </div>
+          ) : depositShown.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
+                <ShieldCheck size={24} className="text-[#2e9f82]" />
+              </div>
+              <p className="text-sm text-[#6b6860] mb-1">
+                {filterYear !== 'all'
+                  ? `No deposits for ${filterYear}.`
+                  : hasFilters ? 'No deposits match your filters.' : 'No deposits recorded yet.'}
+              </p>
+              <p className="text-xs text-[#9b9890]">
+                {filterYear !== 'all' ? 'Switch to “All years” to see every deposit.' : 'Deposits are recorded from the contract detail page.'}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left min-w-[900px]">
+                <thead>
+                  <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
+                    {['Ref', 'Contract', 'Building', 'Unit', 'Customer', 'Amount', 'Status', 'Date', ''].map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Subtotal header, identical to the ledger's category header —
+                      the eye can add up the Amount column and land on it. */}
+                  <tr className="bg-[#f1efe9] border-b border-[#e8e6e0]">
+                    <td colSpan={5} className="px-4 py-2.5">
+                      <span className="text-[13px] font-bold uppercase tracking-wide text-[#1a1916]">
+                        {depositCards.find(c => c.key === filterDeposit)?.label ?? 'On record'}
+                      </span>
+                      <span className="ml-2 text-[11px] text-[#9b9890]">
+                        {depositShown.length} record{depositShown.length !== 1 ? 's' : ''}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 font-bold text-sm text-[#1a1916]">{fmtAed(depositShownTotal)}</td>
+                    <td colSpan={3} />
+                  </tr>
+                  {depositShown.map(d => (
+                    <tr key={d.id} onClick={() => setDetailId(d.id)}
+                      className="border-b border-[#f0ede8] text-sm text-[#1a1916] hover:bg-[#fafaf8] cursor-pointer transition-colors">
+                      <td className="px-4 py-3.5 font-medium font-mono text-xs">{d.depositRef}</td>
+                      <td className="px-4 py-3.5">
+                        {d.contractId ? (
+                          <Link href={`/rental-provider/dashboard/contracts/${d.contractId}/v2`}
+                            onClick={e => e.stopPropagation()}
+                            className="text-[#2e9f82] font-medium hover:underline">{d.contractRef}</Link>
+                        ) : <span className="text-[#9b9890]">—</span>}
+                      </td>
+                      <td className="px-4 py-3.5 text-[#6b6860]">{d.building}</td>
+                      <td className="px-4 py-3.5">{d.unit}</td>
+                      <td className="px-4 py-3.5">{d.tenant}</td>
+                      <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
+                      <td className="px-4 py-3.5">
+                        <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[d.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
+                          {STATUS_LABELS[d.status] ?? d.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-[#6b6860] whitespace-nowrap">{fmtDate(d.transactionDate ?? d.recordedDate)}</td>
+                      <td className="px-4 py-3.5"><ExternalLink size={13} className="text-[#9b9890]" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {detail && (
         <DepositDetailModal
@@ -642,11 +901,7 @@ function CategoryBlock({
                   {/* Struck through when the row is listed but not counted, so
                       the eye can add up the column and land on the subtotal. */}
                   <td className={`px-4 py-3.5 font-semibold ${d.countsTowardTotals === false ? 'line-through text-[#9b9890]' : ''}`}
-                    title={d.countsTowardTotals === false
-                      ? (d.excludedReason === 'cancelled'
-                          ? 'Cancelled — voided, never collected, so not in any subtotal'
-                          : 'Bounced and made good — the replacement cheque carries this money instead')
-                      : undefined}>
+                    title={d.countsTowardTotals === false ? EXCLUDED_WHY[d.excludedReason ?? 'bounce-replaced'] : undefined}>
                     {fmtAed(d.amount)}
                   </td>
                   <td className="px-4 py-3.5 text-[#6b6860]">{vatOf(d) > 0 ? fmtAed(vatOf(d)) : '—'}</td>

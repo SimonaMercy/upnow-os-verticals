@@ -314,6 +314,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [tab, setTab] = useState<TabKey>(() => {
     const t = sp.get('tab'); return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
   });
+  // Guards the one-shot "land on a pipeline that actually has records" hop below;
+  // a manual tab click sets it so an empty pipeline the RP chose is never overridden.
+  const didAutoTab = useRef(false);
   // Seeded from `?q=` so a link that has no contract id yet (a just-converted
   // lead) can still land with that customer filtered in.
   const [search, setSearch] = useState(() => sp.get('q') ?? '');
@@ -333,7 +336,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     params.set('view', next.view ?? view);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
-  const selectTab = (k: TabKey) => { setTab(k); syncUrl({ tab: k }); };
+  const selectTab = (k: TabKey) => { didAutoTab.current = true; setTab(k); syncUrl({ tab: k }); };
   const selectView = (v: 'kanban' | 'list' | 'grid') => { setView(v); syncUrl({ view: v }); };
 
   const load = useMemo(() => () => Promise.all([
@@ -401,10 +404,25 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     terminated: TERM_STAGES,
   };
 
+  const focusKey = sp.get('focus');
+
+  // Land on a pipeline that has something in it. The sidebar/bookmark can point at
+  // ?tab=new while New Lease is empty this year — rather than open on a blank board,
+  // hop once to the first pipeline (TABS order) that holds at least one record and
+  // mirror it into the URL. Only fires when the landing tab is empty, only once, and
+  // never after a manual tab click or a ?focus= deep link (which picks its own tab).
+  useEffect(() => {
+    if (loading || didAutoTab.current || focusKey) return;
+    didAutoTab.current = true;
+    if (cardsByTab[tab].length > 0) return;
+    const first = TABS.find(t => cardsByTab[t.key].length > 0);
+    if (first) selectTab(first.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, cardsByTab]);
+
   // Deep-link focus (?focus=c-<id> / l-<id>) — e.g. "Open lease" from a converted
   // lead. Once the data loads, jump to the tab that holds the card, then scroll to
   // it and flash a highlight ring. Done once so the RP can still switch tabs after.
-  const focusKey = sp.get('focus');
   const didFocusTab = useRef(false);
   const focusElRef = useRef<HTMLElement | null>(null);
   useEffect(() => {

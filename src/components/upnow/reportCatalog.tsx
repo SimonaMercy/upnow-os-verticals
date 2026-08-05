@@ -68,10 +68,10 @@ export const REPORT_BASIS: Record<string, ReportBasis> = {
     differsFrom: 'Fee & VAT shows only VAT-applicable contracts by default; set it to "All contracts" to compare.',
   },
   payments: {
-    scope: 'Every contract and every payment type — the full ledger',
-    period: 'No window — the whole book, filtered on screen',
-    status: 'Every row is LISTED; the subtotals count only what was collectible',
-    differsFrom: 'The only surface that shows cancelled and replaced cheques as lines. Its subtotals match Payment Grouping.',
+    scope: 'One earning lease per occupied unit — every payment type on it (deposits are held money, not payments: own tab, own totals)',
+    period: 'No window — the whole book; the year filter buckets each payment by the period it falls DUE',
+    status: 'Every row is LISTED; subtotals exclude cancelled and bounced cheques, made good or not',
+    differsFrom: 'Ties to Cash Management. Payment Grouping and Fee & VAT read every contract and still count an unreplaced bounce (it is a supply for VAT), so they run higher.',
   },
 };
 

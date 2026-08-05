@@ -66,6 +66,7 @@ import { recomputeSubleaseCharges, classifySubleaseCharge } from '@/lib/sublease
 import { configuredFeeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -2309,6 +2310,205 @@ function PaySegRail({ title, extra, onAdd }: { title: string; extra?: React.Reac
   );
 }
 
+/**
+ * The security deposit, as its own section of the contract.
+ *
+ * It sat inside the Payments table until migration 0191 — the first rail, above
+ * Rental Income — which was wrong twice over. It put money the landlord HOLDS in
+ * the same list as money the customer OWES, and because a deposit could be
+ * recorded either as a `payments` row or as a register row, the table rendered
+ * whichever it found first: the payment-backed version had no Settle button, so
+ * the four leases signed in the app could not settle their deposit at move-out.
+ *
+ * One record now (the register), one section, and every action it actually needs
+ * in one place: record, correct, clear/bounce the cheque, settle at move-out, and
+ * the receipt number. A lease with NO deposit still gets the section — an empty
+ * state that offers Add is how a deposit nobody recorded stops being invisible.
+ */
+function ContractDepositSection({
+  deposit: sd, agreedAmount, contractBase, refs, perms,
+  adding, editing, busy, statusBusy, err, statusErr,
+  form, setForm, onStartAdd, onStartEdit, onCancel, onSaveNew, onSaveEdit, onChangeStatus,
+}: {
+  deposit: {
+    depositId: number | null; amount: number; chequeNumber: string | null;
+    recordedDate: string | null; dueDate: string | null; paymentMethod: string | null;
+    chequeStatus: string | null; status: string | null; isCarried: boolean;
+    sourceContractId: number | null; settledRefundAmount: number | null;
+    settledDeductionAmount: number | null; settledOn: string | null; settledViaSettlementId: number | null;
+  } | null;
+  agreedAmount: number | null;
+  contractBase: string;
+  refs: PaymentRefs;
+  perms: ActorPerms;
+  adding: boolean; editing: boolean; busy: boolean; statusBusy: boolean;
+  err: string | null; statusErr: string | null;
+  form: { amount: string; chequeNumber: string; paymentMethod: string; dueDate: string; chequeStatus: string };
+  setForm: React.Dispatch<React.SetStateAction<{ amount: string; chequeNumber: string; paymentMethod: string; dueDate: string; chequeStatus: string }>>;
+  onStartAdd: () => void; onStartEdit: () => void; onCancel: () => void;
+  onSaveNew: () => void; onSaveEdit: (depositId: number) => void;
+  onChangeStatus: (depositId: number, status: string) => void;
+}) {
+  // Editable only on the lease that OWNS the record. A renewal carries the same
+  // physical deposit and shows it read-only — editing it there would edit the
+  // original lease's money from a page that does not own it.
+  const editable = !!sd && !sd.isCarried && sd.depositId != null && perms.deposits;
+  const settled = !!sd?.status && sd.status !== 'held';
+  const form_ = (
+    <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12, background: 'var(--jade-tint)' }}>
+      <p className="subhead">{adding ? 'Record the security deposit' : 'Edit security deposit'}</p>
+      <div className="grid2">
+        <div className="field"><label>Amount (AED)</label>
+          <input type="number" min="0" step="0.01" className="input" value={form.amount} autoFocus
+            onChange={e => setForm(v => ({ ...v, amount: e.target.value }))} />
+        </div>
+        <div className="field"><label>Payment method</label>
+          <select className="input" value={form.paymentMethod}
+            onChange={e => setForm(v => ({ ...v, paymentMethod: e.target.value }))}>
+            {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Cheque / reference no.</label>
+          <input className="input" value={form.chequeNumber} placeholder="Cheque #, transfer ID…"
+            onChange={e => setForm(v => ({ ...v, chequeNumber: e.target.value }))} />
+        </div>
+        <div className="field"><label>{form.chequeStatus === 'cleared' ? 'Date received' : 'Due date'}</label>
+          <input type="date" className="input" value={form.dueDate}
+            onChange={e => setForm(v => ({ ...v, dueDate: e.target.value }))} />
+        </div>
+        <div className="field"><label>Cheque status</label>
+          <select className="input" value={form.chequeStatus}
+            onChange={e => setForm(v => ({ ...v, chequeStatus: e.target.value }))}>
+            <option value="pending">Pending</option>
+            <option value="cleared">Cleared</option>
+            <option value="bounced">Bounced</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+      {/* Says what clearing it means before it is clicked — the receipt number is
+          minted off this, and money in hand is what it asserts. */}
+      <p className="note" style={{ marginTop: 6, fontSize: 11 }}>
+        {form.chequeStatus === 'cleared'
+          ? 'Cleared means the money is in hand — this mints the deposit receipt.'
+          : 'The deposit is recorded as held either way; the status tracks the cheque.'}
+      </p>
+      {err && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{err}</p>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button className="btn btn-jade btn-sm" disabled={busy}
+          onClick={() => (adding ? onSaveNew() : onSaveEdit(sd!.depositId!))}>
+          <Check size={14} /> {busy ? 'Saving…' : adding ? 'Record deposit' : 'Save changes'}
+        </button>
+        <button className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="sec">
+      <div className="sech">
+        <span className="si"><DirhamSign size={16} /></span>
+        <span className="st">Security Deposit</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {sd && !sd.isCarried && (
+            <span className="note" style={{ fontSize: 11 }}>held against this lease</span>
+          )}
+          {sd?.isCarried && sd.sourceContractId != null && (
+            <span className="note" style={{ fontSize: 11 }}>
+              carried from{' '}
+              <Link href={`${contractBase.replace(/\/\d+$/, '')}/${sd.sourceContractId}/v2`}
+                style={{ color: 'var(--jade)', fontWeight: 600, textDecoration: 'underline' }}>
+                CID-{sd.sourceContractId}
+              </Link>
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="secb" style={{ padding: 14 }}>
+        {!sd ? (
+          // Nothing on record. The landlord's own tracker had six leases reading
+          // this way, five of which were deposits filed somewhere else — so the
+          // empty state states the fact and offers the fix rather than staying blank.
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 13 }}>No deposit on record for this tenancy</p>
+              <p className="note" style={{ fontSize: 12 }}>
+                {agreedAmount
+                  ? `The lease agrees ${fmtAed(agreedAmount)} — record it here once the cheque or transfer is in hand.`
+                  : 'If a deposit was collected, record it here so it can be evidenced and settled at move-out.'}
+              </p>
+            </div>
+            {perms.deposits && !adding && (
+              <button type="button" className="btn btn-jade btn-sm" style={{ marginLeft: 'auto' }} onClick={onStartAdd}>
+                <Plus size={13} /> Add deposit
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--jade-deep)', letterSpacing: '-.02em' }}>
+                  {sd.amount ? fmtAed(sd.amount) : <span style={{ color: '#9b9890', fontSize: 15 }}>amount not recorded</span>}
+                </div>
+                {sd.depositId != null && <ReceiptRefTag refs={refs} id={sd.depositId} kind="deposit" />}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, auto))', gap: '4px 22px', marginLeft: 'auto' }}>
+                <DRow k="Reference" v={sd.chequeNumber ?? '—'} />
+                <DRow k="Method"    v={sd.paymentMethod ? fmtMethod(sd.paymentMethod) : '—'} />
+                <DRow k={sd.recordedDate ? 'Received' : 'Cheque date'} v={fmtDate(sd.recordedDate ?? sd.dueDate) || '—'} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {editable && sd.amount ? (
+                <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
+                  title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={statusBusy}
+                  onChange={e => onChangeStatus(sd.depositId!, e.target.value)}>
+                  <option value="pending">Pending</option>
+                  <option value="cleared">Cleared</option>
+                  <option value="bounced">Bounced</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              ) : (
+                <span className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
+                  {(sd.chequeStatus ?? 'pending')}
+                </span>
+              )}
+              {/* The settlement outcome is a different fact from the cheque status
+                  — held vs returned/kept — so it gets its own chip, never merged. */}
+              {settled && (
+                <span className={'cstat ' + sd.status} style={{ textTransform: 'capitalize' }}>{sd.status!.replace('_', ' ')}</span>
+              )}
+              {editable && !adding && !editing && (
+                <button type="button" className="mini-btn view" title="Correct the amount, reference, method or date"
+                  onClick={onStartEdit}>
+                  <Pencil size={12} /> {sd.amount ? 'Edit' : 'Set deposit'}
+                </button>
+              )}
+              {perms.settleDeposits && sd.amount > 0 && !settled && (
+                <Link href={`${contractBase}/settlement`} className="mini-btn view" title="Settle the deposit (refund / deduction)">
+                  <Stamp size={12} /> Settle
+                </Link>
+              )}
+              {statusErr && <span className="note" style={{ color: 'var(--brick)', fontSize: 11 }}>{statusErr}</span>}
+            </div>
+
+            {settled && (sd.settledRefundAmount != null || sd.settledDeductionAmount != null) && (
+              <p className="note" style={{ fontSize: 12 }}>
+                Refunded {fmtAed(sd.settledRefundAmount ?? 0)} · kept {fmtAed(sd.settledDeductionAmount ?? 0)}
+                {sd.settledOn ? ` · ${fmtDate(sd.settledOn)}` : ''}
+                {sd.settledViaSettlementId != null ? ' · via the move-out settlement' : ''}
+              </p>
+            )}
+          </div>
+        )}
+        {(adding || (editing && editable)) && <div style={{ marginTop: 12 }}>{form_}</div>}
+      </div>
+    </div>
+  );
+}
+
 /** Per-section subtotal row — closes each segment (Security Deposit / Rental Income /
  *  Management Fee / Third Party) with its own total, so no section is left un-summed
  *  and the totals never get lumped together. Optional sub-lines (e.g. Net rent / VAT). */
@@ -2371,7 +2571,7 @@ function DetailsDrawer({
   open, tab, setTab, onClose, inline, contract, payments, kycDocs, onApproveDoc, onRejectDoc,
   // onDeletePayment is intentionally not destructured — fee rows are corrected
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
-  onRecordPayment, onUpdatePayment, onUpdateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
+  onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
   notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
 }: {
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
@@ -2410,6 +2610,11 @@ function DetailsDrawer({
     chequeStatus?: string; paymentMethod?: string | null; dueDate?: string | null;
     chequeNumber?: string | null; amount?: number; depositStatus?: string;
   }) => Promise<void>;
+  /** POST /api/contracts/:id/deposits — record the deposit on a lease that has none. */
+  onCreateDeposit: (body: {
+    amount: number; chequeNumber?: string | null; paymentMethod?: string | null;
+    dueDate?: string | null; chequeStatus?: string;
+  }) => Promise<void>;
   /** PATCH /api/contracts/:id/clauses — save edited custom clauses + notes. */
   onSaveClauses: (customClauses: string[], notes: string | null) => Promise<void>;
   /** PATCH /api/contracts/:id/confirm-pdc — confirm post-dated cheques received. */
@@ -2429,7 +2634,9 @@ function DetailsDrawer({
   /** RP reconciliation refs — plan number + per-payment receipt numbers. */
   paymentRefs?: PaymentRefs;
 }) {
-  const depositRow = payments.find(p => p.paymentType === 'security_deposit');
+  // No `depositRow` any more: a deposit is never a payment row (migration 0191),
+  // so there is exactly one place to read it from — contract.securityDeposit, the
+  // register record — and exactly one section that renders it.
   // Receipt links must respect the portal (RP vs manager) — derive the base
   // the same way the page does, so manager links don't 404.
   const drawerPathname = usePathname();
@@ -2580,6 +2787,39 @@ function DetailsDrawer({
       setDepEditing(false);
     } catch (e) {
       setDepErr(e instanceof Error ? e.message : 'Failed to save deposit');
+    } finally { setDepBusy(false); }
+  };
+  // ── Add a deposit — for a lease that has none on record ──
+  //
+  // The same form as the editor, opened from the section's Add button. Worth its
+  // own state rather than reusing depEditing: "correct what we hold" and "record
+  // a deposit we never captured" are different actions and the empty section has
+  // to say which one it is offering.
+  const [depAdding, setDepAdding] = useState(false);
+  const startDepAdd = () => {
+    setDepAdding(true); setDepErr(null);
+    setDepForm({
+      // Pre-fill the agreed figure when the contract carries one — the usual case
+      // is that the deposit was agreed on the lease and simply never recorded.
+      amount: contract.securityDepositAmount ? String(contract.securityDepositAmount) : '',
+      chequeNumber: '', paymentMethod: 'cheque', dueDate: '', chequeStatus: 'pending',
+    });
+  };
+  const saveNewDep = async () => {
+    const amt = Number(depForm.amount);
+    if (depForm.amount.trim() === '' || !Number.isFinite(amt) || amt <= 0) { setDepErr('Enter the deposit amount'); return; }
+    setDepBusy(true); setDepErr(null);
+    try {
+      await onCreateDeposit({
+        amount: amt,
+        chequeNumber: depForm.chequeNumber.trim() || null,
+        paymentMethod: depForm.paymentMethod || null,
+        dueDate: depForm.dueDate || null,
+        chequeStatus: depForm.chequeStatus,
+      });
+      setDepAdding(false);
+    } catch (e) {
+      setDepErr(e instanceof Error ? e.message : 'Failed to record the deposit');
     } finally { setDepBusy(false); }
   };
   // Surfaced when an inline status change (cheque or settlement) fails — otherwise
@@ -2950,7 +3190,7 @@ function DetailsDrawer({
   // ("+ X charges incurred") so the gap reads as an answer rather than a discrepancy.
   // They used to be forced equal, which meant a bounced-cheque penalty silently
   // restated the agreed rent (contract 81: a 77,000 lease shown as 78,000).
-  const grandDeposit = contract.contractType === 'renewal' ? 0 : (depositRow?.amount ?? contract.securityDeposit?.amount ?? 0);
+  const grandDeposit = contract.contractType === 'renewal' ? 0 : (contract.securityDeposit?.amount ?? 0);
   const paymentsGrandTotal = grandDeposit + rentGross + managementFeeTotal + thirdPartyTotal;
   // What the tenancy was AGREED at, split back out of the grand total above. A
   // penalty is real money and belongs in the ledger, but rolling it into a single
@@ -2970,7 +3210,7 @@ function DetailsDrawer({
   // so it must not appear as a new line/instalment in the renewal's payment plan.
   const depositForPlan = contract.contractType === 'renewal'
     ? 0
-    : (depositRow?.amount ?? contract.securityDeposit?.amount
+    : (contract.securityDeposit?.amount
       ?? contract.securityDepositHeld ?? contract.securityDepositAmount ?? 0);
   let adminNet = 0, adminVat = 0, ejariNet = 0, ejariVat = 0, commNet = 0, commVat = 0;
   const customFees: { label: string; netFils: number; vatFils: number }[] = [];
@@ -3186,6 +3426,36 @@ function DetailsDrawer({
           {/* Rental period moved to the page-top info bar (next to the customer). */}
           {(inline || tab === 'payments') && (
             <>
+              {/* ── Security deposit — its OWN section, above the payments ledger ──
+                  It used to be the first rail INSIDE the Payments table, which put
+                  money the landlord is holding on behalf of the customer in the
+                  same list as money the customer owes, and let a deposit be
+                  recorded two different ways depending on which row the table
+                  found first. A deposit is a liability held, not income: it has a
+                  settlement, a proof, a held→returned lifecycle and it carries
+                  across a renewal, none of which a rent cheque has. */}
+              <span id="sec-deposit" />
+              <ContractDepositSection
+                deposit={contract.securityDeposit ?? null}
+                agreedAmount={contract.securityDepositAmount ?? null}
+                contractBase={contractBase}
+                refs={paymentRefs}
+                perms={perms}
+                adding={depAdding}
+                editing={depEditing}
+                busy={depBusy}
+                statusBusy={depStatusBusy}
+                err={depErr}
+                statusErr={depStatusErr}
+                form={depForm}
+                setForm={setDepForm}
+                onStartAdd={startDepAdd}
+                onStartEdit={startDepEdit}
+                onCancel={() => { setDepAdding(false); setDepEditing(false); setDepErr(null); }}
+                onSaveNew={saveNewDep}
+                onSaveEdit={saveDep}
+                onChangeStatus={changeDepStatus}
+              />
               <span id="sec-payments" />
               <div className="sec">
                 <div className="sech">
@@ -3197,226 +3467,6 @@ function DetailsDrawer({
                     <PayCols />
                     <thead><tr><th>#</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                     <tbody>
-                      {(depositRow || contract.securityDeposit) && <PaySegRail title="Security Deposit" />}
-                      {/* Security deposit folds in as the first payment row. When
-                          the deposit is THIS contract's own payment it's editable;
-                          a renewal that only carries the deposit gets a read-only
-                          row below (from contract.securityDeposit). */}
-                      {depositRow && (
-                        <Fragment>
-                          <tr>
-                            <td><DirhamSign size={13} /></td>
-                            <td>
-                              {depositRow.description?.trim() || 'Security deposit'}
-                              <ReceiptRefTag refs={paymentRefs} id={depositRow.id} />
-                            </td>
-                            <td className="amt">{fmtAed(depositRow.amount)}</td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{depositRow.chequeNumber ?? '—'}</td>
-                            <td>{fmtMethod(depositRow.paymentMethod)}</td>
-                            <td>{fmtDate(depositRow.transactionDate)}</td>
-                            <td>
-                              <div style={PAY_STATUS_CELL}>
-                                {perms.deposits ? (
-                                  <select
-                                    className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')}
-                                    style={{ cursor: 'pointer' }}
-                                    value={depositRow.chequeStatus ?? 'cleared'}
-                                    disabled={statusBusy === depositRow.id}
-                                    onChange={e => void changeStatus(depositRow.id, e.target.value)}
-                                  >
-                                    <option value="pending">Pending</option>
-                                    <option value="cleared">Cleared</option>
-                                    <option value="bounced">Bounced</option>
-                                    <option value="cancelled">Cancelled</option>
-                                  </select>
-                                ) : (
-                                  <span className={'cstat ' + (depositRow.chequeStatus ?? 'cleared')} style={{ textTransform: 'capitalize' }}>
-                                    {depositRow.chequeStatus ?? 'cleared'}
-                                  </span>
-                                )}
-                                {perms.deposits && depositRow.chequeStatus !== 'cleared' && (
-                                  <button
-                                    type="button"
-                                    className="mini-btn view"
-                                    title="Edit amount / reference / description"
-                                    onClick={() => editingId === depositRow.id ? setEditingId(null) : startEdit(depositRow)}
-                                  >
-                                    <Pencil size={12} /> Edit
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                          {editingId === depositRow.id && (
-                            <tr>
-                              <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
-                                <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
-                                  <p className="subhead">Correct security-deposit details</p>
-                                  <div className="field"><label>Description</label>
-                                    <input className="input" value={editForm.description} placeholder="e.g. Security deposit"
-                                      onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
-                                  </div>
-                                  <div className="grid2">
-                                    <div className="field"><label>Amount (AED)</label>
-                                      <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
-                                        onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
-                                    </div>
-                                    <div className="field"><label>Payment method</label>
-                                      <select className="input" value={editForm.paymentMethod}
-                                        onChange={e => setEditForm(v => ({ ...v, paymentMethod: e.target.value }))}>
-                                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                                      </select>
-                                    </div>
-                                  </div>
-                                  <div className="field"><label>Cheque / reference no.</label>
-                                    <input className="input" value={editForm.chequeNumber} placeholder="Cheque #, transfer ID…"
-                                      onChange={e => setEditForm(v => ({ ...v, chequeNumber: e.target.value }))} />
-                                  </div>
-                                  {editErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{editErr}</p>}
-                                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                                    <button className="btn btn-jade btn-sm" disabled={editBusy} onClick={() => void saveEdit(depositRow.id)}>
-                                      <Check size={14} /> {editBusy ? 'Saving…' : 'Save changes'}
-                                    </button>
-                                    <button className="btn btn-ghost btn-sm" disabled={editBusy} onClick={() => { setEditingId(null); setEditErr(null); }}>Cancel</button>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      )}
-                      {/* Held deposit, shown on every contract in the chain. The
-                          oldest lease holds the actual record; renewals show it
-                          read-only ("carried"). */}
-                      {!depositRow && contract.securityDeposit && (() => {
-                        const sd = contract.securityDeposit!;
-                        // A manager without the deposit permission sees the held
-                        // deposit read-only — no status change / edit / settle / set.
-                        const editable = !sd.isCarried && sd.depositId != null && perms.deposits;
-                        return (
-                          <Fragment>
-                            <tr style={sd.isCarried ? { opacity: 0.6 } : undefined}>
-                              <td><DirhamSign size={13} /></td>
-                              <td>
-                                Security deposit
-                                {sd.depositId != null && <ReceiptRefTag refs={paymentRefs} id={sd.depositId} kind="deposit" />}
-                                {sd.isCarried && sd.sourceContractId != null && (
-                                  <span className="note" style={{ display: 'block', fontSize: 11 }}>
-                                    held — carried from{' '}
-                                    <Link href={`/rental-provider/dashboard/contracts/${sd.sourceContractId}/v2`} style={{ color: 'var(--jade)', fontWeight: 600, textDecoration: 'underline' }}>
-                                      CID-{sd.sourceContractId}
-                                    </Link>
-                                  </span>
-                                )}
-                                {editable && !sd.amount && (
-                                  <span className="note" style={{ display: 'block', fontSize: 11, color: '#b45309' }}>
-                                    amount not recorded yet
-                                  </span>
-                                )}
-                              </td>
-                              <td className="amt">{sd.amount ? fmtAed(sd.amount) : <span style={{ color: '#9b9890' }}>—</span>}</td>
-                              <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{sd.chequeNumber ?? '—'}</td>
-                              <td>{sd.paymentMethod ? fmtMethod(sd.paymentMethod) : '—'}</td>
-                              <td>{fmtDate(sd.dueDate ?? sd.recordedDate)}</td>
-                              <td>
-                                {editable && sd.amount ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-                                    {/* One clean action toolbar — status · Edit · Receipt · Settle */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-                                      <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
-                                        title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={depStatusBusy}
-                                        onChange={e => void changeDepStatus(sd.depositId!, e.target.value)}>
-                                        <option value="pending">Pending</option>
-                                        <option value="cleared">Cleared</option>
-                                        <option value="bounced">Bounced</option>
-                                        <option value="cancelled">Cancelled</option>
-                                      </select>
-                                      {sd.chequeStatus !== 'cleared' && (
-                                        <button type="button" className="mini-btn view" title="Edit deposit — method, due date, amount"
-                                          onClick={() => depEditing ? setDepEditing(false) : startDepEdit()}>
-                                          <Pencil size={12} /> Edit
-                                        </button>
-                                      )}
-                                      {perms.settleDeposits && (!sd.status || sd.status === 'held') && (
-                                        <Link href={`${contractBase}/settlement`} className="mini-btn view" title="Settle the deposit (refund / deduction)">
-                                          <Stamp size={12} /> Settle
-                                        </Link>
-                                      )}
-                                    </div>
-                                    {/* Settled outcome (move-out settlement is the source of truth) */}
-                                    {sd.status && sd.status !== 'held' && (
-                                      <div style={{ textAlign: 'right' }}>
-                                        <span className={'cstat ' + sd.status} style={{ textTransform: 'capitalize' }}>{sd.status.replace('_', ' ')}</span>
-                                        {(sd.settledRefundAmount != null || sd.settledDeductionAmount != null) && (
-                                          <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 2 }}>
-                                            refunded {fmtAed(sd.settledRefundAmount ?? 0)} · kept {fmtAed(sd.settledDeductionAmount ?? 0)}{sd.settledViaSettlementId != null ? ' · via move-out' : ''}
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                    {depStatusErr && (
-                                      <span className="note" style={{ color: 'var(--brick)', fontSize: 11, textAlign: 'right' }}>{depStatusErr}</span>
-                                    )}
-                                  </div>
-                                ) : editable ? (
-                                  <button type="button" className="btn btn-jade btn-sm" onClick={() => startDepEdit()}>
-                                    <Pencil size={12} /> Set deposit
-                                  </button>
-                                ) : (
-                                  <span className={'cstat ' + (sd.status ?? 'held')} style={{ textTransform: 'capitalize' }}>
-                                    {(sd.status ?? 'held').replace('_', ' ')}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                            {editable && depEditing && (
-                              <tr>
-                                <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
-                                  <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
-                                    <p className="subhead">Edit security deposit</p>
-                                    <div className="grid2">
-                                      <div className="field"><label>Amount (AED)</label>
-                                        <input type="number" min="0" step="0.01" className="input" value={depForm.amount}
-                                          onChange={e => setDepForm(v => ({ ...v, amount: e.target.value }))} />
-                                      </div>
-                                      <div className="field"><label>Payment method</label>
-                                        <select className="input" value={depForm.paymentMethod}
-                                          onChange={e => setDepForm(v => ({ ...v, paymentMethod: e.target.value }))}>
-                                          {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                                        </select>
-                                      </div>
-                                      <div className="field"><label>Cheque / reference no.</label>
-                                        <input className="input" value={depForm.chequeNumber}
-                                          onChange={e => setDepForm(v => ({ ...v, chequeNumber: e.target.value }))} />
-                                      </div>
-                                      <div className="field"><label>Due date</label>
-                                        <input type="date" className="input" value={depForm.dueDate}
-                                          onChange={e => setDepForm(v => ({ ...v, dueDate: e.target.value }))} />
-                                      </div>
-                                      <div className="field"><label>Cheque status</label>
-                                        <select className="input" value={depForm.chequeStatus}
-                                          onChange={e => setDepForm(v => ({ ...v, chequeStatus: e.target.value }))}>
-                                          <option value="pending">Pending</option>
-                                          <option value="cleared">Cleared</option>
-                                          <option value="bounced">Bounced</option>
-                                          <option value="cancelled">Cancelled</option>
-                                        </select>
-                                      </div>
-                                    </div>
-                                    {depErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{depErr}</p>}
-                                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                                      <button className="btn btn-jade btn-sm" disabled={depBusy} onClick={() => void saveDep(sd.depositId!)}>
-                                        <Check size={14} /> {depBusy ? 'Saving…' : 'Save changes'}
-                                      </button>
-                                      <button className="btn btn-ghost btn-sm" disabled={depBusy} onClick={() => { setDepEditing(false); setDepErr(null); }}>Cancel</button>
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </Fragment>
-                        );
-                      })()}
                       {/* Counted the way the rows now read: the instalments, then
                           the payments made against a bounce among them — "6
                           cheques" against a schedule numbered 1–4 invited the
@@ -6538,6 +6588,25 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     void reload();
   };
 
+  // Record a deposit on a lease that never had one. Until this existed the
+  // register could only be added to by the June import, so a deposit collected
+  // outside the lead payment plan had nowhere to go — the landlord's own tracker
+  // lists one (Unit 315, AED 5,000) that the system has never held.
+  const onCreateDeposit = async (body: {
+    amount: number; chequeNumber?: string | null; paymentMethod?: string | null;
+    dueDate?: string | null; chequeStatus?: string;
+  }) => {
+    const res = await fetch(`/api/contracts/${contract.id}/deposits`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    void reload();
+  };
+
   // ── Flow 2: edit clauses ──  PATCH /api/contracts/:id/clauses
   const onSaveClauses = async (customClauses: string[], notes: string | null) => {
     const res = await fetch(`/api/contracts/${contract.id}/clauses`, {
@@ -6935,10 +7004,13 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const propertyHref = !contract.property.id ? null
     : isManagerView ? (mgrRpQ ? `/dashboard/manager/properties?${mgrRpQ}&property=${contract.property.id}` : null)
     : `/rental-provider/dashboard/portfolio?property=${contract.property.id}`;
+  // The Units workspace on THIS unit, in whichever portal is rendering. The
+  // manager branch used to search by unit NUMBER, which matches every unit
+  // sharing that number across buildings; the id is exact.
   const unitHref = !contract.unit.id ? null
     : isManagerView
-      ? (mgrRpQ ? `/dashboard/manager/units?${mgrRpQ}&q=${encodeURIComponent(contract.unit.number ?? contract.unit.name ?? '')}` : null)
-      : (contract.property.id ? `/rental-provider/dashboard/units/${contract.unit.id}` : null);
+      ? (rpScope !== '' ? unitWorkspaceHref(contract.unit.id, { rp: Number(rpScope) }) : null)
+      : unitWorkspaceHref(contract.unit.id);
   const customerHref = !contract.tenant.id ? null
     : isManagerView ? (mgrRpQ ? `/dashboard/manager/tenants/${contract.tenant.id}?${mgrRpQ}` : null)
     : `/rental-provider/dashboard/tenants/${contract.tenant.id}`;
@@ -7436,6 +7508,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             onUpdatePayment={onUpdatePayment}
             onDeletePayment={onDeletePayment}
             onUpdateDeposit={onUpdateDeposit}
+            onCreateDeposit={onCreateDeposit}
             onSaveClauses={onSaveClauses}
             editLocked={editLocked}
             onConfirmPdc={onConfirmPdc}

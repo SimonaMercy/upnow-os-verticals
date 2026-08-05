@@ -271,6 +271,13 @@ interface ApiContract {
   rentVatRate?: number;         // % VAT on rent (0 = residential/exempt)
   contractValue?: number | null;
   securityDepositAmount?: number | null;
+  /** The deposit REGISTER record — where a deposit lives since migration 0191
+   *  (it is no longer a `payments` row). Chain-resolved, so a renewal carries it. */
+  securityDeposit?: {
+    depositId: number; amount: number; chequeNumber: string | null;
+    paymentMethod: string | null; chequeStatus: string | null;
+    recordedDate: string | null; dueDate: string | null;
+  } | null;
   adminFeeFils?: number | null;
   ejariFeeFils?: number | null;
   tenantSignedAt: string | null;
@@ -582,17 +589,19 @@ function buildPaymentRunway(c: ApiContract | null, pp: ApiPaymentPlan | null): P
     ?? items.find(upcoming)
     ?? null;
 
-  // The deposit row — from the real payment when there is one (so it carries its
-  // own cheque status), else the plan item, else the bare contract amount.
-  const depositPayment = (c?.payments ?? []).find(p => p.paymentType === 'security_deposit');
+  // The deposit row — from the REGISTER record when there is one (so it carries
+  // its own cheque status), else the plan item, else the bare contract amount.
+  // It used to read a `payments` row here; deposits stopped being payments in
+  // migration 0191, and the register is the record that can actually be settled.
+  const depositRecord = c?.securityDeposit ?? null;
   const depositPlanItem = (pp?.items ?? []).find(it => it.type === 'security_deposit');
   const depositFallbackFils = pp?.securityDepositFils ?? Math.round((c?.securityDepositAmount ?? 0) * 100);
-  const deposit: RunwayRow | null = depositPayment
+  const deposit: RunwayRow | null = depositRecord
     ? {
         description: 'Security deposit',
-        amountFils: Math.round((depositPayment.amountPaid ?? 0) * 100),
-        dueDate: depositPayment.transactionDate ? depositPayment.transactionDate.slice(0, 10) : null,
-        status: depositPayment.chequeStatus ?? null,
+        amountFils: Math.round((depositRecord.amount ?? 0) * 100),
+        dueDate: depositRecord.dueDate ?? depositRecord.recordedDate ?? null,
+        status: depositRecord.chequeStatus ?? null,
       }
     : depositPlanItem
       ? { description: 'Security deposit', amountFils: depositPlanItem.amountFils ?? 0, dueDate: depositPlanItem.dueDate ?? null, status: null }

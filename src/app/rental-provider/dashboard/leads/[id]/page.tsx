@@ -38,6 +38,7 @@ import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
+import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -674,9 +675,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const propertyHref = !propertyId ? null
     : manager ? `/dashboard/manager/properties?${rpQ}&property=${propertyId}`
     : `/rental-provider/dashboard/portfolio?property=${propertyId}`;
-  const unitHref = !unitId ? null
-    : manager ? `/dashboard/manager/units?${rpQ}&q=${encodeURIComponent(lead.unit?.unitNumber ?? '')}`
-    : `/rental-provider/dashboard/units/${unitId}`;
+  // Both portals open the Units workspace on THIS unit. The manager side used to
+  // search by unit number instead (`?q=`), which matched every unit sharing that
+  // number across buildings; the id does not have that problem.
+  const unitHref = !unitId ? null : unitWorkspaceHref(unitId, manager ?? undefined);
   const customerHref = !customerId ? null
     : manager ? `/dashboard/manager/tenants/${customerId}?${rpQ}`
     : `/rental-provider/dashboard/tenants/${customerId}`;
