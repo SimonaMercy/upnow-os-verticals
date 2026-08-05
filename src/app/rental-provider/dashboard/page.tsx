@@ -612,6 +612,13 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const cashManagementHref = manager
     ? `/dashboard/manager/reports?rp=${manager.rp}&slug=rent-receivable`
     : '/rental-provider/dashboard/reports/rent-receivable';
+  /** "View all N renewals" opens the Renewal pipeline in Operations, not a list
+   *  overlay. The overlay could only name the leases; the pipeline is where the
+   *  renewal is actually worked, stage by stage. The per-bucket tiles above it
+   *  still drill, because those are a filtered slice the pipeline has no tab for. */
+  const renewalsPipelineHref = manager
+    ? `/dashboard/manager/operations?rp=${manager.rp}&tab=renewal`
+    : '/rental-provider/dashboard/operations?tab=renewal';
   /** Deposits Held → the Security Deposits report, which is where HELD_DEPOSIT_SQL
    *  (the figure on the card) is broken down property by property. */
   const depositsHref = manager
@@ -1579,7 +1586,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
             onRetry={() => fetchExtras(selectedRange, renewalWindow)}
             windowDays={renewalWindow}
             onWindowChange={setRenewalWindow}
-            onDrill={drillRenewals}
+            allHref={renewalsPipelineHref}
             onDrillBucket={drillRenewalBucket}
           />
         </div>
@@ -1856,7 +1863,7 @@ const fmtDayHeading = (day: string) =>
  *  is the one that reads as work; Notice Sent is a wait on the customer, and the
  *  other two are settled. Every bucket renders even at 0 — a missing tile reads
  *  as "not measured", a 0 reads as "none", and those are different answers. */
-function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWindowChange, onDrill, onDrillBucket }: {
+function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWindowChange, allHref, onDrillBucket }: {
   list: UpcomingRenewal[];
   buckets?: Record<RenewalBucket, number>;
   loading: boolean;
@@ -1864,7 +1871,8 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
   onRetry: () => void;
   windowDays: RenewalWindow;
   onWindowChange: (w: RenewalWindow) => void;
-  onDrill: () => void;
+  /** Operations → Renewal tab, with the portal's own prefix already applied. */
+  allHref: string;
   onDrillBucket: (b: RenewalBucket) => void;
 }) {
   // Fall back to counting the list when the API predates `renewalBuckets`, so
@@ -1942,14 +1950,22 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
               })}
             </div>
           )}
-          <button
-            type="button"
-            onClick={onDrill}
-            disabled={total === 0}
-            className={`mt-4 text-xs font-semibold text-[var(--neutral-700)] hover:underline self-start${total === 0 ? ' opacity-50 cursor-default' : ' cursor-pointer'}`}
-          >
-            {total === 0 ? `No renewals due in the next ${windowDays} days` : `View all ${total} renewals`}
-          </button>
+          {/* The renewals live in the Operations Renewal pipeline; that is where
+              they get worked, so the link goes there rather than to a read-only
+              list of the same leases. With none due there is nothing to open,
+              so the line stays plain text. */}
+          {total === 0 ? (
+            <span className="mt-4 text-xs font-semibold text-[var(--neutral-700)] opacity-50 self-start">
+              No renewals due in the next {windowDays} days
+            </span>
+          ) : (
+            <Link
+              href={allHref}
+              className="mt-4 text-xs font-semibold text-[var(--neutral-700)] hover:underline self-start cursor-pointer"
+            >
+              View all {total} renewals
+            </Link>
+          )}
         </>
       )}
     </div>
