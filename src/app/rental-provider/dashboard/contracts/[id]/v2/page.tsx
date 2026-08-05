@@ -4253,12 +4253,20 @@ function DetailsDrawer({
               // so they never sit in a "Pending review" state — always "Uploaded".
               const noReview = s.key === 'payment_advice';
               const ok  = noReview || ['approved', 'processed', 'complete'].includes(doc.status);
-              const stt = ok ? 'approved' : doc.status === 'rejected' ? 'rejected' : 'pending';
+              // Contract paperwork is FILED, not reviewed — a past expiry date is a
+              // fact about the document, never an outstanding review. Without this
+              // branch 'expired' fell through to "Pending review", so every ended
+              // lease's Contract Registration Certificate claimed a review nobody
+              // owed. The certificate is still on file; say when it lapsed instead.
+              const expired = !ok && doc.status === 'expired';
+              const stt = ok || expired ? 'approved' : doc.status === 'rejected' ? 'rejected' : 'pending';
               // Say what actually happened: the file IS uploaded. "On file" was
               // jargon that read as a filing state rather than a plain fact.
               const lbl = multi
                 ? `${docs.length} files · uploaded`
-                : ok ? 'Uploaded' : doc.status === 'rejected' ? 'Rejected' : 'Pending review';
+                : ok ? 'Uploaded'
+                : expired ? (doc.expiryDate ? `Uploaded · expired ${fmtDate(doc.expiryDate)}` : 'Uploaded · expired')
+                : doc.status === 'rejected' ? 'Rejected' : 'Pending review';
               return (
                 <div key={s.key} className={'docitem ' + stt}>
                   <FileText size={14} />
