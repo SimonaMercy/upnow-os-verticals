@@ -14,7 +14,7 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  Users, FileText, Coins, RefreshCw, Search, Rows3, LayoutGrid, Mail, Phone, Plus, User,
+  Users, FileText, Search, Rows3, LayoutGrid, Mail, Phone, Plus, User,
 } from 'lucide-react';
 import s from './customersDirectory.module.css';
 import { renewalDaysOf, type DirectoryCustomer } from '@/lib/customersDirectory';
@@ -30,15 +30,6 @@ const fmt = (n: number) => 'AED ' + Math.round(n).toLocaleString('en-US');
 // Card stat ("AED 55.1K") — drops the .0 on round thousands.
 const fmtShort = (n: number) =>
   n < 1 ? 'AED 0' : n >= 1000 ? 'AED ' + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'K' : 'AED ' + Math.round(n);
-// KPI headline ("AED 312.5K" / "AED 1.2M") — compact for large totals, sharing
-// fmtShort's one-decimal rule so the headline reconciles with the per-row amounts.
-const fmtKpi = (n: number) =>
-  n >= 1_000_000
-    ? 'AED ' + (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M'
-    : n >= 1000
-      ? 'AED ' + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'K'
-      : 'AED ' + Math.round(n).toLocaleString('en-US');
-
 function initialsOf(name: string): string {
   const w = name.replace(/L\.L\.C/gi, '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase();
   return w || (name[0] ?? '').toUpperCase();
@@ -49,13 +40,6 @@ const typeChip = (company: boolean): CSSProperties => ({
   color: company ? '#7a5a2e' : '#5a635c', background: company ? '#f3ecdd' : '#eef1ec',
 });
 
-// Renewal-soon = the customer's next live lease ends within the next 90 days
-// (not yet overdue). nextRenewalEnd is the SOONEST end, so multi-unit customers
-// aren't masked by a far-off lease on another unit.
-const isRenewalSoon = (c: DirectoryCustomer) => {
-  const d = renewalDaysOf(c.nextRenewalEnd);
-  return d !== null && d >= 0 && d <= 90;
-};
 function renewalText(c: DirectoryCustomer): string {
   const d = renewalDaysOf(c.nextRenewalEnd);
   if (d === null) return 'No renewal date';
@@ -63,7 +47,7 @@ function renewalText(c: DirectoryCustomer): string {
   return `Renews in ${d}d`;
 }
 
-type Filter = 'all' | 'outstanding' | 'renewal' | 'company';
+type Filter = 'all' | 'individual' | 'company' | 'ended';
 type View = 'row' | 'grid';
 
 export interface CustomersDirectoryProps {
@@ -82,31 +66,32 @@ export function CustomersDirectory({ customers, loading, onAdd, viewHref, emptyS
   const [filter, setFilter] = useState<Filter>('all');
   const [view, setView] = useState<View>('row');
 
+  // "Ended leases" shows the customers with no counting lease left; every other
+  // filter works inside the active pool.
+  const scope = useMemo(
+    () => customers.filter((c) => (filter === 'ended' ? !c.active : c.active)),
+    [customers, filter],
+  );
+
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return customers.filter((c) => {
-      if (filter === 'outstanding' && c.outstanding <= 0) return false;
-      if (filter === 'renewal' && !isRenewalSoon(c)) return false;
+    return scope.filter((c) => {
+      if (filter === 'individual' && c.company) return false;
       if (filter === 'company' && !c.company) return false;
       return !q || `${c.name} ${c.email} ${c.phone ?? ''}`.toLowerCase().includes(q);
     });
-  }, [customers, query, filter]);
+  }, [scope, query, filter]);
 
-  // KPIs (computed across ALL customers, not the filtered view).
-  const totalCustomers = customers.length;
-  const activeLeases = customers.reduce((sum, c) => sum + c.activeLeaseCount, 0);
-  const outstandingTotal = customers.reduce((sum, c) => sum + c.outstanding, 0);
-  // "Has arrears" keys on the displayed whole-AED figure so a sub-AED residue
-  // never reads as a gold "AED 0".
-  const outstandingCount = customers.filter((c) => Math.round(c.outstanding) > 0).length;
-  const renewalSoon = customers.filter(isRenewalSoon).length;
+  // KPIs — the active pool, on the platform's earning-lease rule (see
+  // lib/customersDirectory). Independent of the filter/search in view.
+  const activeCustomers = useMemo(() => customers.filter((c) => c.active), [customers]);
+  const totalCustomers = activeCustomers.length;
+  const activeLeases = activeCustomers.reduce((sum, c) => sum + c.activeLeaseCount, 0);
 
   const dash = (v: string) => (loading ? '…' : v);
   const kpis: Array<{ label: string; value: string; sub: string; icon: ReactNode; iconBg: string; iconColor: string; color: string }> = [
-    { label: 'TOTAL CUSTOMERS', value: dash(String(totalCustomers)), sub: 'Active or upcoming leases', icon: <Users size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'ACTIVE LEASES', value: dash(String(activeLeases)), sub: 'Across all customers', icon: <FileText size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'OUTSTANDING', value: dash(fmtKpi(outstandingTotal)), sub: outstandingCount === 0 ? 'All collected' : `From ${outstandingCount} customer${outstandingCount === 1 ? '' : 's'}`, icon: <Coins size={16} />, iconBg: '#fbf0dd', iconColor: '#a9791f', color: '#a9791f' },
-    { label: 'RENEWALS < 90D', value: dash(String(renewalSoon)), sub: 'Leases up for renewal', icon: <RefreshCw size={16} />, iconBg: '#eaf2f7', iconColor: '#3f6f8f', color: '#1d2823' },
+    { label: 'TOTAL CUSTOMERS', value: dash(String(totalCustomers)), sub: 'Holding a live lease', icon: <Users size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
+    { label: 'ACTIVE LEASES', value: dash(String(activeLeases)), sub: 'Neither ended nor terminated', icon: <FileText size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
   ];
 
   const filtersDirty = !!query || filter !== 'all';
@@ -122,7 +107,7 @@ export function CustomersDirectory({ customers, loading, onAdd, viewHref, emptyS
             </div>
             <h1 style={{ margin: '6px 0 4px', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: '#1d2823' }}>Customers</h1>
             <div style={{ fontSize: 13, color: '#8a938c', maxWidth: '70ch', lineHeight: 1.5 }}>
-              Active customers — anyone with a live or upcoming lease. Ended tenancies move to Ended Leases.
+              Active customers — anyone holding a lease that has neither ended nor been terminated, including a renewal still in flight on a unit they occupy. Switch the filter to “Ended leases” for the rest.
             </div>
           </div>
           {onAdd && (
@@ -161,9 +146,9 @@ export function CustomersDirectory({ customers, loading, onAdd, viewHref, emptyS
           </div>
           <select className={s.select} value={filter} onChange={(e) => setFilter(e.target.value as Filter)}>
             <option value="all">All customers</option>
-            <option value="outstanding">Has outstanding</option>
-            <option value="renewal">Renewal &lt; 90d</option>
+            <option value="individual">Individual</option>
             <option value="company">Companies</option>
+            <option value="ended">Ended leases</option>
           </select>
           <div className={s.toggle}>
             <button type="button" title="Row view" aria-label="Row view" aria-pressed={view === 'row'} onClick={() => setView('row')}
@@ -175,7 +160,7 @@ export function CustomersDirectory({ customers, loading, onAdd, viewHref, emptyS
 
         {/* Result count */}
         <div className={s.resultCount}>
-          <strong>{loading ? '…' : list.length}</strong> of {customers.length} customers
+          <strong>{loading ? '…' : list.length}</strong> of {scope.length} {filter === 'ended' ? 'ended-lease customers' : 'customers'}
         </div>
 
         {/* States */}
@@ -188,8 +173,12 @@ export function CustomersDirectory({ customers, loading, onAdd, viewHref, emptyS
           </div>
         ) : list.length === 0 ? (
           <div className={s.empty}>
-            <div className={s.emptyTtl}>No customers match your search</div>
-            <div className={s.emptySub}>Try a different name, email, or filter.</div>
+            <div className={s.emptyTtl}>{filter === 'ended' && scope.length === 0 ? 'No ended-lease customers' : 'No customers match your search'}</div>
+            <div className={s.emptySub}>
+              {filter === 'ended' && scope.length === 0
+                ? 'Every customer still holds a counting lease.'
+                : 'Try a different name, email, or filter.'}
+            </div>
             {filtersDirty && (
               <button type="button" onClick={() => { setQuery(''); setFilter('all'); }}
                 style={{ marginTop: 14, fontSize: 12.5, fontWeight: 600, color: '#1a7a4f', background: 'transparent', border: 0, cursor: 'pointer', textDecoration: 'underline' }}>
@@ -249,7 +238,7 @@ function RowView({ list, viewHref }: { list: DirectoryCustomer[]; viewHref: (id:
             {/* Outstanding */}
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 13.5, fontWeight: 800, color: hasOut ? '#b07415' : '#1a6b4d', fontVariantNumeric: 'tabular-nums' }}>{hasOut ? fmt(c.outstanding) : 'AED 0'}</div>
-              <div style={{ fontSize: 11, color: '#9aa39c' }}>{hasOut ? 'across active units' : 'fully collected'}</div>
+              <div style={{ fontSize: 11, color: '#9aa39c' }}>{!hasOut ? 'fully collected' : c.active ? 'across active units' : 'on ended leases'}</div>
             </div>
             {/* Action */}
             <div style={{ textAlign: 'right' }}>
@@ -302,7 +291,7 @@ function GridView({ list, viewHref }: { list: DirectoryCustomer[]; viewHref: (id
               <div style={{ background: hasOut ? '#fdf6ea' : '#fbfcfb', border: `1px solid ${hasOut ? '#efe1bf' : '#eef1ec'}`, borderRadius: 11, padding: '10px 12px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>OUTSTANDING</div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: hasOut ? '#b07415' : '#1a6b4d', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{fmtShort(c.outstanding)}</div>
-                <div style={{ fontSize: 10.5, color: '#9aa39c' }}>{hasOut ? 'across active units' : 'fully collected'}</div>
+                <div style={{ fontSize: 10.5, color: '#9aa39c' }}>{!hasOut ? 'fully collected' : c.active ? 'across active units' : 'on ended leases'}</div>
               </div>
             </div>
             {/* Footer */}

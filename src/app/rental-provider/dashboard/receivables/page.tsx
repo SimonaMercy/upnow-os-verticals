@@ -2,7 +2,8 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useMemo } from 'react';
-import { Search, X, DollarSign, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Search, X, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { DirhamSign } from '@/components/ui/DirhamSign';
 import Link from 'next/link';
 
 // 'replaced' = a bounced cheque the customer has since made good with another
@@ -225,7 +226,7 @@ export default function ReceivablesPage() {
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-              <DollarSign size={24} className="text-[#2e9f82]" />
+              <DirhamSign size={24} className="text-[#2e9f82]" />
             </div>
             <p className="text-sm text-[#6b6860] mb-1">
               {hasFilters ? 'No records match your filters.' : 'No receivables yet.'}

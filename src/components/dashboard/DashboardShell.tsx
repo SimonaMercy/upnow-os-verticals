@@ -8,7 +8,7 @@ import {
   CalendarCheck, Wrench, Users, Star, Wallet, BookOpen,
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
-  TrendingUp, UserCheck, DollarSign, MessageSquare, Receipt, BedDouble,
+  TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble,
   Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
@@ -56,7 +56,7 @@ function useManagerNavPerms(role: UserRole): Record<string, boolean> {
    Nav definitions per role
 ───────────────────────────────────────────── */
 /** Keys for the cheap sidebar count badges (GET /api/properties/nav-counts). */
-type NavBadgeKey = 'leads' | 'properties' | 'units' | 'leases' | 'operations';
+type NavBadgeKey = 'leads' | 'properties' | 'units' | 'operations';
 type NavCounts = Partial<Record<NavBadgeKey, number>>;
 
 type NavItem =
@@ -94,7 +94,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
     { label: 'Payments',         href: '/rental-provider/dashboard/payments',       icon: Wallet, match: ['/rental-provider/dashboard/deposits'] },
     { label: 'Operations',       href: '/rental-provider/dashboard/operations',     icon: ClipboardList, badgeKey: 'operations' },
-    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, badgeKey: 'leases', match: ['/rental-provider/dashboard/contracts'] },
+    // No badge on Leases. The register carries several figures of its own
+    // (fully set up, starts later, expired) and a single number in the nav could
+    // only ever be one of them — which read as a contradiction against the page.
+    // Operations keeps its badge: that one IS a worklist length, a single fact.
+    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, match: ['/rental-provider/dashboard/contracts'] },
     { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
     { divider: true },
     { section: 'More' },
@@ -228,7 +232,6 @@ function useNavBadgeCounts(role: UserRole): NavCounts {
             leads:      Number(p?.leads ?? 0),
             properties: Number(p?.properties ?? 0),
             units:      Number(p?.units ?? 0),
-            leases:     Number(c?.leases ?? p?.leases ?? 0),
             operations: Number(c?.operations ?? 0),
           });
         })

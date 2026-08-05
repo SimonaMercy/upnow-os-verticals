@@ -5,10 +5,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Building2, RefreshCw, Wrench,
   CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
-  ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, DollarSign, Info, Tag,
+  ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, Info, Tag,
   MousePointerClick, FileText, ExternalLink,
   Star, Mail, Phone, ShieldCheck, Layers, Zap, Store,
 } from 'lucide-react';
+import { DirhamSign } from '@/components/ui/DirhamSign';
 import { apiGet, apiPatch } from '@/lib/api';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { BackLink } from '@/components/dashboard/DashboardWidgets';
@@ -532,7 +533,7 @@ function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
               </div>
             </Section>
 
-            <Section icon={DollarSign} title="Pricing">
+            <Section icon={DirhamSign} title="Pricing">
               <div className="rounded-lg p-2.5 mb-2.5" style={{ backgroundColor: 'var(--color-primary-50)' }}>
                 <p className="text-xs" style={{ color: 'var(--color-primary)' }}>Annual Rent</p>
                 <p className="text-lg font-bold" style={{ color: 'var(--color-primary)' }}>{aed(detail.rentalPrice)}</p>

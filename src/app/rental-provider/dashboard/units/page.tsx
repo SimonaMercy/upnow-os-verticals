@@ -927,14 +927,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
                   <div className="flex items-center gap-3" style={{ margin: '6px 0 12px' }}>
                     <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>{g.building}</div>
                     <span style={CHIP_COUNT}>{g.items.length} {g.items.length === 1 ? 'unit' : 'units'}</span>
-                    <div className="flex-1" />
-                    {/* Add a unit to this building (its property); the form sets the type. */}
-                    {canEdit && g.items[0]?.pl && (
-                      <button onClick={() => setUnitModal({ plan: g.items[0].pl })} className="flex items-center gap-1.5"
-                        style={{ fontSize: 12.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, border: '1px solid #cce6d8', padding: '8px 13px', borderRadius: 9 }}>
-                        <Plus size={14} /> Add unit
-                      </button>
-                    )}
+                    {/* Adding units happens from the single header action only — the
+                        per-building buttons repeated the same call to action. */}
                   </div>
                   {view === 'grid' ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>

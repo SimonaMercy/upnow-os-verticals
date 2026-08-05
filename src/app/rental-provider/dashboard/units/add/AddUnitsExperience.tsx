@@ -22,7 +22,7 @@ import { useRouter } from 'next/navigation';
 import { SLIDEOVER_MS } from '@/components/upnow/PropertyFormModal';
 import Link from 'next/link';
 import {
-  Plus, X, Camera, Copy, Building2, Eye, FileText,
+  Plus, X, ArrowLeft, Camera, Copy, Building2, Eye, FileText,
   AlertCircle, Loader2, CheckCircle2, ImagePlus, ChevronDown, Search, Check, Pencil, Layers,
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
@@ -448,13 +448,14 @@ export default function AddUnitsExperience({ backHref }: { backHref: string }) {
     <div className={s.app}>
       {/* ── Header ── */}
       <header className={s.header}>
+        {/* Back-arrow on the LEFT, before the title — this is a full-bleed
+            takeover, so it matches UnitFormModal and the detail views. */}
+        <button type="button" className={s.backBtn} onClick={requestBack} aria-label="Back"><ArrowLeft size={18} /></button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className={s.headTitle}>Add Units</div>
           <div className={s.headSub}>Add units to one of your properties</div>
         </div>
         {kycReview && <div className={s.kyc}><AlertCircle size={13} /> KYC under review</div>}
-        {/* Close on the RIGHT — aligned with the property modals + unit form. */}
-        <button className={s.backBtn} onClick={requestBack} aria-label="Close"><X size={17} /></button>
       </header>
 
       {done ? (

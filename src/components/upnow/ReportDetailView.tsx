@@ -14,13 +14,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
-  Building2, Check, ChevronDown, Info,
+  Building2, Check, ChevronDown, Info, RefreshCw,
 } from 'lucide-react';
 import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts } from '@/components/upnow/ReportCharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
+import { BasisNote } from '@/components/upnow/reportCatalog';
 
 /** One line in a bounced cheque's history — mirrors ChequeEvent on the server. */
 interface ChequeEvent {
@@ -59,6 +60,12 @@ interface DrilldownSpec {
    *  sorted by it. */
   groupByKey?: string;
   groupByLabel?: string;
+  /** Floor for the section tables when every line column declares a `width`.
+   *  The percentages resolve against it, so a dense sheet (Payment Record's
+   *  twelve columns) gets real room and the block scrolls sideways instead of
+   *  squeezing dates down to an ellipsis. Every section shares the floor, so
+   *  they stay aligned with each other either way. */
+  itemsMinWidth?: string;
   /** Columns belonging to the PARENT record (the lease) rather than the line.
    *  Printed once at the top of each block and blanked on continuation rows —
    *  the merged-cell shape the landlord's own sheet uses, so an annual rent is
@@ -86,12 +93,11 @@ interface ReportDef {
    * children listed inline beneath — everything on one page, no modal.
    */
   layout?: 'table' | 'grouped' | 'matrix' | 'countMatrix' | 'chequeMatrix';
-  /** Optional caution banner shown above the report (e.g. data-quality notes). */
+  /** How the report is built and what it does and does not count — shown behind
+   *  the ⓘ beside the title, under the description, and printed on the PDF. It
+   *  used to head the page as a banner; at the length these notes run to, that
+   *  buried the numbers the report exists to show. */
   dataNote?: string;
-  /** Show `dataNote` behind the ⓘ instead of as a banner across the top. For a
-   *  note long enough to dominate the page (Fee & VAT), the banner buries the
-   *  numbers the report exists to show. */
-  dataNoteInInfo?: boolean;
   /** When set, render the Property + leasing-model (direct/sub/management)
    *  multi-select filters. The backend returns a `buildings` option list and
    *  honours `buildings=` / `leaseTypes=` query params. Enabled on every report
@@ -136,7 +142,7 @@ interface ReportDef {
   matrixGroupKey?: string;
   /** Small tables printed under the matrix — the reconciliations the sheet is
    *  meant to prove, rather than leaving the reader to do the arithmetic. */
-  summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string }[] }[];
+  summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string; type?: 'aed' | 'number' }[] }[];
 }
 
 /** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked. */
@@ -158,6 +164,11 @@ interface Column {
   width?: string;
   /** Show this column even when every value is 0 — its 0 is meaningful (e.g. "Days left"). */
   keep?: boolean;
+  /** Decimal places for a 'rate'. Defaults to 1, which is right for an occupancy
+   *  or a collection rate. Set 2 where a tenth of a percent is real money — on a
+   *  9.85M book that is ~10,000, and rounding it away makes the percentage
+   *  disagree with the two figures printed beside it. */
+  decimals?: number;
 }
 
 interface TotalSpec {
@@ -166,6 +177,8 @@ interface TotalSpec {
   type?: 'aed' | 'number' | 'rate';
   /** Show this tile even when zero — for totals whose 0 IS the signal (e.g. arrears). */
   keep?: boolean;
+  /** Decimal places for a 'rate'. Defaults to 1 — see the note on Column. */
+  decimals?: number;
 }
 
 /** ⓘ — explanations live behind this, keeping pages executive-clean. Pass `note`
@@ -227,19 +240,22 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     titleKey: 'monthLabel',
     countLabel: 'leases',
     contractIdKey: 'contractId',
+    itemsMinWidth: '62rem',
+    // Widths declared so every month's table is cut the same way and the months
+    // read down the page as one sheet.
     columns: [
-      { key: 'contractRef', label: 'Contract' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'unitLabel', label: 'Unit' },
-      { key: 'buildingName', label: 'Property' },
+      { key: 'contractRef', label: 'Contract', width: '9%' },
+      { key: 'tenantName', label: 'Customer', width: '17%' },
+      { key: 'unitLabel', label: 'Unit', width: '8%' },
+      { key: 'buildingName', label: 'Property', width: '14%' },
       // The lease on file — always the CURRENT term. A row bucketed into a future
       // month shows the term it is renewing FROM, which is the only term that
       // actually exists; the month heading carries the when.
-      { key: 'term', label: 'Term' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      { key: 'term', label: 'Term', width: '14%' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '10%' },
       // Market Rent beside contracted rent = the uplift available at renewal.
-      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
-      { key: 'stage', label: 'Renewal', type: 'stage' },
+      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed', width: '10%' },
+      { key: 'stage', label: 'Renewal', type: 'stage', width: '11%' },
     ],
   },
 };
@@ -319,21 +335,22 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       titleKey: 'monthLabel',
       countLabel: 'leases',
       contractIdKey: 'contractId',
+      itemsMinWidth: '62rem',
       columns: [
-        { key: 'contractRef', label: 'Contract' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'buildingName', label: 'Property' },
-        { key: 'endDate', label: 'Lease ends', type: 'date' },
-        { key: 'daysUntilExpiry', label: 'Days left', align: 'right', type: 'number' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'renewalStatus', label: 'Renewal', type: 'stage' },
+        { key: 'contractRef', label: 'Contract', width: '9%' },
+        { key: 'tenantName', label: 'Customer', width: '18%' },
+        { key: 'unitLabel', label: 'Unit', width: '8%' },
+        { key: 'buildingName', label: 'Property', width: '15%' },
+        { key: 'endDate', label: 'Lease ends', type: 'date', width: '11%' },
+        { key: 'daysUntilExpiry', label: 'Days left', align: 'right', type: 'number', width: '8%' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
+        { key: 'renewalStatus', label: 'Renewal', type: 'stage', width: '13%' },
       ],
     },
   },
   'leases-by-year': {
     title: 'Leases - Monthly',
-    description: 'Each unit’s CURRENT (latest) lease, grouped by the month it COMMENCED within the selected year. A renewed unit is counted once — under its current lease’s start month — so the totals reconcile with the Lease Revenue report and the Portfolio page’s Annual Rent (they never double-count a unit that has renewed). Each row is a month; expand it to see the leases that began that month. Only months with a commencement are shown. The tiles show how many units’ current leases commenced and the annual rent they represent. Pick the year above.',
+    description: 'Each unit’s CURRENT (latest) lease, grouped by the month it COMMENCED within the selected year. A renewed unit is counted once — under its current lease’s start month — so the totals reconcile with the Lease Revenue report and the Portfolio page’s Annual Rent (they never double-count a unit that has renewed). Each row is a month; expand it to see the leases that began that month. Only months with a commencement are shown. Occupied units and Annual rent are the whole earning book and do NOT move with the year — they are the same two figures Cash Management opens with, and the same Annual Rent the dashboard shows. Leases commenced and Rent commenced are the year’s share of that book; the panel under the table shows the rest, sitting under its own year in the picker. Rent FALLING DUE in a year is a different question and belongs to Cash Management. Pick the year above.',
     endpoint: '/api/reports/leases-by-year',
     buildingLeaseFilter: true,
     layout: 'grouped',
@@ -341,26 +358,48 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'monthLabel', label: 'Commenced' },
       { key: 'leases', label: 'Leases', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      // "Rent commenced", not "Annual rent". The month row carries the rent of
+      // the leases that BEGAN in it, which is a slice of the book — and while it
+      // wore the same label as Cash Management's whole-book Annual rent, the two
+      // reports looked like they disagreed about one portfolio. Annual rent now
+      // appears once on this page, in the tile, meaning what it means there.
+      { key: 'annualRentFils', label: 'Rent commenced', align: 'right', type: 'aed' },
     ],
+    // Occupied units, Annual rent — the same opening pair, same keys and same
+    // values as Cash Management, Cheques Management and Rent vs Asking. Then
+    // this report's own two: how much of that book began inside the year.
     totals: [
-      { key: 'leases', label: 'Leases', type: 'number', keep: true },
-      { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
+      { key: 'occupiedUnits', label: 'Occupied units', type: 'number' },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
+      { key: 'leases', label: 'Leases commenced', type: 'number', keep: true },
+      { key: 'commencedRentFils', label: 'Rent commenced', type: 'aed', keep: true },
+    ],
+    summaryPanels: [
+      {
+        title: 'The year’s share of the book',
+        note: 'Annual rent is the whole earning book and never moves with the year — it is the figure Cash Management and the dashboard’s Annual Rent tile both show. What the year changes is how much of it commenced inside the year. Rent falling due in a year is a different question again, and is Cash Management’s.',
+        rows: [
+          { label: 'Annual rent contracted', key: 'annualRentFils', note: 'whole book — same figure on Cash Management' },
+          { label: 'Commenced in this year', key: 'commencedRentFils', total: true },
+          { label: 'Commenced earlier, still running', key: 'carriedRentFils', note: 'listed under its own year in the picker' },
+        ],
+      },
     ],
     drilldown: {
       childKey: 'items',
       titleKey: 'monthLabel',
       countLabel: 'leases',
       contractIdKey: 'contractId',
+      itemsMinWidth: '62rem',
       columns: [
-        { key: 'contractRef', label: 'Contract' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'buildingName', label: 'Property' },
-        { key: 'startDate', label: 'Start', type: 'date' },
-        { key: 'endDate', label: 'End', type: 'date' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'status', label: 'Status', type: 'stage' },
+        { key: 'contractRef', label: 'Contract', width: '9%' },
+        { key: 'tenantName', label: 'Customer', width: '18%' },
+        { key: 'unitLabel', label: 'Unit', width: '8%' },
+        { key: 'buildingName', label: 'Property', width: '15%' },
+        { key: 'startDate', label: 'Start', type: 'date', width: '11%' },
+        { key: 'endDate', label: 'End', type: 'date', width: '11%' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
+        { key: 'status', label: 'Status', type: 'stage', width: '10%' },
       ],
     },
   },
@@ -407,15 +446,16 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       groupByKey: 'buildingName',
       groupByLabel: 'Property',
       opsLinkKey: 'inOperations',
+      itemsMinWidth: '64rem',
       columns: [
-        { key: 'lease', label: 'Unit · Customer · Term', type: 'stack' },
-        { key: 'leaseType', label: 'Type', type: 'stage' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed' },
-        { key: 'installments', label: 'No. of payments', align: 'right', type: 'number' },
-        { key: 'signatures', label: 'Signatures', type: 'stage' },
-        { key: 'stage', label: 'Stage', type: 'stage' },
-        { key: 'ejari', label: 'Registration', type: 'stage' },
+        { key: 'lease', label: 'Unit · Customer · Term', type: 'stack', width: '23%' },
+        { key: 'leaseType', label: 'Type', type: 'stage', width: '9%' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
+        { key: 'collectedFils', label: 'Collected', align: 'right', type: 'aed', width: '11%' },
+        { key: 'installments', label: 'No. of payments', align: 'right', type: 'number', width: '9%' },
+        { key: 'signatures', label: 'Signatures', type: 'stage', width: '11%' },
+        { key: 'stage', label: 'Stage', type: 'stage', width: '10%' },
+        { key: 'ejari', label: 'Registration', type: 'stage', width: '9%' },
       ],
     },
   },
@@ -425,27 +465,106 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   'renewal-pipeline': RENEWAL_FORECAST_DEF,
   'security-deposits': {
     title: 'Security Deposits Report',
-    description: 'Full deposit register and settlement ledger. A deposit is collected at lease start and refundable at lease end. Status shows where each one stands: Holding (live lease), Pending settlement (lease ended — needs to be refunded or deducted), or settled as Returned, Partial return or Forfeited. Refunded / Kept are the amounts that moved at settlement. The tiles up top answer how much you currently hold, how much is pending settlement, and what has been refunded to tenants vs kept. Pick a year to scope the register to deposits taken that year, or All years for the full register.',
+    description: 'Full deposit register and settlement ledger, grouped by property — a deposit is a per-building liability, and a building is settled tenant by tenant, so each property carries its own subtotals and its deposits are listed underneath. Status shows where each one stands: Holding (live lease), Pending settlement (lease ended — needs to be refunded or deducted), or settled as Returned, Partial return or Forfeited. Held is everything still in hand and ALREADY INCLUDES Pending settlement — Holding + Pending settlement is the split of it, so never add the two. Refunded and Kept are what moved at settlement. Deposits whose lease was deleted are listed under Unassigned property so the money is still visible. The panel under the table proves the settlement arithmetic. THIS REPORT HAS NO YEAR FILTER, on purpose: the ledger records no date for when a deposit was taken (recorded_date is empty on every row, and due_date is the cheque\'s written/refund date, spread over twenty-five years), so any year filter silently emptied or mis-filed the register. It is a statement of the whole book as it stands today.',
     endpoint: '/api/reports/security-deposits',
     buildingLeaseFilter: true,
-    controlKey: 'yearRange',
+    layout: 'grouped',
+    // No controlKey: there is no honest period to filter on — see the note above
+    // `SecurityDepositRow` in reports.service.ts.
     columns: [
-      { key: 'unitLabel', label: 'Unit No' },
-      { key: 'tenantName', label: 'Customer' },
-      { key: 'buildingName', label: 'Building' },
-      { key: 'depositFils', label: 'Security Deposit', align: 'right', type: 'aed' },
-      { key: 'state', label: 'Status', type: 'stage' },
-      { key: 'reference', label: 'Payment' },
+      { key: 'buildingName', label: 'Property' },
+      { key: 'deposits', label: 'Deposits', align: 'right', type: 'number' },
+      { key: 'totalFils', label: 'Collected', align: 'right', type: 'aed' },
+      { key: 'holdingFils', label: 'Holding', align: 'right', type: 'aed' },
+      { key: 'pendingFils', label: 'Pending settlement', align: 'right', type: 'aed' },
+      { key: 'refundedFils', label: 'Refunded', align: 'right', type: 'aed' },
+      { key: 'deductedFils', label: 'Kept', align: 'right', type: 'aed' },
+      { key: 'owedFils', label: 'Customer owes', align: 'right', type: 'aed' },
     ],
-    rowLink: { idKey: 'contractId', colKey: 'unitLabel', target: 'contract' },
+    // FOUR tiles, one question each: how much is with us, how much of it should
+    // already have gone, and of what has gone, how much went back versus stayed.
+    // Nine tiles competed with each other and buried the two that matter — and
+    // three of them (Holding, Total collected, the counts) are breakdowns, which
+    // is what the panels under the table are for. Every one carries `keep`: a
+    // settlement figure that vanishes at zero cannot be read, because nothing
+    // then separates "we refunded nothing" from "this report will not tell you".
     totals: [
-      { key: 'heldFils', label: 'Held now (with us)', type: 'aed', keep: true },
+      { key: 'heldFils', label: 'Held', type: 'aed', keep: true },
       { key: 'dueForSettlementFils', label: 'Pending settlement', type: 'aed', keep: true },
-      { key: 'refundedFils', label: 'Refunded to tenants', type: 'aed' },
-      { key: 'deductedFils', label: 'Kept / forfeited', type: 'aed' },
-      { key: 'totalFils', label: 'Total collected', type: 'aed', keep: true },
-      { key: 'held', label: 'Held (count)', type: 'number', keep: true },
+      { key: 'refundedFils', label: 'Refunded to customers', type: 'aed', keep: true },
+      { key: 'deductedFils', label: 'Kept / forfeited', type: 'aed', keep: true },
     ],
+    summaryPanels: [
+      {
+        title: 'What we are holding',
+        note: 'The two halves of the Held tile. Holding is money against tenancies still running; Pending settlement is money that should already have left, on leases that have ended. Both are point-in-time and do not move with the year. Collected is the only year-scoped figure here — the deposits whose leases run in the chosen period — so it will not agree with Held, and is not meant to.',
+        rows: [
+          { label: 'Holding — lease still running', key: 'holdingFils' },
+          { label: 'Pending settlement — lease over', key: 'dueForSettlementFils' },
+          { label: 'Held', key: 'heldFils', total: true },
+          { label: 'Deposits held', key: 'held', type: 'number' },
+          { label: 'Of those, no amount recorded', key: 'noAmount', type: 'number', note: 'a deposit is on file but its value was never entered — it counts as 0 above' },
+          { label: 'Collected in the chosen period', key: 'totalFils', note: 'year-scoped, unlike everything above it' },
+        ],
+      },
+      {
+        title: 'Settled deposits — where the money went',
+        note: 'Counted on the date each deposit was SETTLED, not on the lease term: a deposit refunded this year usually belongs to a lease that ended in an earlier one. Refunded plus Kept equals the face value of the deposits settled — if it does not, a settlement was recorded without saying where the balance went. Held above is what has NOT been settled and is a point-in-time figure, so it does not move with the year.',
+        rows: [
+          { label: 'Deposits settled', key: 'settled', type: 'number' },
+          { label: 'Refunded to customers', key: 'refundedFils' },
+          { label: 'Kept / forfeited', key: 'deductedFils' },
+          { label: 'Face value settled', key: 'settledFils', total: true },
+        ],
+      },
+      {
+        title: 'Charged at settlement',
+        note: 'A deposit can only ever cover so much. Where the charges — penalties, restoration, rent still due — came to more than the deposit was worth, the deposit is kept in full and the rest stays owing. That balance is NOT deposit money: it is not in Held and it was never refundable, it is a debt to collect from a customer who has already left, which is why it is stated on its own.',
+        rows: [
+          { label: 'Total charged', key: 'chargedFils' },
+          { label: '…covered by the deposits (Kept)', key: 'deductedFils' },
+          { label: 'Customers owing a balance', key: 'owedCustomers', type: 'number' },
+          { label: 'Still owed after the deposits were applied', key: 'owedFils', total: true },
+        ],
+      },
+      {
+        title: 'Not settled yet — the work queue',
+        note: 'Leases that have ended with the deposit still in hand and no settlement raised at all. These carry a Not started badge in the Settlement column, and until one is raised nothing has been refunded, kept or charged. Sort or search the register on "pending" to list them, or take them straight out of the CSV.',
+        rows: [
+          { label: 'Deposits pending settlement', key: 'dueForSettlement', type: 'number' },
+          { label: '…with no settlement started', key: 'notStarted', type: 'number' },
+          { label: 'Deposit money behind them', key: 'notStartedFils', total: true },
+        ],
+      },
+    ],
+    drilldown: {
+      childKey: 'items',
+      titleKey: 'buildingName',
+      titleLabel: 'Property',
+      groupNoun: 'property',
+      countLabel: 'deposits',
+      contractIdKey: 'contractId',
+      itemsMinWidth: '60rem',
+      // Reads left to right as the deposit's own arithmetic: this is what we
+      // hold, this much of it we kept, this much went back — Kept + Refunded is
+      // always the deposit. Anything charged BEYOND the deposit could never be
+      // taken from it, so it sits in its own column as a debt to collect.
+      //
+      // There is no "Charged" column: charges are identical to Kept in every
+      // case except when they overrun the deposit, and a column that repeats its
+      // neighbour is what made this table hard to read. Kept + Customer owes IS
+      // the total charged, and the panel below states it once.
+      columns: [
+        { key: 'unitLabel', label: 'Unit No', width: '8%' },
+        { key: 'tenantName', label: 'Customer', width: '20%' },
+        { key: 'depositFils', label: 'Security Deposit', align: 'right', type: 'aed', width: '12%' },
+        { key: 'deductedFils', label: 'Kept', align: 'right', type: 'aed', width: '11%' },
+        { key: 'refundedFils', label: 'Refunded', align: 'right', type: 'aed', width: '11%' },
+        { key: 'owedFils', label: 'Customer owes', align: 'right', type: 'aed', width: '11%' },
+        { key: 'state', label: 'Status', type: 'stage', width: '11%' },
+        { key: 'settlementStage', label: 'Settlement', type: 'stage', width: '9%' },
+      ],
+    },
   },
 
   'payment-record': {
@@ -491,19 +610,23 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       // block exactly as they do on the landlord's sheet; only the cheque
       // columns repeat down the block.
       mergeKeys: ['buildingName', 'unitLabel', 'tenantName', 'startDate', 'endDate', 'annualRentFils'],
+      // Twelve columns, so this one sets a floor and scrolls sideways on a narrow
+      // screen rather than shaving the dates down to an ellipsis. Every month uses
+      // the same floor, which is what keeps the months aligned with each other.
+      itemsMinWidth: '86rem',
       columns: [
-        { key: 'buildingName', label: 'Property' },
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'startDate', label: 'Start', type: 'date' },
-        { key: 'endDate', label: 'End', type: 'date' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'category', label: 'Payment type', type: 'stage' },
-        { key: 'description', label: 'Description' },
-        { key: 'installment', label: 'Installment' },
-        { key: 'chequeNumber', label: 'Cheque no' },
-        { key: 'chequeDate', label: 'Cheque date', type: 'date' },
-        { key: 'amountFils', label: 'Amount collected', align: 'right', type: 'aed' },
+        { key: 'buildingName', label: 'Property', width: '10%' },
+        { key: 'unitLabel', label: 'Unit', width: '6%' },
+        { key: 'tenantName', label: 'Customer', width: '12%' },
+        { key: 'startDate', label: 'Start', type: 'date', width: '7%' },
+        { key: 'endDate', label: 'End', type: 'date', width: '7%' },
+        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '8%' },
+        { key: 'category', label: 'Payment type', type: 'stage', width: '9%' },
+        { key: 'description', label: 'Description', width: '11%' },
+        { key: 'installment', label: 'Installment', width: '6%' },
+        { key: 'chequeNumber', label: 'Cheque no', width: '7%' },
+        { key: 'chequeDate', label: 'Cheque date', type: 'date', width: '7%' },
+        { key: 'amountFils', label: 'Amount collected', align: 'right', type: 'aed', width: '9%' },
       ],
     },
   },
@@ -595,7 +718,13 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
           { label: 'Bounced, never replaced', key: 'bouncedOwedFils', note: 'still owed — outside the figure above' },
           { label: 'Everything receivable', key: 'receivableFils', total: true },
           { label: 'Annual rent contracted', key: 'annualRentFils' },
-          { label: 'Difference', key: 'reconcileGapFils', note: 'Unit 201 — 61,100 of cheques against 60,100 of rent' },
+          // No worked example here. This note used to read "Unit 201 — 61,100 of
+          // cheques against 60,100 of rent", which was true the day it was written
+          // and has not been since that lease was corrected: the row computed 0
+          // while the caption under it still claimed 1,000 was adrift. A note
+          // beside a live figure has to describe the figure, not a snapshot of it
+          // — and the unit it points at is one click away in the sheet above.
+          { label: 'Difference', key: 'reconcileGapFils', note: 'Zero when every lease’s cheques add up to its own rent — anything else is a lease to open, not a reporting fault' },
         ],
       },
     ],
@@ -774,10 +903,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'executive-cashflow': {
     title: 'Executive Cashflow',
-    tagline: 'Your rent cashflow, month by month — expected vs received, what’s pending or bounced, and Net Income.',
-    description: 'For each month of the selected year: the rent Expected (every cheque due, cancelled ones excluded), how much was Received (cleared), what is still Pending, what Bounced, the Penalty income collected, and Net Income (received rent + penalties). Anchored on the cheque date. Expected / Received up top are full-year (all 12 months, incl. post-dated cheques); YTD Expected / YTD Received are collection to date and reconcile with Cash Management. Latest lease per unit. Pick the year above.',
+    tagline: 'Your rent cashflow, month by month — expected vs received, what’s pending or bounced, and the penalties charged.',
+    description: 'The selected year of the Cash Management sheet, read down the months instead of across them — same leases, same arithmetic. For each month: the rent Expected (Cleared + Pending, cancelled cheques excluded), how much was Received, what is still Pending, what Bounced, and the Penalty charged. Anchored on the cheque date. A unit counts when its lease is live: not expired or terminated, the term still running, no accepted termination in effect, and either activated or with its cheques confirmed in hand. A bounced cheque is reported beside Expected and never inside it — where a bounce was made good the replacement already sits in Received, so counting the bounce as well would count the money twice; a bounce nobody replaced is still owed and is shown separately. Occupied units and Annual rent are the whole book (they span whole leases, not one calendar year) and match every other collection report. Pick the year above.',
     endpoint: '/api/reports/executive-cashflow',
-    dataNote: NEEDS_CHEQUE_DATA + ' Penalty income is penalty / late-fee cheques cleared in the month (bounced-cheque, replacement, deferral and the late/early lifecycle penalties) — admin, Contract Registration and commission fees are in the Fee & VAT report. Net Income = received rent + penalties.',
+    dataNote: NEEDS_CHEQUE_DATA + ' Penalty is the penalty / late fees charged in the month (bounced-cheque, replacement, deferral and the late/early lifecycle penalties), whether or not they have cleared — admin, Contract Registration and commission fees are in the Fee & VAT report. It is reported beside the rent, never added into it. A fee recorded without a cheque date is placed in the month it was raised.',
     controlKey: 'year',
     columns: [
       { key: 'label', label: 'Month' },
@@ -786,22 +915,51 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'pendingFils', label: 'Pending', align: 'right', type: 'aed' },
       { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
       { key: 'penaltyFils', label: 'Penalty', align: 'right', type: 'aed' },
-      { key: 'netIncomeFils', label: 'Net Income', align: 'right', type: 'aed' },
       { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
-      { key: 'clearedCount', label: 'Cleared #', align: 'right', type: 'number' },
-      { key: 'pendingCount', label: 'Pending #', align: 'right', type: 'number' },
-      { key: 'bouncedCount', label: 'Bounced #', align: 'right', type: 'number' },
     ],
+    // Opens with the same pair as Cash Management, Cheques Management and Rent vs
+    // Asking — Occupied units, Annual rent — so the four can be read side by side
+    // without hunting for the number being compared. Everything after is the
+    // year's own money; the bounce split and the late/not-yet-due partition are
+    // carried by the reconciliation panels under the table.
     totals: [
+      { key: 'units', label: 'Occupied units', type: 'number', keep: true },
+      { key: 'annualRentFils', label: 'Annual rent', type: 'aed', keep: true },
       { key: 'expectedFils', label: 'Expected (full year)', type: 'aed', keep: true },
       { key: 'receivedFils', label: 'Received (full year)', type: 'aed', keep: true },
-      { key: 'ytdExpectedFils', label: 'YTD expected', type: 'aed', keep: true },
-      { key: 'ytdReceivedFils', label: 'YTD received', type: 'aed', keep: true },
-      { key: 'pendingFils', label: 'Pending', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', type: 'aed' },
-      { key: 'penaltyFils', label: 'Penalty', type: 'aed' },
-      { key: 'netIncomeFils', label: 'Net Income', type: 'aed', keep: true },
+      { key: 'lateFils', label: 'Late — chase this', type: 'aed', keep: true },
+      { key: 'penaltyFils', label: 'Penalty', type: 'aed', keep: true },
       { key: 'collectionRate', label: 'Collection rate', type: 'rate' },
+    ],
+    summaryPanels: [
+      {
+        title: 'What is actually late',
+        note: 'A single “outstanding” figure adds these together and reads far worse than reality. Only the first line is money to chase; Expected is cheques already held for dates that have not arrived. Same cut-off as the Cash Management sheet.',
+        rows: [
+          { label: 'Fallen due so far', key: 'ytdExpectedFils' },
+          { label: 'Collected against it', key: 'ytdReceivedFils' },
+          { label: 'Late — chase this', key: 'lateFils', total: true },
+          { label: 'Expected — post-dated cheques ahead of us', key: 'notYetDueFils' },
+        ],
+      },
+      {
+        title: 'Bounced cheques',
+        note: 'A bounce that was made good is reported but never added into Expected — its replacement cheque already sits inside Received, so counting both would count the money twice. A bounce nobody replaced is still owed, and is added back below.',
+        rows: [
+          { label: 'Bounced and replaced', key: 'bouncedReplacedFils', note: 'already inside Received — excluded' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', total: true, note: 'still owed — chase alongside the late rent' },
+        ],
+      },
+      {
+        title: 'This year against the book',
+        note: 'Annual rent is what the leases are contracted at over their whole terms, so it is deliberately NOT one calendar year of cheques — a lease starting in August is paid across two years. The Cash Management sheet imposes no year at all; add its years together and they come back to this figure.',
+        rows: [
+          { label: 'Expected this year — received + pending', key: 'expectedFils' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils' },
+          { label: 'Everything receivable this year', key: 'receivableFils', total: true },
+          { label: 'Annual rent contracted (whole book)', key: 'annualRentFils' },
+        ],
+      },
     ],
     // Click a month to see the individual rent cheques anchored in it.
     drilldown: {
@@ -918,7 +1076,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     description: 'Every unit in the portfolio against its asking price, grouped by building — rent is negotiated building by building, so that is where the uplift is actionable. Each section is one property with its unit count, what it earns and what it could; expand it for the units. Buildings run A→Z and units run in unit-number order, so you can look a unit up. Units earning nothing today sit at the foot of their building with their asking price, each stating what is outstanding on it — a renewal drafted but never proceeded ("In renewal"), a lease issued and waiting on signature or cheques ("Lease issued"), a term that has run out ("Holding over"), or simply "Vacant". "At market" is within ±5% of the asking price.',
     endpoint: '/api/reports/rent-vs-market',
     buildingLeaseFilter: true,
-    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The sections list the same unit count as the Portfolio report. A unit earning nothing is not simply "vacant" — its Position is read from whatever lease is still open on it, and the row links to that lease: "In renewal" (a renewal drafted but never proceeded), "Lease issued" (issued, waiting on signature or cheques), "Holding over" (still active though its term has run out), "Lease active" (a live in-term lease on a unit its own availability flag calls vacant — a data mismatch worth fixing), "Not leased" (flagged occupied with nothing open) and "Vacant". None of them carry a gap — a vacant unit\'s asking price is lost rent, not uplift at renewal — so the uplift total stays renewal-only. The Market Price total sums the asking price across ALL units, matching the Portfolio page.',
+    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The sections list the same unit count as the Portfolio report. A unit earning nothing is not simply "vacant" — its Position is read from whatever lease is still open on it, and the row links to that lease: "In renewal" (a renewal drafted but never proceeded), "Lease issued" (issued, waiting on signature or cheques), "Holding over" (still active though its term has run out), "Lease active" (a live in-term lease on a unit its own availability flag calls vacant — a data mismatch worth fixing), "Not leased" (flagged occupied with nothing open) and "Vacant". None of them carry a gap — a vacant unit\'s asking price is lost rent, not uplift at renewal — so the uplift total stays renewal-only. Market price is the rental value of EVERY unit in scope, with no occupancy filter, while Annual rent counts only the leases that are earning \u2014 so the Difference between them is the whole opportunity, under-renting and unlet stock together. The panel under the table splits it into those two halves, because they are fixed in different ways: under-renting is repriced at renewal, unlet stock has to be let.',
     layout: 'grouped',
     // Section header: the building, its unit count and what it earns against
     // asking. (Count columns other than Units are left off deliberately — a
@@ -926,8 +1084,13 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'units', label: 'Units', align: 'right', type: 'number' },
-      { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      // Same order as the tiles — market, then annual, then the gap between them
+      // — so the section header reads as the headline restated per building.
       { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
+      // Each building's own gap, so the ones carrying the portfolio's difference
+      // are visible without dividing two columns by eye.
+      { key: 'differencePct', label: 'Difference', align: 'right', type: 'rate', decimals: 2 },
       { key: 'upliftFils', label: 'Uplift', align: 'right', type: 'aed' },
     ],
     drilldown: {
@@ -937,16 +1100,17 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       countLabel: 'units',
       groupNoun: 'building',
       contractIdKey: 'contractId',
+      itemsMinWidth: '66rem',
       columns: [
-        { key: 'unitLabel', label: 'Unit' },
-        { key: 'tenantName', label: 'Customer' },
-        { key: 'unitType', label: 'Type', type: 'stage' },
-        { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-        { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed' },
-        { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta' },
-        { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate' },
-        { key: 'position', label: 'Position', type: 'stage' },
-        { key: 'leaseEnd', label: 'Lease ends', type: 'date' },
+        { key: 'unitLabel', label: 'Unit', width: '9%' },
+        { key: 'tenantName', label: 'Customer', width: '16%' },
+        { key: 'unitType', label: 'Type', type: 'stage', width: '9%' },
+        { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
+        { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed', width: '11%' },
+        { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta', width: '10%' },
+        { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate', width: '7%' },
+        { key: 'position', label: 'Position', type: 'stage', width: '11%' },
+        { key: 'leaseEnd', label: 'Lease ends', type: 'date', width: '9%' },
       ],
     },
     // Five figures. The question this report answers is "what am I leaving on the
@@ -955,12 +1119,39 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     // Holding over are lease-state breakdowns, and they are already on every row
     // and in the Position badge on each unit; as tiles they only competed with the
     // uplift figure the report exists to show.
+    // The two headline figures the landlord asked for, the difference between
+    // them stated as a percentage rather than left to be divided by eye, and then
+    // the report's own measures.
+    //
+    // The two sides are deliberately asymmetric: Market price is EVERY unit's
+    // rental value with no occupancy filter, Annual rent is the earning leases
+    // only. So the difference is the whole opportunity — under-renting AND unlet
+    // stock — and the panel below splits it into those two halves.
     totals: [
       { key: 'occupiedUnits', label: 'Occupied units', type: 'number' },
-      { key: 'currentRentFils', label: 'Annual rent', type: 'aed' },
       { key: 'marketRentFils', label: 'Market price', type: 'aed' },
+      { key: 'currentRentFils', label: 'Annual rent', type: 'aed' },
+      { key: 'differencePct', label: 'Difference', type: 'rate', decimals: 2 },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
       { key: 'belowMarket', label: 'Below asking', type: 'number' },
+    ],
+    // What the headline difference is actually made of. Without this the reader
+    // has one number covering two unrelated problems: rent set below asking on
+    // let units, and units carrying an asking price nobody is paying at all. They
+    // are fixed in completely different ways — one at renewal, one by letting the
+    // unit — so the split is the point.
+    summaryPanels: [
+      {
+        title: 'What the difference is made of',
+        note: 'Market price counts every unit; Annual rent counts only the leases that are earning. So the gap is two problems in one figure. Under-renting is repriced at renewal; unlet stock has to be let. The Uplift tile above is the renewal half only \u2014 a vacant unit\u2019s asking price is lost rent, not uplift.',
+        rows: [
+          { label: 'Market price \u2014 every unit', key: 'marketRentFils' },
+          { label: 'Annual rent \u2014 earning leases', key: 'currentRentFils' },
+          { label: 'Difference', key: 'differenceFils', total: true },
+          { label: '\u2026of which under-renting on let units', key: 'pricingGapFils', note: 'asking vs contracted, same units' },
+          { label: '\u2026of which stock earning nothing', key: 'vacancyGapFils', note: 'asking price of units with no earning lease' },
+        ],
+      },
     ],
   },
 
@@ -968,7 +1159,6 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     title: 'Fee & VAT (Taxation)',
     description: 'One-off fees, rent VAT and third-party pass-throughs, bucketed by the period each payment falls due — net, VAT and the output VAT to file. Group by quarter and the period is a VAT filing period: a lease running across a year-end splits across the quarters its cheques fall in, rather than landing wholly in the quarter it was signed. Admin & commission are VAT-able (5%); Contract Registration is exempt; rent VAT applies to commercial/industrial leases; a sub-leased building also carries the head lessor\'s levy and the 5% charged on it. Scope the period with the date range, and narrow to specific buildings or a leasing model (direct vs sub-lease).',
     endpoint: '/api/reports/fee-taxation',
-    dataNoteInInfo: true,
     feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
@@ -1053,6 +1243,13 @@ const TENANT_SCOPED = new Set<ReportSlug>([
   'leasing-activity', 'fee-taxation',
 ]);
 
+// …and of those, the ones that are ALWAYS the whole book. A ledger recording how
+// money was settled has to include the customers it was settled with, every one
+// of whom has left — so these do not get the Customers toggle at all. Offering it
+// only meant that choosing "Active only" silently zeroed Refunded and Kept while
+// the report still called itself a settlement ledger.
+const FULL_REGISTER_SLUGS = new Set<ReportSlug>(['security-deposits']);
+
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 /** The month an Upcoming Renewals window runs through — "Nov 2026". The backend
@@ -1083,6 +1280,233 @@ function fmtAmt(fils: number | null | undefined): string {
   if (!n) return '·';
   return new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n / 100);
 }
+/** Reconciliation panels — a report's arithmetic stated under its table, so the
+ *  figures in the tiles can be checked against each other instead of taken on
+ *  trust. Opt-in: only a report that defines `summaryPanels` shows them.
+ *
+ *  One component, four layouts. This block was copied out three times (matrix,
+ *  cheque matrix, table) and the grouped layout — the one report where a total
+ *  is a SLICE of the book and most needs the reconciliation spelled out — had no
+ *  copy at all, which is how Leases - Monthly ended up leading with a figure that
+ *  looked like it contradicted Cash Management.
+ *
+ *  `totals` is whichever view is driving the layout: the matrix views carry
+ *  derived figures (Late, Everything receivable) that the raw payload does not,
+ *  so a caller passes `view?.totals ?? data?.totals`. */
+function SummaryPanels({ panels, totals, topBorder = true }: {
+  panels: NonNullable<ReportDef['summaryPanels']>;
+  totals?: Record<string, unknown> | null;
+  /** Off when the panels are their own card rather than the foot of a table —
+   *  the rule would otherwise sit directly on the card's own top border. */
+  topBorder?: boolean;
+}) {
+  return (
+    <div className={`${topBorder ? 'border-t border-[#e8e6e0] ' : ''}grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid`}>
+      {panels.map(panel => (
+        <div key={panel.title}>
+          <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
+          <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
+            <tbody>
+              {panel.rows.map(r => (
+                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                  <td className="px-3 py-2 text-left">
+                    {r.label}
+                    {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">
+                    {(() => {
+                      const v = r.key ? (totals?.[r.key] as number | undefined) : undefined;
+                      // A count printed as money reads AED 7.00 for seven deposits.
+                      return r.type === 'number' ? (v == null ? '—' : fmtNumber(v)) : fmtAmt(v);
+                    })()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** What each diagnosis MEANS, and what to do about it. The kind is the whole
+ *  point of the panel — "1,000 adrift" tells nobody what to open; "a bounce was
+ *  replaced but its row was never voided" tells them exactly. */
+const RECONCILE_KIND: Record<string, { label: string; tone: 'red' | 'amber' | 'gray'; what: string }> = {
+  'no-cheques': {
+    label: 'No cheques recorded', tone: 'red',
+    what: 'Rent is set on the lease and not one payment row exists. Nothing will ever be collected against it.',
+  },
+  'phantom-vat': {
+    label: 'Rent booked as VAT', tone: 'red',
+    what: 'VAT on these rows is exactly 5/105 of the gross — the signature of VAT extracted OUT of a rent figure. Every other path adds VAT to a net, so this rent has been booked as output VAT.',
+  },
+  // No 'bounce-not-voided'. A bounce that has been made good keeps its status on
+  // purpose — its replacement carries the instalment — so there is nothing to
+  // void and no verdict that should suggest there is.
+  'bounce-unreplaced': {
+    label: 'Bounce not made good', tone: 'red',
+    what: 'The schedule adds up but the cash does not. This is money genuinely short — chase it alongside the late rent. A bounce already covered by a replacement is not counted here.',
+  },
+  'over-collected': {
+    label: 'More recorded than contracted', tone: 'amber',
+    what: 'The cheques on file exceed the lease’s own rent, with no discount to explain it.',
+  },
+  'under-collected': {
+    label: 'Less recorded than contracted', tone: 'amber',
+    what: 'The cheques on file fall short of the lease’s own rent — an instalment that was never written.',
+  },
+};
+
+interface ReconcileException {
+  contractId: number; contractRef: string;
+  unitLabel: string | null; buildingName: string | null; customer: string | null;
+  annualRentFils: number; schedFils: number; netFils: number; liveFils: number;
+  bouncedCoveredFils: number; bouncedOwedFils: number; suspectVatFils: number;
+  gapFils: number; kind: string; basis: 'sched' | 'net' | 'live';
+}
+interface ReconcileResult {
+  generatedAt: string;
+  totals: { leases: number; clean: number; exceptions: number; zeroRent: number; netGapFils: number; grossGapFils: number };
+  exceptions: ReconcileException[];
+}
+
+/**
+ * Reconcile — the leases behind the Difference, on demand.
+ *
+ * Deliberately NOT gated on the Difference being non-zero. The aggregate nets
+ * off: on the reference book it reads 0 while three leases are individually
+ * adrift by 77,000 gross, because Cash Management's own arithmetic compensates
+ * correctly for bounces the underlying records get wrong. A button that only
+ * appeared when the total was ugly would have stayed hidden through exactly the
+ * faults it exists to find.
+ *
+ * Read-only. It diagnoses and links out; nothing here writes a payment row.
+ */
+function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contractsBase: string }) {
+  const [result, setResult] = useState<ReconcileResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = () => {
+    setBusy(true); setErr(null);
+    fetch(endpoint, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : Promise.reject(`Error ${r.status}`)))
+      .then(setResult)
+      .catch(e => setErr(String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  const money = (fils: number) => (fils / 100).toLocaleString('en-AE', { maximumFractionDigits: 0 });
+  const signed = (fils: number) => `${fils > 0 ? '+' : fils < 0 ? '−' : ''}${money(Math.abs(fils))}`;
+
+  return (
+    <div className="border-t border-[#e8e6e0] px-5 py-5 bg-[#fdfcfa] print:hidden">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={run}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#1a1916] hover:border-[#2e9f82] hover:text-[#2e9f82] disabled:opacity-60 transition-colors">
+          <RefreshCw size={12} className={busy ? 'animate-spin' : ''} />
+          {busy ? 'Reconciling…' : result ? 'Run again' : 'Reconcile'}
+        </button>
+        <span className="text-[11px] text-[#6b6860]">
+          Checks every lease three ways — schedule, net of VAT, and collectible cash. Read-only: nothing is changed.
+        </span>
+      </div>
+
+      {err && <p className="mt-3 text-[12px] text-[#dc2626]">Could not reconcile: {err}</p>}
+
+      {result && (
+        <div className="mt-4">
+          <div className="text-[12px] text-[#6b6860]">
+            <span className="font-bold text-[#1a1916]">{result.totals.exceptions}</span>
+            {result.totals.exceptions === 1 ? ' lease does not' : ' leases do not'} reconcile, out of{' '}
+            <span className="font-bold text-[#1a1916]">{result.totals.leases}</span>.{' '}
+            {result.totals.exceptions > 0 && (
+              <>
+                <span className="font-bold text-[#1a1916]">AED {money(result.totals.grossGapFils)}</span> adrift in total
+                {result.totals.netGapFils !== result.totals.grossGapFils && (
+                  <> — netting to {signed(result.totals.netGapFils)}, which is why an aggregate Difference can read clean</>
+                )}
+                .{' '}
+              </>
+            )}
+            {result.totals.zeroRent > 0 && (
+              <>{result.totals.zeroRent} rent-free {result.totals.zeroRent === 1 ? 'lease is' : 'leases are'} excluded — that state is intentional.</>
+            )}
+          </div>
+
+          {result.totals.exceptions === 0 ? (
+            <p className="mt-3 text-[12px] text-[#15803d] font-semibold">
+              Every lease’s cheques add up to its own rent, on all three bases.
+            </p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden min-w-[720px]">
+                <thead className="bg-[#f4f3ef] text-[#6b6860]">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Lease</th>
+                    <th className="px-3 py-2 text-left font-semibold">What is wrong</th>
+                    <th className="px-3 py-2 text-right font-semibold">Annual rent</th>
+                    {/* All three bases are shown, not just the failing one: the
+                        reader can see WHICH comparison failed instead of taking
+                        the verdict on trust. */}
+                    <th className="px-3 py-2 text-right font-semibold">Schedule</th>
+                    <th className="px-3 py-2 text-right font-semibold">Net of VAT</th>
+                    <th className="px-3 py-2 text-right font-semibold">Collectible</th>
+                    <th className="px-3 py-2 text-right font-semibold">Gap</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.exceptions.map(e => {
+                    const k = RECONCILE_KIND[e.kind] ?? { label: e.kind, tone: 'gray' as const, what: '' };
+                    const tone = k.tone === 'red' ? 'bg-[#fee2e2] text-[#991b1b]'
+                      : k.tone === 'amber' ? 'bg-[#fef3c7] text-[#92400e]'
+                      : 'bg-[#f3f4f6] text-[#374151]';
+                    /** The basis the verdict was reached on, emphasised so the
+                     *  reader's eye lands on the column that actually failed. */
+                    const hot = (b: string) => (e.basis === b ? 'font-bold text-[#1a1916]' : 'text-[#6b6860]');
+                    return (
+                      <tr key={e.contractId} className="border-t border-[#f0ede8] align-top">
+                        <td className="px-3 py-2 text-left">
+                          <Link href={`${contractsBase}/${e.contractId}/v2`} className="font-semibold text-[#2e9f82] inline-flex items-center gap-1 hover:underline">
+                            {e.unitLabel ?? e.contractRef}<ExternalLink size={11} />
+                          </Link>
+                          <div className="text-[11px] text-[#9b9890] leading-tight">
+                            {[e.buildingName, e.customer].filter(Boolean).join(' · ')}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-left max-w-[320px]">
+                          <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{k.label}</span>
+                          {k.what && <div className="text-[11px] text-[#6b6860] mt-1 leading-relaxed">{k.what}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{money(e.annualRentFils)}</td>
+                        <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('sched')}`}>{money(e.schedFils)}</td>
+                        <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('net')}`}>{money(e.netFils)}</td>
+                        <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('live')}`}>{money(e.liveFils)}</td>
+                        <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap font-bold ${e.gapFils < 0 ? 'text-[#dc2626]' : 'text-[#b45309]'}`}>
+                          {signed(e.gapFils)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-[11px] text-[#9b9890] mt-2">
+            Ran {new Date(result.generatedAt).toLocaleString('en-AE')} · nothing was changed
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Rent-roll cell colour by cheque status.
 const CELL_STATUS_STYLE: Record<string, string> = {
   cleared:   'text-[#15803d]',          // collected → green
@@ -1158,6 +1582,12 @@ const STAGE_STYLE: Record<string, string> = {
   returned:           'bg-[#dcfce7] text-[#166534]',
   partial_return:     'bg-[#e0e7ff] text-[#3730a3]',
   forfeited:          'bg-[#fee2e2] text-[#b91c1c]',
+  // …and how far the settlement behind it has got. `paid` is the only stage at
+  // which money has actually moved; the rest are a statement still being agreed.
+  // (`draft` already carries the neutral grey further down this map.)
+  sent:               'bg-[#dbeafe] text-[#1e40af]',
+  agreed:             'bg-[#fef3c7] text-[#854d0e]',
+  paid:               'bg-[#dcfce7] text-[#166534]',
   // listing-status lifecycle (vacancy-analysis)
   draft:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — not yet live
   pending:   'bg-[#fef3c7] text-[#854d0e]',  // amber — awaiting review
@@ -1191,14 +1621,14 @@ function drillRowClass(item: Record<string, unknown>): string {
     : 'border-t border-[#f0ede8] hover:bg-[#fafaf8]';
 }
 
-function CellValue({ value, type }: { value: unknown; type?: Column['type'] }) {
+function CellValue({ value, type, decimals }: { value: unknown; type?: Column['type']; decimals?: number }) {
   if (value === null || value === undefined || value === '') {
     return <span className="text-[#c8c6c0]">—</span>;
   }
   if (type === 'aed') return <span>{fmtAed(Number(value))}</span>;
   if (type === 'number') return <span>{fmtNumber(Number(value))}</span>;
   if (type === 'date') return <span>{fmtDate(String(value))}</span>;
-  if (type === 'rate') return <span>{Number(value).toFixed(1)}%</span>;
+  if (type === 'rate') return <span>{Number(value).toFixed(decimals ?? 1)}%</span>;
   if (type === 'delta') {
     const v = Number(value);
     // gapFils = market − current: positive = below market (red, down), negative = above market (green, up)
@@ -1300,7 +1730,14 @@ export function ReportDetailView({
   // Matrix (rent-roll) year selector — defaults to the hub year (current if "All").
   const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
   // Tenant scope — show active customers only (default) or include ended tenants.
-  const [scope, setScope] = useState<'active' | 'all'>(() => (sp?.get('scope') === 'all' ? 'all' : 'active'));
+  // Security Deposits opens on the FULL register: a settled deposit belongs, by
+  // definition, to a customer who has left, so the active-only default emptied
+  // the settlement half of the report — Refunded and Kept both read zero and the
+  // Returned / Partial / Forfeited lines disappeared. The toggle still narrows it.
+  const [scope, setScope] = useState<'active' | 'all'>(() =>
+    sp?.get('scope') === 'active' ? 'active'
+      : sp?.get('scope') === 'all' || FULL_REGISTER_SLUGS.has(slug) ? 'all'
+      : 'active');
   // Cash Management: client-side property filter ('' = all properties).
   const [propertyFilter, setPropertyFilter] = useState('');
   // Unit Mix: server-side Unit type filter ('' = all types).
@@ -1357,6 +1794,20 @@ export function ReportDetailView({
   const [vatScope, setVatScope] = useState<'applicable' | 'all'>(() => (sp?.get('vatScope') === 'all' ? 'all' : 'applicable'));
   // RP portal can reclassify a building's leasing model inline; managers can't.
   const canClassify = endpointBase === '/api/reports';
+  /** Reconcile, scoped exactly as the page is. It is a sibling endpoint of the
+   *  report, so it follows `endpointBase` into the manager portal (where the
+   *  slug route gates it on Cash Management / Cheques Management access) and
+   *  carries `extraQuery` — without the rp= the manager route 400s on a missing
+   *  landlord. The Property / Lease-type filters travel too, or the panel would
+   *  report faults on buildings the reader has filtered away. */
+  const reconcileEndpoint = useMemo(() => {
+    const qs = new URLSearchParams();
+    if (selectedBuildings.length) qs.set('buildings', selectedBuildings.join(','));
+    if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
+      qs.set('leaseTypes', selectedLeaseTypes.join(','));
+    const parts = [extraQuery, qs.toString()].filter(Boolean).join('&');
+    return `${endpointBase}/reconciliation${parts ? `?${parts}` : ''}`;
+  }, [endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes]);
 
   // Hub-wide year (Reports landing page). The useState defaults above seed from
   // it on mount; this keeps a report in sync when the year is changed on the hub
@@ -1416,7 +1867,12 @@ export function ReportDetailView({
     }
     // Tenant scope — only the tenant/financial reports honour it; default is
     // active-only on the backend, so only the explicit "all" needs sending.
-    if (TENANT_SCOPED.has(slug) && scope === 'all') url += (url.includes('?') ? '&' : '?') + 'scope=all';
+    // A full-register report is ALWAYS asked for the whole book — the backend
+    // defaults to active-only, so the param has to be sent every time, not only
+    // when a toggle says so.
+    if (FULL_REGISTER_SLUGS.has(slug) || (TENANT_SCOPED.has(slug) && scope === 'all')) {
+      url += (url.includes('?') ? '&' : '?') + 'scope=all';
+    }
     // Unit type filter (Unit Mix).
     if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
     if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
@@ -1633,6 +2089,24 @@ export function ReportDetailView({
       .filter(g => g.items.length > 0);
   }, [def, data, search]);
 
+  // The figures a grouped report prints on each section header: every summary
+  // column except the title, which IS the heading. Hoisted so the header grid is
+  // laid out from one list and every section lines up.
+  const summaryCols = useMemo(
+    () => (def?.layout === 'grouped' && def.drilldown
+      ? def.columns.filter(c => c.key !== def.drilldown!.titleKey)
+      : []),
+    [def],
+  );
+  // Only lock the section tables to fixed widths when the report has declared
+  // them for every line column — a partial set would size the rest to nothing.
+  const fixedItemCols = !!def?.drilldown?.columns.length
+    && def.drilldown.columns.every(c => !!c.width);
+  // Tracks in the section-header grid. Past seven figures a single row squeezes
+  // each label past reading — Payment Record carries eleven — so those wrap onto
+  // a second row of the SAME tracks, which keeps the figures in columns.
+  const summaryTracks = summaryCols.length > 7 ? Math.ceil(summaryCols.length / 2) : summaryCols.length;
+
   // Cash Management matrix: when a search needle or the property dropdown narrows
   // the visible units, the footer (per-month + grand total), the KPI tiles, the
   // reconciliation panels and the CSV "Total" row must all reflect the rows shown.
@@ -1686,6 +2160,51 @@ export function ReportDetailView({
     for (const c of def.matrixTrailing ?? []) if (!(c.key in totals)) totals[c.key] = sum(c.key);
     return { columnTotals: colTotals, totals };
   }, [def.layout, def.matrixTrailing, data, search, sorted, propertyFilter]);
+
+  /**
+   * The month columns rolled up into calendar years.
+   *
+   * Cash Management deliberately imposes no year — its columns run from the
+   * earliest cheque on the book to the latest, so a tenancy crossing 31 December
+   * is never cut in half. That is right for reading a lease, and useless for the
+   * question a landlord actually asks next: what does each year come to. Twenty-
+   * three month columns cannot be added up by eye.
+   *
+   * Built from the VISIBLE rows, so the search box and the property filter move
+   * it exactly as they move the grid above. Same two rules as the rest of the
+   * sheet: a cell is Cleared + Pending, and a bounce is in neither — it sits on
+   * its month for the drill-down but never in a total, because where a bounce was
+   * made good its replacement is already inside Cleared.
+   */
+  const yearSummary = useMemo(() => {
+    if (def.layout !== 'matrix' || !data) return null;
+    const monthKeys = (data.monthKeys ?? []) as string[];
+    if (!monthKeys.length) return null;
+    const acc = new Map<string, { year: string; totalFils: number; clearedFils: number; pendingFils: number }>();
+    // Seeded from the columns, not from the data, so a year that is entirely
+    // post-dated still gets a line at 0 collected rather than disappearing.
+    for (const k of monthKeys) {
+      const y = k.slice(0, 4);
+      if (!acc.has(y)) acc.set(y, { year: y, totalFils: 0, clearedFils: 0, pendingFils: 0 });
+    }
+    for (const row of sorted) {
+      const cells = (row.cells as { amountFils: number; cheques?: { amountFils: number; status: string | null }[] }[] | undefined) ?? [];
+      cells.forEach((c, ci) => {
+        const k = monthKeys[ci];
+        if (!k) return;
+        const b = acc.get(k.slice(0, 4))!;
+        const amt = Number(c.amountFils) || 0;
+        let cleared = 0;
+        for (const q of c.cheques ?? []) if (q.status === 'cleared') cleared += Number(q.amountFils) || 0;
+        b.totalFils += amt;
+        b.clearedFils += cleared;
+        // Whatever is in the cell and has not cleared. Derived rather than summed
+        // from the lines so the three figures cannot fail to add up.
+        b.pendingFils += amt - cleared;
+      });
+    }
+    return [...acc.values()].sort((a, b) => a.year.localeCompare(b.year));
+  }, [def.layout, data, sorted]);
 
   // One matrix row. Extracted so the grouped body (property bar → units →
   // subtotal) and the flat body render identically instead of drifting.
@@ -2110,6 +2629,21 @@ export function ReportDetailView({
         ...colTotals.map(v => ((csvRun += Number(v) || 0) / 100).toFixed(2)),
         ...trailing.map(() => ''),
       ]);
+      // By year — the same rollup the page shows under the grid, so the file does
+      // not make the reader re-add twenty-three columns the page already added.
+      if (yearSummary?.length) {
+        rows.push([]);
+        rows.push(['By year']);
+        rows.push(['Year', 'Collected', 'Pending', 'Total']);
+        for (const y of yearSummary) {
+          rows.push([
+            y.year,
+            (y.clearedFils / 100).toFixed(2),
+            (y.pendingFils / 100).toFixed(2),
+            (y.totalFils / 100).toFixed(2),
+          ]);
+        }
+      }
       rows.push(...panelRows());
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
       return;
@@ -2240,6 +2774,11 @@ export function ReportDetailView({
         const n = groups.reduce((s, g) => s + (Number(g.row[c.key]) || 0), 0);
         return c.type === 'number' ? String(n) : (n / 100).toFixed(2);
       }));
+      // The reconciliation panels travel with the file, same as the matrix and
+      // table exports. A grouped report's summary is a slice of the book, so the
+      // sheet that explains the rest of it is exactly what must not be dropped
+      // on the way out. Gated on summaryPanels — no other grouped CSV changes.
+      for (const r of panelRows()) rows.push(r);
 
       downloadCsv(`${slug}-${datestamp}.csv`, headers, rows);
       return;
@@ -2247,6 +2786,10 @@ export function ReportDetailView({
 
     const headers = activeColumns.map(c => c.label);
     const rows = sorted.map(row => activeColumns.map(c => fmtCell(row[c.key], c.type)));
+    // A report that states its arithmetic under the table exports it too — the
+    // file has to say what the page says. Gated on summaryPanels, so no other
+    // table report's CSV changes shape.
+    for (const r of panelRows()) rows.push(r);
     const suffix = feeDetailed ? '-detailed' : '';
     downloadCsv(`${slug}${suffix}-${datestamp}.csv`, headers, rows);
   }
@@ -2302,9 +2845,12 @@ export function ReportDetailView({
           )}
           <h1 className="text-xl font-bold text-[#1a1916] flex items-center gap-2">
             {def.title}
-            <InfoTip text={def.description} note={def.dataNoteInInfo ? def.dataNote : undefined} />
+            <InfoTip text={def.description} note={def.dataNote} />
           </h1>
           {def.tagline && <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{def.tagline}</p>}
+          {/* Scope · period · status, for the money reports. Renders nothing for
+              a slug with no entry. */}
+          <BasisNote slug={slug} className="mt-1 max-w-2xl" />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -2327,16 +2873,14 @@ export function ReportDetailView({
       <div className="hidden print:block mb-6">
         <h1 className="text-xl font-bold">{def.title}</h1>
         <p className="text-sm text-gray-600">{def.description}</p>
+        {/* On screen this sits behind the ⓘ; on paper there is nothing to hover,
+            and a printed sheet is the copy that gets read away from the app. */}
+        {def.dataNote && <p className="text-xs text-gray-600 mt-1">{def.dataNote}</p>}
+        {/* The basis belongs on paper too — a printed statement is the copy that
+            gets compared against another report. */}
+        <BasisNote slug={slug} className="mt-1" />
         {data && <p className="text-xs text-gray-500 mt-1">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>}
       </div>
-
-      {/* Data-quality caution banner — unless the report folds it behind the ⓘ. */}
-      {def.dataNote && !def.dataNoteInInfo && (
-        <div className="flex items-start gap-2 mb-4 px-3.5 py-2.5 rounded-xl bg-[#fef3c7] border border-[#fcd34d] text-[#854d0e] text-xs print:bg-white">
-          <AlertCircle size={14} className="shrink-0 mt-0.5" />
-          <span>{def.dataNote}</span>
-        </div>
-      )}
 
       {/* Filters — grouped into one aligned card for fee-taxation; a transparent
           (display:contents) wrapper everywhere else so single-bar reports are unchanged. */}
@@ -2442,7 +2986,7 @@ export function ReportDetailView({
               </select>
             </div>
           )}
-          {TENANT_SCOPED.has(slug) && (
+          {TENANT_SCOPED.has(slug) && !FULL_REGISTER_SLUGS.has(slug) && (
             <div className={fGroup}>
               <span className={fLabel}>Customers</span>
               <select className={fSelect} aria-label="Customers" value={scope} onChange={e => setScope(e.target.value as 'active' | 'all')}>
@@ -2803,7 +3347,7 @@ export function ReportDetailView({
 
       {/* Tenant scope — active customers only (default) vs include ended tenants.
           Non-simple only (the simple bar renders this as a dropdown). */}
-      {!simpleFilterBar && TENANT_SCOPED.has(slug) && (
+      {!simpleFilterBar && TENANT_SCOPED.has(slug) && !FULL_REGISTER_SLUGS.has(slug) && (
         <div className={ctrlRowCls}>
           <span className={ctrlLabelCls}>Customers:</span>
           {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
@@ -2832,7 +3376,7 @@ export function ReportDetailView({
               <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-2.5">
                 <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
                 <p className="text-sm font-bold text-[#1a1916] mt-0.5">
-                  {t.type === 'aed' ? fmtAed(raw) : t.type === 'rate' ? `${Number(raw).toFixed(1)}%` : fmtNumber(raw)}
+                  {t.type === 'aed' ? fmtAed(raw) : t.type === 'rate' ? `${Number(raw).toFixed(t.decimals ?? 1)}%` : fmtNumber(raw)}
                 </p>
               </div>
             );
@@ -2897,18 +3441,25 @@ export function ReportDetailView({
                 {/* Month header */}
                 <button
                   onClick={() => toggleGroup(key)}
-                  className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left hover:bg-[#fafaf8] print:hover:bg-transparent">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <ChevronRight size={16} className={`text-[#9b9890] transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
-                    <span className={`text-sm font-bold whitespace-nowrap ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`}>{String(g.row[dd.titleKey] ?? '')}</span>
+                  className="w-full flex items-center gap-4 px-5 py-3 text-left hover:bg-[#fafaf8] print:hover:bg-transparent">
+                  <div className="flex items-center gap-2.5 min-w-0 w-[13rem] shrink-0">
+                    <ChevronRight size={16} className={`text-[#9b9890] shrink-0 transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
+                    <span className={`text-sm font-bold truncate ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`} title={String(g.row[dd.titleKey] ?? '')}>{String(g.row[dd.titleKey] ?? '')}</span>
                   </div>
-                  {/* Wraps rather than overflowing — a report with many summary
-                      figures would otherwise push the last ones off the edge. */}
-                  <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 min-w-0">
-                    {def.columns.filter(c => c.key !== dd.titleKey).map(c => (
-                      <span key={c.key} className="text-xs whitespace-nowrap hidden sm:inline">
-                        <span className="text-[#9b9890]">{c.label}: </span>
-                        <span className="font-semibold text-[#1a1916]"><CellValue value={g.row[c.key]} type={c.type} /></span>
+                  {/* One equal-width track per summary column, label stacked over
+                      figure. Every section header shares the grid, so the figures
+                      form straight columns down the page instead of the ragged
+                      wrapped chips that came before — the header bar reads as the
+                      table it summarises. */}
+                  <div
+                    className="hidden sm:grid flex-1 min-w-0 items-end gap-x-4 gap-y-2"
+                    style={{ gridTemplateColumns: `repeat(${summaryTracks}, minmax(0, 1fr))` }}>
+                    {summaryCols.map(c => (
+                      <span key={c.key} className="min-w-0 text-right">
+                        <span className="block text-[10px] uppercase tracking-wide text-[#9b9890] truncate" title={c.label}>{c.label}</span>
+                        <span className="block text-xs font-semibold text-[#1a1916] tabular-nums truncate">
+                          <CellValue value={g.row[c.key]} type={c.type} decimals={c.decimals} />
+                        </span>
                       </span>
                     ))}
                   </div>
@@ -2916,11 +3467,24 @@ export function ReportDetailView({
                 {/* Leases in this month */}
                 {!isCollapsed && (
                   <div className="overflow-x-auto border-t border-[#f0ede8]">
-                    <table className="w-full text-xs">
+                    {/* Each section renders its own table, so without declared
+                        widths every one measures its own content and the columns
+                        step in and out down the page. When the report states
+                        widths the tables are fixed to them and read as a single
+                        continuous sheet. */}
+                    <table
+                      className={`w-full text-xs ${fixedItemCols ? 'table-fixed' : ''}`}
+                      style={fixedItemCols && dd.itemsMinWidth ? { minWidth: dd.itemsMinWidth } : undefined}>
+                      {fixedItemCols && (
+                        <colgroup>
+                          {dd.columns.map(c => <col key={c.key} style={{ width: c.width }} />)}
+                          {dd.contractIdKey && <col style={{ width: '5.5rem' }} />}
+                        </colgroup>
+                      )}
                       <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
                         <tr>
                           {dd.columns.map(c => (
-                            <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                            <th key={c.key} className={`px-3 py-2 font-semibold truncate ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
                           ))}
                           {dd.contractIdKey && <th className="px-3 py-2.5 print:hidden" aria-hidden />}
                         </tr>
@@ -2950,8 +3514,8 @@ export function ReportDetailView({
                           )}
                           <tr className={`hover:bg-[#fafaf8] ${sameBlock ? 'border-t border-[#f7f5f1]' : 'border-t border-[#e3e0d9]'}`}>
                             {dd.columns.map(c => (
-                              <td key={c.key} className={`px-3 ${sameBlock ? 'py-1.5' : 'py-2'} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
-                                {sameBlock && merged.has(c.key) ? null : <CellValue value={it[c.key]} type={c.type} />}
+                              <td key={c.key} className={`px-3 ${sameBlock ? 'py-1.5' : 'py-2'} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${fixedItemCols && c.type !== 'stack' ? 'truncate' : ''} text-[#1a1916]`}>
+                                {sameBlock && merged.has(c.key) ? null : <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />}
                               </td>
                             ))}
                             {dd.contractIdKey && (
@@ -2984,6 +3548,15 @@ export function ReportDetailView({
               </div>
             );
           })}
+          {/* A grouped report's total is a SLICE — the months on screen, not the
+              whole book — so this is the layout that most needs its arithmetic
+              stated. Leases - Monthly uses it to show the year's share against
+              the portfolio anchor Cash Management reports. */}
+          {def.summaryPanels && (
+            <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+              <SummaryPanels panels={def.summaryPanels} totals={data?.totals} topBorder={false} />
+            </div>
+          )}
         </div>
       ) : def.layout === 'matrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
@@ -3103,35 +3676,75 @@ export function ReportDetailView({
               </tfoot>
             </table>
           </div>
-          {def.summaryPanels && (
-            <div className="border-t border-[#e8e6e0] grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid">
-              {def.summaryPanels.map(panel => (
-                <div key={panel.title}>
-                  <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
-                  <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
-                    <tbody>
-                      {panel.rows.map(r => {
-                        // Whichever view is driving this layout — the cheque grid has no matrixView,
-                        // and the derived reconciliation figures live on the view, not on data.
-                        const view = matrixView ?? chequeView;
-                        const v = r.key ? (view?.totals?.[r.key] ?? data?.totals?.[r.key]) : undefined;
-                        return (
-                          <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
-                            <td className="px-3 py-2 text-left">
-                              {r.label}
-                              {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(v)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
-                </div>
-              ))}
+          {/* By year — the columns above added up, since twenty-three of them
+              cannot be. Sits between the grid and the reconciliation panels: it
+              is the first thing read after the sheet and the thing the panels
+              then explain. */}
+          {yearSummary && yearSummary.length > 0 && (
+            <div className="border-t border-[#e8e6e0] px-5 py-5 bg-[#fdfcfa] print:break-inside-avoid">
+              <div className="text-[12px] font-bold text-[#1a1916] mb-2">By year</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden min-w-[420px]">
+                  <thead className="bg-[#f4f3ef] text-[#6b6860]">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Year</th>
+                      <th className="px-3 py-2 text-right font-semibold">Collected</th>
+                      <th className="px-3 py-2 text-right font-semibold">Pending</th>
+                      <th className="px-3 py-2 text-right font-semibold">Total</th>
+                      <th className="px-3 py-2 text-right font-semibold">Collected %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yearSummary.map(y => (
+                      <tr key={y.year} className="border-t border-[#f0ede8] text-[#6b6860]">
+                        <td className="px-3 py-2 text-left font-medium text-[#1a1916]">{y.year}</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#15803d]">{fmtAmt(y.clearedFils)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#b45309]">{fmtAmt(y.pendingFils)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(y.totalFils)}</td>
+                        {/* Blank rather than 0% on a year that is entirely
+                            post-dated — nothing has been missed there yet. */}
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                          {y.totalFils ? `${Math.round((y.clearedFils / y.totalFils) * 100)}%` : '·'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-[#f4f3ef] font-bold text-[#1a1916]">
+                    {(() => {
+                      const t = yearSummary.reduce((s, y) => ({
+                        clearedFils: s.clearedFils + y.clearedFils,
+                        pendingFils: s.pendingFils + y.pendingFils,
+                        totalFils: s.totalFils + y.totalFils,
+                      }), { clearedFils: 0, pendingFils: 0, totalFils: 0 });
+                      return (
+                        <tr className="border-t border-[#e8e6e0]">
+                          <td className="px-3 py-2 text-left">Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmtAmt(t.clearedFils)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmtAmt(t.pendingFils)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmtAmt(t.totalFils)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                            {t.totalFils ? `${Math.round((t.clearedFils / t.totalFils) * 100)}%` : '·'}
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                  </tfoot>
+                </table>
+              </div>
+              <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">
+                Each year is the rent DATED in it — a lease running across 31 December is split between two years, which is why no year equals the annual rent of any lease. Collected + Pending is the year’s total; a bounced cheque is in neither, on the same rule as the sheet above. The Total line is every column on the sheet and matches Total — collected + pending below.
+              </p>
             </div>
           )}
+          {/* The cheque grid has no matrixView; the derived reconciliation
+              figures live on whichever view is driving, not on the raw payload. */}
+          {def.summaryPanels && (
+            <SummaryPanels panels={def.summaryPanels} totals={(matrixView ?? chequeView)?.totals ?? data?.totals} />
+          )}
+          {/* The leases behind the Difference, on demand. Sits directly under the
+              panels that state the arithmetic, because it is the answer to the
+              question those panels raise. */}
+          <ReconcilePanel endpoint={reconcileEndpoint} contractsBase={contractsBase} />
           <div className="flex items-center gap-4 px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#15803d]" /> Collected</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
@@ -3214,35 +3827,15 @@ export function ReportDetailView({
               </tfoot>
             </table>
           </div>
+          {/* The cheque grid has no matrixView; the derived reconciliation
+              figures live on whichever view is driving, not on the raw payload. */}
           {def.summaryPanels && (
-            <div className="border-t border-[#e8e6e0] grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid">
-              {def.summaryPanels.map(panel => (
-                <div key={panel.title}>
-                  <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
-                  <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
-                    <tbody>
-                      {panel.rows.map(r => {
-                        // Whichever view is driving this layout — the cheque grid has no matrixView,
-                        // and the derived reconciliation figures live on the view, not on data.
-                        const view = matrixView ?? chequeView;
-                        const v = r.key ? (view?.totals?.[r.key] ?? data?.totals?.[r.key]) : undefined;
-                        return (
-                          <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
-                            <td className="px-3 py-2 text-left">
-                              {r.label}
-                              {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(v)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
-                </div>
-              ))}
-            </div>
+            <SummaryPanels panels={def.summaryPanels} totals={(matrixView ?? chequeView)?.totals ?? data?.totals} />
           )}
+          {/* The leases behind the Difference, on demand. Sits directly under the
+              panels that state the arithmetic, because it is the answer to the
+              question those panels raise. */}
+          <ReconcilePanel endpoint={reconcileEndpoint} contractsBase={contractsBase} />
         </div>
       ) : def.layout === 'countMatrix' ? (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
@@ -3410,7 +4003,7 @@ export function ReportDetailView({
                               onClick={e => e.stopPropagation()}
                               className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
                               title={rl!.target === 'unit' ? 'Open in Units' : 'Open contract'}>
-                              <CellValue value={row[c.key]} type={c.type} />
+                              <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
                               <ExternalLink size={12} className="print:hidden" />
                             </Link>
                           ) : feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
@@ -3423,7 +4016,7 @@ export function ReportDetailView({
                               <ExternalLink size={12} className="print:hidden" />
                             </Link>
                           ) : (
-                            <CellValue value={row[c.key]} type={c.type} />
+                            <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
                           )}
                         </td>
                         );
@@ -3439,6 +4032,10 @@ export function ReportDetailView({
               </tbody>
             </table>
           </div>
+          {/* Reconciliation panels — the arithmetic stated under the table, the
+              same block the matrix reports carry. Opt-in: only a report that
+              defines summaryPanels shows them. */}
+          {def.summaryPanels && <SummaryPanels panels={def.summaryPanels} totals={data?.totals} />}
         </div>
       )}
 
@@ -3511,7 +4108,7 @@ export function ReportDetailView({
                       <tr key={idx} className={drillRowClass(it)}>
                         {dd.columns.map(c => (
                           <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
-                            <CellValue value={it[c.key]} type={c.type} />
+                            <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />
                           </td>
                         ))}
                         {dd.contractIdKey && (
@@ -3613,7 +4210,7 @@ export function ReportDetailView({
                     <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       {cellModal.columns.map(c => (
                         <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
-                          <CellValue value={it[c.key]} type={c.type} />
+                          <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />
                         </td>
                       ))}
                       {cellModal.contractIdKey && (

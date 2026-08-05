@@ -15,7 +15,13 @@ import type { UnitFormData } from '@/components/upnow/UnitFormModal';
 // unit editor recognises these exact labels to present them as a single
 // auto-synced toggle (20% of Market Price + 5% VAT on that 20%). Only offered
 // for sub-lease properties, and fully optional (not every landlord applies it).
-export const SUBLEASE_NET_LABEL = 'Sub-lease charge (20%)';
+//
+// The net line names the levy for what it is — the head lessor's percentage of
+// the lease — rather than "Sub-lease charge (20%)", which read as a fee. These
+// are the terms every store now holds (migration 0186 renamed the 28 units and
+// 38 payment rows); changing one without the other would strand the toggle,
+// since the match below is by exact string.
+export const SUBLEASE_NET_LABEL = '20% on sub-lease';
 export const SUBLEASE_VAT_LABEL = '5% VAT on sub-lease';
 export const isSubleaseChargeRow = (label: string) =>
   label === SUBLEASE_NET_LABEL || label === SUBLEASE_VAT_LABEL;

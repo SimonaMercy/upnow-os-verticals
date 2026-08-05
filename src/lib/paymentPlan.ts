@@ -96,11 +96,13 @@ export function comparePaymentSchedule(a: SchedulableRow, b: SchedulableRow): nu
 /**
  * Uniform label for a RENT row in a payment schedule.
  *
- * The stored descriptions are inconsistent by origin: the first cheque is minted
- * server-side as `"Rental Instalment 1 of 4"`, while the later ones carry the
- * lead payment plan's own `"Installment 2"`. Rendering them verbatim made one
- * schedule read "Rental Instalment 1 of 4 · Installment 2 · Installment 3".
- * Print every rent row as `Instalment N` instead.
+ * The stored descriptions used to be inconsistent by origin: the first cheque was
+ * minted server-side as `"Rental Instalment 1 of 4"`, while the later ones carried
+ * the lead payment plan's own `"Installment 2"`, so one schedule read
+ * "Rental Instalment 1 of 4 · Installment 2 · Installment 3". Migrations 0187/0188
+ * settled every stored row on `"Instalment N"` — the same string this returns —
+ * and the generators write that now. This still normalises: the description is
+ * free text the RP can edit. Print every rent row as `Instalment N`.
  *
  * `index` is the row's 0-based position AMONG THE RENT ROWS (they sort
  * chronologically within their category, so position = instalment number).

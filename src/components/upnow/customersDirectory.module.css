@@ -53,9 +53,10 @@
 }
 
 /* 4-up KPI strip → 2-up when tight. */
+/* Auto-fit so the strip fills the row whatever the tile count (currently 2). */
 .kpiGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 13px;
   margin-bottom: 18px;
 }

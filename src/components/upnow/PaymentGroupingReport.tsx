@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { GripVertical, X, Pencil, Printer, RotateCcw, Check, Loader2, FolderPlus, ArrowLeft, FileSpreadsheet } from 'lucide-react';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
+import { BasisNote } from '@/components/upnow/reportCatalog';
 
 // A `vat` payment is "Fees VAT" (the combined VAT cheque on admin/commission
 // fees) when its description says so. Every other `vat` cheque is rent VAT.
@@ -41,6 +42,15 @@ interface PaymentRow {
   transactionDate: string | null;
   recordedDate: string | null;
   vatAmount: number | null;
+  // Server-derived, from `shared/payment-basis.ts` — the same rule Cash
+  // Management and Fee & VAT apply. A statement must not total a cheque that was
+  // voided, nor a bounce whose replacement is already in the list.
+  countsTowardTotals?: boolean;
+  excludedReason?: 'cancelled' | 'bounce-replaced' | null;
+  // Rent VAT the contract holds as a RATE with no row of its own, apportioned to
+  // this cheque (fils). Reconstructed server-side by `shared/rent-vat-basis.ts`,
+  // so this report and Fee & VAT declare the same output VAT.
+  impliedRentVatFils?: number | null;
   // for year scoping via the lease term when a payment has no own date
   startDate?: string | null; endDate?: string | null; fromYear?: number | null; toYear?: number | null;
 }
@@ -151,8 +161,10 @@ const fmtAed = (v: number) => {
 // its full year of cheques — and its full year of VAT — into all four quarters
 // at face value. On the live data that reported 2.9x the real 2026 rent VAT and
 // made each year's rental income exceed the entire multi-year ledger. The
-// Payments ledger still carries the old rule; these totals will differ from it
-// until that page is moved over too.
+// The Security Deposits register carried the same defect on its collection
+// basis. It could not be fixed the same way — the ledger records no date for
+// when a deposit was taken — so that report dropped its period filter entirely
+// rather than keep a control that silently mis-files rows.
 /** The single date a row is attributed to. The cheque date where there is one;
  *  otherwise the recorded date, then the lease start, then the deposit's from
  *  year — each a single point, so a row can never land in two periods. */
@@ -165,6 +177,12 @@ const effectiveDate = (d: PaymentRow): string | null => {
  *  back to the lease. Surfaced in the UI so an inferred period is never quietly
  *  filed as fact — on the live data these are rent rows missing a due date. */
 const isPeriodInferred = (d: PaymentRow): boolean => !d.transactionDate && !d.recordedDate;
+
+/** Does this row belong in a subtotal? A cancelled cheque was voided and was
+ *  never a supply; a bounce already made good is represented by the replacement
+ *  cheque sitting in this same list, so counting both states the money twice.
+ *  Older API responses carry no flag — default to counting, never to hiding. */
+const counts = (d: PaymentRow): boolean => d.countsTowardTotals !== false;
 
 const yearMatch = (d: PaymentRow, y: number): boolean => {
   const s = effectiveDate(d);
@@ -275,10 +293,33 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       // Date window takes precedence over the Year dropdown when set.
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
       else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (!counts(d)) continue;                    // voided / already replaced
       add(itemKeyOf(d), Number(d.amount) || 0);
+      // Rent VAT this contract holds as a rate rather than a row. Without it the
+      // "5% VAT on Rent" line is short by exactly the legacy contracts, and this
+      // report and Fee & VAT declare different output VAT for the same quarter.
+      if (d.paymentType === 'rental_income') add('vat_rental', (Number(d.impliedRentVatFils) || 0) / 100);
     }
     return t;
   }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
+
+  // What the status rule kept OUT of the figures above, measured through the same
+  // filters. Reported rather than dropped: a total that quietly shrank is a total
+  // nobody can reconcile against last quarter's filing.
+  const excludedRows = useMemo(() => {
+    const out: PaymentRow[] = [];
+    for (const d of rows) {
+      if (counts(d)) continue;
+      if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
+      if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
+      if (dateActive) { if (!dateInRange(d, from, to)) continue; }
+      else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (!(Number(d.amount) || 0)) continue;
+      out.push(d);
+    }
+    return out;
+  }, [rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
+  const excludedTotal = excludedRows.reduce((s, d) => s + (Number(d.amount) || 0), 0);
 
   // Rows inside the current period that had NO date of their own and were placed
   // by the lease-start fallback. Reported to the RP rather than silently mixed
@@ -287,6 +328,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
     const out: PaymentRow[] = [];
     for (const d of rows) {
       if (!isPeriodInferred(d)) continue;
+      if (!counts(d)) continue;                    // already reported as excluded
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
       if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
@@ -328,14 +370,23 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
   // per-type matching (VAT rental/fees, per-description 'other') as the totals.
   const detailRows = useMemo(() => {
     if (!detail) return [];
-    const out: Array<{ row: PaymentRow; amount: number }> = [];
+    const out: Array<{ row: PaymentRow; amount: number; note?: string }> = [];
     for (const d of rows) {
       if (ownership !== 'all' && (buildingLeasing[d.building ?? ''] ?? 'direct') !== ownership) continue;
       if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
       else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (!counts(d)) continue;
       const amt = Number(d.amount) || 0;
       if (amt && itemKeyOf(d) === detail) out.push({ row: d, amount: amt });
+      // Rent VAT reconstructed from the contract rate has no row of its own. It
+      // is real money in the total above, so it must be auditable here too —
+      // listed against the rent cheque it was apportioned to, and labelled as
+      // reconstructed so nobody hunts for a cheque that does not exist.
+      if (detail === 'vat_rental' && d.paymentType === 'rental_income') {
+        const implied = (Number(d.impliedRentVatFils) || 0) / 100;
+        if (implied) out.push({ row: d, amount: implied, note: 'on rent (no VAT cheque)' });
+      }
     }
     return out.sort((a, b) => b.amount - a.amount);
   }, [detail, rows, year, from, to, dateActive, ownership, building, buildingLeasing]);
@@ -383,13 +434,26 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       if (building !== 'all' && (d.building ?? '').trim() !== building) continue;
       if (dateActive) { if (!dateInRange(d, from, to)) continue; }
       else if (year !== 'all' && !yearMatch(d, Number(year))) continue;
+      if (!counts(d)) continue;                    // same rule as the on-screen totals
       const amt = Number(d.amount) || 0;
-      if (!amt) continue;
       const itemKey = itemKeyOf(d);
-      const desc = d.paymentType === 'other'
-        ? ((d.description ?? '').trim() || 'Other')
-        : (d.description ?? itemLabel(itemKey));
-      out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount: amt, desc });
+      if (amt) {
+        const desc = d.paymentType === 'other'
+          ? ((d.description ?? '').trim() || 'Other')
+          : (d.description ?? itemLabel(itemKey));
+        out.push({ cat: catOf(itemKey), item: itemLabel(itemKey), row: d, amount: amt, desc });
+      }
+      // The exported sheet has to add up to the screen, so reconstructed rent VAT
+      // is a line here too — see `detailRows`.
+      if (d.paymentType === 'rental_income') {
+        const implied = (Number(d.impliedRentVatFils) || 0) / 100;
+        if (implied) {
+          out.push({
+            cat: catOf('vat_rental'), item: itemLabel('vat_rental'), row: d,
+            amount: implied, desc: '5% VAT on Rent (on rent, no VAT cheque)',
+          });
+        }
+      }
     }
     return out;
   };
@@ -461,6 +525,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
       <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
       <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Every payment counts once, in the period its cheque falls due — the same basis as Cash Management — so a quarter can be used as a filing period. Session-only; use Print to export.</p>
+      <BasisNote slug="payment-grouping" className="mt-1.5 max-w-3xl" />
     </div>
   );
 
@@ -538,6 +603,30 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
               <li key={d.id}>
                 {d.contractRef ?? '—'} · {d.building ?? '—'} {d.unit ?? ''} · {itemLabel(itemKeyOf(d))} · {fmtAed(Number(d.amount) || 0)}
                 {d.description ? ` · ${d.description}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Money the status rule kept OUT of every figure below. Stated on the page
+          and on the print-out: this report used to total these rows, so anyone
+          comparing against an earlier statement needs to see what moved. */}
+      {excludedRows.length > 0 && (
+        <div className="mb-4 rounded-xl border border-[#e8e6e0] bg-[#f7f6f3] px-4 py-3">
+          <p className="text-sm font-semibold text-[#6b6860]">
+            {excludedRows.length} payment{excludedRows.length !== 1 ? 's' : ''} in this period ({fmtAed(excludedTotal)}) {excludedRows.length !== 1 ? 'are' : 'is'} not counted below
+          </p>
+          <p className="text-xs text-[#6b6860] mt-1">
+            A cancelled cheque was voided and never collected. A bounced cheque
+            that was made good is already represented by its replacement, which
+            IS counted — including both would state the same money twice.
+          </p>
+          <ul className="mt-2 text-xs text-[#6b6860] space-y-0.5">
+            {excludedRows.map(d => (
+              <li key={d.id}>
+                {d.contractRef ?? '—'} · {d.building ?? '—'} {d.unit ?? ''} · {itemLabel(itemKeyOf(d))} · {fmtAed(Number(d.amount) || 0)}
+                {' · '}{d.excludedReason === 'cancelled' ? 'cancelled' : 'bounced, replaced'}
               </li>
             ))}
           </ul>
@@ -660,7 +749,7 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
                   </tr>
                 </thead>
                 <tbody>
-                  {detailRows.map(({ row: d, amount }, idx) => {
+                  {detailRows.map(({ row: d, amount, note }, idx) => {
                     const cid = d.contractRef ? /CID-(\d+)/.exec(d.contractRef)?.[1] : null;
                     return (
                       <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
@@ -675,7 +764,9 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
                         <td className="px-3 py-2 text-left text-[#1a1916]">{d.tenant ?? '—'}</td>
                         <td className="px-3 py-2 text-left text-[#6b6860]">{d.building ?? '—'}</td>
                         <td className="px-3 py-2 text-left text-[#6b6860] tabular-nums">{(d.transactionDate ?? d.recordedDate ?? '—').slice(0, 10)}</td>
-                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">{d.status ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">
+                          {note ?? d.status ?? '—'}
+                        </td>
                         <td className="px-4 py-2 text-right tabular-nums font-semibold text-[#1a1916]">{fmtAed(amount)}</td>
                       </tr>
                     );

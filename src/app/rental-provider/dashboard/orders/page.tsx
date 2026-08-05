@@ -10,10 +10,10 @@
  *
  * Four buckets only:
  *   - All       — current leases (one in-force lease per unit) = the "Total".
- *   - Active    — current leases not expiring within EXPIRING_DAYS.
- *   - Expiring  — current leases ending within EXPIRING_DAYS (renewal workload;
- *                 a unit with a signed-ahead renewal shows here via its parent).
- *   - Expired   — ended/terminated history (the ONLY year-filtered bucket).
+ *   - Starts later — signed ahead, term not begun.
+ *   - Expired      — ended/terminated history.
+ *
+ * Renewal workload is NOT a bucket here — it belongs to the Renewals report.
  *
  * "In force" folds three DB realities into live occupancy: status=active,
  * winding-down (accepted termination, `terminating`), and running-but-not-yet-
@@ -32,9 +32,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Search, X, FileText, ChevronLeft, ChevronRight,
-  Bell, Download, Clock, Shield, Coins, Calendar, Pencil, Info,
+  Bell, Download, Shield, Coins, Pencil, Info, ClipboardList, Archive, CalendarClock,
 } from 'lucide-react';
 import { tenantDisplayName } from '@/lib/tenantName';
+import { liveLeaseTips } from '@/lib/liveLease';
+import { contractHref, surfaceOfLockedAt } from '@/lib/contractHref';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
 type ContractStatus = 'active' | 'expired' | 'terminated' | 'pending' | 'issued';
 type DisplayStatus = ContractStatus | 'declined' | 'needs_activation' | 'starts_later' | 'superseded' | 'terminating';
-type TabKey = 'all' | 'active' | 'expiring' | 'expired';
+type TabKey = 'all' | 'starts_later' | 'expired';
 
 /** Expiring window for the renewal-attention bucket. */
 const EXPIRING_DAYS = 90;
@@ -61,16 +63,39 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   terminating:      'Terminating',
 };
 
-// Leases register. All / Active / Expiring show LOCKED in-force leases (All =
-// one locked lease per unit; Expiring = ending within EXPIRING_DAYS — the
-// renewal workload). Expired surfaces ended leases on this RP (e.g. the prior
-// term of a renewed lease). Drafts / in-setup leases live in Operations; the
-// fully-ended CUSTOMER view lives under Ended Leases.
+// Leases register, as ONE dropdown rather than a tab row — the buckets are a
+// single choice and the list grew past what tabs read well at.
+//
+// Every bucket here obeys the same gate: locked, and NOT in the Operations
+// worklist. This page and Operations must never claim the same lease.
+//
+// Active Leases = one such lease per unit, in force today. Upcoming Renewals =
+// same, but signed ahead with the term not yet begun. Expired Leases = ended
+// leases (e.g. the prior term of a renewed lease). The fully-ended CUSTOMER
+// view lives under Ended Leases.
+//
+// ⚠️ "Active Leases" here is the SET-UP-COMPLETE subset (93 on RP 2). The
+// dashboard tile of the same name counts every live tenancy (107) — it also
+// includes the ones still being set up. Same words, two scopes, so the strip
+// under the KPIs states both numbers and where the difference sits. Do not
+// remove that sentence without renaming one of the two.
+//
+// There is NO "Expiring < 90d" bucket. It was a slice of the same leases under
+// another number, and renewal workload is the Renewals report's job — one place
+// to track it, not a count competing with the register's own. Individual rows
+// still show their own countdown when a term is close; that is context on a
+// lease, not a rival headline.
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'all',      label: 'All' },
-  { key: 'active',   label: 'Active' },
-  { key: 'expiring', label: `Expiring < ${EXPIRING_DAYS}d` },
-  { key: 'expired',  label: 'Expired' },
+  { key: 'all',          label: 'Active Leases' },
+  { key: 'starts_later', label: 'Upcoming Renewals' },
+  { key: 'expired',      label: 'Expired Leases' },
+];
+
+/** Lease type — the New / Renewal split the rows already chip. */
+const TYPE_FILTERS: { key: string; label: string }[] = [
+  { key: 'all',     label: 'All lease types' },
+  { key: 'new',     label: 'New' },
+  { key: 'renewal', label: 'Renewal' },
 ];
 
 /** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
@@ -144,6 +169,8 @@ interface Contract {
   status: ContractStatus;
   ejariStatus: string;
   contractActive: boolean;
+  /** Cheques confirmed in hand — half of the live-tenancy rule (lib/liveLease). */
+  pdcConfirmed?: boolean | null;
   renewalStatus: string | null;
   createdAt: string;
   /** Operations vs Leases split: NULL = still in the Operations worklist;
@@ -153,7 +180,7 @@ interface Contract {
    *  so the Edit pencil is hidden. On-file-only (imported) leases stay editable. */
   signed?: boolean;
   tenant: { id: number | null; name: string | null; email: string | null; entityType: string | null; companyName: string | null };
-  unit: { id: number | null; number: string | null; name: string | null };
+  unit: { id: number | null; number: string | null; name: string | null; availability?: string | null };
   property: { id: number | null; buildingName: string | null };
   /** Termination snapshot — only present when a request has been raised. */
   termination?: {
@@ -213,7 +240,23 @@ function unitLeaseKey(c: Contract): number | string {
   return c.unit.id ?? `c${c.id}`;
 }
 
+/**
+ * Which of a unit's two candidate leases represents the unit TODAY.
+ *
+ * IN FORCE WINS FIRST, and that clause is the whole point. Without it this
+ * picked the latest-ending lease, so on a unit with a running lease AND a
+ * renewal signed ahead the future renewal won the collapse — and because a
+ * not-yet-started lease is then dropped from `currentLeases`, the unit vanished
+ * from the register entirely, running lease and all. That was 30 units on RP 2:
+ * the sidebar badge said 93 leases and the page said 63, and the missing 30 were
+ * exactly the units with a signed-ahead renewal. Signed-ahead leases are not
+ * lost by this — they have their own "Starts later" bucket, built off the raw
+ * list rather than the collapse.
+ */
 function preferCurrentLease(prev: Contract, next: Contract): Contract {
+  const prevInForce = isInForce(prev);
+  const nextInForce = isInForce(next);
+  if (nextInForce !== prevInForce) return nextInForce ? next : prev;
   const prevLive = displayStatusOf(prev) !== 'needs_activation';
   const nextLive = displayStatusOf(next) !== 'needs_activation';
   if (nextLive && !prevLive) return next;
@@ -245,22 +288,81 @@ function leaseWord(n: number): string {
   return `${n} lease${n === 1 ? '' : 's'}`;
 }
 
-function RentBreakdownTip({ breakdown }: { breakdown: RentBreakdown }) {
+/** Why a live tenancy is not in the register — the label shown against each row
+ *  in the "still being set up" list. Most specific reason first. */
+function setupReasonOf(c: Contract, opsIds: Set<number>): string {
+  const ds = displayStatusOf(c);
+  if (ds === 'terminating')      return 'Winding down';
+  if (ds === 'needs_activation') return 'Needs activation';
+  if (ds === 'starts_later')     return 'Signed ahead';
+  if (c.lockedAt == null)        return 'Not locked yet';
+  if (opsIds.has(c.id))          return 'In Operations';
+  return STATUS_LABELS[ds] ?? 'In setup';
+}
+
+/** Annual-rent reconciliation shown in the tooltip: the gross candidate set, what
+ *  each exclusion removes, and the running total that survives. The type was
+ *  referenced but never declared — a long-standing compile error in this file. */
+type RentBreakdownLine = { count: number; amount: number };
+type RentBreakdown = {
+  gross: RentBreakdownLine;
+  setup: RentBreakdownLine;
+  operations: RentBreakdownLine;
+  running: RentBreakdownLine;
+};
+
+/**
+ * The info icon on "Fully set up". Opens the LIST of live tenancies this
+ * register is holding back, one row per unit with the reason and a link into
+ * the lease, followed by the annual-rent reconciliation. A count on its own
+ * ("14 elsewhere") is not checkable; a list of units is.
+ */
+function RentBreakdownTip({ breakdown, pending, manager, opsHref }: {
+  breakdown: RentBreakdown;
+  pending: { c: Contract; reason: string }[];
+  manager?: { rp: number };
+  opsHref: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <span className="rent-tip">
       <button
         type="button"
-        aria-label="Show annual rent breakdown"
+        aria-label="Show the leases still being set up, and the annual rent breakdown"
         aria-expanded={open}
         onClick={() => setOpen(v => !v)}
-        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
         className="rent-tip-btn"
       >
         <Info size={12} />
       </button>
       {open && (
-        <span className="rent-tip-pop" role="dialog" aria-label="Annual rent breakdown">
+        <span className="rent-tip-pop" role="dialog" aria-label="Leases still being set up">
+          {pending.length > 0 && (
+            <>
+              <span className="rent-tip-row strong">
+                <span>Still being set up</span>
+                <span>{leaseWord(pending.length)}</span>
+              </span>
+              <span className="tip-list">
+                {pending.map(({ c, reason }) => (
+                  // These rows ARE the still-being-set-up leases, so most of
+                  // them live in Operations — linking them to the register was
+                  // sending the reader to a lease page for a lease the register
+                  // does not contain.
+                  <Link key={c.id} href={contractHref(c.id, surfaceOfLockedAt(c.lockedAt), manager)} className="tip-item">
+                    <span className="tip-unit">
+                      {c.unit.number ? `Unit ${c.unit.number}` : c.unit.name ?? c.ref}
+                      <em>{c.property.buildingName ?? '—'}</em>
+                    </span>
+                    <span className="tip-why">{reason}</span>
+                  </Link>
+                ))}
+              </span>
+              <Link href={opsHref} className="tip-all">Open Operations →</Link>
+              <span className="rent-tip-sep" />
+            </>
+          )}
           <span className="rent-tip-row strong">
             <span>Annual Rent</span>
             <span>{leaseWord(breakdown.gross.count)} · AED {fmtAedAmt(breakdown.gross.amount)}</span>
@@ -380,7 +482,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
-  const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
+  const [filterType, setFilterType] = useState('all');
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [page, setPage] = useState(1);
   const router = useRouter();
@@ -398,7 +500,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
       .finally(() => setLoading(false));
   }, [manager]);
 
-  useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterYear]);
+  useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterType]);
 
   const now = useMemo(() => new Date(), []);
   const soonBy = useMemo(() => { const d = new Date(); d.setDate(d.getDate() + EXPIRING_DAYS); return d; }, []);
@@ -408,37 +510,12 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     [contracts],
   );
 
-  // Year options — every year a contract's term touches, newest first. Parsed
-  // from the ISO prefix to avoid timezone drift.
-  const yearOf = (d: string | null) => (d && /^\d{4}/.test(d) ? d.slice(0, 4) : null);
-  const years = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of contracts) {
-      const sy = yearOf(c.startDate); if (sy) set.add(sy);
-      const ey = yearOf(c.endDate);   if (ey) set.add(ey);
-    }
-    set.add(String(new Date().getFullYear()));
-    return [...set].sort((a, b) => b.localeCompare(a));
-  }, [contracts]);
-
-  // Year scope — applies to the WHOLE page. A lease belongs to a year if its
-  // term OVERLAPS it (started on/before Dec 31 AND ends on/after Jan 1), plus a
-  // forward-dated renewal created in that year. 'all' = no scoping. The headline
-  // no longer inflates with the year because the live buckets dedupe per unit
-  // (see currentLeases) — the old 169 was a raw row count, now fixed.
-  const yearScoped = useMemo(() => {
-    if (filterYear === 'all') return contracts;
-    const jan1 = `${filterYear}-01-01`;
-    const dec31 = `${filterYear}-12-31`;
-    return contracts.filter(c => {
-      const s = (c.startDate ?? '').slice(0, 10);
-      const e = (c.endDate ?? '').slice(0, 10);
-      if (s && s > dec31 && (c.createdAt ?? '').slice(0, 4) === filterYear) return true;
-      if (!s || s > dec31) return false;   // term starts after this year
-      if (e && e < jan1) return false;     // term ended before this year
-      return true;                         // overlaps the year
-    });
-  }, [contracts, filterYear]);
+  // The year picker is GONE — the register shows every year. It defaulted to the
+  // current year, which silently hid leases whose term did not touch it and made
+  // the headline disagree with the dashboard for a reason nothing on the page
+  // stated. Scope by year on the Expired list if you need it; the live buckets
+  // are today-anchored anyway, so a year filter never applied to them.
+  const yearScoped = contracts;
 
   // ── CURRENT LEASES = one in-force lease per unit within scope. This is the
   // headline "Total". A renewed unit keeps the old + new rows and prior cycles
@@ -474,8 +551,62 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     [grossLeaseCandidates, opsIds],
   );
 
-  const expiringLeases = useMemo(() => currentLeases.filter(c => endsSoon(c, soonBy)), [currentLeases, soonBy]);
-  const activeLeases   = useMemo(() => currentLeases.filter(c => !endsSoon(c, soonBy)), [currentLeases, soonBy]);
+
+  // UPCOMING RENEWALS — signed ahead, term not begun, and ALREADY SET UP.
+  //
+  // The locked/Operations test is the point. Without it this listed every
+  // signed-ahead draft, and a draft that has not been blessed is by definition
+  // still in the Operations pre-active pipeline — so the register was showing
+  // Operations' own work back to the user under a different name. On RP 2 that
+  // was all 30 of them (`pending`, locked_at NULL), i.e. the bucket duplicated
+  // Operations exactly and reconciled with nothing.
+  //
+  // Same rule as `currentLeases`, only the term has not started yet. Expect 0
+  // until a signed-ahead renewal is marked active — that is correct, not a bug.
+  // One row per lease (no per-unit collapse: two units signed ahead to the same
+  // customer are two renewals).
+  const startsLaterLeases = useMemo(
+    () => yearScoped.filter(c =>
+      displayStatusOf(c) === 'starts_later' &&
+      c.lockedAt != null &&
+      !opsIds.has(c.id)),
+    [yearScoped, opsIds],
+  );
+
+  // ── Reconciliation with the dashboard ──────────────────────────────────────
+  // The dashboard's "Active Leases" tile counts LIVE TENANCIES (lib/liveLease,
+  // the mirror of LIVE_LEASE_TIPS_SQL). This register is narrower on purpose —
+  // leases still being set up belong to Operations, and the two pages must not
+  // both claim them. So the figures differ, and the strip below says by how many
+  // and where the rest are, rather than leaving the reader to guess.
+  const liveTenancies = useMemo(
+    () => liveLeaseTips(contracts, c => ({
+      id: c.id,
+      unitId: c.unit.id,
+      unitOccupied: c.unit.availability === 'occupied',
+      startDate: c.startDate,
+      endDate: c.endDate,
+      status: c.status,
+      contractActive: c.contractActive,
+      pdcConfirmed: c.pdcConfirmed,
+      terminationResponse: c.termination?.response ?? null,
+      terminationEffectiveDate: c.termination?.effectiveDate ?? null,
+    })),
+    [contracts],
+  );
+  // The live tenancies this register does NOT list, each with the reason it is
+  // held back. The info icon on "Fully set up" opens this, so the gap is a list
+  // of real units you can click into — not a number you have to take on trust.
+  const currentIds = useMemo(() => new Set(currentLeases.map(c => c.id)), [currentLeases]);
+  const pendingSetupLeases = useMemo(
+    () => liveTenancies
+      .filter(c => !currentIds.has(c.id))
+      .map(c => ({ c, reason: setupReasonOf(c, opsIds) }))
+      .sort((a, b) => (a.c.property.buildingName ?? '').localeCompare(b.c.property.buildingName ?? '')
+        || (a.c.unit.number ?? '').localeCompare(b.c.unit.number ?? '')),
+    [liveTenancies, currentIds, opsIds],
+  );
+  const elsewhereCount = pendingSetupLeases.length;
   // Expired/ended leases — e.g. the prior term of a renewed lease (an expired
   // original whose renewal is still active). Each ended term is its own history
   // row (no per-unit collapse); superseded duplicates map to a 'superseded'
@@ -484,23 +615,28 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
 
   const tabCounts = useMemo<Record<TabKey, number>>(() => ({
     all: currentLeases.length,
-    active: activeLeases.length,
-    expiring: expiringLeases.length,
+    starts_later: startsLaterLeases.length,
     expired: expiredLeases.length,
-  }), [currentLeases, activeLeases, expiringLeases, expiredLeases]);
+  }), [currentLeases, startsLaterLeases, expiredLeases]);
 
   const baseList = useMemo(() => {
     switch (activeTab) {
-      case 'active':   return activeLeases;
-      case 'expiring': return expiringLeases;
-      case 'expired':  return expiredLeases;
-      default:         return currentLeases;
+      case 'starts_later': return startsLaterLeases;
+      case 'expired':      return expiredLeases;
+      default:             return currentLeases;
     }
-  }, [activeTab, currentLeases, activeLeases, expiringLeases, expiredLeases]);
+  }, [activeTab, currentLeases, startsLaterLeases, expiredLeases]);
 
   const filtered = useMemo(() => {
     const list = baseList.filter(c => {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
+      // Lease type — a renewal child carries contractType 'renewal'; everything
+      // else (including imported originals with a null type) reads as New, the
+      // same rule the row chip uses, so filter and chip never disagree.
+      if (filterType !== 'all') {
+        const isRenewal = c.contractType === 'renewal';
+        if (filterType === 'renewal' ? !isRenewal : isRenewal) return false;
+      }
       if (search.trim()) {
         const q = search.trim().toLowerCase();
         const haystack = [c.ref, c.tenant.name, c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]
@@ -511,7 +647,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     });
     // Soonest-ending first (renewal urgency).
     return [...list].sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''));
-  }, [baseList, filterAsset, search]);
+  }, [baseList, filterAsset, filterType, search]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -526,80 +662,90 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     running: { count: currentLeases.length, amount: runningRent },
   }), [grossLeaseCandidates, setupExcludedLeases, operationsExcludedLeases, currentLeases, runningRent]);
 
-  const hasFilters = filterAsset !== 'all' || search !== '';
+  const hasFilters = filterAsset !== 'all' || filterType !== 'all' || search !== '';
 
-  const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode; info?: React.ReactNode }[] = [
-    { lbl: 'Current leases',          val: String(currentLeases.length),  ic: <FileText size={12} /> },
-    { lbl: 'Active',                  val: String(activeLeases.length),   ic: <Shield size={12} /> },
-    { lbl: `Expiring · ${EXPIRING_DAYS}d`, val: String(expiringLeases.length), ic: <Clock size={12} /> },
-  ];
+  // The cards describe WHAT IS ON SCREEN, so they follow the bucket. Showing
+  // Active Leases / In Operations above a list of expired terms put two figures
+  // next to rows that had nothing to do with either — the reader has to work out
+  // which number the list underneath belongs to, and that is the whole confusion
+  // this page has been carrying.
+  //
+  // Active Leases is the only bucket with two cards, and they ADD UP to the
+  // dashboard's figure: 93 + 14 = 107. The breakdown tooltip rides on that first
+  // card — it walks gross → setup → operations → running, i.e. precisely the
+  // "why is this not the dashboard's number" question.
+  const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode; info?: React.ReactNode; href?: string }[] =
+    activeTab === 'expired'
+      ? [{ lbl: 'Expired Leases', val: String(expiredLeases.length), ic: <Archive size={12} /> }]
+      : activeTab === 'starts_later'
+        ? [{ lbl: 'Upcoming Renewals', val: String(startsLaterLeases.length), ic: <CalendarClock size={12} /> }]
+        : [
+            { lbl: 'Active Leases', val: String(currentLeases.length), ic: <Shield size={12} />, info: <RentBreakdownTip breakdown={rentBreakdown} pending={pendingSetupLeases} manager={manager} opsHref={opsHref} /> },
+            { lbl: 'In Operations', val: String(elsewhereCount),       ic: <ClipboardList size={12} />, href: opsHref },
+          ];
 
   return (
     <div className="orders-page">
-      <header className="topbar">
-        <div className="crumbs">Workspace / Leasing / <b>Leases</b></div>
-        <div className="right">
-          <button className="icon-btn" aria-label="Notifications"><Bell size={18} /><span className="dot" /></button>
-          <button className="av-btn" aria-label="Profile">A</button>
-        </div>
-      </header>
+      {/* RP only. The manager portal already stacks DashboardShell's real header
+          (working notification bell + avatar menu) above the layout's "Acting for"
+          scope bar, so rendering this made a THIRD strip whose bell and avatar are
+          decoration — a permanent unread dot that opens nothing, and a hardcoded
+          "A" beside the signed-in manager's own menu. The crumb goes with it: the
+          shell's sidebar already marks where you are. */}
+      {!manager && (
+        <header className="topbar">
+          {/* Matches the sidebar, which is flat — there is no "Workspace" and no
+              "Leasing" group to sit under, so the old crumb named a hierarchy the
+              app does not have. */}
+          <div className="crumbs">Dashboard / <b>Leases</b></div>
+          <div className="right">
+            <button className="icon-btn" aria-label="Notifications"><Bell size={18} /><span className="dot" /></button>
+            <button className="av-btn" aria-label="Profile">A</button>
+          </div>
+        </header>
+      )}
 
       <main className="main">
         {/* Hero */}
         <div className="hero">
           <div className="left">
             <div className="eyebrow"><FileText size={12} /> Leasing</div>
-            <h1>Active <span className="accent">leases</span></h1>
-            <p>Your locked, in-force leases — one per unit. Drafts and contracts still being set up live in Operations; ended tenancies in Ended Leases.</p>
+            {/* No standfirst under the title. The two KPI tiles and the strip
+                below already say what is counted and what is not — a paragraph
+                repeating it was the third telling of the same thing. */}
+            <h1><span className="accent">Leases</span></h1>
           </div>
           <div className="right">
-            <div className="year-global" title="Scope the whole page by lease year">
-              <Calendar size={14} />
-              <select className="sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter leases by year">
-                <option value="all">All years</option>
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
             <button type="button" className="btn btn-ghost"><Download size={14} /> Export</button>
           </div>
         </div>
 
         {/* KPIs */}
         <div className="kpis">
-          {kpis.map((k, i) => (
-            <div key={i} className={'kpi ' + (k.accent ? 'accent' : '')}>
-              <div className="lbl"><span className="ic">{k.ic}</span>{k.lbl}{k.info}</div>
-              <div className={'val ' + (k.aed ? 'aed' : '')}>
-                {k.aed && <span className="cur">AED</span>}{k.val}
-              </div>
-            </div>
-          ))}
+          {kpis.map((k, i) => {
+            const body = (
+              <>
+                <div className="lbl"><span className="ic">{k.ic}</span>{k.lbl}{k.info}</div>
+                <div className={'val ' + (k.aed ? 'aed' : '')}>
+                  {k.aed && <span className="cur">AED</span>}{k.val}
+                </div>
+              </>
+            );
+            const cls = 'kpi ' + (k.accent ? 'accent ' : '') + (k.href ? 'kpi-link' : '');
+            return k.href
+              ? <Link key={i} href={k.href} className={cls}>{body}</Link>
+              : <div key={i} className={cls}>{body}</div>;
+          })}
         </div>
 
-        {/* Context — the year filter scopes the whole page; the Total is
-            deduped per unit so it reflects real tenancies, not raw rows. */}
-        <div className="today-strip">
-          <b>{currentLeases.length}</b> locked leases{filterYear === 'all' ? '' : ` in ${filterYear}`} — one per unit ·
-          {' '}contracts still being set up live in <Link href={opsHref} className="ops-link">Operations →</Link>
-        </div>
+        {/* The reconciliation sentence that used to sit here is gone. The two
+            KPI tiles carry it now — Active Leases + In Operations add up to the
+            dashboard's figure — and the info icon on the first tile lists the
+            leases behind the gap unit by unit. */}
 
-        {/* Tabs */}
-        <div className="rangetabs">
-          <div className="tabs">
-            {TABS.map(t => (
-              <button
-                key={t.key}
-                type="button"
-                className={activeTab === t.key ? 'active' : ''}
-                onClick={() => setActiveTab(t.key)}
-              >
-                {t.label}<span className="count">{tabCounts[t.key] ?? 0}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Filters */}
+        {/* Filters — the bucket picker sits with Properties and Lease type
+            rather than on its own row above them. All three narrow the same
+            list, so they belong in one place. */}
         <div className="filters">
           <div className="search">
             <span className="ic"><Search size={15} /></span>
@@ -612,14 +758,38 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
               <button type="button" className="clear" onClick={() => setSearch('')}><X size={14} /></button>
             )}
           </div>
+          {/* Lease state leads: it picks WHICH leases the row is filtering,
+              so Properties and Lease type read as narrowing that choice. */}
+          <div className="sel-wrap">
+            <select
+              className="sel"
+              value={activeTab}
+              onChange={e => setActiveTab(e.target.value as TabKey)}
+              aria-label="Filter leases by state"
+            >
+              {TABS.map(t => (
+                <option key={t.key} value={t.key}>{t.label} ({tabCounts[t.key] ?? 0})</option>
+              ))}
+            </select>
+          </div>
           <div className="sel-wrap">
             <select className="sel" value={filterAsset} onChange={e => setFilterAsset(e.target.value)}>
               <option value="all">All properties</option>
               {assets.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+          <div className="sel-wrap">
+            <select
+              className="sel"
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
+              aria-label="Filter by lease type"
+            >
+              {TYPE_FILTERS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+            </select>
+          </div>
           {hasFilters && (
-            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setSearch(''); }}>
+            <button type="button" className="reset" onClick={() => { setFilterAsset('all'); setFilterType('all'); setSearch(''); }}>
               <X size={12} /> Reset
             </button>
           )}
@@ -849,8 +1019,10 @@ function GlobalStyle() {
         color: currentColor; opacity: .8;
       }
       .orders-page .rent-tip-btn:hover { opacity: 1; }
+      /* Opens to the RIGHT of the icon. It used to anchor on right:0, which
+         threw the panel leftwards across the KPI it belongs to. */
       .orders-page .rent-tip-pop {
-        position: absolute; top: calc(100% + 8px); right: 0; z-index: 10;
+        position: absolute; top: calc(100% + 8px); left: 0; z-index: 10;
         width: min(360px, 82vw); border-radius: 14px; background: #fff;
         border: 1px solid var(--line); box-shadow: 0 16px 40px rgba(26,25,22,.14);
         padding: 12px 14px; color: var(--ink); text-transform: none; letter-spacing: normal;
@@ -868,6 +1040,38 @@ function GlobalStyle() {
       .orders-page .rent-tip-sep {
         display: block; border-top: 1px solid var(--line); margin: 8px 0 6px;
       }
+      /* The "still being set up" list — scrolls inside the popover so a long
+         backlog never pushes the rent reconciliation off the bottom. */
+      .orders-page .tip-list {
+        display: block; max-height: 208px; overflow-y: auto;
+        margin: 4px -4px 2px; padding: 0 4px;
+      }
+      .orders-page .tip-item {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 6px 6px; border-radius: 8px; text-decoration: none; color: inherit;
+      }
+      .orders-page .tip-item:hover { background: var(--bg-2, #f7f7f4); }
+      .orders-page .tip-unit {
+        display: flex; flex-direction: column; min-width: 0;
+        font-size: 12px; font-weight: 600; color: var(--ink);
+      }
+      .orders-page .tip-unit em {
+        font-style: normal; font-weight: 400; font-size: 11px; color: var(--ink-3);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .orders-page .tip-why {
+        flex: 0 0 auto; font-size: 10.5px; font-weight: 600; color: var(--ink-3);
+        background: var(--bg-2, #f4f3ef); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+      }
+      .orders-page .tip-all {
+        display: block; font-size: 11.5px; font-weight: 700; color: var(--green-d);
+        text-decoration: none; padding: 4px 6px 0;
+      }
+      .orders-page .tip-all:hover { text-decoration: underline; }
+      /* A KPI that navigates. Same box as the static tiles, plus the hover
+         affordance so it reads as clickable rather than decorative. */
+      .orders-page .kpi-link { text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s; }
+      .orders-page .kpi-link:hover { border-color: var(--ink-3); box-shadow: 0 6px 18px rgba(26,25,22,.07); }
       .orders-page .kpi .val {
         font-size: 25px; font-weight: 700; letter-spacing: -.025em;
         color: var(--ink); line-height: 1; font-variant-numeric: tabular-nums;
@@ -887,7 +1091,7 @@ function GlobalStyle() {
       .orders-page .kpi.accent .val .cur { color: rgba(255,255,255,.55); }
 
       .orders-page .today-strip {
-        margin: 10px 2px 0; font-size: 12.5px; color: var(--ink-2);
+        margin: 10px 2px 18px; font-size: 12.5px; color: var(--ink-2);
         background: var(--paper-2); border: 1px solid var(--line);
         border-radius: 10px; padding: 8px 12px;
       }

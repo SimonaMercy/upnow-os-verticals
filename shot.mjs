@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const OUT = '/private/tmp/claude-501/-Users-muhammadzeeshan-Documents-UpNow-Business-Decision-Reports/d8d247a0-1551-4aa3-9dcc-5482d28c7a75/scratchpad';
+const b = await chromium.launch();
+const ctx = await b.newContext({ viewport: { width: 1440, height: 1100 } });
+const p = await ctx.newPage();
+await p.goto('http://127.0.0.1:3000/login', { waitUntil: 'networkidle' });
+await p.fill('input[type="email"]', 'kbaalfalasi@gmail.com').catch(() => {});
+await p.screenshot({ path: `${OUT}/01-login.png` });
+console.log('at', p.url());
+console.log(await p.locator('body').innerText().then(t => t.slice(0, 300)));
+await b.close();

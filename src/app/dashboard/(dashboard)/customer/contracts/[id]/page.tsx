@@ -19,10 +19,11 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, FileText, CheckCircle, Loader2, AlertCircle, X,
-  User, Building2, Calendar, DollarSign, FileSignature,
+  User, Building2, Calendar, FileSignature,
   BadgeCheck, Eye, Download, CreditCard, ClipboardList,
   ChevronRight,
 } from 'lucide-react';
+import { DirhamSign } from '@/components/ui/DirhamSign';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
@@ -628,7 +629,7 @@ export default function TenantContractDetailPage() {
 
                     {/* Preferences — only while pending */}
                     {isPending && (
-                      <SectionCard title="Your Payment Preferences" icon={DollarSign}>
+                      <SectionCard title="Your Payment Preferences" icon={DirhamSign}>
                         <p className="text-xs text-[#9b9890] mb-4">
                           Let your landlord know how you would like to pay. They will finalise the schedule when issuing the contract.
                         </p>
@@ -676,7 +677,7 @@ export default function TenantContractDetailPage() {
                     )}
 
                     {/* Security Deposit (read-only) */}
-                    <SectionCard title="Security Deposit" icon={DollarSign}>
+                    <SectionCard title="Security Deposit" icon={DirhamSign}>
                       {depositPayment ? (
                         <>
                           <Row label="Amount" value={fmtAed(depositPayment.amount)} />

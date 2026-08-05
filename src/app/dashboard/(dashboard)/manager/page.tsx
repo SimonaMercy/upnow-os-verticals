@@ -1,5 +1,4 @@
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
@@ -29,7 +28,11 @@ interface ActionItem {
   vendor?: string; category?: string | null; doc?: string; docName?: string | null;
   reason?: string | null; date?: string | null;
   awaitingTenant?: boolean; awaitingLandlord?: boolean; need?: string | null;
-  bounced?: number; overdue?: number; deposit?: string | number | null;
+  // Rent and fee cheques are counted separately by the API — they are both money
+  // owed but not the same job, and the landlord's Overdue/Bounced KPI counts the
+  // rent halves only.
+  bounced?: number; overdue?: number; bouncedFee?: number; overdueFee?: number;
+  deposit?: string | number | null;
 }
 interface Bucket { count: number; items: ActionItem[]; truncated?: boolean }
 interface ActionCenter {
@@ -42,17 +45,38 @@ interface ActionCenter {
   amcExpired: Bucket; delayedFollowups: Bucket;
 }
 
-const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '');
-/** Compact form for the lease term, where the row shows both ends at once. */
-const fmtDShort = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: '2-digit' }) : '');
-const term = (i: ActionItem) =>
-  i.startDate || i.endDate ? `${fmtDShort(i.startDate)} → ${fmtDShort(i.endDate)}` : undefined;
-/** Names the side the manager has to chase, so "Awaiting Signature" says whose. */
-const signer = (i: ActionItem) => {
-  const who = [i.awaitingTenant ? 'customer' : null, i.awaitingLandlord ? 'landlord' : null].filter(Boolean);
-  return who.length ? `Waiting on ${who.join(' & ')}` : 'Waiting on signature';
+/** Every Action Center row is the same two things: the unit, and the one state
+ *  that says what is owed on it. The building is the group heading, so it never
+ *  repeats on the row. A row with no unit falls back to whoever it concerns. */
+const unitOf = (i: ActionItem) => (i.unit ? `Unit ${i.unit}` : i.tenant ?? `#${i.id}`);
+const buildingOf = (i: ActionItem) => i.building ?? 'Unassigned building';
+/** The date a row turns on has already passed — the lease it names has ended and
+ *  the action is late, not upcoming. Compared against local midnight, so a row
+ *  dated today reads as due rather than overdue. */
+const overdueBy = (d?: string | null) => !!d && new Date(d) < new Date(new Date().toDateString());
+/** Unit labels are numbers, and mixed ones like "Room-16" / "SHOP-3" — a plain
+ *  sort puts Unit 10 before Unit 9, so collate numerically. */
+const byUnit = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+/** Names the side the manager has to chase, short enough to sit in the status
+ *  column — they chase the signer, they never sign themselves. */
+const signerShort = (i: ActionItem) =>
+  i.awaitingTenant && i.awaitingLandlord ? 'Needs both'
+    : i.awaitingLandlord ? 'Needs landlord'
+      : i.awaitingTenant ? 'Needs customer' : 'Needs signature';
+/** Stage names arrive lower-case from the API (`viewing scheduled`). */
+const sentence = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+/** What is actually wrong with this lease's cheques. RENT first: it is the half
+ *  the landlord's own Overdue/Bounced KPI counts, and a bounced rent cheque
+ *  needs a replacement while an overdue one needs chasing. A lease with no rent
+ *  problem at all is here purely on fee cheques (admin / Ejari / other) — a
+ *  different job, so it says so rather than borrowing the rent wording. */
+const chequeState = (i: ActionItem) => {
+  const rent = [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null]
+    .filter(Boolean).join(' · ');
+  if (rent) return rent;
+  const fees = (i.bouncedFee ?? 0) + (i.overdueFee ?? 0);
+  return fees ? `${fees} fee cheque${fees > 1 ? 's' : ''}` : 'Needs attention';
 };
-const place = (i: ActionItem) => [i.unit ? `Unit ${i.unit}` : null, i.building].filter(Boolean).join(' · ');
 
 /**
  * Manager home — always the manager's own dashboard layout (headline stats +
@@ -108,11 +132,13 @@ function ManagerMultiOverview() {
   //    from several landlords at once, so the link takes the row's own `rpId`
   //    rather than the page scope — a manager page opened without a landlord has
   //    nothing to resolve against.
-  //  - Anything that is a step in the lease's setup/wind-down pipeline (sign,
-  //    Ejari, utility, move-in, renew, terminate, move-out) goes to Operations,
-  //    which is the full working view where those steps are actually performed.
-  //    Only the buckets with a dedicated screen — settlement, AMC, customer
-  //    documents — go elsewhere.
+  //  - A row goes to OPERATIONS when what it is waiting on is a step in the
+  //    lease's setup/wind-down pipeline (sign, Ejari, utility, move-in, renew,
+  //    terminate, move-out) — Operations is the working view where those steps
+  //    are actually performed. Everything else goes to the LEASE itself, which
+  //    is the record you read to answer it: money owed on a lease, or the
+  //    settlement that closes one. Leads and customer documents are neither, so
+  //    they keep their own pages.
   const scopeQ = (rpId?: number, extra?: string) => {
     const rp = rpId ?? scopedRp ?? null;
     const parts = [rp != null ? `rp=${rp}` : null, extra ?? null].filter(Boolean);
@@ -120,6 +146,9 @@ function ManagerMultiOverview() {
   };
   const opsHref = (i: ActionItem, extra?: string) =>
     `/dashboard/manager/operations/${i.id}${scopeQ(i.rpId, extra)}`;
+  /** The lease record itself — the Leases nav's detail page. */
+  const leaseHref = (i: ActionItem) =>
+    `/dashboard/manager/contracts/${i.id}${scopeQ(i.rpId)}`;
 
   return (
     <DashboardPage
@@ -162,76 +191,112 @@ function ManagerMultiOverview() {
           </select>
         </div>
       </div>
+      {/* Every card reads the same way: units grouped under their building, each
+          against the one state that says what is owed on it. The buckets differ
+          in WHAT that state is, never in how a row is shaped, so the whole
+          Action Center can be scanned without re-learning each card. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-        {/* Leads open the pipeline, so they lead the Action Center. The row's
-            note is the lead's own stage and the date is when it last moved —
-            oldest first from the API, so whatever has gone quiet is on top. */}
+        {/* Leads open the pipeline, so they lead the Action Center. The state is
+            the lead's own stage; a lead is not a lease, so the row opens the
+            lead. Oldest-untouched first from the API. */}
         <ActionBucket icon={UserPlus} color="#0d9488" label="Leads to progress" href={`/dashboard/manager/leads${scopeQ()}`}
-          loading={actionLoading} bucket={action?.openLeads} dateLabel="last moved"
-          render={i => ({
-            title: place(i) || i.tenant || `Lead #${i.id}`,
-            name: place(i) ? i.tenant : undefined,
-            note: i.need, date: i.date,
+          loading={actionLoading} bucket={action?.openLeads}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: sentence(i.need) || 'In progress',
             href: `/dashboard/manager/leads/${i.id}${scopeQ(i.rpId)}`,
           })} />
+        {/* Signature, Ejari/utility, move-in, renewal, termination and move-out
+            are all pipeline steps → Operations, the view where they are done. */}
         <ActionBucket icon={PenLine} color="#7c3aed" label="Awaiting Signature" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.awaitingSignature} dateLabel="issued"
-          render={i => ({ title: place(i), name: i.tenant, note: signer(i), term: term(i), date: i.date, href: opsHref(i) })} />
+          loading={actionLoading} bucket={action?.awaitingSignature}
+          groupBy={buildingOf}
+          compact={i => ({ unit: unitOf(i), status: signerShort(i), href: opsHref(i) })} />
         <ActionBucket icon={Stamp} color="#0891b2" label="Registration Pending" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.registrationPending} dateLabel="from"
-          render={i => ({ title: place(i), name: i.tenant, note: i.need, term: term(i), date: i.date, href: opsHref(i) })} />
+          loading={actionLoading} bucket={action?.registrationPending}
+          groupBy={buildingOf}
+          compact={i => ({ unit: unitOf(i), status: i.need ?? 'Registration pending', href: opsHref(i) })} />
+        {/* A move-in whose start date has passed with no inspection submitted is
+            late, not upcoming — the same distinction the renewal cards draw. */}
         <ActionBucket icon={LogIn} color="#2563eb" label="Move-ins (inspection due)" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.moveIns} dateLabel="starts"
-          render={i => ({ title: place(i), name: i.tenant, note: 'Move-in inspection not submitted', term: term(i), date: i.date, href: opsHref(i) })} />
+          loading={actionLoading} bucket={action?.moveIns}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: overdueBy(i.date) ? 'Overdue' : 'Inspection due',
+            overdue: overdueBy(i.date),
+            href: opsHref(i),
+          })} />
         {/* Renewals to raise: nothing proposed yet, so the row deep-links into the
-            renewal flow itself (?action=renew) rather than the lease's front page. */}
-        {/* An active lease already past its end date with no renewal sent is the
-            most overdue item in this bucket, so it is called out as such rather
-            than reading like any other upcoming expiry. */}
+            renewal flow itself (?action=renew) rather than the lease's front page.
+            An active lease already past its end date with no renewal sent is the
+            most overdue item here, so it says so instead of reading like any
+            other upcoming expiry. */}
         <ActionBucket icon={RefreshCw} color="#2e9f82" label={`Renewals to raise (≤${days}d)`} href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.renewals} dateLabel="expires"
-          render={i => {
-            const overdue = !!i.date && new Date(i.date) < new Date(new Date().toDateString());
-            return {
-              title: place(i), name: i.tenant,
-              note: overdue ? `OVERDUE — ${i.need ?? 'lease already ended'}` : i.need,
-              term: term(i), date: i.date, href: opsHref(i, 'action=renew'),
-            };
-          }} />
+          loading={actionLoading} bucket={action?.renewals}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: overdueBy(i.date) ? 'Overdue' : i.need ?? 'To raise',
+            overdue: overdueBy(i.date),
+            href: opsHref(i, 'action=renew'),
+          })} />
         {/* Offer already out — the renewal workflow lives on the PARENT lease, so
-            link there, not at the pending renewal draft. The term shown is the
-            OFFERED one; the date is when the lease it replaces runs out. */}
-        <ActionBucket icon={MailQuestion} color="#0369a1" label="Renewal Offers — Awaiting Reply" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.renewalOffersOut} dateLabel="current ends"
-          render={i => ({
-            title: place(i), name: i.tenant, note: 'Waiting on customer to accept',
-            term: term(i), date: i.date,
+            link there, not at the pending renewal draft.
+            Carries the window in its label like "Renewals to raise": both are the
+            same renewal queue on the same date, split by whether the offer went
+            out, so a reader can see the count answers the control above. */}
+        <ActionBucket icon={MailQuestion} color="#0369a1" label={`Renewal Offers — Awaiting Reply (≤${days}d)`} href={`/dashboard/manager/contracts${scopeQ()}`}
+          loading={actionLoading} bucket={action?.renewalOffersOut}
+          groupBy={buildingOf}
+          compact={i => ({
+            // The lease being replaced has already ended and still no answer:
+            // that is a different job from an offer out on a lease with months
+            // left, and it is the only distinction this list needs to carry.
+            unit: unitOf(i),
+            status: overdueBy(i.date) ? 'Overdue' : 'Awaiting reply',
+            overdue: overdueBy(i.date),
             href: `/dashboard/manager/operations/${i.parentId ?? i.id}${scopeQ(i.rpId)}`,
           })} />
         <ActionBucket icon={XCircle} color="#b91c1c" label="Termination Requests" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.terminationRequests} dateLabel="requested"
-          render={i => ({ title: place(i), name: i.tenant, note: i.reason ?? 'Awaiting your response', term: term(i), date: i.date, href: opsHref(i) })} />
+          loading={actionLoading} bucket={action?.terminationRequests}
+          groupBy={buildingOf}
+          compact={i => ({ unit: unitOf(i), status: 'Awaiting response', href: opsHref(i) })} />
         <ActionBucket icon={LogOut} color="#b45309" label="Move-outs (inspection due)" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.moveOuts} dateLabel="moves out"
-          render={i => ({ title: place(i), name: i.tenant, note: 'Move-out inspection not submitted', term: term(i), date: i.date, href: opsHref(i) })} />
+          loading={actionLoading} bucket={action?.moveOuts}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: overdueBy(i.date) ? 'Overdue' : 'Inspection due',
+            overdue: overdueBy(i.date),
+            href: opsHref(i),
+          })} />
+        {/* Cheques are money owed ON a lease, not a step in the pipeline, so the
+            row opens the LEASE. How many bounced vs merely fell overdue is the
+            state — a bounce needs a replacement cheque, an overdue one needs
+            chasing, and the counts say which job this is. */}
         <ActionBucket icon={Banknote} color="#dc2626" label="Bounced / Overdue Cheques" href={`/dashboard/manager/receivables${scopeQ()}`}
-          loading={actionLoading} bucket={action?.chequesAttention} dateLabel="oldest due"
-          render={i => ({
-            title: place(i), name: i.tenant,
-            note: [i.bounced ? `${i.bounced} bounced` : null, i.overdue ? `${i.overdue} overdue` : null].filter(Boolean).join(', '),
-            term: term(i), date: i.date, href: opsHref(i),
+          loading={actionLoading} bucket={action?.chequesAttention}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: chequeState(i),
+            overdue: !!i.bounced,
+            href: leaseHref(i),
           })} />
         {/* Terminated leases with no settlement recorded. Where a deposit is
-            held the amount IS the row — it is what gets refunded to close it —
-            so it is stated rather than left as a generic "not settled". */}
+            held the amount IS the state — it is what gets refunded to close it.
+            Settlement is a lease record with its own screen, not a pipeline
+            step, so the row opens that screen directly. */}
         <ActionBucket icon={Scale} color="#0d9488" label="Settlement Pending" href={`/dashboard/manager/contracts${scopeQ()}`}
-          loading={actionLoading} bucket={action?.settlementPending} dateLabel="ended"
-          render={i => ({
-            title: place(i), name: i.tenant,
-            note: Number(i.deposit) > 0
-              ? `AED ${Number(i.deposit).toLocaleString('en-AE')} held — refund to close`
-              : 'No settlement recorded — no deposit held',
-            term: term(i), date: i.date,
+          loading={actionLoading} bucket={action?.settlementPending}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: Number(i.deposit) > 0
+              ? `AED ${Number(i.deposit).toLocaleString('en-AE')} held`
+              : 'No deposit held',
             href: `/dashboard/manager/contracts/${i.id}/settlement${scopeQ(i.rpId)}`,
           })} />
         {/* AMC Expired is deliberately NOT on this dashboard — vendor contracts
@@ -239,13 +304,17 @@ function ManagerMultiOverview() {
             card was permanently full of items nobody was chasing. It lives on
             /dashboard/manager/amc, where it can be worked properly. The
             `amcExpired` bucket is still returned by the API for that page. */}
-        {/* Follow-ups are not leases — no unit, so the requested document takes
-            the prominent line the unit number holds everywhere else. */}
+        {/* Follow-ups are the one bucket with no unit — a requested document
+            belongs to a CUSTOMER, not a lease — so the customer is the heading
+            and the document takes the row. Same two-column shape, and the row
+            opens the customer, which is where the document is chased. */}
         <ActionBucket icon={Clock} color="#92400e" label="Delayed Follow-ups" href={`/dashboard/manager/tenants${scopeQ()}`}
-          loading={actionLoading} bucket={action?.delayedFollowups} dateLabel="requested"
-          render={i => ({
-            title: (i.docName ?? i.doc ?? 'Document').replace(/_/g, ' '),
-            name: i.tenant, note: 'Requested but not uploaded', date: i.date,
+          loading={actionLoading} bucket={action?.delayedFollowups}
+          groupBy={i => i.tenant ?? 'Customer'}
+          compact={i => ({
+            unit: (i.docName ?? i.doc ?? 'Document').replace(/_/g, ' '),
+            status: 'Not uploaded',
+            overdue: true,
             href: i.tenantId ? `/dashboard/manager/tenants/${i.tenantId}${scopeQ(i.rpId)}` : undefined,
           })} />
       </div>
@@ -280,25 +349,44 @@ function ManagerMultiOverview() {
 /**
  * One Action Center card.
  *
- * Rows read location-first: the unit number is the prominent line, because a
- * manager works a building and identifies a lease by its unit — the customer's
- * name is context, not the heading. Under it sit the name, the reason this row
- * is here (including WHO is being waited on), and on the right the lease term
- * plus the one date this bucket turns on, labelled so it can't be misread.
+ * Every row is a clickable unit and the one state that says what is owed on it,
+ * gathered under its building. A manager works a building at a time and
+ * identifies a lease by its unit, so that pair is the whole row — the customer
+ * name, lease term and dates the card used to carry made ten cards that each had
+ * to be read differently, and none of them was the thing being decided. `status`
+ * is where a bucket says what it is about; `overdue` colours the ones that are
+ * late rather than merely due. Clicking goes to whichever screen CLEARS the row
+ * (see the link rules above), not to a generic list.
  */
 function ActionBucket({
-  icon: Icon, color, label, href, loading, bucket, render, dateLabel,
+  icon: Icon, color, label, href, loading, bucket, groupBy, compact,
 }: {
   icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
   color: string; label: string; href: string; loading: boolean;
-  bucket?: Bucket; dateLabel?: string;
-  render: (i: ActionItem) => {
-    title: string; name?: string; note?: string | null;
-    term?: string; date?: string | null; href?: string;
-  };
+  bucket?: Bucket;
+  /** The row's group heading — the building, or the customer where a bucket has
+   *  no unit (delayed follow-ups are customer documents, not leases). */
+  groupBy: (i: ActionItem) => string;
+  compact: (i: ActionItem) => { unit: string; status: string; overdue?: boolean; href?: string };
 }) {
   const count = bucket?.count ?? 0;
   const items = bucket?.items ?? [];
+  // Group in render order, then sort the headings and the rows inside them, so
+  // the same queue always reads the same way down the card.
+  const groups = (() => {
+    const m = new Map<string, ActionItem[]>();
+    for (const i of items) {
+      const k = groupBy(i);
+      const rows = m.get(k);
+      if (rows) rows.push(i); else m.set(k, [i]);
+    }
+    return [...m.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, rows]) => [
+        name,
+        [...rows].sort((a, b) => byUnit(compact(a).unit, compact(b).unit)),
+      ] as const);
+  })();
   return (
     <div className="bg-white rounded-2xl p-4 flex flex-col" style={{ boxShadow: 'var(--shadow-sm)', minHeight: 150 }}>
       <div className="flex items-center gap-2 mb-2">
@@ -319,37 +407,40 @@ function ActionBucket({
         ) : count === 0 ? (
           <p className="text-xs py-3 text-center" style={{ color: 'var(--color-neutral-300)' }}>Nothing pending</p>
         ) : (
-          <div className="space-y-1">
-            {items.map(i => {
-              const r = render(i);
-              const row = (
-                <div className="flex items-start justify-between gap-3 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold truncate leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{r.title || '—'}</p>
-                    {r.name && <p className="text-[10px] truncate leading-tight" style={{ color: 'var(--color-neutral-400)' }}>{r.name}</p>}
-                    {r.note && <p className="text-[11px] truncate leading-tight mt-0.5 font-medium" style={{ color }}>{r.note}</p>}
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {r.term && <p className="text-[10px] tabular-nums leading-tight" style={{ color: 'var(--color-neutral-500)' }}>{r.term}</p>}
-                    {r.date && (
-                      <p className="text-[10px] tabular-nums leading-tight" style={{ color: 'var(--color-neutral-400)' }}>
-                        {dateLabel ? `${dateLabel} ` : ''}{fmtD(r.date)}
-                      </p>
-                    )}
-                  </div>
+          // A building heading, then one line per unit — the label on the left,
+          // its state on the right. The heading sticks to the top of the scroll
+          // area, so a manager part-way down a long list can always see which
+          // building they are reading.
+          <div className="space-y-2">
+            {groups.map(([building, rows]) => (
+              <div key={building}>
+                <div className="sticky top-0 bg-white flex items-baseline justify-between gap-2 pb-0.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide truncate" style={{ color: 'var(--color-neutral-400)' }}>
+                    {building}
+                  </span>
+                  <span className="text-[10px] tabular-nums shrink-0" style={{ color: 'var(--color-neutral-300)' }}>{rows.length}</span>
                 </div>
-              );
-              // Each row opens the item it names. A row without an `href` (an
-              // older payload missing the ids the link needs) stays inert rather
-              // than becoming a link to nowhere.
-              return r.href ? (
-                <Link key={i.id} href={r.href} className="block rounded-lg -mx-1 px-1 hover:bg-[var(--color-base-50,#faf9f7)] transition-colors">
-                  {row}
-                </Link>
-              ) : (
-                <div key={i.id}>{row}</div>
-              );
-            })}
+                {rows.map(i => {
+                  const c = compact(i);
+                  const line = (
+                    <div className="flex items-center justify-between gap-3 py-1 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
+                      <span className="text-[13px] font-semibold truncate leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{c.unit}</span>
+                      <span className="text-[11px] font-medium shrink-0 leading-tight" style={{ color: c.overdue ? '#b91c1c' : color }}>{c.status}</span>
+                    </div>
+                  );
+                  // Each row opens the screen that clears it. A row without an
+                  // `href` (a payload missing the ids the link needs) stays
+                  // inert rather than becoming a link to nowhere.
+                  return c.href ? (
+                    <Link key={i.id} href={c.href} className="block rounded-lg -mx-1 px-1 hover:bg-[var(--color-base-50,#faf9f7)] transition-colors">
+                      {line}
+                    </Link>
+                  ) : (
+                    <div key={i.id}>{line}</div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
       </div>

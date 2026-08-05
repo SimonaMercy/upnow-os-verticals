@@ -249,8 +249,9 @@ interface CashflowRow {
   receivedFils: number;
   pendingFils: number;
   bouncedFils: number;
+  bouncedOwedFils: number;
   penaltyFils: number;
-  netIncomeFils: number;
+  penaltyCollectedFils: number;
   collectionRate: number;
   [k: string]: unknown;
 }
@@ -263,7 +264,7 @@ export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
     [name === 'Collection %' ? `${Number(value).toFixed(1)}%` : fmtAed(Number(value)), String(name)] as [string, string];
   return (
     <div className="grid lg:grid-cols-2 gap-3 mb-6">
-      <Card title="Rent cashflow by month" hint="Where each month's rent stands: collected (green), still pending (amber) and bounced (red). The three stack to the rent Expected that month.">
+      <Card title="Rent cashflow by month" hint="Where each month's rent stands: collected (green) and still pending (amber) stack to the rent Expected that month. A bounce nobody replaced (red) stands beside the stack, not inside it — it is money still owed, and a bounce that was made good is already counted inside Received.">
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -6 }} barSize={16}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
@@ -272,12 +273,14 @@ export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
             <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
             <Bar dataKey="receivedFils" name="Received" stackId="c" fill={JADE} stroke="#fff" strokeWidth={1} />
-            <Bar dataKey="pendingFils" name="Pending" stackId="c" fill={AMBER} stroke="#fff" strokeWidth={1} />
-            <Bar dataKey="bouncedFils" name="Bounced" stackId="c" fill={RED} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="pendingFils" name="Pending" stackId="c" fill={AMBER} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
+            {/* Its own stack, so the Expected column is never read as including a
+                bounce — the whole point of the Cash Management rule. */}
+            <Bar dataKey="bouncedOwedFils" name="Bounced · still owed" stackId="b" fill={RED} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </Card>
-      <Card title="Net Income &amp; collection rate" hint="Net Income each month (received rent + penalties, green bars) against the collection rate — the share of that month's expected rent already received (blue line).">
+      <Card title="Rent collected &amp; collection rate" hint="Rent received each month (green bars) with the penalties charged on top of it (amber), against the collection rate — the share of that month's expected rent already received (blue line).">
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: -6 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
@@ -286,7 +289,8 @@ export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
             <YAxis yAxisId="rate" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={40} />
             <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
-            <Bar yAxisId="money" dataKey="netIncomeFils" name="Net Income" fill={JADE} barSize={18} radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="money" dataKey="receivedFils" name="Received" stackId="n" fill={JADE} barSize={18} stroke="#fff" strokeWidth={1} />
+            <Bar yAxisId="money" dataKey="penaltyFils" name="Penalty" stackId="n" fill={AMBER} barSize={18} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
             <Line yAxisId="rate" type="monotone" dataKey="collectionRate" name="Collection %" stroke={BLUE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
           </ComposedChart>
         </ResponsiveContainer>

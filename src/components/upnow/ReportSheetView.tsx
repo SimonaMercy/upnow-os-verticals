@@ -40,16 +40,52 @@ interface BuildingOpt { id: number; name: string; leasingType: 'direct' | 'sub' 
 interface LeaseReport { year: number; rows: LeaseRow[]; totals: Omit<LeaseRow, 'label'>; buildings?: BuildingOpt[]; }
 
 interface CashRow {
+  // Expected is Cleared + Pending — a bounced cheque is reported in its own
+  // column and never inside it (the Cash Management rule).
   label: string; expectedFils: number; receivedFils: number; pendingFils: number;
-  bouncedFils: number; penaltyFils: number; netIncomeFils: number;
+  // Penalty is the fee CHARGED that month — read like Bounced, not like
+  // Received; how much of it has actually cleared is carried separately.
+  bouncedFils: number; penaltyFils: number; penaltyCollectedFils: number;
   clearedCount: number; pendingCount: number; bouncedCount: number;
   items?: DrillItem[];   // the rent cheques behind this month (drill-down)
 }
-interface CashReport { year: number; rows: CashRow[]; totals: Omit<CashRow, 'label'>; buildings?: BuildingOpt[]; }
+interface CashTotalsShape extends Omit<CashRow, 'label'> {
+  /** Occupied units + contracted annual rent — the whole book, not the selected
+   *  year, and identical to the Cash Management sheet's own pair. */
+  units: number; annualRentFils: number;
+  bouncedOwedFils: number; bouncedReplacedFils: number;
+  ytdExpectedFils: number; ytdReceivedFils: number;
+  lateFils: number; notYetDueFils: number; receivableFils: number;
+  collectionRate: number;
+}
+interface CashReport {
+  year: number; rows: CashRow[]; buildings?: BuildingOpt[]; totals: CashTotalsShape;
+}
 
 // A cell drill-down: the records behind one sheet figure.
-interface SheetDrillCol { key: string; label: string; money?: boolean; date?: boolean }
-interface SheetDrill { title: string; countLabel: string; columns: SheetDrillCol[]; items: DrillItem[] }
+interface SheetDrillCol {
+  key: string; label: string; money?: boolean; date?: boolean;
+  /** Second, muted line under the value — the pairs that belong together read as
+   *  one thing (customer + its unit, cheque number + its date) instead of as
+   *  four separate columns to scan across. */
+  sub?: string;
+  /** With `date`, renders `key → rangeEnd` as one span (a contract term). */
+  rangeEnd?: string;
+  /** Shown when `key` is empty — a penalty has no cheque number, so its charge
+   *  name stands in rather than leaving a dash. */
+  fallback?: string;
+  /** Status pill rather than plain text. */
+  status?: boolean;
+  /** Sets this column's own value larger and bolder than its second line — the
+   *  unit is what a landlord scans down, the customer under it is context. */
+  emphasis?: boolean;
+}
+interface SheetDrill {
+  title: string; countLabel: string; columns: SheetDrillCol[]; items: DrillItem[];
+  /** Records are grouped under this field's value (a building), each group
+   *  carrying its own count and subtotal. */
+  groupKey?: string;
+}
 
 interface FunnelRow {
   label: string; leadReceived: number; viewingDone: number; kycVerified: number;
@@ -114,11 +150,72 @@ const CASH_COLS: { key: keyof CashRow; label: string; money?: boolean }[] = [
   { key: 'pendingFils', label: 'Pending', money: true },
   { key: 'bouncedFils', label: 'Bounced', money: true },
   { key: 'penaltyFils', label: 'Penalty', money: true },
-  { key: 'netIncomeFils', label: 'Net Income', money: true },
-  { key: 'clearedCount', label: 'Cleared Cnt' },
-  { key: 'pendingCount', label: 'Pending Cnt' },
-  { key: 'bouncedCount', label: 'Bounced Cnt' },
 ];
+
+/** What each clickable figure in a cashflow month opens — the subset of that
+ *  month's records that produced it, and what to call them. A month's records
+ *  arrive as one list (rent cheques + penalty charges); these are the same
+ *  partitions the backend sums, so the popup always adds up to the cell. */
+const isRent = (it: DrillItem) => it.kind !== 'penalty';
+const CASH_DRILL: Record<string, { title: string; countLabel: string; match: (it: DrillItem) => boolean }> = {
+  label:        { title: 'All records',      countLabel: 'record', match: () => true },
+  expectedFils: { title: 'Expected — rent cleared + pending', countLabel: 'cheque',
+                  match: it => isRent(it) && (it.status === 'cleared' || it.status === 'pending') },
+  receivedFils: { title: 'Received',         countLabel: 'cheque', match: it => isRent(it) && it.status === 'cleared' },
+  pendingFils:  { title: 'Pending',          countLabel: 'cheque', match: it => isRent(it) && it.status === 'pending' },
+  bouncedFils:  { title: 'Bounced cheques',  countLabel: 'cheque', match: it => isRent(it) && it.status === 'bounced' },
+  penaltyFils:  { title: 'Penalties charged', countLabel: 'charge', match: it => it.kind === 'penalty' },
+};
+
+/** '2026-07-01' → '1 Jul 2026'. A popup full of ISO strings is a wall of digits;
+ *  the same dates read at a glance this way. */
+const fmtDate = (v: unknown) => {
+  const s = v == null ? '' : String(v).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || '—';
+  const [y, m, d] = s.split('-');
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${Number(d)} ${MON[Number(m) - 1] ?? m} ${y}`;
+};
+
+/** Unit order inside a building — 'Unit 2' before 'Unit 10', which a plain string
+ *  sort gets backwards. Digits compare as numbers, everything else as text, so
+ *  '1A' / 'G-02' / 'Shop 3' all land where the eye expects them. */
+const unitRank = (v: unknown) =>
+  String(v ?? '').toLowerCase().replace(/^unit\s*/, '').match(/\d+|\D+/g) ?? [];
+function byUnit(a: DrillItem, b: DrillItem) {
+  const ra = unitRank(a.unitLabel), rb = unitRank(b.unitLabel);
+  // A record with no unit at all goes last rather than heading the block.
+  if (!ra.length !== !rb.length) return ra.length ? -1 : 1;
+  for (let i = 0; i < Math.max(ra.length, rb.length); i++) {
+    const x = ra[i], y = rb[i];
+    if (x == null) return -1;
+    if (y == null) return 1;
+    const nx = Number(x), ny = Number(y);
+    const both = !Number.isNaN(nx) && !Number.isNaN(ny);
+    const d = both ? nx - ny : x.localeCompare(y);
+    if (d) return d;
+  }
+  // Same unit — a lease can carry several records in one month (rent plus the
+  // fee charged against it); keep those in date order.
+  return String(a.dueDate ?? a.startDate ?? '').localeCompare(String(b.dueDate ?? b.startDate ?? ''));
+}
+
+/** The popup's records, blocked by building (or one unnamed block when the drill
+ *  sets no groupKey) and ordered by unit within each block. Blocks are ordered by
+ *  size — the property carrying most of the figure first — and each carries its
+ *  own money subtotal. */
+function groupDrillItems(drill: SheetDrill): { key: string; items: DrillItem[]; totalFils: number }[] {
+  const total = (items: DrillItem[]) => items.reduce((s, it) => s + Number(it.amountFils ?? it.annualRentFils ?? 0), 0);
+  if (!drill.groupKey) return [{ key: '', items: [...drill.items].sort(byUnit), totalFils: total(drill.items) }];
+  const by = new Map<string, DrillItem[]>();
+  for (const it of drill.items) {
+    const k = String(it[drill.groupKey] ?? '') || 'Unassigned property';
+    (by.get(k) ?? by.set(k, []).get(k)!).push(it);
+  }
+  return [...by.entries()]
+    .map(([key, items]) => ({ key, items: items.sort(byUnit), totalFils: total(items) }))
+    .sort((a, b) => b.totalFils - a.totalFils || b.items.length - a.items.length || a.key.localeCompare(b.key));
+}
 
 const fmtAed = (fils: number | null | undefined) =>
   new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(Math.round(Number(fils ?? 0) / 100));
@@ -126,14 +223,16 @@ const aed = (fils: number | null | undefined) => Math.round(Number(fils ?? 0) / 
 const datestamp = () => new Date().toISOString().slice(0, 10);
 
 // ─── the sheet table — compact enough that a full year never scrolls ──────────
-function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, rows, totals, render, drillKey, onDrill }: {
+function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, rows, totals, render, drillKeys, onDrill }: {
   cols: { key: keyof R; label: string }[];
   rows: R[];
   totals: Record<string, unknown>;
   render: (row: R | null, key: keyof R) => string;
-  /** When set, this column's cell becomes a button opening the row's records. */
-  drillKey?: keyof R;
-  onDrill?: (row: R) => void;
+  /** These columns' cells become buttons opening the records behind THAT figure
+   *  — one clickable month name left the reader with a mixed list and no way to
+   *  find the two cheques behind a Bounced total. */
+  drillKeys?: (keyof R)[];
+  onDrill?: (row: R, key: keyof R) => void;
 }) {
   return (
     <div className="rounded-xl border border-[#e8e6e0] bg-white overflow-x-auto">
@@ -152,12 +251,12 @@ function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, ro
             <tr key={r.label} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#fafaf8]">
               {cols.map((c, i) => {
                 const v = render(r, c.key);
-                const canDrill = drillKey != null && c.key === drillKey && onDrill && (r.items?.length ?? 0) > 0 && v !== '' && v !== '0';
+                const canDrill = !!drillKeys?.includes(c.key) && onDrill && (r.items?.length ?? 0) > 0 && v !== '' && v !== '0';
                 return (
                   <td key={String(c.key)} className={`px-2 py-[5px] whitespace-nowrap tabular-nums ${i === 0 ? 'text-left font-semibold text-[#1a1916]' : `text-right ${v === '0' || v === '' ? 'text-[#c8c6c0]' : 'text-[#4a4742]'}`}`}>
                     {canDrill ? (
                       <button
-                        onClick={() => onDrill!(r)}
+                        onClick={() => onDrill!(r, c.key)}
                         className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer print:no-underline print:text-[#4a4742]"
                         title="See the records behind this number">
                         {v}
@@ -179,6 +278,100 @@ function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, ro
           </tr>
         </tfoot>
       </table>
+    </div>
+  );
+}
+
+// ─── the cashflow header + reconciliation ─────────────────────────────────────
+/** The pair every collection report opens with (Occupied units · Annual rent),
+ *  then the selected year's money. Occupied units and Annual rent span the whole
+ *  book — whole lease terms, not one calendar year — so they read the same here
+ *  as on Cash Management, Cheques Management and Rent vs Asking. */
+function CashTotals({ totals, year }: { totals: CashTotalsShape; year: number }) {
+  const tiles: { label: string; value: string; sub?: string; green?: boolean }[] = [
+    { label: 'Occupied units', value: String(totals.units ?? 0) },
+    { label: 'Annual rent', value: `AED ${fmtAed(totals.annualRentFils)}` },
+    { label: `Expected ${year}`, value: `AED ${fmtAed(totals.expectedFils)}` },
+    { label: `Received ${year}`, value: `AED ${fmtAed(totals.receivedFils)}`, green: true },
+    { label: 'Late — chase this', value: `AED ${fmtAed(totals.lateFils)}` },
+    // The fee charged, with what has cleared beneath it — a penalty raised and
+    // not yet paid is still owed, and showing only the collected part left the
+    // figure at zero on a book where every fee of the year was still pending.
+    {
+      label: `Penalty ${year}`,
+      value: `AED ${fmtAed(totals.penaltyFils)}`,
+      sub: `AED ${fmtAed(totals.penaltyCollectedFils)} collected`,
+      green: true,
+    },
+  ];
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
+      {tiles.map(t => (
+        <div key={t.label} className="bg-white rounded-xl border border-[#e8e6e0] px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
+          <p className={`text-sm font-bold tabular-nums mt-0.5 ${t.green ? 'text-[#1a7a5a]' : 'text-[#1a1916]'}`}>{t.value}</p>
+          {t.sub && <p className="text-[10px] text-[#9b9890] tabular-nums">{t.sub}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The arithmetic stated under the sheet — the same three panels the Cash
+ *  Management sheet carries, so the two pages can be read against each other
+ *  line by line. */
+function CashPanels({ totals, year }: { totals: CashTotalsShape; year: number }) {
+  const panels: { title: string; note: string; rows: { label: string; value: number; total?: boolean; note?: string }[] }[] = [
+    {
+      title: 'What is actually late',
+      note: 'A single “outstanding” figure adds these together and reads far worse than reality. Only the first line is money to chase; Expected is cheques already held for dates that have not arrived. Same cut-off as the Cash Management sheet.',
+      rows: [
+        { label: 'Fallen due so far', value: totals.ytdExpectedFils },
+        { label: 'Collected against it', value: totals.ytdReceivedFils },
+        { label: 'Late — chase this', value: totals.lateFils, total: true },
+        { label: 'Expected — post-dated cheques ahead of us', value: totals.notYetDueFils },
+      ],
+    },
+    {
+      title: 'Bounced cheques',
+      note: 'A bounce that was made good is reported but never added into Expected — its replacement cheque already sits inside Received, so counting both would count the money twice. A bounce nobody replaced is still owed, and is added back below.',
+      rows: [
+        { label: 'Bounced and replaced', value: totals.bouncedReplacedFils, note: 'already inside Received — excluded' },
+        { label: 'Bounced, never replaced', value: totals.bouncedOwedFils, total: true, note: 'still owed — chase alongside the late rent' },
+      ],
+    },
+    {
+      title: `${year} against the book`,
+      note: 'Annual rent is what the leases are contracted at across their whole terms, so it is deliberately NOT one calendar year of cheques — a lease starting in August is paid across two years. The Cash Management sheet imposes no year at all; add its years together and they come back to that figure.',
+      rows: [
+        { label: `Expected ${year} — received + pending`, value: totals.expectedFils },
+        { label: 'Bounced, never replaced', value: totals.bouncedOwedFils },
+        { label: `Everything receivable in ${year}`, value: totals.receivableFils, total: true },
+        { label: 'Annual rent contracted (whole book)', value: totals.annualRentFils },
+      ],
+    },
+  ];
+  return (
+    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 mt-5 print:break-inside-avoid">
+      {panels.map(panel => (
+        <div key={panel.title}>
+          <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
+          <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden bg-white">
+            <tbody>
+              {panel.rows.map(r => (
+                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                  <td className="px-3 py-2 text-left">
+                    {r.label}
+                    {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAed(r.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -236,24 +429,50 @@ async function exportCashXlsx(report: CashReport) {
       c.key === 'label' ? r.label : c.money ? aed(r[c.key] as number) : Number(r[c.key] ?? 0)));
     CASH_COLS.forEach((c, i) => { if (c.money) row.getCell(i + 1).numFmt = money; });
   }
+  // The footer is every month of the year added up, post-dated cheques included
+  // — it is the year total, and calling it YTD contradicted the YTD block beside
+  // it, which stops at the current month.
   const tot = ws.addRow(CASH_COLS.map(c =>
-    c.key === 'label' ? 'YTD' : c.money ? aed(report.totals[c.key] as number) : Number(report.totals[c.key] ?? 0)));
+    c.key === 'label' ? 'Year total' : c.money ? aed(report.totals[c.key] as number) : Number(report.totals[c.key] ?? 0)));
   tot.font = { bold: true };
   CASH_COLS.forEach((c, i) => { if (c.money) tot.getCell(i + 1).numFmt = money; });
 
-  // The reference file's side block: YTD Expected / YTD Received at L2:M3.
-  ws.getCell('L2').value = 'YTD Expected';
-  ws.getCell('M2').value = aed(report.totals.expectedFils);
-  ws.getCell('M2').numFmt = money;
-  ws.getCell('L3').value = 'YTD Received';
-  ws.getCell('M3').value = aed(report.totals.receivedFils);
-  ws.getCell('M3').numFmt = money;
-  ws.getCell('L2').font = { bold: true };
-  ws.getCell('L3').font = { bold: true };
+  // The reference file's side block, one blank column clear of the sheet — YTD
+  // Expected / YTD Received first (the year-to-date figures that tie to Cash
+  // Management), then the reconciliation the page states under the table, so the
+  // file says what the report says. Positioned off CASH_COLS so dropping a
+  // column from the sheet never leaves a gulf between the two.
+  const labelCol = CASH_COLS.length + 2;
+  const valueCol = labelCol + 1;
+  const put = (row: number, label: string, value: number, count = false) => {
+    const lc = ws.getRow(row).getCell(labelCol);
+    const vc = ws.getRow(row).getCell(valueCol);
+    lc.value = label;
+    vc.value = count ? Number(value ?? 0) : aed(value);
+    if (!count) vc.numFmt = money;
+  };
+  put(2, 'YTD Expected', report.totals.ytdExpectedFils);
+  put(3, 'YTD Received', report.totals.ytdReceivedFils);
+  ws.getRow(2).getCell(labelCol).font = { bold: true };
+  ws.getRow(3).getCell(labelCol).font = { bold: true };
 
+  const side: [string, number][] = [
+    ['Late — chase this', report.totals.lateFils],
+    ['Expected — post-dated cheques ahead', report.totals.notYetDueFils],
+    ['Penalty charged', report.totals.penaltyFils],
+    ['Penalty collected', report.totals.penaltyCollectedFils],
+    ['Bounced and replaced', report.totals.bouncedReplacedFils],
+    ['Bounced, never replaced', report.totals.bouncedOwedFils],
+    ['Everything receivable', report.totals.receivableFils],
+    ['Annual rent contracted (whole book)', report.totals.annualRentFils],
+    ['Occupied units', report.totals.units],
+  ];
+  side.forEach(([label, value], i) => put(5 + i, label, value, label === 'Occupied units'));
   ws.getColumn(1).width = 8;
-  for (let i = 2; i <= 10; i++) ws.getColumn(i).width = 12;
-  ws.getColumn(12).width = 14;
+  for (let i = 2; i <= CASH_COLS.length; i++) ws.getColumn(i).width = 12;
+  // Wide enough for the reconciliation labels sitting in the side block.
+  ws.getColumn(labelCol).width = 34;
+  ws.getColumn(valueCol).width = 14;
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -273,7 +492,7 @@ const SHEETS = {
   },
   'executive-cashflow': {
     title: 'Executive Cashflow',
-    subtitle: 'Rent expected vs received, pending, bounced, penalties and Net Income, month by month.',
+    subtitle: 'Rent expected vs received, pending, bounced and the penalty income collected, month by month. Expected is received + pending on the earning leases — a bounce is reported beside it, never inside it, so this is the selected year of the Cash Management sheet.',
     exportLabel: 'Export Excel',
   },
   'leasing-funnel': {
@@ -409,16 +628,15 @@ export default function ReportSheetView({
           cols={LEASE_COLS}
           rows={(data as LeaseReport).rows}
           totals={(data as LeaseReport).totals as unknown as Record<string, unknown>}
-          drillKey="newLeases"
+          drillKeys={['newLeases']}
           onDrill={row => setDrill({
             title: `${row.label} · New contracts`,
             countLabel: 'lease',
+            groupKey: 'buildingName',
             columns: [
+              { key: 'unitLabel', label: 'Unit · Customer', sub: 'tenantName', emphasis: true },
               { key: 'contractRef', label: 'Contract' },
-              { key: 'unitLabel', label: 'Unit' },
-              { key: 'buildingName', label: 'Property' },
-              { key: 'tenantName', label: 'Customer' },
-              { key: 'startDate', label: 'Start', date: true },
+              { key: 'startDate', label: 'Contract term', date: true, rangeEnd: 'endDate' },
               { key: 'annualRentFils', label: 'Annual rent', money: true },
             ],
             items: row.items ?? [],
@@ -431,33 +649,42 @@ export default function ReportSheetView({
         />
       ) : (
         <>
-          <div className="flex gap-2 mb-3">
-            <span className="inline-flex items-baseline gap-1.5 bg-white border border-[#e8e6e0] rounded-xl px-3 py-1.5 text-xs text-[#6b6860]">
-              YTD Expected <strong className="text-sm text-[#1a1916] tabular-nums">AED {fmtAed((data as CashReport).totals.expectedFils)}</strong>
-            </span>
-            <span className="inline-flex items-baseline gap-1.5 bg-white border border-[#e8e6e0] rounded-xl px-3 py-1.5 text-xs text-[#6b6860]">
-              YTD Received <strong className="text-sm text-[#1a7a5a] tabular-nums">AED {fmtAed((data as CashReport).totals.receivedFils)}</strong>
-            </span>
-          </div>
+          {/* Opens with the pair every collection report opens with — Occupied
+              units, Annual rent — then the year's own money. The two chips here
+              used to be labelled YTD and carried the FULL-YEAR figures, which
+              contradicted the YTD block in the exported file. */}
+          <CashTotals totals={(data as CashReport).totals} year={(data as CashReport).year} />
           <SheetTable
             cols={CASH_COLS}
             rows={(data as CashReport).rows}
             totals={(data as CashReport).totals as unknown as Record<string, unknown>}
-            drillKey="label"
-            onDrill={row => setDrill({
-              title: `${row.label} · Rent cheques`,
-              countLabel: 'cheque',
-              columns: [
-                { key: 'contractRef', label: 'Contract' },
-                { key: 'unitLabel', label: 'Unit' },
-                { key: 'tenantName', label: 'Customer' },
-                { key: 'chequeNumber', label: 'Cheque #' },
-                { key: 'dueDate', label: 'Due', date: true },
-                { key: 'amountFils', label: 'Amount', money: true },
-                { key: 'status', label: 'Status' },
-              ],
-              items: row.items ?? [],
-            })}
+            // Every figure in the row opens its OWN records — clicking Bounced
+            // lists the bounced cheques, Penalty lists the fees. The month name
+            // still opens everything.
+            drillKeys={['label', 'expectedFils', 'receivedFils', 'pendingFils', 'bouncedFils', 'penaltyFils']}
+            onDrill={(row, key) => {
+              const f = CASH_DRILL[key as keyof typeof CASH_DRILL];
+              const items = (row.items ?? []).filter(f.match);
+              setDrill({
+                title: `${row.label} · ${f.title}`,
+                countLabel: f.countLabel,
+                groupKey: 'buildingName',
+                columns: [
+                  // Unit leads — it is what the landlord scans for; the customer
+                  // (the company name where the lease is to a company) sits under
+                  // it. Long trade names would otherwise crowd out the unit.
+                  { key: 'unitLabel', label: 'Unit · Customer', sub: 'tenantName', emphasis: true },
+                  { key: 'contractStart', label: 'Contract term', date: true, rangeEnd: 'contractEnd' },
+                  // A penalty carries no cheque number, so the charge names
+                  // itself here — the Type column is gone, and a fee still has
+                  // to be tellable from rent in the all-records view.
+                  { key: 'chequeNumber', label: 'Cheque', sub: 'dueDate', fallback: 'typeLabel' },
+                  { key: 'amountFils', label: 'Amount', money: true },
+                  { key: 'status', label: 'Status', status: true },
+                ],
+                items,
+              });
+            }}
             render={(row, key) => {
               if (!row) return '';
               const col = CASH_COLS.find(c => c.key === key);
@@ -466,18 +693,28 @@ export default function ReportSheetView({
               return v == null ? '' : String(v);
             }}
           />
-          <p className="text-[10px] text-[#9b9890] mt-2">All amounts in AED. Anchored on the cheque date; cancelled cheques excluded; includes customers who have since moved out. Net Income = received rent + penalty income.</p>
+          <p className="text-[10px] text-[#9b9890] mt-2">All amounts in AED. Anchored on the cheque date; cancelled cheques excluded; includes customers who have since moved out. Expected is Received + Pending — a bounced cheque is reported beside it, never inside it. Penalty is the penalty / late fee charged in the month — bounced-cheque, replacement and deferral charges plus the late/early lifecycle penalties — read like Bounced: reported beside the rent, never inside it, whether or not it has been collected yet. The header tile says how much of the year’s penalties actually cleared. Click any figure in a month — Expected, Received, Pending, Bounced or Penalty — for the records behind that number; the month name opens all of them.</p>
+          <CashPanels totals={(data as CashReport).totals} year={(data as CashReport).year} />
         </>
       )}
 
       {/* Cell drill-down: the records behind a sheet figure */}
       {drill && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 print:hidden" onClick={() => setDrill(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
               <div>
                 <h3 className="text-base font-bold text-[#1a1916]">{drill.title}</h3>
-                <p className="text-xs text-[#6b6860] mt-0.5">{drill.items.length} {drill.countLabel}{drill.items.length === 1 ? '' : 's'}</p>
+                {/* The subset's own total, so the popup can be checked against
+                    the cell that opened it without adding the rows up by hand. */}
+                <p className="text-xs text-[#6b6860] mt-0.5">
+                  {drill.items.length} {drill.countLabel}{drill.items.length === 1 ? '' : 's'}
+                  {drill.items.some(it => it.amountFils != null) && (
+                    <> · <span className="font-semibold text-[#1a1916] tabular-nums">
+                      AED {fmtAed(drill.items.reduce((s, it) => s + Number(it.amountFils ?? 0), 0))}
+                    </span></>
+                  )}
+                </p>
               </div>
               <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">✕</button>
             </div>
@@ -486,35 +723,89 @@ export default function ReportSheetView({
                 <p className="px-5 py-8 text-center text-sm text-[#9b9890]">No records for this period.</p>
               ) : (
                 <table className="w-full text-xs">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-10">
                     <tr>
                       {drill.columns.map(c => (
-                        <th key={c.key} className={`px-3 py-2 font-semibold ${c.money ? 'text-right' : 'text-left'}`}>{c.label}</th>
+                        <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.money ? 'text-right' : 'text-left'}`}>{c.label}</th>
                       ))}
-                      <th className="px-3 py-2.5" aria-hidden />
+                      <th className="px-4 py-2.5" aria-hidden />
                     </tr>
                   </thead>
-                  <tbody>
-                    {drill.items.map((it, idx) => (
-                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
-                        {drill.columns.map(c => {
-                          const raw = it[c.key];
-                          const text = raw == null ? '—'
-                            : c.money ? `AED ${fmtAed(Number(raw))}`
-                            : c.date ? String(raw).slice(0, 10)
-                            : String(raw);
-                          return (
-                            <td key={c.key} className={`px-3 py-2 ${c.money ? 'text-right tabular-nums' : 'text-left'} ${c.key === 'status' ? 'capitalize' : ''} text-[#1a1916]`}>{text}</td>
-                          );
-                        })}
-                        <td className="px-3 py-2.5 text-right">
-                          {it.contractId != null && (
-                            <a href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open ↗</a>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  {/* One block per building — a flat list of thirty cheques from
+                      six properties is unreadable, and the landlord thinks by
+                      building. Each block states its own count and subtotal. */}
+                  {groupDrillItems(drill).map(g => (
+                    <tbody key={g.key}>
+                      {drill.groupKey && (
+                        <tr className="bg-[#f4f3ef] border-t border-[#e3e0d9]">
+                          <td colSpan={drill.columns.length + 1} className="px-4 py-2">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <span className="text-[11px] font-bold uppercase tracking-wide text-[#1a1916]">{g.key}</span>
+                              <span className="text-[10px] text-[#6b6860] tabular-nums">
+                                {g.items.length} {drill.countLabel}{g.items.length === 1 ? '' : 's'}
+                                {g.totalFils > 0 && <> · <span className="font-semibold text-[#1a1916]">AED {fmtAed(g.totalFils)}</span></>}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {g.items.map((it, idx) => (
+                        <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] align-top">
+                          {drill.columns.map(c => {
+                            const raw = it[c.key];
+                            // A bounce has to be findable in a mixed month list —
+                            // thirty cleared cheques and two bounced ones read as
+                            // "all cleared" when every row looks the same.
+                            if (c.status) {
+                              const s = String(raw ?? '');
+                              const tone = s === 'bounced' ? 'bg-[#fee2e2] text-[#b91c1c]'
+                                : s === 'cleared' ? 'bg-[#dcf5ec] text-[#1a7a5a]'
+                                : s === 'pending' ? 'bg-[#fef3c7] text-[#92400e]'
+                                : 'bg-[#f4f3ef] text-[#6b6860]';
+                              return (
+                                <td key={c.key} className="px-4 py-2.5 text-left">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${tone}`}>{s || '—'}</span>
+                                </td>
+                              );
+                            }
+                            // A contract term is one fact, so it reads as one
+                            // span rather than two date columns to line up.
+                            if (c.rangeEnd) {
+                              const end = it[c.rangeEnd];
+                              return (
+                                <td key={c.key} className="px-4 py-2.5 text-left whitespace-nowrap text-[#1a1916] tabular-nums">
+                                  {raw == null && end == null ? '—' : <>{fmtDate(raw)} <span className="text-[#9b9890]">→</span> {fmtDate(end)}</>}
+                                </td>
+                              );
+                            }
+                            const val = raw == null || String(raw) === ''
+                              ? (c.fallback ? it[c.fallback] : null)
+                              : raw;
+                            const text = val == null || String(val) === '' ? '—'
+                              : c.money ? `AED ${fmtAed(Number(val))}`
+                              : c.date ? fmtDate(val)
+                              : String(val);
+                            const sub = c.sub ? it[c.sub] : null;
+                            return (
+                              <td key={c.key} className={`px-4 py-2.5 ${c.money ? 'text-right tabular-nums font-semibold' : 'text-left'} text-[#1a1916]`}>
+                                <div className={c.emphasis ? 'text-[13px] font-bold whitespace-nowrap' : undefined}>{text}</div>
+                                {sub != null && String(sub) !== '' && (
+                                  <div className={`text-[10px] text-[#9b9890] mt-0.5 leading-tight ${c.emphasis ? 'max-w-[210px]' : ''}`}>
+                                    {c.sub === 'dueDate' || /date$/i.test(c.sub ?? '') ? fmtDate(sub) : String(sub)}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-4 py-2.5 text-right">
+                            {it.contractId != null && (
+                              <a href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline whitespace-nowrap">Open ↗</a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  ))}
                 </table>
               )}
             </div>

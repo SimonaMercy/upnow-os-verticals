@@ -37,11 +37,12 @@ import type { DocReq } from '@/lib/docRequirements';
 import {
   ArrowLeft, FileText, FileSignature, Stamp, Zap, Key, BadgeCheck,
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
-  User, Building2, Calendar, DollarSign, CreditCard, Paperclip,
+  User, Building2, Calendar, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
   Trash2, Plus, Link2,
 } from 'lucide-react';
+import { DirhamSign } from '@/components/ui/DirhamSign';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
@@ -3204,7 +3205,7 @@ function DetailsDrawer({
                       {depositRow && (
                         <Fragment>
                           <tr>
-                            <td><DollarSign size={13} /></td>
+                            <td><DirhamSign size={13} /></td>
                             <td>
                               {depositRow.description?.trim() || 'Security deposit'}
                               <ReceiptRefTag refs={paymentRefs} id={depositRow.id} />
@@ -3295,7 +3296,7 @@ function DetailsDrawer({
                         return (
                           <Fragment>
                             <tr style={sd.isCarried ? { opacity: 0.6 } : undefined}>
-                              <td><DollarSign size={13} /></td>
+                              <td><DirhamSign size={13} /></td>
                               <td>
                                 Security deposit
                                 {sd.depositId != null && <ReceiptRefTag refs={paymentRefs} id={sd.depositId} kind="deposit" />}
@@ -3600,7 +3601,7 @@ function DetailsDrawer({
                               <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
                                 <p className="subhead">Correct cheque details</p>
                                 <div className="field"><label>Description</label>
-                                  <input className="input" value={editForm.description} placeholder="e.g. Rental Instalment 1 of 4"
+                                  <input className="input" value={editForm.description} placeholder="e.g. Instalment 1"
                                     onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
                                 </div>
                                 <div className="grid2">
@@ -4032,7 +4033,7 @@ function DetailsDrawer({
                         </div>
                       </div>
                       <div className="field"><label>Description</label>
-                        <input className="input" value={rec.description} placeholder={`Rental Instalment ${rentRows.length + 1}`} onChange={e => setRec(v => ({ ...v, description: e.target.value }))} />
+                        <input className="input" value={rec.description} placeholder={`Instalment ${rentRows.length + 1}`} onChange={e => setRec(v => ({ ...v, description: e.target.value }))} />
                       </div>
                       <div className="grid2">
                         <div className="field"><label>Amount (AED)</label>
@@ -5459,7 +5460,7 @@ function RenewalProposeModal({
     let annualVat = 0;
     for (let i = 0; i < n; i++) {
       const r = i === n - 1 ? lastA : base;
-      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Rental Instalment ${i + 1} of ${n}`, date: dueDates[i] ?? '', net: r, vat: 0 });
+      rows.push({ key: `r${i}`, d: n === 1 ? 'Annual Rent' : `Instalment ${i + 1}`, date: dueDates[i] ?? '', net: r, vat: 0 });
       const v = vatOf(r);
       if (v > 0) {
         annualVat += v;

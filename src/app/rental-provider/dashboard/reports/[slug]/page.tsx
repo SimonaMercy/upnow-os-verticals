@@ -8,6 +8,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { PaymentGroupingReport } from '@/components/upnow/PaymentGroupingReport';
 import { ManagerOperationsReport } from '@/components/upnow/ManagerOperationsReport';
+import { ManagerActivityPerformance } from '@/components/upnow/ManagerActivityPerformance';
+import { ManagerActivityCounters } from '@/components/upnow/ManagerActivityCounters';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
@@ -22,6 +24,22 @@ export default function ReportDetailPage() {
   }
   if (params.slug === 'manager-operations') {
     return <ManagerOperationsReport backHref="/rental-provider/dashboard/reports" />;
+  }
+  if (params.slug === 'manager-activity-counters') {
+    return (
+      <ManagerActivityCounters
+        endpoint="/api/reports/manager-activity-counters"
+        backHref="/rental-provider/dashboard/reports"
+      />
+    );
+  }
+  if (params.slug === 'manager-activity-performance') {
+    return (
+      <ManagerActivityPerformance
+        endpoint="/api/reports/manager-activity-performance"
+        backHref="/rental-provider/dashboard/reports"
+      />
+    );
   }
   if (params.slug === 'operations-by-stage') {
     return <OperationsByStageReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;

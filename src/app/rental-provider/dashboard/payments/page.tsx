@@ -5,6 +5,7 @@ import { Search, X, Wallet, Loader2, RefreshCw, ExternalLink, Calendar } from 'l
 import Link from 'next/link';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 import { taxPortionOf } from '@/lib/chargeTax';
+import { BasisNote } from '@/components/upnow/reportCatalog';
 
 /** Portfolio-wide Payments ledger (SCRUM-577 / 579). Lists every payment row across
  *  the RP's contracts, grouped into top-level CATEGORIES that mirror the Payment
@@ -182,6 +183,12 @@ interface PaymentRow {
   startDate: string | null;
   endDate: string | null;
   status: string;
+  // Server-derived (`shared/payment-basis.ts`): whether this row belongs in a
+  // money total. This page is the LEDGER and keeps listing every row whatever the
+  // answer — a ledger that hides rows is not one — but the category subtotals
+  // honour it, so they agree with Payment Grouping and Fee & VAT.
+  countsTowardTotals?: boolean;
+  excludedReason?: 'cancelled' | 'bounce-replaced' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
@@ -347,15 +354,29 @@ export default function PaymentsPage() {
     return m;
   }, [scoped]);
 
+  /** A row belongs in a money total unless the server says otherwise (voided, or
+   *  a bounce whose replacement is already in the list). An older API response
+   *  carrying no flag counts, so a stale deploy under-reports nothing. */
+  const counts = (r: PaymentRow) => r.countsTowardTotals !== false;
+
   // Per-category totals (over the full scoped set, so the cards always show every
-  // category's amount regardless of which one is currently selected).
+  // category's amount regardless of which one is currently selected). Excluded
+  // rows stay in the LIST below and out of these figures — that is the whole
+  // difference between a ledger and a statement.
   const catTotals = useMemo(() => {
     const t: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, third_party: 0, others: 0 };
-    for (const cat of CATEGORY_ORDER) t[cat] = catRowsMap[cat].reduce((s, r) => s + r.amount, 0);
+    for (const cat of CATEGORY_ORDER) t[cat] = catRowsMap[cat].filter(counts).reduce((s, r) => s + r.amount, 0);
     return t;
   }, [catRowsMap]);
+  // Named beside the cards so a subtotal that no longer matches the rows under it
+  // is explained rather than looking like a bug.
+  const excludedTotal = useMemo(
+    () => scoped.filter(r => !counts(r)).reduce((s, r) => s + r.amount, 0),
+    [scoped],
+  );
+  const excludedCount = useMemo(() => scoped.filter(r => !counts(r)).length, [scoped]);
   const depositsHeld = useMemo(
-    () => scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held').reduce((s, d) => s + d.amount, 0),
+    () => scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held' && counts(d)).reduce((s, d) => s + d.amount, 0),
     [scoped],
   );
 
@@ -368,8 +389,9 @@ export default function PaymentsPage() {
         return {
           cat,
           rows: catRows,
-          subtotal: catRows.reduce((s, r) => s + r.amount, 0),
-          vat: catRows.reduce((s, r) => s + vatOf(r), 0),
+          // Every row is listed; only the counting ones are summed.
+          subtotal: catRows.filter(counts).reduce((s, r) => s + r.amount, 0),
+          vat: catRows.filter(counts).reduce((s, r) => s + vatOf(r), 0),
         };
       })
       .filter(g => g.rows.length > 0),
@@ -398,6 +420,7 @@ export default function PaymentsPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Payments</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Every payment across your rental agreements — by category. Click a card to filter.</p>
+          <BasisNote slug="payments" className="mt-1 max-w-3xl" />
         </div>
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]"
@@ -474,6 +497,13 @@ export default function PaymentsPage() {
           {shownCount} line{shownCount !== 1 ? 's' : ''}
           {filterCategory !== 'all' ? ` · ${CATEGORY_LABELS[filterCategory]}` : ''}
         </span>
+        {/* Every line is listed; the subtotals count only what was collectible.
+            Saying so here is what lets this page and the reports be compared. */}
+        {excludedCount > 0 && (
+          <span className="text-xs text-[#6b6860]">
+            {excludedCount} line{excludedCount !== 1 ? 's' : ''} ({fmtAed(excludedTotal)}) listed but not counted — cancelled, or a bounce its replacement already covers
+          </span>
+        )}
       </div>
 
       {/* Ledger */}
@@ -609,7 +639,16 @@ function CategoryBlock({
                   <td className="px-4 py-3.5">{d.unit}</td>
                   <td className="px-4 py-3.5">{d.tenant}</td>
                   <td className="px-4 py-3.5 text-[#6b6860] max-w-[220px] truncate" title={rowDescription(d)}>{rowDescription(d)}</td>
-                  <td className="px-4 py-3.5 font-semibold">{fmtAed(d.amount)}</td>
+                  {/* Struck through when the row is listed but not counted, so
+                      the eye can add up the column and land on the subtotal. */}
+                  <td className={`px-4 py-3.5 font-semibold ${d.countsTowardTotals === false ? 'line-through text-[#9b9890]' : ''}`}
+                    title={d.countsTowardTotals === false
+                      ? (d.excludedReason === 'cancelled'
+                          ? 'Cancelled — voided, never collected, so not in any subtotal'
+                          : 'Bounced and made good — the replacement cheque carries this money instead')
+                      : undefined}>
+                    {fmtAed(d.amount)}
+                  </td>
                   <td className="px-4 py-3.5 text-[#6b6860]">{vatOf(d) > 0 ? fmtAed(vatOf(d)) : '—'}</td>
                   <td className="px-4 py-3.5">
                     <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[d.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>

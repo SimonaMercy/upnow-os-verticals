@@ -15,6 +15,7 @@ import { apiGet } from '@/lib/api';
 import DepositDetailModal, { type DepositDetail, type DepositRow } from '@/components/upnow/DepositDetailModal';
 import { useManagerLandlordScope, SelectLandlordNotice } from '@/components/dashboard/managerLandlordScope';
 import { taxPortionOf } from '@/lib/chargeTax';
+import { BasisNote } from '@/components/upnow/reportCatalog';
 
 // ─── Categories (top level) ───────────────────────────────────────────────
 // Identical set, order and membership to the landlord ledger — see that file for
@@ -164,6 +165,12 @@ interface PaymentRow {
   startDate: string | null;
   endDate: string | null;
   status: string;
+  // Server-derived (`shared/payment-basis.ts`), sent by the SAME listPayments()
+  // that feeds the landlord ledger. This page lists every row whatever the answer
+  // — a ledger that hides rows is not one — but the subtotals honour it, so a
+  // manager and their landlord read the identical figures.
+  countsTowardTotals?: boolean;
+  excludedReason?: 'cancelled' | 'bounce-replaced' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;
@@ -303,10 +310,23 @@ export default function ManagerPaymentsPage() {
 
   const filtered = filterCategory === 'all' ? scoped : scoped.filter(d => categoryOf(itemKeyOf(d)) === filterCategory);
 
+  /** A row belongs in a money total unless the server says otherwise (voided, or
+   *  a bounce whose replacement is already in the list). An older API response
+   *  carrying no flag counts, so a stale deploy under-reports nothing. Mirrors
+   *  the landlord ledger exactly — see that file for the reasoning. */
+  const counts = (r: PaymentRow) => r.countsTowardTotals !== false;
+
+  // Excluded rows stay in the LIST below and out of these figures — that is the
+  // whole difference between a ledger and a statement.
   const catTotals: Record<CategoryKey, number> = { rental_income: 0, security_deposit: 0, management_fee: 0, third_party: 0, others: 0 };
-  for (const d of scoped) catTotals[categoryOf(itemKeyOf(d))] += d.amount;
-  const grandTotal   = scoped.reduce((s, d) => s + d.amount, 0);
-  const depositsHeld = scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held').reduce((s, d) => s + d.amount, 0);
+  for (const d of scoped) if (counts(d)) catTotals[categoryOf(itemKeyOf(d))] += d.amount;
+  const grandTotal   = scoped.filter(counts).reduce((s, d) => s + d.amount, 0);
+  const depositsHeld = scoped.filter(d => d.paymentType === 'security_deposit' && d.status === 'held' && counts(d)).reduce((s, d) => s + d.amount, 0);
+  // Named beside the cards so a subtotal that no longer matches the rows under it
+  // is explained rather than looking like a bug.
+  const excludedRows   = scoped.filter(d => !counts(d));
+  const excludedTotal  = excludedRows.reduce((s, d) => s + d.amount, 0);
+  const excludedCount  = excludedRows.length;
 
   const groups = CATEGORY_ORDER
     .map(cat => {
@@ -314,8 +334,9 @@ export default function ManagerPaymentsPage() {
       return {
         cat,
         rows: catRows,
-        subtotal: catRows.reduce((s, r) => s + r.amount, 0),
-        vat: catRows.reduce((s, r) => s + vatOf(r), 0),
+        // Every row is listed; only the counting ones are summed.
+        subtotal: catRows.filter(counts).reduce((s, r) => s + r.amount, 0),
+        vat: catRows.filter(counts).reduce((s, r) => s + vatOf(r), 0),
       };
     })
     .filter(g => g.rows.length > 0);
@@ -341,6 +362,7 @@ export default function ManagerPaymentsPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Payments</h1>
           <p className="text-sm text-[#6b6860] mt-0.5">Every payment across the landlord’s rental agreements — by category. Click a card to filter.</p>
+          <BasisNote slug="payments" className="mt-1 max-w-3xl" />
         </div>
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]"
@@ -373,6 +395,15 @@ export default function ManagerPaymentsPage() {
           );
         })}
       </div>
+
+      {/* Every line is listed; the subtotals count only what was collectible.
+          Saying so here is what lets this page, the landlord ledger and the
+          reports be compared without anyone chasing a phantom discrepancy. */}
+      {excludedCount > 0 && (
+        <p className="text-xs text-[#6b6860] -mt-3 mb-6">
+          {excludedCount} line{excludedCount !== 1 ? 's' : ''} ({fmtAed(excludedTotal)}) listed but not counted — cancelled, or a bounce its replacement already covers
+        </p>
+      )}
 
       {/* Secondary filters */}
       <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm border border-[#f0ede8]">
