@@ -14,9 +14,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Search, Download, Printer, Loader2, FileSpreadsheet,
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
-  Building2, Check, ChevronDown, Info, RefreshCw,
+  Info, RefreshCw,
 } from 'lucide-react';
-import { apiPatch } from '@/lib/api';
 import { getReportsYear, useReportsYear, yearToRange, yearForMatrix, REPORT_YEARS } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts } from '@/components/upnow/ReportCharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
@@ -152,7 +151,6 @@ interface VacantUnit { unitId: number; label: string; unitType: string | null; r
 interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub' | 'management'; contracts: number; }
 type LeaseType = 'direct' | 'sub' | 'management';
 const ALL_LEASE_TYPES: LeaseType[] = ['direct', 'sub', 'management'];
-const LEASE_TYPE_LABELS: Record<LeaseType, string> = { direct: 'Direct', sub: 'Sub-lease', management: 'Management' };
 /** Prettify a raw unit_type token (e.g. 'retail_shop' → 'Retail Shop'). */
 const prettyUnitType = (t: string) => t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
@@ -1162,7 +1160,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
-    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Leases are narrowed to those that can carry output VAT — a lease qualifies if it has a rent VAT rate, raises VAT cheques, or records VAT on any of its rows, so exempt residential rent stays out and appears the moment a standard-rated fee is charged on it. Switch to "Incl. exempt" to see every lease. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT is the contract\'s own VAT cheques where it raises them; on older contracts with VAT embedded it is annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), spread across that contract\'s rent cheques so it falls due when the rent does. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the Building filter or the property form.',
+    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Leases are narrowed to those that can carry output VAT — a lease qualifies if it has a rent VAT rate, raises VAT cheques, or records VAT on any of its rows, so exempt residential rent stays out and appears the moment a standard-rated fee is charged on it. Switch to "Incl. exempt" to see every lease. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Rent VAT is the contract\'s own VAT cheques where it raises them; on older contracts with VAT embedded it is annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), spread across that contract\'s rent cheques so it falls due when the rent does. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the property form.',
     columns: [
       { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
@@ -1769,8 +1767,7 @@ export function ReportDetailView({
   const [cellModal, setCellModal] = useState<{ title: string; countLabel: string; columns: Column[]; contractIdKey?: string; items: Record<string, unknown>[] } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Fee-taxation building + leasing-model filters. [] buildings = all; lease
-  // types default to both selected (= all). Inline reclassify bumps refreshTick
-  // to refetch so the rows reflect the building's new leasing model.
+  // types default to all selected (= all).
   // Seeded from the address so a refresh restores the property / leasing-model
   // choice along with the rest of the filters.
   const [selectedBuildings, setSelectedBuildings] = useState<number[]>(
@@ -1781,10 +1778,6 @@ export function ReportDetailView({
     const picked = raw.filter(t => (ALL_LEASE_TYPES as readonly string[]).includes(t));
     return picked.length ? picked : [...ALL_LEASE_TYPES];
   });
-  const [buildingMenuOpen, setBuildingMenuOpen] = useState(false);
-  const [classifyingId, setClassifyingId] = useState<number | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
-  const buildingMenuRef = useRef<HTMLDivElement>(null);
   // Fee-taxation: view (per-period summary vs per-contract detail) + bucketing
   // granularity (year vs quarter). View is client-only — one fetch returns both
   // rows + items; granularity re-buckets server-side so it refetches.
@@ -1792,8 +1785,6 @@ export function ReportDetailView({
   const [granularity, setGranularity] = useState<'year' | 'quarter'>(() => (sp?.get('groupBy') === 'quarter' ? 'quarter' : 'year'));
   // Fee & VAT only: hide exempt leases (the default) or include them.
   const [vatScope, setVatScope] = useState<'applicable' | 'all'>(() => (sp?.get('vatScope') === 'all' ? 'all' : 'applicable'));
-  // RP portal can reclassify a building's leasing model inline; managers can't.
-  const canClassify = endpointBase === '/api/reports';
   /** Reconcile, scoped exactly as the page is. It is a sibling endpoint of the
    *  report, so it follows `endpointBase` into the manager portal (where the
    *  slug route gates it on Cash Management / Cheques Management access) and
@@ -1894,7 +1885,7 @@ export function ReportDetailView({
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope, refreshTick]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope]);
 
   // Keep the chosen filters in the URL. A refresh — or a link pasted to someone
   // else — then lands on the same view instead of resetting to the default. Only
@@ -1917,16 +1908,6 @@ export function ReportDetailView({
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
   }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, selectedBuildings, selectedLeaseTypes]);
 
-  // Close the building filter menu on an outside click.
-  useEffect(() => {
-    if (!buildingMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (buildingMenuRef.current && !buildingMenuRef.current.contains(e.target as Node)) setBuildingMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [buildingMenuOpen]);
-
   const buildingOptions = data?.buildings ?? [];
   // A report may declare which years actually have data (availableYears); when it
   // does, the year picker shows only those (empty years never appear). Reports
@@ -1944,39 +1925,13 @@ export function ReportDetailView({
   const leaseFilteredBuildingOptions = selectedLeaseTypes.length === 1
     ? buildingOptions.filter(b => b.leasingType === selectedLeaseTypes[0])
     : buildingOptions;
-  // Empty selection = ALL buildings. Boxes render checked in that state; the
-  // first toggle expands to an explicit set, and re-selecting everything
-  // collapses back to "all" (empty) so the report stays unfiltered.
-  const allBuildingIds = buildingOptions.map(b => b.id);
-  const isAllBuildings = selectedBuildings.length === 0;
-  const buildingChecked = (id: number) => isAllBuildings || selectedBuildings.includes(id);
-  const toggleBuilding = (id: number) =>
-    setSelectedBuildings(prev => {
-      const base = prev.length === 0 ? allBuildingIds : prev;
-      const next = base.includes(id) ? base.filter(b => b !== id) : [...base, id];
-      return next.length === allBuildingIds.length ? [] : next; // all selected → "all"
-    });
-  // Toggle a leasing model; never allow an empty selection (resets to all).
-  const toggleLeaseType = (t: LeaseType) =>
-    setSelectedLeaseTypes(prev => {
-      const next = prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t];
-      return next.length ? next : [...ALL_LEASE_TYPES];
-    });
-  // Reclassify a building's leasing model inline (RP only). Optimistic on the
-  // badge, then refetch so the rows/totals follow the new model.
-  async function classifyBuilding(id: number, leasingType: LeaseType) {
-    if (!canClassify) return;
-    setClassifyingId(id);
-    setData(prev => prev ? { ...prev, buildings: prev.buildings?.map(b => b.id === id ? { ...b, leasingType } : b) } : prev);
-    try {
-      await apiPatch(`/properties/${id}`, { leasingType });
-    } catch {
-      /* fall through — the refetch re-syncs the badge from the server */
-    } finally {
-      setRefreshTick(t => t + 1);
-      setClassifyingId(null);
-    }
-  }
+  // Empty selection = ALL buildings; the Property dropdown writes either [] (all)
+  // or a single id. The backend still accepts a comma-separated list, so a saved
+  // multi-building link keeps working — only the picker is single-choice now.
+  //
+  // The leasing model of a building is set from the property form (Portfolio →
+  // property → Leasing type); it used to be editable inline from this report's
+  // building menu, which the plain dropdown replaces.
 
   // Fee-taxation Detailed view swaps the per-period summary for per-contract
   // line items, reusing the whole table pipeline (sort / search / CSV / render).
@@ -2491,23 +2446,19 @@ export function ReportDetailView({
   const visibleColumns = useMemo(() => activeColumns.filter(c => !deadColKeys.has(c.key)), [activeColumns, deadColKeys]);
   const visibleTotals = useMemo(() => def.totals.filter(t => !deadTotalKeys.has(t.key)), [def, deadTotalKeys]);
 
-  // Filter-bar styling. Three modes:
-  //  • simpleFilterBar — every report with the Property + Lease-type dropdowns
-  //    except Fee & VAT: ALL controls (period/year/window + the two dropdowns)
-  //    flow inline in ONE wrapping row inside a single bordered card.
-  //  • fee-taxation — its many controls stack as aligned rows (divide-y card).
+  // Filter-bar styling. Two modes:
+  //  • simpleFilterBar — every report with the Property + Lease-type dropdowns,
+  //    Fee & VAT included: ALL controls (period/year/window + the dropdowns)
+  //    flow inline in ONE wrapping row inside a single bordered card. Fee & VAT
+  //    used to stack pill rows in a taller card; it now reads exactly like every
+  //    other report, so a landlord learns one filter pattern, not two.
   //  • no filter — the wrapper collapses (display:contents) and each control
   //    keeps its own bare row.
-  const simpleFilterBar = !!def?.buildingLeaseFilter && !def?.feeTaxationControls;
-  const filtersPanel = !!def?.buildingLeaseFilter && !!def?.feeTaxationControls;
+  const simpleFilterBar = !!def?.buildingLeaseFilter;
   const ctrlRowCls = simpleFilterBar
     ? 'flex items-center gap-2 flex-wrap print:hidden'
-    : filtersPanel
-      ? 'flex items-center gap-2 flex-wrap px-4 py-3 print:hidden'
-      : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
-  const ctrlLabelCls = filtersPanel
-    ? 'text-xs text-[#6b6860] font-semibold min-w-[104px]'
-    : 'text-xs text-[#6b6860] font-medium';
+    : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
+  const ctrlLabelCls = 'text-xs text-[#6b6860] font-medium';
   // Simple-filter-bar group: a small label stacked directly above its field, so
   // every filter (Year · Property · Lease type · Customers) lines up as one row
   // of matching label-over-dropdown columns.
@@ -2882,14 +2833,13 @@ export function ReportDetailView({
         {data && <p className="text-xs text-gray-500 mt-1">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>}
       </div>
 
-      {/* Filters — grouped into one aligned card for fee-taxation; a transparent
-          (display:contents) wrapper everywhere else so single-bar reports are unchanged. */}
+      {/* Filters — one bordered card with every control as a label-over-dropdown
+          column; a transparent (display:contents) wrapper for reports that have
+          no such filters, so their single controls are unchanged. */}
       <div className={
         simpleFilterBar
           ? 'rounded-2xl border border-[#e8e6e0] bg-white flex flex-wrap items-end gap-x-4 gap-y-3 px-4 py-3 mb-6 print:hidden'
-          : filtersPanel
-            ? 'rounded-2xl border border-[#e8e6e0] bg-white divide-y divide-[#f0ede8] mb-6 print:hidden'
-            : 'contents'
+          : 'contents'
       }>
 
       {/* Consolidated filter bar — the time control + Property + Lease type +
@@ -2974,6 +2924,37 @@ export function ReportDetailView({
               {leaseFilteredBuildingOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
+          {/* Fee & VAT — view, bucketing and VAT scope. Dropdowns like every
+              other filter on the bar, not the pill rows this report used to
+              carry on its own. */}
+          {def.feeTaxationControls && (
+            <>
+              <div className={fGroup}>
+                <span className={fLabel}>View</span>
+                <select className={fSelect} aria-label="View" value={feeView}
+                  onChange={e => setFeeView(e.target.value as 'overall' | 'detailed')}>
+                  <option value="overall">Overall</option>
+                  <option value="detailed">Detailed (per contract)</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Group by</span>
+                <select className={fSelect} aria-label="Group by" value={granularity}
+                  onChange={e => { const g = e.target.value as 'year' | 'quarter'; setGranularity(g); if (urlBase) router.replace(`${urlBase}/${slug}?groupBy=${g}`); }}>
+                  <option value="year">Year</option>
+                  <option value="quarter">Quarter</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>VAT scope</span>
+                <select className={fSelect} aria-label="VAT scope" value={vatScope}
+                  onChange={e => setVatScope(e.target.value as 'applicable' | 'all')}>
+                  <option value="applicable">VAT-applicable only</option>
+                  <option value="all">Incl. exempt</option>
+                </select>
+              </div>
+            </>
+          )}
           {def.unitTypeFilter && (
             <div className={fGroup}>
               <span className={fLabel}>Unit type</span>
@@ -3152,139 +3133,6 @@ export function ReportDetailView({
           <DateRangePicker from={from} to={to}
             placeholder="All time"
             onChange={(f, t) => { setFrom(f); setTo(t); }} />
-        </div>
-      )}
-
-      {/* View (overall summary vs per-contract detail) + bucketing granularity. */}
-      {def.feeTaxationControls && (
-        <div className={ctrlRowCls}>
-          <span className={ctrlLabelCls}>View:</span>
-          {([
-            { id: 'overall',  label: 'Overall' },
-            { id: 'detailed', label: 'Detailed' },
-          ] as const).map(v => (
-            <button key={v.id} onClick={() => setFeeView(v.id)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${feeView === v.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
-              {v.label}
-            </button>
-          ))}
-          <span className="text-xs text-[#6b6860] font-medium ml-2">Group by:</span>
-          {([
-            { id: 'year',    label: 'Year' },
-            { id: 'quarter', label: 'Quarter' },
-          ] as const).map(g => (
-            <button key={g.id} onClick={() => { setGranularity(g.id); if (urlBase) router.replace(`${urlBase}/${slug}?groupBy=${g.id}`); }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${granularity === g.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
-              {g.label}
-            </button>
-          ))}
-          <span className="text-[11px] text-[#9b9890] ml-1">
-            {feeView === 'detailed' ? 'Every contract — verify the totals add up' : 'Totals per ' + (granularity === 'quarter' ? 'quarter' : 'year')}
-          </span>
-        </div>
-      )}
-
-      {/* VAT scope — exempt residential leases are hidden by default so what is
-          left is what a return is actually built from. */}
-      {def.feeTaxationControls && (
-        <div className={ctrlRowCls}>
-          <span className={ctrlLabelCls}>Leases:</span>
-          {([
-            { id: 'applicable', label: 'VAT-applicable only' },
-            { id: 'all',        label: 'Incl. exempt' },
-          ] as const).map(v => (
-            <button key={v.id} onClick={() => setVatScope(v.id)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${vatScope === v.id ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
-              {v.label}
-            </button>
-          ))}
-          <span className="text-[11px] text-[#9b9890] ml-1">
-            {vatScope === 'applicable'
-              ? 'Only leases that can carry output VAT — exempt residential rent is hidden.'
-              : 'Every lease, including exempt residential rent that adds nothing to a return.'}
-          </span>
-        </div>
-      )}
-
-      {/* Building + leasing-model (direct/sub/management) filters — fee-taxation only. */}
-      {def.feeTaxationControls && (
-        <div className={ctrlRowCls}>
-          {/* Leasing model — true multi-select; all on = all. */}
-          <span className={ctrlLabelCls}>Leasing model:</span>
-          {([
-            { id: 'direct',     label: 'Direct lease' },
-            { id: 'sub',        label: 'Sub-lease' },
-            { id: 'management', label: 'Management' },
-          ] as const).map(t => {
-            const on = selectedLeaseTypes.includes(t.id);
-            return (
-              <button key={t.id} onClick={() => toggleLeaseType(t.id)}
-                className={`inline-flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${on ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
-                {on && <Check size={12} />} {t.label}
-              </button>
-            );
-          })}
-
-          {/* Building multi-select (with inline reclassify for RPs). */}
-          <span className="text-xs text-[#6b6860] font-medium ml-2">Buildings:</span>
-          <div className="relative" ref={buildingMenuRef}>
-            <button
-              type="button"
-              disabled={buildingOptions.length === 0}
-              onClick={() => setBuildingMenuOpen(o => !o)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-              <Building2 size={13} />
-              {selectedBuildings.length === 0
-                ? (buildingOptions.length ? 'All buildings' : 'No buildings')
-                : `${selectedBuildings.length} of ${buildingOptions.length}`}
-              <ChevronDown size={13} className={buildingMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
-            </button>
-            {buildingMenuOpen && buildingOptions.length > 0 && (
-              <div className="absolute z-40 mt-1 left-0 w-80 bg-white border border-[#e8e6e0] rounded-xl shadow-xl overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-[#f0eeea] bg-[#faf9f6]">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">{isAllBuildings ? 'All buildings' : `${selectedBuildings.length} of ${allBuildingIds.length} selected`}</span>
-                  {!isAllBuildings && (
-                    <button type="button" onClick={() => setSelectedBuildings([])}
-                      className="text-[11px] font-semibold text-[#2e9f82] hover:underline">Reset to all</button>
-                  )}
-                </div>
-                <ul className="max-h-72 overflow-y-auto py-1">
-                  {buildingOptions.map(b => {
-                    const checked = buildingChecked(b.id);
-                    return (
-                      <li key={b.id} className="flex items-center gap-2 px-3 py-2 hover:bg-[#f9f8f5]">
-                        <button type="button" onClick={() => toggleBuilding(b.id)} className="flex items-center gap-2 min-w-0 flex-1 text-left">
-                          <span className={`w-4 h-4 rounded border grid place-items-center shrink-0 ${checked ? 'bg-[#2e9f82] border-[#2e9f82]' : 'border-[#c5c2bc] bg-white'}`}>
-                            {checked && <Check size={11} className="text-white" />}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block text-sm text-[#1a1916] truncate">{b.name}</span>
-                            <span className="block text-[10px] text-[#9b9890]">{b.contracts} contract{b.contracts === 1 ? '' : 's'}{checked ? '' : ' · excluded'}</span>
-                          </span>
-                        </button>
-                        {/* Leasing model — inline toggle for RP, read-only badge for managers. */}
-                        {canClassify ? (
-                          <span className="inline-flex shrink-0 rounded-md border border-[#e8e6e0] overflow-hidden text-[10px] font-semibold">
-                            {ALL_LEASE_TYPES.map(t => (
-                              <button key={t} type="button" disabled={classifyingId === b.id}
-                                onClick={() => b.leasingType !== t && classifyBuilding(b.id, t)}
-                                className={`px-2 py-1 transition-colors disabled:opacity-50 ${b.leasingType === t ? 'bg-[#2e9f82] text-white' : 'bg-white text-[#6b6860] hover:bg-[#f0fdf8]'}`}>
-                                {LEASE_TYPE_LABELS[t]}
-                              </button>
-                            ))}
-                          </span>
-                        ) : (
-                          <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${b.leasingType === 'sub' ? 'bg-[#ede9fe] text-[#5b21b6]' : b.leasingType === 'management' ? 'bg-[#fef0e0] text-[#b45309]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
-                            {b.leasingType === 'sub' ? 'Sub-lease' : b.leasingType === 'management' ? 'Management' : 'Direct'}
-                          </span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
