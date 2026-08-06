@@ -560,6 +560,8 @@ export interface PropertyFormData {
   street: string;
   makaniNumber: string;
   plotNumber: string;
+  /** Municipal drainage account — Ajman prints it on the tenancy contract. */
+  sewerageNumber: string;
   numberOfFloors: string;
   // RP-declared total units in the building (metadata) — distinct from the live
   // count of unit rows actually created on the property.
@@ -582,7 +584,7 @@ const EMPTY: PropertyFormData = {
   buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
-  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '', numberOfUnits: '',
+  street: '', makaniNumber: '', plotNumber: '', sewerageNumber: '', numberOfFloors: '', numberOfUnits: '',
   propertyDescription: '',
   latitude: null, longitude: null,
   sharedAmenities: [],
@@ -853,6 +855,9 @@ export function PropertyFields({
 }) {
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
+  // Ajman's tenancy contract is the only one that prints a Sewerage Number, so
+  // that field is shown only when the property sits in Ajman.
+  const isAjman = value.emirateName.trim().toLowerCase() === 'ajman';
   // In-app document preview (matches the KYC / contract "View" pattern).
   // "View" routes through the shared in-portal viewer (pdf.js → <canvas>), the
   // same path units and every other surface use. Unlike a native <iframe> PDF
@@ -1300,9 +1305,11 @@ export function PropertyFields({
           )}
         </div>
 
-        {/* Location chain: Country → Emirate. The City tier is hidden for now —
-            it still auto-selects internally (one city per UAE emirate) so the
-            community list loads and cityId is saved; we just don't show it. */}
+        {/* Location chain: Country → Emirate → (City) → Community. The City tier
+            stays hidden while an emirate has exactly one city — it auto-selects
+            internally so the flow reads Emirate → Community. Ajman is divided
+            into eight municipal sectors, so there the picker has to be shown or
+            the community list can never load. */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <FieldLabel label="Country" required />
@@ -1326,6 +1333,22 @@ export function PropertyFields({
           </div>
         </div>
 
+        {/* City / Sector — only where the emirate has more than one */}
+        {cities.length > 1 && (
+          <div>
+            <FieldLabel label="City / Sector" />
+            <select
+              className={cn(SELECT, loadingCities && DISABLED_CLS)}
+              value={value.cityId ?? ''}
+              onChange={e => handleCityChange(e.target.value)}
+              disabled={loadingCities}
+            >
+              <option value="">{loadingCities ? 'Loading…' : 'Select City / Sector'}</option>
+              {cities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
+            </select>
+          </div>
+        )}
+
         {/* Community + (Sub-Community only when the community has any) */}
         <div className={cn('grid gap-3', subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
           <div>
@@ -1336,7 +1359,12 @@ export function PropertyFields({
               onChange={e => handleCommunityChange(e.target.value)}
               disabled={!value.cityId || loadingComms}
             >
-              <option value="">{loadingComms ? 'Loading…' : value.cityId ? 'Select Community' : 'Select Emirate first'}</option>
+              <option value="">
+                {loadingComms ? 'Loading…'
+                  : value.cityId ? 'Select Community'
+                  : cities.length > 1 ? 'Select City / Sector first'
+                  : 'Select Emirate first'}
+              </option>
               {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}
             </select>
           </div>
@@ -1399,6 +1427,16 @@ export function PropertyFields({
             <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
               onChange={e => upd('makaniNumber', e.target.value)} />
           </div>
+          {/* Ajman's tenancy contract prints a Sewerage Number (رقم الصرف الصحي)
+              — a per-building municipal drainage account. No other emirate's
+              contract asks for it, so the field only appears for Ajman. */}
+          {isAjman && (
+            <div>
+              <FieldLabel label="Sewerage Number" />
+              <input className={INPUT} placeholder="e.g. 1922057213" value={value.sewerageNumber}
+                onChange={e => upd('sewerageNumber', e.target.value)} />
+            </div>
+          )}
           <div>
             <FieldLabel label="Number of floors" />
             <input className={INPUT} placeholder="e.g. 20 or G+12" value={value.numberOfFloors}

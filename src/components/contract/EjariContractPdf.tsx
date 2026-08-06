@@ -16,6 +16,7 @@ import {
 } from '@react-pdf/renderer';
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 import { isDubaiContract } from '@/lib/ejariFill';
+import { AjmanContractDoc, isAjmanContract, type AjmanContractFields } from './AjmanContractPdf';
 import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
@@ -51,7 +52,7 @@ const AR = 'NotoAr';
 const isArabic = (s?: string | null) =>
   /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(s || '');
 
-export interface EjariParty { name: string | null; email: string | null; phone: string | null; entityType?: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null }
+export interface EjariParty { name: string | null; email: string | null; phone: string | null; nationality?: string | null; passportNumber?: string | null; entityType?: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null; licenseAuthority?: string | null }
 export interface EjariContractData {
   ref: string;
   startDate: string; endDate: string; createdAt: string;
@@ -59,14 +60,25 @@ export interface EjariContractData {
   // Rent discount (rent line only). listedRent − discountAmount = annualRent.
   listedRent?: number | null; discountType?: 'percent' | 'fixed' | null; discountAmount?: number | null;
   modeOfPayment: string | null; numberOfInstallments?: number | null; customClauses?: string[]; notes?: string | null;
+  /** The lease's utility account (DEWA / FEWA / SEWA …). DB column is still
+   *  `tenancy_contracts.dewa_account_number`; the app treats it as generic. */
+  utilityAccountNumber?: string | null;
   // Lessor is the landlord, OR — when the RP holds a Power of Attorney — the POA
   // representative. The official contract lists the POA holder's phone as the
   // lessor's contact (see `lessorPhone` below).
   landlord: EjariParty & { bankAccountName?: string | null; hasPoa?: boolean | null; poaPersonName?: string | null; poaPersonPhone?: string | null };
   tenant: EjariParty;
-  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; plotNumber: string | null; makaniNumber: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
-  unit: { number: string | null; name: string | null; type: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
+  // `city` is the emirate's own sub-division — only Ajman populates it, with the
+  // municipal sector its form prints as `Sector`. `subCommunity` is the numbered
+  // district ("Al Nuaimiya 2") that same form prints as `District`.
+  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; city?: string | null; subCommunity?: string | null; plotNumber: string | null; makaniNumber: string | null; sewerageNumber?: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
+  unit: { number: string | null; name: string | null; type: string | null; floor?: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
+  /** Ajman-form overrides. The Ajman tenancy contract prints boxes our model has
+   *  no source for (Sector, Floor, Room, Sewerage No., the Request Details block,
+   *  the Arabic mirrors of names/nationalities). Anything set here wins over the
+   *  value derived from the contract — see `buildAjmanFields`. */
+  ajman?: Partial<AjmanContractFields>;
 }
 export interface EjariAddendum { id: number; name: string; fileUrl?: string | null; mimeType?: string | null; tenantSig: string | null; tenantSignedAt: string | null; landlordSig: string | null; landlordSignedAt: string | null; /** Extracted text lines (DOCX), rendered inline across pages. */ lines?: string[]; /** In-app bilingual terms (the new authoring path); rendered EN then AR. */ terms?: AddendumTerms | null }
 
@@ -498,7 +510,7 @@ function buildAddendumPreamble(data?: EjariContractData): string | null {
  *  and the Tenant/Lessor signature block are react-pdf `fixed` elements, so they
  *  repeat at the top/bottom of EVERY page. Page padding reserves space for both
  *  so the flowing terms never run under them (no overlap). */
-function addendumPages(
+export function addendumPages(
   addendums: EjariAddendum[],
   contractSigs?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[],
   data?: EjariContractData,
@@ -581,7 +593,7 @@ const ViewerHeader = ({ data, onClose, children }: { data: EjariContractData; on
   <div style={VIEWER_BAR}>
     <div>
       <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Tenancy Contract — {data.ref}</p>
-      <p style={{ margin: 0, fontSize: 12, color: '#666' }}>UAE unified tenancy contract</p>
+      <p style={{ margin: 0, fontSize: 12, color: '#666' }}>{isAjmanContract(data) ? 'Ajman tenancy contract' : 'UAE unified tenancy contract'}</p>
     </div>
     <div style={{ display: 'flex', gap: 10 }}>
       <button onClick={() => (onClose ? onClose() : window.history.back())} style={CLOSE_BTN}>✕ Close</button>
@@ -589,6 +601,19 @@ const ViewerHeader = ({ data, onClose, children }: { data: EjariContractData; on
     </div>
   </div>
 );
+
+/**
+ * The vector (non-Dubai) contract document for a contract.
+ *  - Ajman → the Ajman Municipality & Planning Department form (`AjmanContractDoc`).
+ *  - every other emirate → the unified `EjariContractDoc`.
+ * Addendum pages are rendered once here and handed to whichever doc is chosen,
+ * so both paths append the same addendums.
+ */
+export function contractDocFor(data: EjariContractData, addendums: EjariAddendum[]) {
+  return isAjmanContract(data)
+    ? <AjmanContractDoc data={data} extraPages={addendumPages(addendums, data.signatures, data)} />
+    : <EjariContractDoc data={data} addendums={addendums} />;
+}
 
 /** Full-screen viewer. Dubai → filled official PDF in an iframe; else → react-pdf. */
 export default function EjariContractViewer({ data, addendums = [], onClose }: { data: EjariContractData; addendums?: EjariAddendum[]; onClose?: () => void }) {
@@ -624,7 +649,7 @@ function DubaiFullscreen({ data, addendums, onClose }: { data: EjariContractData
 function ReactPdfFullscreen({ data, addendums, onClose }: { data: EjariContractData; addendums: EjariAddendum[]; onClose?: () => void }) {
   // Non-Dubai → the @react-pdf vector doc → bytes (canvas) + a download URL.
   const { bytes, url, error } = useReactPdfDoc(
-    () => <EjariContractDoc data={data} addendums={addendums} />,
+    () => contractDocFor(data, addendums),
     ejariDocKey(data, addendums),
   );
   return (

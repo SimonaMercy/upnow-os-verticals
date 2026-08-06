@@ -10,6 +10,7 @@ export interface CustomerInitial {
   email?: string | null;
   phone?: string | null;
   emiratesIdNumber?: string | null;
+  passportNumber?: string | null;
   nationality?: string | null;
   gender?: string | null;
   dateOfBirth?: string | null;
@@ -40,6 +41,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
   const [email, setEmail] = useState(initial?.email ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [emiratesIdNumber, setEid] = useState(initial?.emiratesIdNumber ?? '');
+  const [passportNumber, setPassport] = useState(initial?.passportNumber ?? '');
   const [nationality, setNationality] = useState(initial?.nationality ?? '');
   const [gender, setGender] = useState(initial?.gender ?? '');
   const [dateOfBirth, setDob] = useState((initial?.dateOfBirth ?? '').slice(0, 10));
@@ -70,6 +72,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
           firstName: firstName.trim() || null, lastName: lastName.trim() || null,
           phone: phone.trim() || null, email: email.trim() || undefined,
           emiratesIdNumber: emiratesIdNumber.trim() || null,
+          passportNumber: passportNumber.trim() || null,
           entityType, companyName: entityType === 'company' ? (companyName.trim() || null) : null,
           // Company tenants capture the trade license + authority AND the
           // authorised signatory's identity (name + Emirates ID above, plus
@@ -121,6 +124,9 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
         {mode === 'edit' && (
           <>
             <div><label className={label}>{entityType === 'company' ? 'Signatory Emirates ID' : 'Emirates ID'}</label><input className={field} value={emiratesIdNumber} onChange={e => setEid(e.target.value)} placeholder="784-YYYY-NNNNNNN-D" /></div>
+            {/* Captured the same way as the Emirates ID — the Ajman tenancy
+                contract prints it in the Second Party block (جواز السفر). */}
+            <div><label className={label}>{entityType === 'company' ? 'Signatory passport no.' : 'Passport number'}</label><input className={field} value={passportNumber} onChange={e => setPassport(e.target.value)} placeholder="e.g. AM1572324" /></div>
             {entityType === 'company' && (
               <div><label className={label}>Signatory nationality</label><input className={field} value={nationality} onChange={e => setNationality(e.target.value)} placeholder="e.g. Emirati" /></div>
             )}

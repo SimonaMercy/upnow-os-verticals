@@ -56,7 +56,7 @@ type Note = {
 type CustomerDetail = {
   customer: {
     id: number; name: string | null; firstName: string | null; lastName: string | null;
-    email: string | null; phone: string | null; emiratesId: string | null;
+    email: string | null; phone: string | null; emiratesId: string | null; passportNumber: string | null;
     nationality: string | null; gender: string | null; dateOfBirth: string | null;
     entityType: string | null; companyName: string | null; tradeLicenseNumber: string | null;
     tradeLicenseAuthority: string | null;
@@ -76,6 +76,16 @@ function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   const dt = new Date(`${d.slice(0, 10)}T00:00:00Z`);
   return Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+/** A recorded expiry is a calendar date, not an instant — compare date-only in
+ *  Dubai so a document is "expired" from the day after it lapses, not at UTC
+ *  midnight while it is still today for the office reading the screen. */
+function isExpired(d: string | null | undefined): boolean {
+  if (!d) return false;
+  const exp = d.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) return false;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' }); // YYYY-MM-DD
+  return exp < today;
 }
 function monthYear(d: string | null | undefined): string | null {
   if (!d) return null;
@@ -484,6 +494,7 @@ export default function CustomerDetailPage() {
     { icon: Mail, label: 'Email', value: c.email },
     { icon: Phone, label: 'Phone', value: c.phone },
     { icon: IdCard, label: 'Emirates ID', value: c.emiratesId },
+    { icon: IdCard, label: 'Passport No.', value: c.passportNumber },
     // Personal attributes are shown for individuals only; companies surface
     // their licensing details instead.
     ...(!isCompany ? [
@@ -631,7 +642,7 @@ export default function CustomerDetailPage() {
             submitUrl={editUrl}
             initial={{
               firstName: c.firstName, lastName: c.lastName, name: c.name, email: c.email, phone: c.phone,
-              emiratesIdNumber: c.emiratesId, nationality: c.nationality, gender: c.gender,
+              emiratesIdNumber: c.emiratesId, passportNumber: c.passportNumber, nationality: c.nationality, gender: c.gender,
               dateOfBirth: c.dateOfBirth, entityType: c.entityType, companyName: c.companyName,
               tradeLicenseNumber: c.tradeLicenseNumber, tradeLicenseAuthority: c.tradeLicenseAuthority,
             }}
@@ -788,6 +799,13 @@ export default function CustomerDetailPage() {
             const partial = hasAnyFile && !satisfied;   // e.g. Emirates ID front on file but back missing
             const hasFile = hasAnyFile;
             const pending = hasAnyFile && filed[0].status === 'pending';
+            // A lapsed expiry invalidates the slot however complete it looks —
+            // an Emirates ID with both sides on file but an expired date is not
+            // a document anyone can act on, so the row reads red, not green.
+            const expired = filed.some(f => isExpired(f.expiryDate));
+            // Show the lapsed side's date when one of two sides has expired —
+            // showing the still-valid one would hide the reason the row is red.
+            const shownExpiry = filed.find(f => isExpired(f.expiryDate))?.expiryDate ?? filed[0]?.expiryDate ?? null;
             const twoSided = req.key === 'emirates_id';
             const busy = directBusy === req.key;
             // Emirates ID (two-sided) and any doc that carries an expiry — trade
@@ -798,8 +816,8 @@ export default function CustomerDetailPage() {
               : () => pickDirect(slotsFor(req, docs)[0]);
             return (
               <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
-                  {uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${expired ? 'bg-[#fee2e2] text-[#b91c1c]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                  {expired ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
@@ -807,11 +825,14 @@ export default function CustomerDetailPage() {
                     {uploaded ? (
                       <>
                         {pending && <span className="text-[#b91c1c]">Pending review</span>}
-                        {filed[0].expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(filed[0].expiryDate)}</span>}
-                        <span className="text-[#1a7a5a]">{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
+                        {shownExpiry && (expired
+                          ? <span className="text-[#b91c1c]">Expired {fmtDate(shownExpiry)}</span>
+                          : <span className="text-[#1a7a5a]">exp {fmtDate(shownExpiry)}</span>)}
+                        <span className={expired ? 'text-[#9b9890]' : 'text-[#1a7a5a]'}>{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
                       </>
                     ) : partial ? (
                       <>
+                        {shownExpiry && expired && <span className="text-[#b91c1c]">Expired {fmtDate(shownExpiry)}</span>}
                         <span className="text-[#b07415]">{partialHint}{req.required ? ' · required' : ''}</span>
                         <span className="text-[#9b9890]">{filed.length} of 2 sides on file</span>
                       </>
@@ -837,19 +858,23 @@ export default function CustomerDetailPage() {
           })}
 
           {/* KYC docs outside the standard checklist (e.g. labour card) — still listed */}
-          {extraKycDocs.map(d => (
+          {extraKycDocs.map(d => {
+          const docExpired = isExpired(d.expiryDate);
+          return (
             <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
               {/* No file = nothing has been sent. A tick and "Pending review"
                   would both claim a document that never arrived. */}
-              <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${d.fileUrl ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
-                {d.fileUrl ? <Check size={16} /> : <FileText size={16} />}
+              <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${docExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : d.fileUrl ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                {docExpired ? <AlertTriangle size={16} /> : d.fileUrl ? <Check size={16} /> : <FileText size={16} />}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-bold text-[#1a1916] truncate">{docLabel(d, data.documents)}</div>
                 <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                   {!d.fileUrl && <span className="text-[#b07415]">Not uploaded</span>}
                   {d.fileUrl && d.status === 'pending' && <span className="text-[#b91c1c]">Pending review</span>}
-                  {d.expiryDate && <span className="text-[#1a7a5a]">exp {fmtDate(d.expiryDate)}</span>}
+                  {d.expiryDate && (docExpired
+                    ? <span className="text-[#b91c1c]">Expired {fmtDate(d.expiryDate)}</span>
+                    : <span className="text-[#1a7a5a]">exp {fmtDate(d.expiryDate)}</span>)}
                   {d.fileUrl && !d.expiryDate && d.status !== 'pending' && <span className="text-[#1a7a5a]">On record</span>}
                 </div>
               </div>
@@ -860,7 +885,8 @@ export default function CustomerDetailPage() {
                 </button>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
 
@@ -961,6 +987,7 @@ export default function CustomerDetailPage() {
                   // `existing` still goes into the upload slot so the file fills
                   // that placeholder rather than creating a second row.
                   const uploaded = !!existing?.fileUrl;
+                  const occExpired = uploaded && isExpired(existing!.expiryDate);
                   const busy = directBusy === req.key;
                   const occSlot: UploadSlot = { label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) };
                   // Occupant identity docs (EID / passport / visa) carry an expiry —
@@ -970,15 +997,18 @@ export default function CustomerDetailPage() {
                     : () => pickDirect(occSlot);
                   return (
                     <div key={req.key} className="flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
-                        {uploaded ? <Check size={16} /> : <FileText size={16} />}
+                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${occExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                        {occExpired ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : <FileText size={16} />}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label.replace(/^Occupant \d+ — /, '')}</div>
-                        <div className="text-[11px] font-semibold mt-0.5">
+                        <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                           {uploaded
                             ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
                             : <span className="text-[#b07415]">Not uploaded · optional</span>}
+                          {uploaded && existing!.expiryDate && (occExpired
+                            ? <span className="text-[#b91c1c]">Expired {fmtDate(existing!.expiryDate)}</span>
+                            : <span className="text-[#1a7a5a]">exp {fmtDate(existing!.expiryDate)}</span>)}
                         </div>
                         {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                       </div>

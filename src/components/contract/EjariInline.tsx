@@ -3,12 +3,13 @@
 /**
  * Inline (embeddable) Ejari tenancy contract, sized for a page section.
  *  - Dubai  → the OFFICIAL DLD PDF filled with the contract data (pdf-lib).
- *  - others → the @react-pdf vector document (emirate-aware fallback).
+ *  - Ajman  → the Ajman Municipality form (@react-pdf, via contractDocFor).
+ *  - others → the @react-pdf unified document (emirate-aware fallback).
  * BOTH are rasterised to <canvas> via pdf.js (EjariCanvas); an <iframe> blob PDF
  * renders blank on mobile browsers, so we never use one.
  * @react-pdf needs the browser, so load this via next/dynamic with ssr:false.
  */
-import { EjariContractDoc, ejariDocKey, type EjariContractData, type EjariAddendum } from './EjariContractPdf';
+import { contractDocFor, ejariDocKey, type EjariContractData, type EjariAddendum } from './EjariContractPdf';
 import { isDubaiContract } from '@/lib/ejariFill';
 import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
@@ -34,7 +35,7 @@ export default function EjariInline({ data, addendums = [], height = 640, fluid 
   // download link (the SAME bytes it rasterises — no extra generation).
   const { bytes: dubaiBytes, url: dubaiUrl, error: dubaiErr } = useFilledEjari(data, addendums, dubai);
   const { bytes: vectorBytes, url: vectorUrl, error: vectorErr } = useReactPdfDoc(
-    () => <EjariContractDoc data={data} addendums={addendums} />,
+    () => contractDocFor(data, addendums),
     ejariDocKey(data, addendums),
     !dubai,
   );
