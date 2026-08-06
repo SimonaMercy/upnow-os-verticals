@@ -49,6 +49,9 @@ interface Payload {
   span: string; rowAxis: string;
   totals: { rows: number; onBoard: number; offBoard: number };
   kpis: Array<{ k: string; v: number }>;
+  /** False on the "All activity" tab, where the log deliberately lists work the
+   *  board cannot place and so stops matching the rail's lane counts. */
+  boardOnly?: boolean;
   pipelines: Array<{ key: string; title: string; count: number }>;
   buckets: Bucket[];
   lanes: LaneDef[];
@@ -236,13 +239,26 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
             <p style={{ ...micro, position: 'sticky', top: 0, background: RAIL, padding: '12px 18px 9px', borderBottom: `1px solid ${LINE}` }}>Pipeline</p>
             {data.pipelines.map((p) => {
               const on = p.key === pipe;
+              // "All activity" is not a fifth pipeline — it is the way out of
+              // them, and the only tab that lists work with no board lane. Set
+              // apart so it does not read as another stage of the journey.
+              const isAll = p.key === 'all';
               return (
                 <button key={p.key} onClick={() => { setPipe(p.key); resetDrill(); }}
                   style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', border: 0,
                     borderBottom: '1px solid #eeece7', borderLeft: `3px solid ${on ? A : 'transparent'}`,
+                    borderTop: isAll ? `1px solid ${LINE}` : undefined,
+                    marginTop: isAll ? 10 : undefined,
                     background: on ? TINT : 'transparent', color: p.count ? (on ? DEEP : INK) : FAINT,
                     padding: '14px 18px', cursor: 'pointer', borderRadius: 0 }}>
-                  <span style={{ flex: 1, textAlign: 'left', fontSize: 13.5, fontWeight: on ? 700 : 600, letterSpacing: '-.01em' }}>{p.title}</span>
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: 13.5, fontWeight: on ? 700 : 600, letterSpacing: '-.01em' }}>
+                    {p.title}
+                    {isAll && (
+                      <span style={{ display: 'block', marginTop: 2, font: `500 10px ${MONO}`, color: FAINT, letterSpacing: 0 }}>
+                        includes work with no lane
+                      </span>
+                    )}
+                  </span>
                   <span style={{ font: `700 15px ${MONO}`, fontVariantNumeric: 'tabular-nums' }}>{p.count.toLocaleString()}</span>
                 </button>
               );
