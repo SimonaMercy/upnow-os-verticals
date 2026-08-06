@@ -36,6 +36,8 @@ export const ACTOR_CHIP: Record<string, [string, string, string]> = {
 export const ACTOR_WORD: Record<string, string> = { manager: 'manager', customer: 'customer', rp: 'landlord', system: 'system' };
 export interface Entry {
   id: number; at: string; lane: string | null; label: string; cid: string | null;
+  /** WHICH thing was actioned — the document, where the action names one. */
+  item?: string | null;
   changed: Array<{ field: string; from: string | null; to: string | null }> | null;
   why: string | null; wait: number; waitLabel: string; waitBy: string;
   rework: boolean; actor: string; who: string | null; onBehalfOf: string | null; detail: string;
@@ -255,7 +257,15 @@ export function LogTable({ entries, compact }: { entries: Entry[]; compact?: boo
               </td>
               <td style={{ padding: compact ? '9px 8px' : '8px 10px', verticalAlign: 'top', minWidth: compact ? 150 : undefined }}>
                 <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, letterSpacing: '-.01em',
-                  color: e.rework ? '#8a6a1e' : INK }}>{e.label}</span>
+                  color: e.rework ? '#8a6a1e' : INK }}>
+                  {e.label}
+                  {/* WHICH document. Weighted down so the action still reads
+                      first, but on the same line — "Uploaded a document" on its
+                      own was the single most common unanswerable row. */}
+                  {e.item && (
+                    <span style={{ fontWeight: 500, color: MID }}> — {e.item}</span>
+                  )}
+                </span>
                 {compact && (
                   <span style={{ display: 'block', marginTop: 3, font: `500 10px ${MONO}`, color: FAINT }}>
                     {e.cid ?? '—'} · {e.who ?? '—'}

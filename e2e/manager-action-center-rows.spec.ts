@@ -48,10 +48,18 @@ test('every bucket is grouped unit rows that click to the right screen', async (
     expect(await links.count()).toBeGreaterThan(0);
     expect(await links.first().getAttribute('href')).toMatch(hrefPattern);
 
-    // Two columns only: a label and a state. The detailed row's date column
-    // ("issued 22 Jun 2026" etc.) must be gone.
+    // A label and a state, and nothing else — the detailed row's date column
+    // ("issued 22 Jun 2026" etc.) must be gone. The renewal-offers card is the
+    // ONE exception: an unanswered offer is read against a deadline, so it
+    // carries a third line with the deadline month and the offered term.
     const row = await links.first().innerText();
-    expect(row.split('\n').filter(Boolean).length).toBe(2);
+    const lines = row.split('\n').filter(Boolean);
+    if (title.startsWith('Renewal Offers')) {
+      expect(lines.length).toBe(3);
+      expect(lines[1]).toMatch(/^Ends [A-Z][a-z]{2} \d{4} · \d{1,2} [A-Z][a-z]{2} \d{2} – \d{1,2} [A-Z][a-z]{2} \d{2}$/);
+    } else {
+      expect(lines.length).toBe(2);
+    }
     console.log(`${title}: ${count} in ${heads.length} group(s) →`, JSON.stringify(row.replace(/\n/g, ' | ')));
   }
 

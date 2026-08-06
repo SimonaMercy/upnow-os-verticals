@@ -104,11 +104,18 @@ const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 // same work on a second board (the reason KYC + Payment plan aren't lanes here
 // either). Renewals keep their Cheques / PDC lane: a renewal has no lead, so that
 // board is the only place its cheques are worked.
+// Lane ORDER is the process order, and it must match the checklist order the
+// API builds (`buildOperationsList`): Signatures → Utility → Move-in →
+// Contract Registration. Registration is LAST because it is what makes the
+// tenancy legally live — everything before it is a precondition. This list used
+// to put Registration second, which parked a lease on the Registration lane
+// while its utility account and move-in were still outstanding, and disagreed
+// with the manager dashboard's Registration Pending bucket.
 const NEW_STAGES: StageDef[] = [
   { key: 'signatures',   title: 'Signatures',        keys: ['sign_tenant', 'sign_landlord'] },
-  { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
   { key: 'utility',      title: 'Utility',           keys: ['utility'] },
   { key: 'move_in',      title: 'Move-in',           keys: ['move_in'] },
+  { key: 'ejari',        title: 'Contract Registration',             keys: ['ejari'] },
 ];
 
 // Renewal — starts with the offer stages (Draft → Notice Sent, driven by the

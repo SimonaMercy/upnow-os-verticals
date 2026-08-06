@@ -9,6 +9,7 @@ import {
   PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useAuth } from '@/contexts/AuthContext';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { DashboardPage, StatCard, SectionHeader } from '@/components/dashboard/DashboardWidgets';
@@ -57,6 +58,26 @@ const overdueBy = (d?: string | null) => !!d && new Date(d) < new Date(new Date(
 /** Unit labels are numbers, and mixed ones like "Room-16" / "SHOP-3" — a plain
  *  sort puts Unit 10 before Unit 9, so collate numerically. */
 const byUnit = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+/** Lease dates arrive as the UTC INSTANT of Dubai midnight — a 1 Aug lease date
+ *  serializes as `2026-07-31T20:00:00.000Z`. Both slicing the ISO string and
+ *  formatting in the browser's own zone therefore render the day BEFORE, so
+ *  every date on this page is formatted in APP_TIME_ZONE. */
+/*  `en-AE` is the app's date locale everywhere else, and it is also the one that
+ *  abbreviates September to "Sep" — en-GB renders "Sept", the only 4-letter
+ *  month, which visibly breaks the column. */
+const fmtDay = (d?: string | null) =>
+  d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: '2-digit' }) : '';
+const fmtMonth = (d?: string | null) =>
+  d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, month: 'short', year: 'numeric' }) : '';
+/** The renewal offer's own term, plus the month the lease it replaces runs out —
+ *  the month is the deadline the queue is sorted by, the term is what the
+ *  customer has been asked to accept. Either half can be missing on a legacy
+ *  row, so each is dropped independently rather than blanking the whole line. */
+const offerTerm = (i: ActionItem) =>
+  [
+    fmtMonth(i.date) && `Ends ${fmtMonth(i.date)}`,
+    fmtDay(i.startDate) && fmtDay(i.endDate) && `${fmtDay(i.startDate)} – ${fmtDay(i.endDate)}`,
+  ].filter(Boolean).join(' · ') || undefined;
 /** Names the side the manager has to chase, short enough to sit in the status
  *  column — they chase the signer, they never sign themselves. */
 const signerShort = (i: ActionItem) =>
@@ -257,6 +278,10 @@ function ManagerMultiOverview() {
             unit: unitOf(i),
             status: overdueBy(i.date) ? 'Overdue' : 'Awaiting reply',
             overdue: overdueBy(i.date),
+            // The only card that carries dates: an unanswered offer is read
+            // against a deadline (the month the current lease runs out) and the
+            // term on the table. Every other bucket stays unit + state.
+            note: offerTerm(i),
             href: `/dashboard/manager/operations/${i.parentId ?? i.id}${scopeQ(i.rpId)}`,
           })} />
         <ActionBucket icon={XCircle} color="#b91c1c" label="Termination Requests" href={`/dashboard/manager/contracts${scopeQ()}`}
@@ -367,7 +392,10 @@ function ActionBucket({
   /** The row's group heading — the building, or the customer where a bucket has
    *  no unit (delayed follow-ups are customer documents, not leases). */
   groupBy: (i: ActionItem) => string;
-  compact: (i: ActionItem) => { unit: string; status: string; overdue?: boolean; href?: string };
+  /** `note` is an OPTIONAL second line under the unit. Only the renewal-offers
+   *  card supplies it (the offered term and the deadline month); every other
+   *  bucket stays the single unit + state line the CEO asked for. */
+  compact: (i: ActionItem) => { unit: string; status: string; overdue?: boolean; href?: string; note?: string };
 }) {
   const count = bucket?.count ?? 0;
   const items = bucket?.items ?? [];
@@ -424,7 +452,12 @@ function ActionBucket({
                   const c = compact(i);
                   const line = (
                     <div className="flex items-center justify-between gap-3 py-1 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-                      <span className="text-[13px] font-semibold truncate leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{c.unit}</span>
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-semibold truncate leading-tight" style={{ color: 'var(--color-neutral-900)' }}>{c.unit}</div>
+                        {c.note && (
+                          <div className="text-[10px] tabular-nums truncate leading-tight" style={{ color: 'var(--color-neutral-400)' }}>{c.note}</div>
+                        )}
+                      </div>
                       <span className="text-[11px] font-medium shrink-0 leading-tight" style={{ color: c.overdue ? '#b91c1c' : color }}>{c.status}</span>
                     </div>
                   );
