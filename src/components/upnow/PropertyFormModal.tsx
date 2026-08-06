@@ -560,8 +560,6 @@ export interface PropertyFormData {
   street: string;
   makaniNumber: string;
   plotNumber: string;
-  /** Municipal drainage account — Ajman prints it on the tenancy contract. */
-  sewerageNumber: string;
   numberOfFloors: string;
   // RP-declared total units in the building (metadata) — distinct from the live
   // count of unit rows actually created on the property.
@@ -584,7 +582,7 @@ const EMPTY: PropertyFormData = {
   buildingName: '', spaceCategory: '', leasingType: 'direct',
   countryId: null, emirateId: null, cityId: null, communityId: null, subCommunityId: null,
   countryName: '', emirateName: '', cityName: '', communityName: '', subCommunityName: '',
-  street: '', makaniNumber: '', plotNumber: '', sewerageNumber: '', numberOfFloors: '', numberOfUnits: '',
+  street: '', makaniNumber: '', plotNumber: '', numberOfFloors: '', numberOfUnits: '',
   propertyDescription: '',
   latitude: null, longitude: null,
   sharedAmenities: [],
@@ -855,9 +853,6 @@ export function PropertyFields({
 }) {
   const [autoFilled, setAutoFilled] = useState(false);
   const [showMap, setShowMap] = useState(!!(value.latitude && value.longitude));
-  // Ajman's tenancy contract is the only one that prints a Sewerage Number, so
-  // that field is shown only when the property sits in Ajman.
-  const isAjman = value.emirateName.trim().toLowerCase() === 'ajman';
   // In-app document preview (matches the KYC / contract "View" pattern).
   // "View" routes through the shared in-portal viewer (pdf.js → <canvas>), the
   // same path units and every other surface use. Unlike a native <iframe> PDF
@@ -1427,16 +1422,6 @@ export function PropertyFields({
             <input className={INPUT} placeholder="e.g. 1234567890" value={value.makaniNumber}
               onChange={e => upd('makaniNumber', e.target.value)} />
           </div>
-          {/* Ajman's tenancy contract prints a Sewerage Number (رقم الصرف الصحي)
-              — a per-building municipal drainage account. No other emirate's
-              contract asks for it, so the field only appears for Ajman. */}
-          {isAjman && (
-            <div>
-              <FieldLabel label="Sewerage Number" />
-              <input className={INPUT} placeholder="e.g. 1922057213" value={value.sewerageNumber}
-                onChange={e => upd('sewerageNumber', e.target.value)} />
-            </div>
-          )}
           <div>
             <FieldLabel label="Number of floors" />
             <input className={INPUT} placeholder="e.g. 20 or G+12" value={value.numberOfFloors}

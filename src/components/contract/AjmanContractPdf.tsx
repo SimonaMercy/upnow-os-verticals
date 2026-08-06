@@ -239,7 +239,9 @@ export function buildAjmanFields(
     // AUTHORITY ACCOUNT number, so the lease's utility account is the right
     // source (FEWA in Ajman); the unit's premise number is only a fallback.
     fewaNumber: S(data.utilityAccountNumber || u.dewaPremiseNumber || p.premisesNumber),
-    sewerageNumber: S(p.sewerageNumber),
+    // Per connection, like the FEWA premise number — so it lives on the unit.
+    // The property-level column is the pre-0194 fallback.
+    sewerageNumber: S(u.sewerageNumber || p.sewerageNumber),
 
     startDate: fmtDate(data.startDate),
     endDate: fmtDate(data.endDate),

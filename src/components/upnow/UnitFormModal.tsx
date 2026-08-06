@@ -198,6 +198,8 @@ export interface UnitFormData {
   unitTier: string;
   floor: string;
   premiseNumber: string;
+  /** Ajman prints this on the tenancy contract; per connection, like the premise no. */
+  sewerageNumber: string;
   bedrooms: string;
   bathrooms: string;
   parkingSpaces: string;
@@ -304,7 +306,7 @@ function ordinal(n: string): string {
 
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
-  floor: '', premiseNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '',
+  floor: '', premiseNumber: '', sewerageNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '',
   unitSizeSqft: '', unitSizeSqm: '', view: '',
   furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
@@ -324,6 +326,9 @@ const FEE_FIELDS = ['securityDeposit', 'adminFee', 'ejariFeeFils', 'commission']
 interface Props {
   open: boolean;
   propertyCategory: string;
+  /** Emirate of the parent property — Ajman's tenancy contract is the only one
+   *  that prints a Sewerage Number, so that field shows only there. */
+  propertyEmirate?: string | null;
   initial?: Partial<UnitFormData>;
   /** URL of a floor plan already attached (edit mode) — shows "current" state. */
   existingFloorPlanUrl?: string | null;
@@ -565,7 +570,9 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-export function UnitFormModal({ open, propertyCategory, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title, layoutBulk = false, layoutUnitCount, leasingType }: Props) {
+export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial, existingFloorPlanUrl, propertyStandalone, propertyId, editingUnitId, feeRules, existingAddendums, planLabel, manager, rpQ, seedAddendumTerms, hasAddendumFile, onAddendumApplied, onClose, onSave, title, layoutBulk = false, layoutUnitCount, leasingType }: Props) {
+  // Only Ajman's tenancy contract prints a Sewerage Number.
+  const isAjmanUnit = (propertyEmirate ?? '').trim().toLowerCase() === 'ajman';
   const [form, setForm] = useState<UnitFormData>({ ...EMPTY_UNIT, ...initial });
   // Fee fields the user has typed in this session — they stop auto-recomputing
   // off the rent / unit type (mirrors the plan-pricing editor's `overridden`).
@@ -829,6 +836,12 @@ export function UnitFormModal({ open, propertyCategory, initial, existingFloorPl
               <div>
                 <label className={ds.lbl}>Utility Premises No.</label>
                 <input className={ds.input} placeholder="e.g. 1234567" value={form.premiseNumber} onChange={e => upd('premiseNumber', e.target.value)} />
+              </div>
+            )}
+            {!layoutBulk && isAjmanUnit && (
+              <div>
+                <label className={ds.lbl}>Sewerage No.</label>
+                <input className={ds.input} placeholder="e.g. 1922057213" value={form.sewerageNumber} onChange={e => upd('sewerageNumber', e.target.value)} />
               </div>
             )}
           </div>

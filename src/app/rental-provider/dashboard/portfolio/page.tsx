@@ -53,7 +53,6 @@ interface Property {
   communityName: string | null;
   street: string | null;
   makaniNumber: string | null;
-  sewerageNumber: string | null;
   plotNumber: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -179,7 +178,6 @@ function formToCreateDto(data: PropertyFormData) {
     numberOfFloors: data.numberOfFloors || undefined,
     numberOfUnits: data.numberOfUnits ? Number(data.numberOfUnits) : undefined,
     makaniNumber: data.makaniNumber || undefined,
-    sewerageNumber: data.sewerageNumber || undefined,
     plotNumber: data.plotNumber || undefined,
     latitude: data.latitude ?? undefined,
     longitude: data.longitude ?? undefined,
@@ -754,7 +752,6 @@ export default function PortfolioPage() {
             communityId:         propertyModal.editing.communityId ?? null,
             subCommunityId:      propertyModal.editing.subCommunityId ?? null,
             makaniNumber:        propertyModal.editing.makaniNumber ?? '',
-            sewerageNumber:      propertyModal.editing.sewerageNumber ?? '',
             plotNumber:          propertyModal.editing.plotNumber ?? '',
             street:              propertyModal.editing.street ?? '',
             propertyDescription: propertyModal.editing.propertyDescription ?? '',

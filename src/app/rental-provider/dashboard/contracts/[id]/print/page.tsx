@@ -94,6 +94,7 @@ function toEjari(c: any, signatures: any[]): EjariContractData {
       floor: c.unit?.floor ?? null,
       sizeSqm: c.unit?.sizeSqm ?? null,
       dewaPremiseNumber: c.unit?.dewaPremiseNumber ?? null,
+      sewerageNumber: c.unit?.sewerageNumber ?? null,
       bedrooms: c.unit?.bedrooms ?? null,
     },
     signatures: (Array.isArray(signatures) ? signatures : []).map((s) => ({

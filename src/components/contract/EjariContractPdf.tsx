@@ -72,7 +72,7 @@ export interface EjariContractData {
   // municipal sector its form prints as `Sector`. `subCommunity` is the numbered
   // district ("Al Nuaimiya 2") that same form prints as `District`.
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; city?: string | null; subCommunity?: string | null; plotNumber: string | null; makaniNumber: string | null; sewerageNumber?: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
-  unit: { number: string | null; name: string | null; type: string | null; floor?: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; bedrooms?: number | null };
+  unit: { number: string | null; name: string | null; type: string | null; floor?: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; sewerageNumber?: string | null; bedrooms?: number | null };
   signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
   /** Ajman-form overrides. The Ajman tenancy contract prints boxes our model has
    *  no source for (Sector, Floor, Room, Sewerage No., the Request Details block,

@@ -36,6 +36,7 @@ export interface UnitRecord {
   unitTier: string;
   floor: string | null;
   premiseNumber: string | null;
+  sewerageNumber: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
   parkingSpaces: number | null;
@@ -149,6 +150,7 @@ export function unitFormToDto(data: UnitFormData) {
     unitTier: data.unitTier || 'standard',
     floor: clearable(data.floor),
     premiseNumber: clearable(data.premiseNumber),
+    sewerageNumber: clearable(data.sewerageNumber),
     unitSizeSqft: num(data.unitSizeSqft) ?? undefined,
     unitSizeSqm: num(data.unitSizeSqm) ?? undefined,
     bedrooms: !residential ? null : data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
@@ -192,6 +194,7 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     unitTier:         u.unitTier,
     floor:            u.floor ?? '',
     premiseNumber:    u.premiseNumber ?? '',
+    sewerageNumber:   u.sewerageNumber ?? '',
     bedrooms:         u.bedrooms != null ? String(u.bedrooms) : 'Studio',
     bathrooms:        u.bathrooms != null ? String(u.bathrooms) : '1',
     parkingSpaces:    u.parkingSpaces != null ? String(u.parkingSpaces) : '',
@@ -304,6 +307,7 @@ export async function saveLayoutDetails(opts: {
   const dto = unitFormToDto(data) as Record<string, unknown>;
   delete dto.unitNumber;
   delete dto.premiseNumber;
+  delete dto.sewerageNumber;
   delete dto.floor;
   const body = { propertyId, planLabel, ...dto };
   const rpQ = manager ? `?rp=${manager.rp}` : '';

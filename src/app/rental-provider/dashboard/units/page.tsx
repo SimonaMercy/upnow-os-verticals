@@ -33,7 +33,7 @@ import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
 
-interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null }
+interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null; emirate?: string | null }
 interface Resp {
   properties: PropOpt[];
   selectedPropertyId: number | null;
@@ -130,6 +130,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const leasingByProperty = useMemo(() => {
     const m = new Map<number, 'direct' | 'sub' | 'management' | null>();
     for (const p of data?.properties ?? []) m.set(p.id, p.leasingType ?? null);
+    return m;
+  }, [data]);
+  // propertyId → emirate, so the unit editor knows to show Ajman's Sewerage No.
+  const emirateByProperty = useMemo(() => {
+    const m = new Map<number, string | null>();
+    for (const p of data?.properties ?? []) m.set(p.id, p.emirate ?? null);
     return m;
   }, [data]);
   const [propertyId, setPropertyId] = useState<number | null>(null);
@@ -1078,6 +1084,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         <UnitFormModal
           open
           propertyCategory={unitModal.plan.spaceCategory ?? ''}
+          propertyEmirate={emirateByProperty.get(unitModal.plan.propertyId) ?? null}
           leasingType={leasingByProperty.get(unitModal.plan.propertyId) ?? null}
           title={unitModal.editingUnit ? 'Edit Unit' : 'Add Unit'}
           initial={unitModal.editingUnit ? unitToFormInitial(unitModal.editingUnit) : undefined}
