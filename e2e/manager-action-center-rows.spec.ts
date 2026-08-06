@@ -23,9 +23,14 @@ const ROUTES: Array<[string, RegExp]> = [
   ['Renewals to raise',            /\/dashboard\/manager\/operations\/\d+\?.*action=renew/],
   ['Renewal Offers — Awaiting Reply', /\/dashboard\/manager\/operations\/\d+/],
   ['Termination Requests',         /\/dashboard\/manager\/operations\/\d+/],
-  ['Bounced \\/ Overdue Cheques',  /\/dashboard\/manager\/contracts\/\d+/],
+  ['Bounced Cheques',              /\/dashboard\/manager\/contracts\/\d+/],
+  ['Overdue Cheques',              /\/dashboard\/manager\/contracts\/\d+/],
   ['Settlement Pending',           /\/dashboard\/manager\/contracts\/\d+\/settlement/],
   ['Delayed Follow-ups',           /\/dashboard\/manager\/tenants\/\d+/],
+  // Both document cards send the manager to the customer's KYC page — that is
+  // where a lapsed identity doc is actually replaced.
+  ['Expired Documents',            /\/dashboard\/manager\/tenants\/\d+/],
+  ['Expiry Not Recorded',          /\/dashboard\/manager\/tenants\/\d+/],
 ];
 
 test('every bucket is grouped unit rows that click to the right screen', async ({ page }) => {

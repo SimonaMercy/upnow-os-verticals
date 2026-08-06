@@ -30,12 +30,17 @@ async function overdueOrBounced(page: Page): Promise<number> {
   return Number(body.overdueOrBounced ?? -1);
 }
 
-/** Contract ids on the manager's "bounced / overdue cheques" bucket for RP 2. */
+/** Contract ids on the manager's cheque buckets for RP 2. Bounced and overdue
+ *  are separate cards — a replaced bounce has to drop off BOTH, so this checks
+ *  the union rather than picking one. */
 async function managerChequeBucket(page: Page): Promise<number[]> {
   const res = await page.request.get('/api/manager/action-center?rp=2');
   expect(res.ok()).toBeTruthy();
-  const body = await res.json() as { chequesAttention?: { items?: Array<{ id: number; bounced?: number; overdue?: number }> } };
-  return (body.chequesAttention?.items ?? []).map(i => i.id);
+  const body = await res.json() as {
+    chequesBounced?: { items?: Array<{ id: number }> };
+    chequesOverdue?: { items?: Array<{ id: number }> };
+  };
+  return [...(body.chequesBounced?.items ?? []), ...(body.chequesOverdue?.items ?? [])].map(i => i.id);
 }
 
 test('a replaced bounce drops off the landlord KPI and the manager action list', async ({ page }) => {
