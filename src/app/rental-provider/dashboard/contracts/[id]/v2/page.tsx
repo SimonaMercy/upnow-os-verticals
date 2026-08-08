@@ -6852,7 +6852,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     content = {
       tone: 'declined', icon: 'alert', sub: 'Renewal cancelled', label: 'Cancelled',
       headline: 'This renewal was cancelled before it started.',
-      body: 'The next term is void and its cheques were cancelled. The current lease keeps running to its own end date — propose a fresh renewal there if new terms are needed.',
+      // Reached two ways — the RP cancelled the renewal outright, OR the current
+      // lease was terminated and took its un-accepted renewal with it. Don't claim
+      // the current lease "keeps running": in the termination case it is winding down.
+      body: 'The next term is void and its cheques were cancelled. Nothing further happens on this row — if new terms are needed, propose a fresh renewal on the current lease.',
       timing: null,
       node: contract.parentContractId ? (
         <Link href={`${contractsBase}/${contract.parentContractId}/v2`} className="btn btn-jade" style={{ alignSelf: 'flex-start' }}>
