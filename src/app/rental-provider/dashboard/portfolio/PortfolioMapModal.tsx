@@ -42,6 +42,9 @@ interface PortfolioMapProperty {
   coverPhotoUrl?: string | null;
   spaceCategory?: string;
   rentTotal?: number;
+  // Admin-only: an RP looking at its own portfolio already knows the owner, so
+  // the landlord line only renders where the map spans several providers.
+  ownerName?: string | null;
 }
 
 // Occupancy-coloured pin. Colours are picked to stand off the Google Maps
@@ -340,6 +343,13 @@ function MapDetailCard({
             </span>
           )}
         </div>
+
+        {property.ownerName && (
+          <p className="truncate text-xs font-semibold text-[#1a7a5a]">
+            <span className="mr-1.5 text-[10px] font-bold uppercase tracking-[0.09em] text-[#a9a69e]">Rental provider</span>
+            {property.ownerName}
+          </p>
+        )}
 
         {(property.fullAddress || hasPin) && (
           <p className="flex items-center gap-1 truncate text-xs text-[#6b6860]">

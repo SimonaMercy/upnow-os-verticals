@@ -25,6 +25,7 @@ import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
+import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
@@ -139,6 +140,18 @@ export default function ManagerReportsPage() {
         onBack={() => navigate(null)}
         contractsBase="/dashboard/manager/contracts"
         leadsBase="/dashboard/manager/leads"
+      />
+    );
+  }
+  // Move-out Reasons renders its own chart + drill-down component, scoped to
+  // this managed landlord's book via rp=N.
+  if (openSlug === 'move-out-reasons') {
+    return (
+      <MoveOutReasonsReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        managerRp={effectiveRp}
       />
     );
   }

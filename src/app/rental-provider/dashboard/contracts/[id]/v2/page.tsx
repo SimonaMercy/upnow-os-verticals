@@ -58,6 +58,9 @@ import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequ
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
+import { errMessage } from '@/lib/apiError';
+import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
+import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
 import { docLabel } from '@/lib/docLabel';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans, installmentLabel } from '@/lib/installmentPlans';
@@ -219,6 +222,9 @@ interface ContractDetail {
     requestedByRole: 'tenant' | 'rental_provider' | null;
     requestedAt: string | null;
     reason: string | null;
+    /** Coded move-out reason (migration 0198) — what the Move-out Reasons
+     *  report counts. NULL on every lease terminated before it existed. */
+    reasonCode: string | null;
     effectiveDate: string | null;
     response: 'pending' | 'accepted' | 'rejected' | null;
     respondedAt: string | null;
@@ -1877,6 +1883,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             <div style={{ flex: 1 }}>
               <p className="bt">Effective {fmtDate(h.contract.termination.effectiveDate)}</p>
               <p className="bp">Requested {fmtDate(h.contract.termination.requestedAt)}</p>
+              {h.contract.termination.reasonCode && <p className="bp">Reason: {moveOutReasonLabel(h.contract.termination.reasonCode)}</p>}
               {h.contract.termination.reason && <div className="quote">&ldquo;{h.contract.termination.reason}&rdquo;</div>}
             </div>
           </div>
@@ -1899,6 +1906,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           <span className="bic"><Clock size={18} /></span>
           <div style={{ flex: 1 }}>
             <p className="bt">Effective {fmtDate(h.contract.termination.effectiveDate)}</p>
+            {h.contract.termination.reasonCode && <p className="bp">Reason: {moveOutReasonLabel(h.contract.termination.reasonCode)}</p>}
             {h.contract.termination.reason && <div className="quote">&ldquo;{h.contract.termination.reason}&rdquo;</div>}
           </div>
         </div>
@@ -1929,6 +1937,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                   ? 'Direct termination — the lease stays active until you mark the settlement paid.'
                   : 'Both parties have agreed. Complete the move-out inspection, then settle the security deposit.'}
               </p>
+              {h.contract.termination.reasonCode && <p className="bp">Reason: {moveOutReasonLabel(h.contract.termination.reasonCode)}</p>}
             </div>
           </div>
           <Link href={h.moveOutInspectionUrl} className="btn btn-jade btn-block">
@@ -5015,6 +5024,7 @@ function TerminateModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
   const [reason, setReason] = useState('');
+  const [reasonCode, setReasonCode] = useState('');
   const [effective, setEffective] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -5025,9 +5035,9 @@ function TerminateModal({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason, effectiveDate: effective }),
+        body: JSON.stringify({ reason, reasonCode, effectiveDate: effective }),
       });
-      if (!res.ok) throw new Error(`Termination request failed: ${res.status}`);
+      if (!res.ok) throw new Error(await errMessage(res, 'Termination request failed'));
       onSubmitted();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Termination request failed');
@@ -5050,8 +5060,13 @@ function TerminateModal({
             {contract.tenant.name ?? 'The customer'} must accept this request before the contract terminates.
           </p>
           <div className="field">
-            <label>Reason</label>
-            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why are you ending this contract?" />
+            <label>Move-out reason</label>
+            <MoveOutReasonSelect value={reasonCode} onChange={setReasonCode} />
+            <p className="note" style={{ marginTop: 6 }}>Counted in the Move-out Reasons report.</p>
+          </div>
+          <div className="field">
+            <label>Details{moveOutReason(reasonCode)?.requiresNote ? '' : ' (optional)'}</label>
+            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Anything the reason above doesn't say" />
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label>Effective date</label>
@@ -5061,7 +5076,7 @@ function TerminateModal({
         </div>
         <div className="mf">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn btn-brick btn-sm" disabled={!reason.trim() || !effective || busy} onClick={submit}>
+          <button className="btn btn-brick btn-sm" disabled={!moveOutReasonReady(reasonCode, reason) || !effective || busy} onClick={submit}>
             Send request
           </button>
         </div>
@@ -5077,6 +5092,7 @@ function DirectTerminateModal({
   contract, onClose, onSubmitted,
 }: { contract: ContractDetail; onClose: () => void; onSubmitted: () => void }) {
   const [reason, setReason] = useState('');
+  const [reasonCode, setReasonCode] = useState('');
   const [effective, setEffective] = useState(new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -5087,9 +5103,9 @@ function DirectTerminateModal({
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason, effectiveDate: effective }),
+        body: JSON.stringify({ reason, reasonCode, effectiveDate: effective }),
       });
-      if (!res.ok) throw new Error(`Direct termination failed: ${res.status}`);
+      if (!res.ok) throw new Error(await errMessage(res, 'Direct termination failed'));
       onSubmitted();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Direct termination failed');
@@ -5112,8 +5128,13 @@ function DirectTerminateModal({
             The customer has already vacated. This ends the lease without their approval and starts the move-out → utility → settlement close-out. The lease stays active until you complete the settlement.
           </p>
           <div className="field">
-            <label>Reason</label>
-            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why are you ending this contract?" />
+            <label>Move-out reason</label>
+            <MoveOutReasonSelect value={reasonCode} onChange={setReasonCode} />
+            <p className="note" style={{ marginTop: 6 }}>Counted in the Move-out Reasons report.</p>
+          </div>
+          <div className="field">
+            <label>Details{moveOutReason(reasonCode)?.requiresNote ? '' : ' (optional)'}</label>
+            <textarea className="input" value={reason} onChange={e => setReason(e.target.value)} placeholder="Anything the reason above doesn't say" />
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label>Effective date</label>
@@ -5123,7 +5144,7 @@ function DirectTerminateModal({
         </div>
         <div className="mf">
           <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn btn-brick btn-sm" disabled={!reason.trim() || !effective || busy} onClick={submit}>
+          <button className="btn btn-brick btn-sm" disabled={!moveOutReasonReady(reasonCode, reason) || !effective || busy} onClick={submit}>
             Terminate directly
           </button>
         </div>
@@ -5380,7 +5401,7 @@ function RenewalProposeModal({
   // sub-lease pass-through lines, whose labels declare them a percentage of the
   // rent — and a renewal is exactly where the rent changes. Those two re-derive
   // from the net rent below (and again whenever the rent field moves), so the
-  // offer can never quote last year's percentage, nor the unit's Market Price
+  // offer can never quote last year's percentage, nor the unit's Market Rent
   // percentage when the lease is let for less.
   const [extras, setExtras] = useState<{ description: string; amount: string; dueDate: string }[]>(() => {
     // Carried charges fall due on the FIRST installment date (same as the rent

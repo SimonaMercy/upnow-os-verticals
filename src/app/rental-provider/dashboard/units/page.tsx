@@ -539,10 +539,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     <div className="flex items-end justify-between gap-3">
       <div>
         {/* Plan-wide TOTALS across the layout's units — not a per-unit range.
-            Market Price = Σ every unit's asking rent; Annual Rent = Σ each
+            Market Rent = Σ every unit's asking rent; Annual Rent = Σ each
             leased unit's latest-lease annual rent. */}
         <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>
-          MARKET PRICE{p.unitCount > 1 ? ` · ${p.unitCount} UNITS` : ''}
+          MARKET RENT{p.unitCount > 1 ? ` · ${p.unitCount} UNITS` : ''}
         </div>
         {p.rentSum != null && p.rentSum > 0 ? (
           <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
@@ -729,10 +729,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11.5, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
         </div>
-        {/* Market Price (asking) + contracted Annual Rent (latest lease) —
+        {/* Market Rent (asking) + contracted Annual Rent (latest lease) —
             mirrors the portfolio's per-property pairing. */}
         <div className="text-right shrink-0">
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
           {price != null
             ? <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>AED {aed(Number(price))} <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
             : <div style={{ fontSize: 14, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
@@ -772,9 +772,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
           <div className="mt-auto flex items-end justify-between gap-2" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
-            {/* Market Price (asking) + contracted Annual Rent (latest lease). */}
+            {/* Market Rent (asking) + contracted Annual Rent (latest lease). */}
             <div>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
               {price != null
                 ? <div style={{ fontSize: 17, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums' }}>AED {aed(Number(price))} <span style={{ fontSize: 11, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
                 : <div style={{ fontSize: 13, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}

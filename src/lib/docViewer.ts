@@ -78,8 +78,61 @@ export function openDocViewer(docs: DocViewerDoc | DocViewerDoc[], title = 'Docu
   notify();
 }
 
+/**
+ * Open stored documents by their document id, streaming the bytes through the
+ * API instead of pointing the viewer at the storage bucket.
+ *
+ * `documents.file_url` holds a bare `storage.googleapis.com/...` URL, and that
+ * bucket denies anonymous reads — a browser fetch of it comes back 403 and gets
+ * dropped as ERR_BLOCKED_BY_ORB, so the viewer opened on a document that could
+ * never load. GET /documents/:id/file streams the same bytes same-origin with
+ * the session cookie, which is what that endpoint was added for.
+ *
+ * The response is turned into a `blob:` URL so everything downstream — the
+ * image path (`img.src`), the pdf.js path (`fetch`, which omits credentials) —
+ * keeps working unchanged and stays same-origin.
+ *
+ * Blob URLs are revoked when the viewer closes; holding them for the life of the
+ * modal is what lets the canvas re-read the bytes on rotate.
+ */
+export async function openDocViewerByIds(
+  docs: ReadonlyArray<{ id: number; caption?: string | null; mimeType?: string | null }>,
+  title = 'Document',
+): Promise<void> {
+  const loaded = await Promise.all(
+    docs.map(async (d) => {
+      try {
+        const res = await fetch(`/api/documents/${d.id}/file`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return {
+          fileUrl: URL.createObjectURL(blob),
+          caption: d.caption ?? null,
+          // The canvas picks its image/PDF branch off the URL extension, which a
+          // blob: URL does not have — carry the real type across instead.
+          mimeType: d.mimeType ?? blob.type ?? null,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const list = loaded.filter((d): d is NonNullable<typeof d> => d != null);
+  if (!list.length) return;
+  current = { docs: list, title, watermark: currentDocWatermark() };
+  notify();
+}
+
 export function closeDocViewer(): void {
   if (!current) return;
+  // Release any blob: URLs this viewer minted (openDocViewerByIds), so the bytes
+  // are not pinned in memory for the rest of the session.
+  for (const d of current.docs) {
+    if (d.fileUrl?.startsWith('blob:')) URL.revokeObjectURL(d.fileUrl);
+  }
   current = null;
   notify();
 }

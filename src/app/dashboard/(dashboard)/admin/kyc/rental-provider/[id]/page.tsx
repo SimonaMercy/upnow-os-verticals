@@ -380,7 +380,7 @@ export default function RpKycDetailPage() {
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to KYC Queue
+          Back to Profile Verification
         </button>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-3">

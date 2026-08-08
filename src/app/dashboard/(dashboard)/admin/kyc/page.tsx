@@ -2120,7 +2120,7 @@ export default function AdminKycPage() {
         style={{ borderColor: "var(--color-base-200)" }}>
 
         <span className="text-sm font-bold mr-3 shrink-0" style={{ color: "var(--color-neutral-900)" }}>
-          KYC Queue
+          Profile Verification
         </span>
 
         {([

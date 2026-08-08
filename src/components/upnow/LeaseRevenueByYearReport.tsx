@@ -178,7 +178,7 @@ export function LeaseRevenueByYearReport({
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
             <Kpi label="Active leases" value={String(data.totals.leases)} sub={`${data.years[0] ?? '—'}–${data.years[data.years.length - 1] ?? '—'}`} Icon={CalendarClock} />
             <Kpi label="Annual Rent" value={fmtAed(data.totals.annualRentFils)} sub="contracted · latest lease / unit" Icon={TrendingUp} />
-            <Kpi label="Market Price" value={fmtAed(data.totals.marketPriceFils)} sub="asking rent · all units" Icon={Coins} />
+            <Kpi label="Market Rent" value={fmtAed(data.totals.marketPriceFils)} sub="asking rent · all units" Icon={Coins} />
           </div>
 
           {/* ── Summary by Year (per-unit annual rent snapshot) ──────────────── */}
@@ -208,7 +208,7 @@ export function LeaseRevenueByYearReport({
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-[#8a8780] mt-3">{data.totals.leasedUnits} of {data.totals.totalUnits} units are leased ({data.totals.totalUnits - data.totals.leasedUnits} never leased). Market Price counts all {data.totals.totalUnits}.</p>
+            <p className="text-xs text-[#8a8780] mt-3">{data.totals.leasedUnits} of {data.totals.totalUnits} units are leased ({data.totals.totalUnits - data.totals.leasedUnits} never leased). Market Rent counts all {data.totals.totalUnits}.</p>
           </Section>
 
           {/* ── Leases (active leases with their annual rent) ────────────────── */}

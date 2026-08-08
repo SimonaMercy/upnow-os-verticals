@@ -112,13 +112,15 @@ export default function AdminPropertyDetailPage() {
         ))}
       </div>
 
-      {/* Money for the building. Market Price is the asking rent across every
+      {/* Money for the building. Market Rent is the asking rent across every
           unit; Annual Rent is what is actually contracted, counting one
-          qualifying lease per unit — so the pair reads asking vs earning. */}
+          qualifying lease per unit — so the pair reads asking vs earning.
+          These two names are the platform-wide vocabulary; do not reintroduce
+          "market price" or "market value" for the same figure. */}
       {fin && (fin.marketPrice > 0 || fin.annualRent > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
           <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
-            <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Market price</div>
+            <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Market rent</div>
             <div className="text-2xl font-bold text-[#1a1916] tabular-nums mt-1">{aed(fin.marketPrice)}</div>
             <div className="text-[11px] text-[#9b9890] mt-0.5">asking rent · all {fin.totalUnits} units</div>
           </div>
@@ -246,7 +248,7 @@ export default function AdminPropertyDetailPage() {
             {d.units.map((u) => (
               <Link key={u.id} href={`/dashboard/admin/units/${u.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-[#faf9f7] transition">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[#3f3d39]">{u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? `Unit #${u.id}`)}</div>
+                  <div className="text-sm font-semibold text-[#3f3d39]">{u.unitNumber ? `Unit ${u.unitNumber}` : `Unit #${u.id}`}</div>
                   <div className="text-xs text-[#6b6860]">{[u.unitType, u.bedrooms ? `${u.bedrooms} BR` : null].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">

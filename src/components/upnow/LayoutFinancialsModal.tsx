@@ -296,7 +296,7 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
     let price: number | null = null;
     if (priceStr !== '') {
       price = Number(priceStr);
-      if (!Number.isFinite(price) || price < 0) { setErr('Enter a valid market price'); return; }
+      if (!Number.isFinite(price) || price < 0) { setErr('Enter a valid market rent'); return; }
     }
 
     // Lease terms + leasing config + Special Conditions — the editor is the
@@ -346,9 +346,9 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
         </header>
 
         <div className={ds.modalBody}>
-          {/* Market Price (asking rent) — the single price (drives the fee auto-defaults). */}
+          {/* Market Rent (asking rent) — the single price (drives the fee auto-defaults). */}
           <div className={ds.field}>
-            <label className={ds.lbl}>Market Price (AED)</label>
+            <label className={ds.lbl}>Market Rent (AED)</label>
             <input type="number" min={0} step="any" autoFocus placeholder="e.g. 85000" value={vals.rentalPrice}
               onChange={e => onRentChange(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') save(); }}

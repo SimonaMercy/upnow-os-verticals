@@ -64,14 +64,14 @@ const EXPORTS: ExportDef[] = [
   {
     key: 'contracts-new-lease',
     title: 'Contracts — New Lease',
-    description: 'New leases: market price, rent, cheque splits, fees, terms & documents.',
+    description: 'New leases: market rent, rent, cheque splits, fees, terms & documents.',
     url: '/api/platform-export/contracts?type=new',
     Icon: FileSignature,
   },
   {
     key: 'contracts-renewal',
     title: 'Contracts — Renewal',
-    description: 'Renewals: market price, rent, cheque splits, fees, terms & documents.',
+    description: 'Renewals: market rent, rent, cheque splits, fees, terms & documents.',
     url: '/api/platform-export/contracts?type=renewal',
     Icon: RefreshCw,
   },

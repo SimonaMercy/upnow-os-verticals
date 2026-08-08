@@ -229,7 +229,7 @@ export interface UnitFormData {
    *  payment row. */
   additionalPayments: Array<{ label: string; amount: string; vat: string }>;
   /** Sub-lease properties only — when on, a 20%-of-Market-Price charge plus a 5%
-   *  VAT-on-that line are auto-synced from the Market Price and materialised into
+   *  VAT-on-that line are auto-synced from the Market Rent and materialised into
    *  `additionalPayments` on save. Optional (off by default). */
   subleaseCharge: boolean;
   description: string;
@@ -685,8 +685,8 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
   };
 
   // Sub-lease charge — offered only for sub-lease properties. Both lines recompute
-  // live from the Market Price so the toggle is always exact ("auto-calculated
-  // with market price"). Rounded to whole AED like every other fee.
+  // live from the Market Rent so the toggle is always exact ("auto-calculated
+  // with market rent"). Rounded to whole AED like every other fee.
   const showSublease = leasingType === 'sub';
   const subleaseNet  = Math.round((Number(form.rentalPrice) || 0) * 0.20);
   const subleaseVat  = Math.round(subleaseNet * 0.05);
@@ -899,7 +899,7 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
 
           <div className={ds.grid2}>
             <div className={ds.field}>
-              <label className={ds.lbl}>Market Price (AED) <span className={ds.req}>*</span></label>
+              <label className={ds.lbl}>Market Rent (AED) <span className={ds.req}>*</span></label>
               <input type="number" min="0" step="any" className={cn(ds.input, errors.rentalPrice && ds.inputErr)} placeholder="e.g. 85000"
                 value={form.rentalPrice} onChange={e => upd('rentalPrice', e.target.value)} />
               {errors.rentalPrice && <p className={ds.errText}>{errors.rentalPrice}</p>}
@@ -923,19 +923,19 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
                     onChange={e => setForm(f => ({ ...f, subleaseCharge: e.target.checked }))} />
                   <div style={{ flex: 1 }}>
                     <div className={ds.addRowTitle}>Sub-lease charge <span style={{ fontWeight: 600, fontSize: 10.5, color: '#8a7a4e', border: '1px solid #d9c891', background: '#fff', borderRadius: 5, padding: '1px 6px', marginLeft: 6 }}>SUB-LEASE ONLY</span></div>
-                    <div className={ds.addRowSub}>Auto-calculated from Market Price. Optional — leave off if this landlord doesn’t apply it.</div>
+                    <div className={ds.addRowSub}>Auto-calculated from Market Rent. Optional — leave off if this landlord doesn’t apply it.</div>
                   </div>
                 </label>
                 {form.subleaseCharge && (
                   subleaseNet > 0 ? (
                     <div style={{ marginTop: 10, borderTop: '1px solid #ece0c5', paddingTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 7, columnGap: 12, fontSize: 12.5 }}>
-                      <span style={{ color: '#5c5647' }}>20% on sub-lease <span style={{ color: '#9b8f6b' }}>· 20% × Market Price</span></span>
+                      <span style={{ color: '#5c5647' }}>20% on sub-lease <span style={{ color: '#9b8f6b' }}>· 20% × Market Rent</span></span>
                       <strong style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {subleaseNet.toLocaleString('en-AE')}</strong>
                       <span style={{ color: '#5c5647' }}>5% VAT on sub-lease <span style={{ color: '#9b8f6b' }}>· 5% × the 20%</span></span>
                       <strong style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {subleaseVat.toLocaleString('en-AE')}</strong>
                     </div>
                   ) : (
-                    <p style={{ marginTop: 9, fontSize: 11.5, color: '#b06b2c', fontStyle: 'italic' }}>Enter a Market Price above to calculate the sub-lease charge.</p>
+                    <p style={{ marginTop: 9, fontSize: 11.5, color: '#b06b2c', fontStyle: 'italic' }}>Enter a Market Rent above to calculate the sub-lease charge.</p>
                   )
                 )}
               </div>

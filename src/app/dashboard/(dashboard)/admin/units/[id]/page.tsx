@@ -159,7 +159,7 @@ export default function AdminUnitDetailPage() {
           <div className="flex items-start gap-3 min-w-0">
             <span className="w-11 h-11 rounded-xl bg-[#f0faf6] text-[#1a7a5a] grid place-items-center shrink-0"><Home size={20} /></span>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold text-[#1a1916] leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : (u.unitName ?? `Unit #${u.id}`)}</h1>
+              <h1 className="text-xl font-bold text-[#1a1916] leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : `Unit #${u.id}`}</h1>
               <Link href={`/dashboard/admin/properties/${u.propertyId}`} className="text-sm text-[#1a7a5a] hover:underline inline-flex items-center gap-1.5 mt-1"><Building2 size={13} /> {prop?.buildingName ?? 'Property'} <ExternalLink size={11} /></Link>
               <p className="text-xs text-[#9b9890] mt-0.5">{loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</p>
             </div>
