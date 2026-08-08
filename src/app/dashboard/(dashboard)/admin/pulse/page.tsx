@@ -998,9 +998,12 @@ export default function PlatformPulsePage() {
             What the platform sees at login — portfolio-wide across all rental providers
           </p>
         </div>
+        {/* No "Live activity" shortcut: /dashboard/admin/activity is parked
+            `hidden: true` in the nav rail, so a link here would be the only
+            door into a page the product has deliberately closed. Same reason
+            the Activity and Risk board hints are gone from the cards below. */}
         <div className="flex items-center gap-2 flex-wrap">
           <StatusChip status={status} open={statusOpen} onToggle={() => setStatusOpen((o) => !o)} />
-          <Link href="/dashboard/admin/activity" className="text-[11px] font-semibold text-[#6b6860] border border-[#e8e6e0] bg-white rounded-full px-3 py-1.5 hover:border-[#d4d2cc]">Live activity</Link>
         </div>
       </div>
 
@@ -1653,8 +1656,7 @@ export default function PlatformPulsePage() {
       </div>
       <div className="mt-3">
         <ChartCard title="Deposit settlement aging"
-          sub={`${risk.settlementsCount} settlement${risk.settlementsCount === 1 ? '' : 's'} pending, ${fmtAED(risk.settlementsPending)} — how long money owed back has been waiting since the lease ended`}
-          href="/dashboard/admin/risk" hint="Risk board">
+          sub={`${risk.settlementsCount} settlement${risk.settlementsCount === 1 ? '' : 's'} pending, ${fmtAED(risk.settlementsPending)} — how long money owed back has been waiting since the lease ended`}>
           {risk.settlementsCount === 0 ? <EmptyChart text="No deposit settlements pending" h={150} /> : (
             <HBars height={150} fmt={(v) => `${v} cases`} rows={data.exposure.depositAging.map((b, i) => ({
               name: b.bucket, value: b.cases, color: ['#8fb4de', '#5f92cc', '#3a6fb0', '#274e85'][i],
@@ -1674,8 +1676,7 @@ export default function PlatformPulsePage() {
           page views are READS (line) — two different things on one timeline, so
           a quiet-but-watched day is visible rather than reading as inactivity. */}
       <ChartCard title="Platform activity / day"
-        sub={`Last 30 days · ${data.usage.actions30d.toLocaleString()} actions by ${data.usage.activeUsers30d} users`}
-        href="/dashboard/admin/activity" hint="Activity">
+        sub={`Last 30 days · ${data.usage.actions30d.toLocaleString()} actions by ${data.usage.activeUsers30d} users`}>
         <div className="flex items-center gap-4 text-[11px] text-[#6b6860] mb-1">
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[2px] inline-block" style={{ background: BLUE }} />Actions</span>
           <span className="flex items-center gap-1.5"><span className="w-3.5 h-0.5 inline-block" style={{ background: JADE }} />Page views</span>
@@ -1696,8 +1697,7 @@ export default function PlatformPulsePage() {
 
       <div className="mt-3" />
       <ChartCard title="Platform usage heatmap"
-        sub={`Audit-logged actions per hour across the week, last 30 days · ${data.usage.actions30d.toLocaleString()} actions by ${data.usage.activeUsers30d} users`}
-        href="/dashboard/admin/activity" hint="Activity">
+        sub={`Audit-logged actions per hour across the week, last 30 days · ${data.usage.actions30d.toLocaleString()} actions by ${data.usage.activeUsers30d} users`}>
         {/* The answer, before the picture. */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
           {[
@@ -1769,8 +1769,7 @@ export default function PlatformPulsePage() {
           Views without leads is the signal worth acting on. */}
       <div className="mt-3">
         <ChartCard title="Most-viewed listings · public"
-          sub={`Last 30 days · ${data.usage.listings.totalViews.toLocaleString()} view${data.usage.listings.totalViews === 1 ? '' : 's'} by ${data.usage.listings.visitors.toLocaleString()} visitor${data.usage.listings.visitors === 1 ? '' : 's'} on the public listing pages`}
-          href="/dashboard/admin/activity" hint="Activity">
+          sub={`Last 30 days · ${data.usage.listings.totalViews.toLocaleString()} view${data.usage.listings.totalViews === 1 ? '' : 's'} by ${data.usage.listings.visitors.toLocaleString()} visitor${data.usage.listings.visitors === 1 ? '' : 's'} on the public listing pages`}>
           {data.usage.listings.top.length === 0 ? (
             <EmptyChart text="No public listing views in the last 30 days" h={140} />
           ) : (
