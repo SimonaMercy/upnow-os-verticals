@@ -29,7 +29,7 @@ export type CustomerStateKey =
   | 'move_in' | 'move_in_review' | 'active'
   | 'termination_request_received' | 'termination_request_sent'
   | 'renewal_offered' | 'renewal_documents' | 'renewal_cheques' | 'renewal_cheques_review'
-  | 'renewal_progress' | 'renewal_ejari' | 'renewal_active'
+  | 'renewal_progress' | 'renewal_ejari' | 'renewal_ready' | 'renewal_active'
   | 'rejected' | 'withdrawn' | 'terminated' | 'renewal_rejected'
   | 'superseded' | 'terminating';
 
@@ -140,7 +140,8 @@ export const CUSTOMER_STATE_DEFS: Record<CustomerStateKey, CustomerStateDef> = {
   renewal_cheques_review:        { label: 'Payments under review',         sub: 'Renewal step 3 of 6',                mode: 'renewal', currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',        body: 'Each cheque is being verified and collected before your renewal goes for signature.',                                                                                                           timing: 'Usually within 1 business day' },
   renewal_progress:              { label: 'Sign your renewal',             sub: 'Renewal step 4 of 6',             mode: 'renewal', currentIndex: 3,  tone: 'action',    headline: 'Last bit — sign your renewal.',                          body: 'Add your signature to lock in the renewed lease.',                                                                                                                                                timing: 'Takes ~2 min' },
   renewal_ejari:                 { label: 'Renewing Contract Registration',                sub: 'Renewal step 5 of 6',             mode: 'renewal', currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is renewing your Contract Registration Certificate.',                 body: '',                                                                                                                                                                                             timing: '2-5 business days' },
-  renewal_active:                { label: 'Renewal active',                sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
+  renewal_ready:                 { label: 'Renewal confirmed',             sub: 'Renewal step 6 of 6',             mode: 'renewal', currentIndex: 5,  tone: 'waiting',   headline: 'Your renewal is confirmed and starts when your current lease ends.',                        body: 'Contract Registration is complete — nothing further is needed from you. The new term takes over automatically on its start date.',                                                              timing: null },
+  renewal_active:                { label: 'Renewal active',              sub: 'Renewal step 6 of 6 — done',      mode: 'renewal', currentIndex: 5,  tone: 'celebrate', headline: 'Your renewal is live.',                                   body: 'Everything carries over — same unit, same deposit, fresh paperwork.',                                                                                                                           timing: null },
 
   rejected:                      { label: 'Application declined',          sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'Your rental provider declined this application.',        body: "Sometimes it's the provider, sometimes it's timing. We'll help you find a place that fits.",                                                                                                  timing: null },
   withdrawn:                     { label: 'You declined this unit',        sub: 'This unit',                       mode: 'rejected', currentIndex: -1, tone: 'declined', headline: 'You declined this offer.',                               body: "No problem — this unit is off your list. Whenever you're ready, we'll help you find a place that fits.",                                                                                       timing: null },
@@ -310,7 +311,6 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
   if (rc) {
     if (rc.status === 'terminated') return 'renewal_rejected';
     if (rc.status === 'active') return 'renewal_active';
-    if (rc.ejariStatus === 'registered') return 'renewal_ejari';
     if (rc.status === 'issued') {
       // Renewal setup order MATCHES the RP renewal pipeline (Operations kanban):
       //   Terms → Documents (expired KYC) → Cheques/PDC → Signatures → Ejari → Active.
@@ -334,9 +334,23 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
       //    hasn't, SignatureAction shows a "waiting for your landlord" state, so the
       //    customer is never asked to sign twice.
       if (!(rc.tenantSignedAt && rc.landlordSignedAt)) return 'renewal_progress';
-      // 4. Both signed → Awaiting Ejari (RP uploads it → auto-activates).
-      return 'renewal_ejari';
+      // 4. Both signed → Awaiting Ejari, then done.
+      //
+      // `registered` means the registration FINISHED, so it must not keep showing
+      // "your provider is renewing your Contract Registration Certificate" — the
+      // old check returned that waiting screen precisely when the work was over,
+      // and the customer sat on it indefinitely (CID-365).
+      //
+      // Registered ≠ active. A renewal registered ahead of its start date stays
+      // `issued` on purpose — going live now would put two active leases on the
+      // unit — and the daily cron flips it on the start date
+      // (_autoActivateOnEjari: "activation deferred until <start>"). So there is a
+      // real state between the two: everything done, nothing left to do, not yet
+      // live. Claiming "Your renewal is live" here would be a lie.
+      return rc.ejariStatus === 'registered' ? 'renewal_ready' : 'renewal_ejari';
     }
+    // Any other child status (draft/pending) with registration already done.
+    if (rc.ejariStatus === 'registered') return 'renewal_ready';
     return 'renewal_cheques';
   }
 

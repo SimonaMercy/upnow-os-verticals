@@ -1026,6 +1026,10 @@ function DownloadCard({ href, icon, title, sub }: { href: string; icon: React.Re
 const DOWNLOAD_STATES = new Set<StateKey>([
   'awaiting_rp_confirm', 'signature', 'ejari', 'utility', 'utility_review', 'move_in',
   'renewal_cheques', 'renewal_cheques_review', 'renewal_progress', 'renewal_ejari',
+  // Keep the panel through renewal_ready: registration has just COMPLETED, which is
+  // exactly when the certificate becomes downloadable. Dropping it here would hide
+  // the document at the moment it first exists.
+  'renewal_ready',
 ]);
 /**
  * Standalone section (rendered BELOW the current-step card, never inside it) so
@@ -1165,6 +1169,9 @@ function ActionBody({ stateKey, resolved, onRefresh }: { stateKey: StateKey; res
     case 'renewal_cheques_review':        return <RenewalChequesAction resolved={resolved} onRefresh={onRefresh} />;
     case 'renewal_progress':              return <SignatureAction resolved={resolved} onRefresh={onRefresh} renewal />;
     case 'renewal_ejari':                 return <WaitingBadge />;
+    // Registration done, term not started — nothing for the customer to do, so the
+    // same waiting body; the copy (STATE_DEFS) is what changes.
+    case 'renewal_ready':                 return <WaitingBadge />;
     case 'renewal_active':                return <ActiveAction resolved={resolved} onRefresh={onRefresh} />;
     case 'rejected':                      return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
     case 'withdrawn':                     return <EndStateAction primaryLabel="Browse other listings" primaryHref="/listings" />;
