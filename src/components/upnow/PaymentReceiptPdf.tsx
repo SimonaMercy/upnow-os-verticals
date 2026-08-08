@@ -226,20 +226,18 @@ const isVat = isVatCheque;
  *  NOT rental income — mirrors the Payments ledger, where 'other' is its own
  *  category, not rent. Kept out of isRental below so they never inflate rent. */
 const GOVT_TYPES = new Set(['vat', 'other']);
+/**
+ * Third Party — every pass-through the RP collects but does not earn: VAT cheques
+ * ("Fees VAT", "Rental VAT"), the sub-lease levy and its tax, service charges.
+ *
+ * VAT is SEGREGATED here, all of it, on one receipt (user decision, 8 Aug 2026) —
+ * the same rule that moved `vat_rental` out of Rental Income and that already
+ * files the sub-lease pass-throughs ("5% VAT on sub-lease") under Third Party. So
+ * the Rental Income and Management Fee receipts carry NET only: the fees' tax
+ * rides its own "Fees VAT" cheque and prints here beside the other tax lines.
+ */
 function isGovernment(p: ReceiptPayment): boolean {
   return GOVT_TYPES.has((p.paymentType ?? '').toLowerCase());
-}
-/**
- * The one-off fees' VAT, collected on its OWN "Fees VAT" cheque (backend
- * `splitVatToOwnCheques` / the lead plan's `splitPlanVatToOwnItems`). It is the
- * tax on the ADMIN / COMMISSION fees, so it prints on the MANAGEMENT FEE receipt
- * beside them — on the Third Party receipt it sat directly under the Contract
- * Registration Fee, which made that receipt total VAT against a fee whose rule is
- * not VAT-rated at all (staging CID-363, a mixed-use lease: registration 220 with
- * 25 of VAT under it, the 25 being the admin fee's).
- */
-function isFeeVat(p: ReceiptPayment): boolean {
-  return isVat(p) && /fees\s*vat/i.test(p.description ?? '');
 }
 function isRental(p: ReceiptPayment): boolean {
   const t = (p.paymentType ?? '').toLowerCase();
@@ -358,9 +356,8 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     // so show its real split — never as net-0 VAT, and never as rent.
     const govVat = isTaxCharge(sel) ? gross : vat;
     const govNet = round2(gross - govVat);
-    // The "Fees VAT" cheque is the management fees' tax, so on its own it heads a
-    // Management Fee receipt — matching where it sits on the combined document.
-    return { kind: 'fee', title: isFeeVat(sel) ? 'MANAGEMENT FEE RECEIPT' : 'THIRD PARTY RECEIPT',
+    // Every tax row — the "Fees VAT" cheque included — is a Third Party charge.
+    return { kind: 'fee', title: 'THIRD PARTY RECEIPT',
       receiptNo: realNo ?? `RCP-${contract.ref}-VAT`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || (isVat(sel) ? 'VAT' : 'Government charge'), net: govNet, vat: govVat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
   }
@@ -491,22 +488,19 @@ function govLine(p: ReceiptPayment, contract: ReceiptContract): LineItem {
   };
 }
 
-/** MANAGEMENT FEE receipt — Admin / Commission and the "Fees VAT" cheque that is
- *  their tax, each net + VAT, mirroring the Payments ledger's Management Fee
- *  category. (Ejari is a Third Party charge — see buildVatReceipt.) */
+/** MANAGEMENT FEE receipt — Admin / Commission NET, mirroring the Payments
+ *  ledger's Management Fee category. Their tax rides the "Fees VAT" cheque, which
+ *  prints on the Third Party receipt with every other tax line (isGovernment).
+ *  (Ejari is a Third Party charge too — see buildVatReceipt.) */
 function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPayment[]): Receipt | null {
   const { lines, feeCount } = feeLinesOf(contract, rentRows);
-  // The fee VAT rides with the fees it was charged on, not with the registration
-  // fee it happens to share a cheque date with (isFeeVat).
-  const feeVatRows = (contract.payments ?? []).filter(isFeeVat);
-  const all = [...lines, ...feeVatRows.map(p => govLine(p, contract))];
-  if (all.length === 0) return null;
+  if (lines.length === 0) return null;
   const feeRows = (contract.fees ?? []).filter(isFee);
   return { kind: 'management', title: 'MANAGEMENT FEE RECEIPT',
     receiptNo: planSegRef(contract, 'management') ?? `RCP-${contract.ref}-MGMT`,
     numberIsPlanRef: !!contract.paymentRefs?.planRefNo,
     date: feeRows[0]?.transactionDate ?? rentRows[0]?.transactionDate ?? contract.startDate ?? null,
-    lines: all, scheduleCount: (feeCount + feeVatRows.length) || all.length };
+    lines, scheduleCount: feeCount || lines.length };
 }
 
 /** GOVERNMENT — VAT receipt. The separate rent/fee VAT cheques (new model), each
@@ -516,10 +510,9 @@ function buildManagementReceipt(contract: ReceiptContract, rentRows: ReceiptPaym
 function buildVatReceipt(contract: ReceiptContract): Receipt | null {
   // Smallest → largest, so the section reads tax/small charges up to the biggest
   // (e.g. 5% Tax on VAT · Fire Fighting · 5% VAT on Rent · 20% VAT on Rent).
-  // The "Fees VAT" cheque is the ADMIN/COMMISSION fees' tax and prints with them
-  // on the Management Fee receipt — never here, where the only net charge is the
-  // (VAT-free) registration fee and it would read as that fee's VAT.
-  const govRows = (contract.payments ?? []).filter(p => isGovernment(p) && !isFeeVat(p))
+  // Every tax row lands here, "Fees VAT" included — all VAT is segregated onto
+  // this one receipt, so no other page carries a VAT figure.
+  const govRows = (contract.payments ?? []).filter(isGovernment)
     .slice().sort((a, b) => (a.amount || 0) - (b.amount || 0));
   // Ejari is shown IN FULL on this Third Party receipt (not split), ALWAYS on top.
   const rentRows = (contract.payments ?? []).filter(isRental);
@@ -547,13 +540,12 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   // show a dedicated VAT line. Legacy contracts have no vat rows; their VAT stays
   // embedded in the rent cheques' vat_amount (rolled into the rent line below).
   const rentRows = payments.filter(p => !isDeposit(p) && !isFee(p) && !isGovernment(p));
-  // Fee VAT belongs to the management fees (isFeeVat), so it joins their lines
-  // rather than the Government & other charges roll-up.
-  const vatRows = payments.filter(p => isGovernment(p) && !isFeeVat(p));
-  const feeVatRows = payments.filter(isFeeVat);
+  // All tax — fee VAT included — rolls up under "Government & other charges";
+  // the fee lines stay NET, matching the segmented receipts.
+  const vatRows = payments.filter(isGovernment);
   const feeRows = (contract.fees ?? []).filter(isFee);
   const { lines: feeLines, legacyBundle, feeCount, ejariLine } = feeLinesOf(contract, rentRows);
-  if (rentRows.length === 0 && feeLines.length === 0 && feeVatRows.length === 0 && vatRows.length === 0) return null;
+  if (rentRows.length === 0 && feeLines.length === 0 && vatRows.length === 0) return null;
 
   const netOf = (rows: ReceiptPayment[]) =>
     round2(rows.reduce((s, p) => s + Math.max(0, (p.amount || 0) - (p.vatAmount || 0)), 0));
@@ -570,7 +562,7 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
   const govVat = round2(vatRows.reduce((s, p) => s + (isTaxCharge(p) ? (p.amount || 0) : (p.vatAmount || 0)), 0) + (ejariLine?.vat ?? 0));
   const govTotal = round2(govNet + govVat);
 
-  const lines: LineItem[] = [...feeLines, ...feeVatRows.map(p => govLine(p, contract)),
+  const lines: LineItem[] = [...feeLines,
     { desc: 'Rent (full lease term)', net: rentNet, vat: rentVatEmbedded, total: round2(rentNet + rentVatEmbedded) }];
   if (govTotal > 0) lines.push({ desc: 'Government & other charges', net: govNet, vat: govVat, total: govTotal });
 
@@ -578,7 +570,7 @@ function buildContractReceipt(contract: ReceiptContract, payments: ReceiptPaymen
     receiptNo: planSegRef(contract, 'contract') ?? `RCP-${contract.ref}-PAY`,
     numberIsPlanRef: !!contract.paymentRefs?.planRefNo,
     date: rentRows[0]?.transactionDate ?? feeRows[0]?.transactionDate ?? null,
-    lines, scheduleCount: rentRows.length + vatRows.length + feeVatRows.length + feeCount };
+    lines, scheduleCount: rentRows.length + vatRows.length + feeCount };
 }
 
 /** Resolve the deposit pseudo-payment from the entity / held amount / column. */
@@ -974,14 +966,14 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   const hasRental = rentals.length > 0;
   const hasDeposit = !isRenewalContract(contract) && (payments.some(isDeposit) || (contract.securityDeposit?.amount ?? 0) > 0
     || (contract.securityDepositHeld ?? 0) > 0 || (contract.securityDepositAmount ?? 0) > 0);
-  // Management Fee page carries the fee rows AND the "Fees VAT" cheque that taxes
-  // them, so a contract whose only management line is that VAT still gets the tab.
-  const hasManagement = feeLinesOf(contract, rentals).lines.length > 0 || payments.some(isFeeVat);
-  // Third Party page appears for VAT/"other" rows OR the Ejari government split
-  // (buildVatReceipt) — so gate the tab/subtitle on both, else it's hidden for a
-  // contract whose only Third Party line is the Ejari 172.50 (e.g. residential).
+  // Management Fee page carries the NET fee rows only — their VAT is a Third Party
+  // line now, so a contract whose only fee row is that VAT gets no Management tab.
+  const hasManagement = feeLinesOf(contract, rentals).lines.length > 0;
+  // Third Party page appears for VAT/"other" rows (fee VAT included) OR the Ejari
+  // government split (buildVatReceipt) — so gate the tab/subtitle on both, else
+  // it's hidden for a contract whose only Third Party line is the Ejari 172.50.
   const hasEjariGov = (contract.fees ?? []).some(f => (f.paymentType ?? '').toLowerCase() === 'ejari_fee' && (f.amount || 0) > 0);
-  const hasVat = payments.some(p => isGovernment(p) && !isFeeVat(p)) || hasEjariGov;
+  const hasVat = payments.some(isGovernment) || hasEjariGov;
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (
