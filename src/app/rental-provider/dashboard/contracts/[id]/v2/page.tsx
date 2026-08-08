@@ -292,12 +292,23 @@ type IconKey = 'document' | 'pen' | 'stamp' | 'bolt' | 'key' | 'active' | 'envel
 
 interface Step { key: StepKey; short: string; label: string; icon: IconKey }
 
+// Order is the REAL process order, and Registration sits third — right after the
+// signatures, before Utility. That is the sequence the outside world imposes: the
+// registration certificate is what a utility account is opened against, which is
+// why `updateEjari` fires the customer's `utilityNeeded` notification the moment
+// registration completes. Between 2026-08-01 and 2026-08-08 this array put
+// Registration LAST, on the reasoning that registration is what makes a tenancy
+// legally live; that reversed the real dependency, and the step copy below was
+// never renumbered to match it (Registration kept reading "Stop 3 · complete"
+// while rendering fifth). Activation is now carried by the last step that
+// actually happens — the move-in counter-signature (see _autoActivateOnEjari and
+// the counter-sign path in contracts.service).
 const STEPS_NEW: Step[] = [
   { key: 'issue',   short: 'Issue',   label: 'Contract issued',  icon: 'document' },
   { key: 'sign',    short: 'Sign',    label: 'Signatures',        icon: 'pen'      },
+  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'utility', short: 'Utility', label: 'Utility account',   icon: 'bolt'     },
   { key: 'movein',  short: 'Move-in', label: 'Move-in inspection',icon: 'key'      },
-  { key: 'ejari',   short: 'Contract Registration',   label: 'Contract Registration',icon: 'stamp'    },
   { key: 'active',  short: 'Active',  label: 'Active tenancy',    icon: 'active'   },
 ];
 const STEPS_RENEWAL: Step[] = [
@@ -463,9 +474,11 @@ const BASE_DOC_TYPES = [
 
 /** Checklist doc keys whose uploads need an expiry date (identity docs + trade
  *  licence). The VAT Tax Registration Certificate and the business / activity
- *  licence are excluded — they carry no expiry. */
+ *  licence are excluded — they carry no expiry. So is `emirates_id_back`: the
+ *  card prints one expiry, on the front, and the back inherits it — see
+ *  docNeedsExpiry in lib/docRequirements. */
 const EXPIRY_DOC_KEYS = new Set([
-  'emirates_id', 'emirates_id_front', 'emirates_id_back', 'passport', 'uae_visa',
+  'emirates_id', 'emirates_id_front', 'passport', 'uae_visa',
   'trade_license',
 ]);
 

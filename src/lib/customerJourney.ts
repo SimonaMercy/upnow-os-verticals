@@ -111,13 +111,16 @@ export const CUSTOMER_STATE_DEFS: Record<CustomerStateKey, CustomerStateDef> = {
   payment_review:                { label: 'Payment & references',          sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'action',    headline: 'Review your plan and prepare your cheques or payments accordingly.', body: 'Attach a reference for each one — cheque photo, transfer screenshot, card slip or cash receipt — so it can be verified.',                                                                       timing: 'Takes ~5 min' },
   awaiting_rp_confirm:           { label: 'Payments under review',         sub: 'Step 3 of 8',                     mode: 'new',     currentIndex: 2,  tone: 'waiting',   headline: 'Your rental provider is reviewing your payments.',       body: 'Each reference is being verified against your contract before it’s issued for signature.',                                                                                                       timing: 'Usually within 1 business day' },
   signature:                     { label: 'Awaiting your signature',       sub: 'Step 4 of 8',                     mode: 'new',     currentIndex: 3,  tone: 'action',    headline: 'Review and sign your tenancy contract.',          body: 'Open the final contract, then add your signature below.',                                                                                                                                         timing: 'Takes ~2 min' },
-  ejari:                         { label: 'Contract Registration in progress', sub: 'Step 7 of 8',                 mode: 'new',     currentIndex: 6,  tone: 'waiting',   headline: 'Your rental provider is registering your Contract Registration Certificate.', body: 'The certificate will appear here for download the moment it’s uploaded.',                                                                                                                       timing: '2-5 business days' },
-  utility:                       { label: 'Confirm utility account',       sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'action',    headline: 'Confirm your utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
-  utility_review:                { label: 'Utility under review',          sub: 'Step 5 of 8',                     mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your utility submission is under review.',         body: 'Your rental provider is checking your account number and proof of payment. You’ll move on to the inspection once it’s approved.',                                                               timing: 'Usually within 1 business day' },
-  move_in:                       { label: 'Move-in inspection',            sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
+  // Steps 5-7 run Registration → Utility → Move-in, matching STEPS_NEW on the
+  // customer rail and the RP's own stepper. `currentIndex` is the index into that
+  // rail, so the two must be changed together.
+  ejari:                         { label: 'Contract Registration in progress', sub: 'Step 5 of 8',                 mode: 'new',     currentIndex: 4,  tone: 'waiting',   headline: 'Your rental provider is registering your Contract Registration Certificate.', body: 'The certificate will appear here for download the moment it’s uploaded. You’ll need it to open your utility account, which is the next step.',                                                  timing: '2-5 business days' },
+  utility:                       { label: 'Confirm utility account',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'action',    headline: 'Confirm your utility account.',                    body: 'Premises number is pre-filled. Add your account number, upload a proof of payment, and submit.',                                                                                                timing: 'Takes ~1 min' },
+  utility_review:                { label: 'Utility under review',          sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'waiting',   headline: 'Your utility submission is under review.',         body: 'Your rental provider is checking your account number and proof of payment. You’ll move on to the inspection once it’s approved.',                                                               timing: 'Usually within 1 business day' },
+  move_in:                       { label: 'Move-in inspection',            sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'action',    headline: 'Review the inspection. Then collect your keys.',          body: 'Walk through every room and meter reading, then counter-sign so the record is official.',                                                                                                       timing: 'Takes ~3 min' },
   // Customer has counter-signed; the inspection now sits with the rental provider
   // (or their property manager) — their counter-signature is what activates the tenancy.
-  move_in_review:                { label: 'Inspection under review',       sub: 'Step 6 of 8',                     mode: 'new',     currentIndex: 5,  tone: 'waiting',   headline: 'You’ve signed — awaiting your rental provider’s approval.', body: 'Your rental provider or their property manager will counter-sign the inspection. Once they do, your tenancy goes live and you can collect your keys.',                                            timing: 'Usually within 1 business day' },
+  move_in_review:                { label: 'Inspection under review',       sub: 'Step 7 of 8',                     mode: 'new',     currentIndex: 6,  tone: 'waiting',   headline: 'You’ve signed — awaiting your rental provider’s approval.', body: 'Your rental provider or their property manager will counter-sign the inspection. Once they do, your tenancy goes live and you can collect your keys.',                                            timing: 'Usually within 1 business day' },
   active:                        { label: 'Active tenancy',                sub: 'Step 8 of 8 — tenancy is live',   mode: 'new',     currentIndex: 7,  tone: 'celebrate', headline: 'Your tenancy is live.',                                   body: '',                                                                                                                                                                                             timing: null },
   termination_request_received:  { label: 'Provider requested termination',sub: 'Respond required',                mode: 'new',     currentIndex: 7,  tone: 'action',    headline: 'Your rental provider wants to end the contract early.',   body: 'Check the reason and effective date below, then accept or reject.',                                                                                                                             timing: 'Awaiting your response' },
   termination_request_sent:      { label: 'Your termination request',      sub: 'Awaiting rental provider',        mode: 'new',     currentIndex: 7,  tone: 'waiting',   headline: 'Your request is with the rental provider.',               body: "Your contract stays active until they accept. We'll notify you the moment they respond.",                                                                                                       timing: 'Awaiting rental provider response' },
@@ -358,22 +361,32 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
     const utilityVerified = c.utilityStatus === 'verified';
     const utilitySubmitted = c.utilityStatus === 'submitted';
 
-    // THE ORDER IS SIGNATURES → UTILITY → MOVE-IN → REGISTRATION → ACTIVE.
+    // THE ORDER IS SIGNATURES → REGISTRATION → UTILITY → MOVE-IN → ACTIVE.
     //
-    // Registration is the LAST gate — it is what makes the tenancy legally live
-    // — so it can no longer be the PRECONDITION of the two steps before it.
-    // While it was, the utility step opened at almost the same moment
-    // registration activated the lease, and the `status === 'active'` branch
-    // above returns first, so in the common case the customer never saw the step
-    // at all. It shows: the customer-side utility submit has zero audit rows
-    // while the landlord-side verify has eight.
+    // Registration is a PRECONDITION of utility, not a step after it: the utility
+    // account is opened against the registration certificate, which is why the
+    // server sends this customer the `utilityNeeded` notification the instant
+    // registration completes (contracts.service.updateEjari).
     //
-    // Mirrors the server gate in contracts.service.submitUtility exactly, so the
-    // customer is never shown a form that would 400.
+    // The step is reachable in this order only because registration no longer
+    // activates the lease on its own — activation waits for the move-in
+    // counter-signature. While registration DID activate it, the `status ===
+    // 'active'` branch above returned first and the customer never saw utility or
+    // move-in at all: `contract.tenant.utility.submit` has zero audit rows to
+    // date, while the landlord-side verify has eight. Every utility account on
+    // record was entered by a landlord on the customer's behalf.
+    //
+    // Looser than the server gate in contracts.service.submitUtility (signatures
+    // OR registration), never tighter the other way — so the customer is never
+    // shown a form that would 400.
     const bothSigned = !!c.tenantSignedAt && !!c.landlordSignedAt;
-    const utilityOpen = bothSigned || c.ejariStatus === 'registered';
 
-    if (!utilityOpen) return 'signature';
+    if (!bothSigned) return 'signature';
+
+    // `ejari` is the "we are registering it" wait — nothing for the customer to
+    // do, but it is where they legitimately sit until the certificate exists.
+    if (c.ejariStatus !== 'registered') return 'ejari';
+
     if (!utilityVerified) return utilitySubmitted ? 'utility_review' : 'utility';
 
     // Move-in covers both halves of the inspection flow — waiting for the
@@ -381,11 +394,9 @@ export function deriveStateKey(r: JourneyInput): CustomerStateKey {
     // decides the sub-UI from `inspectionSubmitted` + `inspectionSignedByTenant`.
     if (!c.moveInInspection?.signedByTenant) return 'move_in';
 
-    // Signed. Registration is the only gate left before the lease goes live —
-    // so `ejari` (the "we are registering it" wait) belongs on the NOT-yet-
-    // registered arm. Once it IS registered the customer is waiting on the
-    // counter-signature, which is `move_in_review`.
-    return c.ejariStatus === 'registered' ? 'move_in_review' : 'ejari';
+    // Customer has signed. The RP's counter-signature is the last gate, and it is
+    // what takes the tenancy live.
+    return 'move_in_review';
   }
 
   // ── 4. Dead-end states (no contract yet).

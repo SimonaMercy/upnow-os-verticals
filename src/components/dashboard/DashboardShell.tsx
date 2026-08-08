@@ -640,7 +640,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     (pathname?.endsWith('/service-provider/onboarding') && !spOnboardingReady);
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)' }}>
+    // `app-shell-root` is the hook the document dock insets so its rail never
+    // covers the page it was opened from — see .doc-dock in globals.css.
+    <div className="app-shell-root flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)', transition: 'padding 0.24s cubic-bezier(.22,.9,.3,1)' }}>
       {/* Desktop sidebar */}
       {!hideSidebar && (
         <div

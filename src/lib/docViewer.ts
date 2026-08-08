@@ -34,9 +34,40 @@ export type DocViewerDoc = {
   mimeType?: string | null;
 };
 
-export type DocViewerState = { docs: DocViewerDoc[]; title: string; watermark: string };
+/**
+ * How the viewer presents itself.
+ *
+ * `modal` (default) is the centred dialog: it owns the screen, locks page scroll
+ * and stacks every document vertically. Right for "read this document".
+ *
+ * `dock` is a rail down the right-hand edge with no backdrop and no scroll lock,
+ * so the page behind stays scrollable and CLICKABLE. It exists for the jobs where
+ * the document is the input to a form rather than the thing being read — recording
+ * a cheque means copying the serial off the scan into the row beside it, which the
+ * modal made impossible: it covered the very form you were filling in. Docs are
+ * paged (one at a time, ◀ 2/4 ▶) rather than stacked, because a narrow rail can't
+ * show a stack usefully.
+ */
+export type DocViewerMode = 'modal' | 'dock';
+
+export type DocViewerState = {
+  docs: DocViewerDoc[];
+  title: string;
+  watermark: string;
+  mode: DocViewerMode;
+  /** Which document the dock opens on — the one whose thumbnail was clicked. */
+  startIndex: number;
+  /**
+   * Monotonic id, one per open. The host keys its panel on it so a fresh open
+   * always starts clean (rotation back to upright, paged to `startIndex`) —
+   * including re-opening the very same document, which an identity-based key
+   * would treat as unchanged.
+   */
+  token: number;
+};
 
 let current: DocViewerState | null = null;
+let openToken = 0;
 const listeners = new Set<() => void>();
 const notify = () => { for (const l of listeners) l(); };
 
@@ -68,13 +99,31 @@ export function currentDocWatermark(): string {
  * Open the in-portal viewer for one or more documents. Accepts a single doc or
  * an array; entries without a fileUrl are dropped. No-op (and never opens an
  * empty modal) when nothing is viewable.
+ *
+ * `opts.dock` opens the right-hand rail instead of the centred dialog — use it
+ * where the caller's own form has to stay reachable while the document is up
+ * (see DocViewerMode). `opts.startIndex` picks which document it opens on.
  */
-export function openDocViewer(docs: DocViewerDoc | DocViewerDoc[], title = 'Document'): void {
+export function openDocViewer(
+  docs: DocViewerDoc | DocViewerDoc[],
+  title = 'Document',
+  opts?: { dock?: boolean; startIndex?: number },
+): void {
   const list = (Array.isArray(docs) ? docs : [docs]).filter(
     (d): d is DocViewerDoc => !!d && !!d.fileUrl,
   );
   if (!list.length) return;
-  current = { docs: list, title, watermark: currentDocWatermark() };
+  // Clamped, because the index is a position in the CALLER's list — which may
+  // have held entries with no file that were just dropped.
+  const start = Math.min(Math.max(opts?.startIndex ?? 0, 0), list.length - 1);
+  current = {
+    docs: list,
+    title,
+    watermark: currentDocWatermark(),
+    mode: opts?.dock ? 'dock' : 'modal',
+    startIndex: start,
+    token: ++openToken,
+  };
   notify();
 }
 
@@ -122,7 +171,7 @@ export async function openDocViewerByIds(
   );
   const list = loaded.filter((d): d is NonNullable<typeof d> => d != null);
   if (!list.length) return;
-  current = { docs: list, title, watermark: currentDocWatermark() };
+  current = { docs: list, title, watermark: currentDocWatermark(), mode: 'modal', startIndex: 0, token: ++openToken };
   notify();
 }
 

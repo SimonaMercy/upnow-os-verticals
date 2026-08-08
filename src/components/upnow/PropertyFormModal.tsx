@@ -37,8 +37,27 @@ export function PropSectionHeader({ num, label, desc }: { num: number; label: st
 interface Country      { id: number; nameEn: string; code: string; }
 interface Emirate      { id: number; nameEn: string; }
 interface City         { id: number; nameEn: string; }
-interface Community    { id: number; nameEn: string; }
+// cityId comes back on the emirate-wide list too — used to back-fill the city
+// tier when the community was picked from that fallback list.
+interface Community    { id: number; nameEn: string; cityId?: number; }
 interface SubCommunity { id: number; nameEn: string; }
+
+// Fuzzy-match a free-text community name (Google / Mapbox) against the DB list.
+// Token overlap, so "Al Barsha 1" still lands on "Al Barsha".
+function matchCommunityByName(comms: Community[], name: string): Community | null {
+  const tokenize = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+  const needle = tokenize(name.toLowerCase().trim());
+  if (!needle.length) return null;
+  let bestScore = 0;
+  let bestMatch: Community | null = null;
+  for (const c of comms) {
+    const dbTokens = tokenize(c.nameEn.toLowerCase());
+    const overlap  = needle.filter(t => dbTokens.includes(t)).length;
+    const score    = overlap / Math.max(needle.length, dbTokens.length);
+    if (score > bestScore) { bestScore = score; bestMatch = c; }
+  }
+  return bestScore >= 0.5 ? bestMatch : null;
+}
 
 // ─── Google Places types ──────────────────────────────────
 interface GPlacePrediction {
@@ -871,13 +890,23 @@ export function PropertyFields({
   const [loadingCities,     setLoadingCities]     = useState(false);
   const [loadingComms,      setLoadingComms]      = useState(false);
   const [loadingSubs,       setLoadingSubs]       = useState(false);
-  // Drive cascade loads independently of form state to avoid stale-closure issues
+  // Drive cascade loads independently of form state to avoid stale-closure issues.
+  // Cities and communities are requested through a counter-stamped object rather
+  // than a bare id, so re-requesting the SAME id still re-runs the loader: a
+  // Google pick that lands on the emirate already selected has to be able to
+  // re-drive the lists, otherwise the Community picker is left empty.
   const [loadEmiratesFor,   setLoadEmiratesFor]   = useState<number | null>(null);
-  const [loadCitiesFor,     setLoadCitiesFor]     = useState<number | null>(null);
-  const [loadCommsFor,      setLoadCommsFor]      = useState<number | null>(null);
+  const [citiesReq,         setCitiesReq]         = useState<{ id: number; n: number } | null>(null);
+  const [commsReq,          setCommsReq]          = useState<{ scope: 'city' | 'emirate'; id: number; n: number } | null>(null);
   const [loadSubsFor,       setLoadSubsFor]       = useState<number | null>(null);
+  const reqSeqRef           = useRef(0);
   const defaultCountryIdRef = useRef<number | null>(null);
   const pendingCommunityRef = useRef<string>('');
+
+  const requestCities = (emirateId: number | null) =>
+    setCitiesReq(emirateId ? { id: emirateId, n: ++reqSeqRef.current } : null);
+  const requestComms = (req: { scope: 'city' | 'emirate'; id: number } | null) =>
+    setCommsReq(req ? { ...req, n: ++reqSeqRef.current } : null);
 
   // Load countries once on mount; auto-select UAE when nothing chosen yet
   useEffect(() => {
@@ -898,9 +927,9 @@ export function PropertyFields({
   // the wizard mounts it once. Names backfill as each list loads.
   useEffect(() => {
     if (value.countryId) setLoadEmiratesFor(value.countryId);
-    setLoadCitiesFor(value.emirateId ?? null);
-    setLoadCommsFor(value.cityId ?? null);
-    setLoadSubsFor(value.communityId ?? null);
+    // Communities are driven off the city load below, sub-communities off the
+    // community load — so only the top of the chain needs kicking here.
+    requestCities(value.emirateId ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -914,72 +943,69 @@ export function PropertyFields({
   // City cascade — for the UAE every emirate has one city, auto-selected so the
   // flow feels like Emirate → Community.
   useEffect(() => {
-    if (!loadCitiesFor) { setCities([]); return; }
+    if (!citiesReq) { setCities([]); return; }
+    const emirateId = citiesReq.id;
     setLoadingCities(true);
-    apiGet<City[]>(`/locations/emirates/${loadCitiesFor}/cities`)
+    apiGet<City[]>(`/locations/emirates/${emirateId}/cities`)
       .then(cs => {
         setCities(cs);
-        // UAE: exactly one city per emirate — auto-select it so the community
-        // list loads. Decide the community-load BEFORE setValue so we never call
-        // a setState from inside the updater (React runs updaters during render,
-        // and a nested setState there warns "update X while rendering Y").
-        const autoCityId = !value.cityId && cs.length === 1 ? cs[0].id : null;
+        // Which city drives the community list: keep the one already chosen when
+        // it belongs to THIS emirate (a leftover from another emirate has to go,
+        // it would both save wrong and block the auto-select), otherwise
+        // auto-select when the emirate has exactly one — the UAE outside Ajman.
+        // Decide everything BEFORE setValue so we never call a setState from
+        // inside the updater (React runs updaters during render, and a nested
+        // setState there warns "update X while rendering Y").
+        const keptCityId = value.cityId && cs.some(c => c.id === value.cityId) ? value.cityId : null;
+        const nextCityId = keptCityId ?? (cs.length === 1 ? cs[0].id : null);
         setValue(prev => {
-          if (prev.cityId && !prev.cityName) {
-            const match = cs.find(c => c.id === prev.cityId);
-            if (match) return { ...prev, cityName: match.nameEn };
-          }
-          if (!prev.cityId && cs.length === 1) {
-            return { ...prev, cityId: cs[0].id, cityName: cs[0].nameEn };
-          }
-          return prev;
+          if (prev.cityId === nextCityId && (prev.cityName || nextCityId == null)) return prev;
+          const match = cs.find(c => c.id === nextCityId);
+          return { ...prev, cityId: nextCityId, cityName: match?.nameEn ?? '' };
         });
-        if (autoCityId != null) setLoadCommsFor(autoCityId);
+        // Always re-drive the community list, and never leave it empty: with no
+        // city resolvable (Ajman's eight municipal sectors) list every community
+        // in the emirate instead of nothing at all.
+        requestComms(nextCityId
+          ? { scope: 'city',    id: nextCityId }
+          : { scope: 'emirate', id: emirateId });
       })
+      .catch(() => {})
       .finally(() => setLoadingCities(false));
-  }, [loadCitiesFor]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citiesReq]);
 
-  // Community cascade
+  // Community cascade — scoped to the selected city, or to the whole emirate
+  // when no city could be resolved (so the picker always has its full list).
   useEffect(() => {
-    if (!loadCommsFor) { setCommunities([]); return; }
+    if (!commsReq) { setCommunities([]); return; }
+    const url = commsReq.scope === 'city'
+      ? `/locations/cities/${commsReq.id}/communities`
+      : `/locations/emirates/${commsReq.id}/communities`;
     setLoadingComms(true);
-    apiGet<Community[]>(`/locations/cities/${loadCommsFor}/communities`)
+    apiGet<Community[]>(url)
       .then(comms => {
         setCommunities(comms);
-        // Trigger the sub-community load BEFORE setValue (never call setState from
-        // inside the updater — it runs during render). Backfill the name purely.
-        const matchedCommId = value.communityId && comms.some(c => c.id === value.communityId)
-          ? value.communityId : null;
-        setValue(prev => {
-          if (prev.communityId && !prev.communityName) {
-            const match = comms.find(c => c.id === prev.communityId);
-            if (match) return { ...prev, communityName: match.nameEn };
-          }
-          return prev;
-        });
-        if (matchedCommId != null) setLoadSubsFor(matchedCommId);
-        // Fuzzy-match a community name carried over from a Mapbox/Google result
-        if (pendingCommunityRef.current) {
-          const pending = pendingCommunityRef.current.toLowerCase().trim();
-          const tokenize = (s: string) => s.replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean);
-          const pendingTokens = tokenize(pending);
-          let bestScore = 0;
-          let bestMatch: Community | null = null;
-          for (const c of comms) {
-            const dbTokens = tokenize(c.nameEn.toLowerCase());
-            const overlap  = pendingTokens.filter(t => dbTokens.includes(t)).length;
-            const score    = overlap / Math.max(pendingTokens.length, dbTokens.length);
-            if (score > bestScore) { bestScore = score; bestMatch = c; }
-          }
-          if (bestMatch && bestScore >= 0.5) {
-            setValue(prev => ({ ...prev, communityId: bestMatch!.id, communityName: bestMatch!.nameEn }));
-            setLoadSubsFor(bestMatch!.id);
-          }
-          pendingCommunityRef.current = '';
+        // Resolve the selection and the sub-community load BEFORE setValue (never
+        // call setState from inside the updater — it runs during render). An
+        // already-chosen community wins; otherwise fuzzy-match the name carried
+        // over from a Google/Mapbox pick. No match just leaves the list open for
+        // a manual pick — it never clears what the handler already decided.
+        const pending = pendingCommunityRef.current;
+        pendingCommunityRef.current = '';
+        const matched = (value.communityId && comms.find(c => c.id === value.communityId))
+          ?? (pending ? matchCommunityByName(comms, pending) : null);
+        if (matched) {
+          setValue(prev => ({ ...prev, communityId: matched.id, communityName: matched.nameEn }));
+          setLoadSubsFor(matched.id);
+        } else {
+          setLoadSubsFor(null);
         }
       })
+      .catch(() => setCommunities([]))
       .finally(() => setLoadingComms(false));
-  }, [loadCommsFor]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commsReq]);
 
   // Sub-Community cascade
   useEffect(() => {
@@ -1031,7 +1057,7 @@ export function PropertyFields({
       subCommunityId: null, subCommunityName: '',
     }));
     setLoadEmiratesFor(val ? Number(val) : null);
-    setLoadCitiesFor(null); setLoadCommsFor(null); setLoadSubsFor(null);
+    requestCities(null); requestComms(null); setLoadSubsFor(null);
     setCities([]); setCommunities([]); setSubCommunities([]);
   };
 
@@ -1044,8 +1070,9 @@ export function PropertyFields({
       communityId: null, communityName: '',
       subCommunityId: null, subCommunityName: '',
     }));
-    setLoadCitiesFor(val ? Number(val) : null);
-    setLoadCommsFor(null); setLoadSubsFor(null);
+    // The city load below re-drives the community list for the new emirate.
+    requestCities(val ? Number(val) : null);
+    setLoadSubsFor(null);
     setCommunities([]); setSubCommunities([]);
     setErrors(prev => ({ ...prev, emirateId: undefined }));
   };
@@ -1058,7 +1085,9 @@ export function PropertyFields({
       communityId: null, communityName: '',
       subCommunityId: null, subCommunityName: '',
     }));
-    setLoadCommsFor(val ? Number(val) : null);
+    // Clearing the city falls back to the emirate-wide list rather than nothing.
+    requestComms(val ? { scope: 'city', id: Number(val) }
+                     : value.emirateId ? { scope: 'emirate', id: value.emirateId } : null);
     setLoadSubsFor(null);
     setSubCommunities([]);
   };
@@ -1068,6 +1097,11 @@ export function PropertyFields({
     setValue(prev => ({
       ...prev,
       communityId: val ? Number(val) : null, communityName: comm?.nameEn ?? '',
+      // Picked off the emirate-wide fallback list: adopt the community's own
+      // city so the saved property still carries a city tier.
+      ...(comm?.cityId && !prev.cityId
+        ? { cityId: comm.cityId, cityName: cities.find(c => c.id === comm.cityId)?.nameEn ?? '' }
+        : {}),
       subCommunityId: null, subCommunityName: '',
     }));
     setLoadSubsFor(val ? Number(val) : null);
@@ -1083,7 +1117,7 @@ export function PropertyFields({
   };
 
   const handleSearchSelect = (r: SearchResult) => {
-    const newEmirateId: number | null = r.emirateId !== undefined
+    const searchEmirateId: number | null = r.emirateId !== undefined
       ? (r.emirateId ?? null)
       : (() => {
           const mb = r.emirateName.trim().toLowerCase();
@@ -1097,6 +1131,10 @@ export function PropertyFields({
           })?.id ?? null;
         })();
 
+    // A result whose emirate we can't map keeps whatever is already selected —
+    // blanking it would tear down the city and community lists with it.
+    const newEmirateId = searchEmirateId ?? value.emirateId;
+    const emirateChanged = newEmirateId !== value.emirateId;
     const emirateName = emirates.find(e => e.id === newEmirateId)?.nameEn ?? r.emirateName;
 
     if (r.communityId != null) {
@@ -1109,6 +1147,8 @@ export function PropertyFields({
         longitude:     r.lng || prev.longitude,
         emirateId:     newEmirateId,
         emirateName,
+        // A city from the previous emirate can't survive the move.
+        ...(emirateChanged ? { cityId: null, cityName: '' } : {}),
         communityId:   r.communityId ?? null,
         communityName: '',
         googlePlaceId: r.googlePlaceId ?? prev.googlePlaceId,
@@ -1123,6 +1163,7 @@ export function PropertyFields({
         longitude:     r.lng || prev.longitude,
         emirateId:     newEmirateId,
         emirateName,
+        ...(emirateChanged ? { cityId: null, cityName: '' } : {}),
         communityId:   null,
         communityName: '',
         googlePlaceId: r.googlePlaceId != null
@@ -1131,8 +1172,12 @@ export function PropertyFields({
       }));
     }
 
-    setLoadCitiesFor(newEmirateId);
-    setLoadCommsFor(null);
+    // Re-drive the whole chain — the request is counter-stamped, so this reloads
+    // even when the pick landed on the emirate that was already selected. The
+    // community list is only blanked when the emirate actually moved: a pick
+    // Google couldn't place must still leave the full list to choose from.
+    requestCities(newEmirateId);
+    if (emirateChanged) { setCities([]); setCommunities([]); }
     setLoadSubsFor(null);
     setSubCommunities([]);
     setAutoFilled(true);
@@ -1348,16 +1393,19 @@ export function PropertyFields({
         <div className={cn('grid gap-3', subCommunities.length > 0 ? 'grid-cols-2' : 'grid-cols-1')}>
           <div>
             <FieldLabel label="Community / Area" />
+            {/* Gated on the emirate, not the city: where no city resolves
+                (Ajman's sectors) the list falls back to every community in the
+                emirate, and picking one fills the city tier in. */}
             <select
-              className={cn(SELECT, (!value.cityId || loadingComms) && DISABLED_CLS)}
+              className={cn(SELECT, (!communities.length || loadingComms) && DISABLED_CLS)}
               value={value.communityId ?? ''}
               onChange={e => handleCommunityChange(e.target.value)}
-              disabled={!value.cityId || loadingComms}
+              disabled={!communities.length || loadingComms}
             >
               <option value="">
                 {loadingComms ? 'Loading…'
-                  : value.cityId ? 'Select Community'
-                  : cities.length > 1 ? 'Select City / Sector first'
+                  : communities.length ? 'Select Community'
+                  : value.emirateId ? 'No communities listed for this emirate'
                   : 'Select Emirate first'}
               </option>
               {communities.map(c => <option key={c.id} value={c.id}>{c.nameEn}</option>)}

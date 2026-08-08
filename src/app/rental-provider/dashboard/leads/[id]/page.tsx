@@ -28,7 +28,6 @@ import {
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { getRequiredDocs, docNeedsExpiry, type DocReq } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
-import { openDocsTogether } from '@/lib/openDocsTogether';
 import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/components/upnow/DocumentReaderModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
@@ -2428,6 +2427,27 @@ function ChequesSection({
   const customerUploads = cheques.filter(c => c.isCustomerUpload);
   const hasCustomerUploads = customerUploads.length > 0;
 
+  // Recording a cheque means reading the serial off the scan and typing it into
+  // the row above — so the preview opens DOCKED to the right edge rather than in
+  // the centred viewer, which covered the very grid being filled in. The whole
+  // set goes in, opened at the one that was clicked, so the RP pages through
+  // ◀ 2/4 ▶ against the instalment list instead of closing and reopening.
+  // Labelled from the row's own position, so the caption in the dock is the same
+  // text as the row it was opened from even when a cheque without an image sits
+  // between them.
+  const previewable = customerUploads
+    .map((c, i) => ({ c, label: c.notes || `Payment ${i + 1}` }))
+    .filter(p => !!p.c.imageUrl);
+  const openCheque = (c: LeadChequeRecord) => {
+    const at = previewable.findIndex(p => p.c.id === c.id);
+    if (at < 0) return;
+    openDocViewer(
+      previewable.map(p => ({ fileUrl: p.c.imageUrl, caption: p.label })),
+      'Cheques',
+      { dock: true, startIndex: at },
+    );
+  };
+
   return (
     <div className="chqbox">
       <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -2514,16 +2534,15 @@ function ChequesSection({
         <div className="doclist" style={{ marginBottom: 10 }}>
           <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Uploaded by customer ({customerUploads.length})</span>
-            {customerUploads.length > 1 && (
-              <button type="button" className="linkbtn"
-                onClick={() => openDocsTogether(customerUploads.map(c => ({ fileUrl: c.imageUrl, displayName: c.notes ?? 'Cheque' })))}>
+            {previewable.length > 1 && (
+              <button type="button" className="linkbtn" onClick={() => openCheque(previewable[0].c)}>
                 <Eye size={11} /> View all
               </button>
             )}
           </div>
           {customerUploads.map((c, i) => {
             const label = c.notes || `Payment ${i + 1}`;
-            const open = () => c.imageUrl && openDocViewer({ fileUrl: c.imageUrl, caption: label });
+            const open = () => openCheque(c);
             return (
               <div key={c.id} className="uprow">
                 <button type="button" className="upthumb" onClick={open} disabled={!c.imageUrl} aria-label={`Preview ${label}`}>

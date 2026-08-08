@@ -317,14 +317,19 @@ interface ApiContract {
 
 interface Step { key: string; label: string; short: string; icon: string }
 
+// Mirrors the RP rail (contracts/:id/v2): Registration is step 5, BEFORE utility,
+// because the utility account is opened against the registration certificate —
+// the customer literally cannot do the utility step until registration is done.
+// See the note on STEPS_NEW there for the 2026-08-01 → 08-08 detour that had
+// Registration last.
 const STEPS_NEW: Step[] = [
   { key: 'booked',          label: 'Booked',             short: 'Booked',   icon: 'calendar' },
   { key: 'documents',       label: 'Documents',          short: 'Docs',     icon: 'document' },
   { key: 'payment',         label: 'Payment & cheques',  short: 'Payment',  icon: 'wallet'   },
   { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen'      },
+  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'utility',         label: 'Utility',            short: 'Utility',  icon: 'bolt'     },
   { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
-  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
   { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
 ];
 // Renewal journey mirrors the RP renewal pipeline (Operations kanban):

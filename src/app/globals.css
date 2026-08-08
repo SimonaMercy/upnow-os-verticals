@@ -891,3 +891,92 @@ body:has(.slideover-panel) { overflow-x: clip; }
 .bk-total-flash { display: inline-block; animation: bkTotalFlash .5s ease; }
 .bk-tile { transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease; }
 .bk-tile:hover { transform: translateY(-1px); }
+
+/* ── Document dock (right-hand preview rail) ───────────────────
+   The centred document modal owns the screen: it is right for reading a
+   document, and wrong for reading one INTO a form — recording a cheque means
+   copying the serial off the scan into the row beside it, and the modal covered
+   that row. The dock is the same viewer (same watermarked canvas, same no-download
+   rules) pinned to the right edge with no backdrop, so the page keeps taking
+   clicks and keystrokes while it is open. See lib/docViewer (DocViewerMode).
+
+   `--doc-dock-w` is the single source of the rail's width: the panel is sized
+   from it and the app shell is inset by exactly the same amount, so the two can
+   never drift apart and leave content stranded underneath. */
+:root { --doc-dock-w: 380px; }
+
+.doc-dock {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 190;
+  width: var(--doc-dock-w);
+  display: flex; flex-direction: column;
+  background: #fff;
+  border-left: 1px solid #e8e6e0;
+  box-shadow: -14px 0 34px rgba(24, 22, 18, 0.10);
+  animation: docDockIn .26s cubic-bezier(.22,.9,.3,1) both;
+}
+@keyframes docDockIn { from { transform: translateX(100%); } to { transform: none; } }
+
+.doc-dock-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 12px 11px 14px; border-bottom: 1px solid #e8e6e0;
+  flex-shrink: 0;
+}
+.doc-dock-title {
+  display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0;
+  font-size: 12.5px; font-weight: 700; color: #1a1916;
+}
+.doc-dock-title svg { color: #2e9f82; flex-shrink: 0; }
+.doc-dock-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.doc-dock-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px; border: none; background: none;
+  color: #6b6860; cursor: pointer;
+}
+.doc-dock-btn:hover:not(:disabled) { background: #f4f3ef; color: #1a1916; }
+.doc-dock-btn:disabled { opacity: .35; cursor: default; }
+
+.doc-dock-nav {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 6px 12px; border-bottom: 1px solid #e8e6e0;
+  flex-shrink: 0;
+}
+.doc-dock-count {
+  font-size: 11px; font-weight: 700; color: #6b6860;
+  font-variant-numeric: tabular-nums; min-width: 58px; text-align: center;
+}
+.doc-dock-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; background: #f4f3ef; }
+.doc-dock-body > div { background: #fff; border: 1px solid #e8e6e0; border-radius: 10px; overflow: hidden; }
+
+/* Make room for the rail. The RP/SP shell is a full-height flex row that ignores
+   body padding, so it is inset directly — one rule, keyed off the same variable. */
+body.doc-dock-open .app-shell-root { padding-right: var(--doc-dock-w); }
+
+/* Below the two-column breakpoint there is no room to sit beside anything, so the
+   rail becomes a bottom sheet: the form stays visible and reachable ABOVE it,
+   which is the same job done vertically. */
+@media (max-width: 1040px) {
+  .doc-dock {
+    top: auto; left: 0; width: auto; height: 46vh;
+    border-left: none; border-top: 1px solid #e8e6e0;
+    box-shadow: 0 -14px 34px rgba(24, 22, 18, 0.12);
+    animation-name: docDockUp;
+  }
+  @keyframes docDockUp { from { transform: translateY(100%); } to { transform: none; } }
+  body.doc-dock-open .app-shell-root { padding-right: 0; padding-bottom: 46vh; }
+}
+
+/* The lead's payment grid has to survive its column being squeezed: the dock
+   takes its width off the app shell, which the page's own viewport media query
+   cannot see (the viewport never changed). A container query on the grid's OWN
+   width can — below ~560px of real room the four columns stack, so Method /
+   Reference / Record stay reachable with a cheque pinned open beside them.
+
+   Lives here, not in the page's styled-jsx block, for two reasons: styled-jsx
+   does not reliably carry `@container` through its parser, and its runtime
+   <style> is injected after this sheet — hence the extra `.paygrid` in the
+   selector, so these win on specificity rather than on order. */
+.quest-page .paygrid { container-type: inline-size; }
+@container (max-width: 560px) {
+  .quest-page .paygrid .payhead { display: none; }
+  .quest-page .paygrid .payrow { grid-template-columns: 1fr; }
+}

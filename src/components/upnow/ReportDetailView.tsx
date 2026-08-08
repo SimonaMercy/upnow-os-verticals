@@ -144,8 +144,12 @@ interface ReportDef {
   summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string; type?: 'aed' | 'number' }[] }[];
 }
 
-/** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked. */
-interface VacantUnit { unitId: number; label: string; unitType: string | null; rentFils: number; }
+/** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked.
+ *  `status` separates a unit that is empty NOW from one that is emptying — a
+ *  tenancy with an accepted termination still reads 'occupied' on the unit until
+ *  move-out, and counting it as vacant without saying so would read as though the
+ *  keys were already back. */
+interface VacantUnit { unitId: number; label: string; unitType: string | null; rentFils: number; status?: 'available' | 'terminating'; }
 
 /** A building option for the fee-taxation building multi-select (from the API). */
 interface BuildingOption { id: number; name: string; leasingType: 'direct' | 'sub' | 'management'; contracts: number; }
@@ -866,7 +870,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'renewal-vacancy': {
     title: 'Renewal Plan - Yearly',
-    description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year, so Renewals + Total Vacant is normally less than Total Units — the gap is the occupied units whose renewal falls outside this year. Click a Vacant count to list those units.',
+    description: 'Renewal calendar per property for the selected year — every property down the side, the twelve months across the top, then Renewals · Total Vacant · Total Units. Each occupied unit is counted once, in the month its lease comes up for renewal (the day after the term ends), so the months add up to Renewals — the units renewing that year, which changes as you switch years. Total Vacant and Total Units are your current inventory (each unit’s live status) and don’t change by year. A unit whose tenancy has an accepted termination counts as Vacant, not as a renewal — it is emptying, so there is nothing to renew; the list marks it “Terminating” because the customer is still in place until move-out. Renewals + Total Vacant is normally less than Total Units, and the gap is exactly the occupied units whose renewal falls outside this year (overdue, or due next year). Click a Vacant count to list those units.',
     endpoint: '/api/reports/renewal-vacancy',
     buildingLeaseFilter: true,
     layout: 'countMatrix',
@@ -4003,6 +4007,7 @@ export function ReportDetailView({
                     <tr>
                       <th className="px-5 py-2.5 text-left font-semibold">Unit</th>
                       <th className="px-3 py-2 text-left font-semibold">Type</th>
+                      <th className="px-3 py-2 text-left font-semibold">Status</th>
                       <th className="px-5 py-2.5 text-right font-semibold">Asking rent</th>
                     </tr>
                   </thead>
@@ -4011,6 +4016,16 @@ export function ReportDetailView({
                       <tr key={u.unitId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                         <td className="px-5 py-2.5 text-left font-medium text-[#1a1916]">{u.label}</td>
                         <td className="px-3 py-2 text-left text-[#6b6860] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
+                        {/* Terminating = still physically occupied, tenancy accepted for
+                            termination. It counts as vacant because there is no renewal
+                            to plan, but the reader must not be told the unit is empty. */}
+                        <td className="px-3 py-2 text-left">
+                          {u.status === 'terminating' ? (
+                            <span className="inline-flex items-center rounded-md bg-[#fdf1e3] px-2 py-0.5 text-[10px] font-semibold text-[#9a5b12]">Terminating</span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-md bg-[#f4f3ef] px-2 py-0.5 text-[10px] font-semibold text-[#6b6860]">Available</span>
+                          )}
+                        </td>
                         <td className="px-5 py-2.5 text-right tabular-nums text-[#1a1916]">{u.rentFils ? fmtAed(u.rentFils) : '—'}</td>
                       </tr>
                     ))}

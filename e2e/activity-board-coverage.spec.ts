@@ -373,53 +373,58 @@ test.describe('Activity board — the lanes the new-lease drive cannot reach', (
         headers: hdrs(S.rp), data: { role: 'landlord', signatureImage: SIG, signatoryName: 'Journey Landlord', method: 'online', consent: true },
       }));
 
-    await step('N3 customer submits utility', () =>
+    // N3 REGISTRATION COMES FIRST — the utility account is opened against the
+    // certificate. It does not activate the lease; the counter-signature does.
+    await step('N3 Ejari certificate', () =>
+      request.post(`${BACKEND}/documents`, {
+        headers: hdrs(S.rp),
+        data: { ownerType: 'tenancy_contract', ownerId: S.contractId, category: 'contract', documentKey: 'ejari_certificate', displayName: 'Ejari certificate', fileUrl: `http://localhost:3011/uploads/cov-ejari-${TS}.pdf`, mimeType: 'application/pdf' },
+      }));
+    await step('N3 mark registered', () =>
+      request.patch(`${BACKEND}/contracts/${S.contractId}/ejari/mark-registered`, { headers: hdrs(S.rp), data: {} }));
+
+    await step('N4 customer submits utility', () =>
       request.patch(`${BACKEND}/contracts/tenant/${S.contractId}/utility`, {
         headers: hdrs(S.cx), data: { utilityAccountNumber: `20${String(TS).slice(-8)}` },
       }));
-    await step('N3 landlord verifies utility', () =>
+    await step('N4 landlord verifies utility', () =>
       request.patch(`${BACKEND}/contracts/${S.contractId}/utility/verify`, { headers: hdrs(S.rp), data: {} }));
 
     // movein_drafted — an UNFINALISED save. The full-cycle spec finalises in one
     // call, so the draft state never exists there.
-    await step('N4 DRAFT the move-in inspection', () =>
+    await step('N5 DRAFT the move-in inspection', () =>
       request.patch(`${BACKEND}/contracts/${S.contractId}/inspection`, {
         headers: hdrs(S.rp),
         data: { type: 'move_in', data: { rooms: [{ name: 'Living room', condition: 'good', notes: 'Walkthrough in progress' }], keysHandedOver: 2 }, finalize: false },
       }));
-    await step('N4 submit the move-in inspection', () =>
+    await step('N5 submit the move-in inspection', () =>
       request.patch(`${BACKEND}/contracts/${S.contractId}/inspection`, {
         headers: hdrs(S.rp),
         data: { type: 'move_in', data: { rooms: [{ name: 'Living room', condition: 'good', notes: 'Handed over clean' }, { name: 'Kitchen', condition: 'good', notes: 'Appliances working' }], meterReadings: { electricity: '41221', water: '9088' }, keysHandedOver: 2 }, finalize: true },
       }));
 
-    const ml = (await step('N4 move-in signing link', () =>
+    const ml = (await step('N5 move-in signing link', () =>
       request.post(`${BACKEND}/portal/generate`, {
         headers: hdrs(S.rp),
         data: { tenantId: S.cxProfileId, contractId: S.contractId, purpose: 'move_in', signerRole: 'tenant', sendEmail: false },
       }),
     )) as { token?: string } | null;
     if (ml?.token) {
-      await step('N4 customer signs the report', () =>
+      await step('N5 customer signs the report', () =>
         request.post(`${BACKEND}/portal/${ml.token}/contracts/${S.contractId}/inspection/sign`, {
           data: { type: 'move_in', signatureImage: SIG, signatoryName: 'Journey Customer', consent: true },
         }));
     }
-    await step('N4 landlord counter-signs', () =>
+    await step('N5 landlord counter-signs — this activates the lease', () =>
       request.post(`${BACKEND}/contracts/${S.contractId}/inspection/counter-sign`, {
         headers: hdrs(S.rp), data: { type: 'move_in', signatureImage: SIG, signatoryName: 'Journey Landlord', consent: true },
       }));
 
-    await step('N5 Ejari certificate', () =>
-      request.post(`${BACKEND}/documents`, {
-        headers: hdrs(S.rp),
-        data: { ownerType: 'tenancy_contract', ownerId: S.contractId, category: 'contract', documentKey: 'ejari_certificate', displayName: 'Ejari certificate', fileUrl: `http://localhost:3011/uploads/cov-ejari-${TS}.pdf`, mimeType: 'application/pdf' },
-      }));
-    const reg = (await step('N5 mark registered → N6 activates', () =>
-      request.patch(`${BACKEND}/contracts/${S.contractId}/ejari/mark-registered`, { headers: hdrs(S.rp), data: {} }),
+    const c2 = (await step('N6 read the lease status back', () =>
+      request.get(`${BACKEND}/contracts/${S.contractId}`, { headers: hdrs(S.rp) }),
     )) as { status?: string } | null;
     // eslint-disable-next-line no-console
-    console.log(`         ↳ lease #${S.contractId} status: ${reg?.status ?? '?'}`);
+    console.log(`         ↳ lease #${S.contractId} status: ${c2?.status ?? '?'}`);
   });
 
   // ── RENEWAL R1→R7 ────────────────────────────────────────────────────────

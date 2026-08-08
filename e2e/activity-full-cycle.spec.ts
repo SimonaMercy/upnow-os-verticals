@@ -14,7 +14,7 @@
  * This drives a brand-new tenancy through all EIGHT lead + new-lease lanes:
  *
  *   L1 Interested  → L2 KYC → L3 Payments
- *   → N2 Signatures → N3 Utility → N4 Move-in → N5 Registration → N6 Activated
+ *   → N2 Signatures → N3 Registration → N4 Utility → N5 Move-in → N6 Activated
  *
  * Everything goes through the REAL HTTP endpoints with REAL tokens from the
  * real registration flow. Nothing is inserted into the activity tables directly.
@@ -50,10 +50,10 @@ const CX_PHONE = `+9715${String(TS + 7).slice(-8)}`;
 /**
  * The tenancy starts TODAY.
  *
- * Registration deliberately does NOT flip a lease live before its term begins —
+ * Activation deliberately does NOT flip a lease live before its term begins —
  * that would double-book the unit with the outgoing tenancy — so a future start
- * date defers activation to the overnight cron and N6 can never be reached in a
- * same-day drive. Starting today is what makes the last lane observable.
+ * date defers it to the overnight cron and N6 can never be reached in a same-day
+ * drive. Starting today is what makes the last lane observable.
  */
 const today = new Date();
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -400,9 +400,35 @@ test.describe('Activity board — one lease, the whole cycle', () => {
     );
   });
 
-  // ── N3 Utility ──────────────────────────────────────────────────────────
-  test('08 — N3: the utility account is submitted and verified', async ({ request }) => {
-    await step('N3 customer submits the DEWA account', () =>
+  // ── N3 Registration ─────────────────────────────────────────────────────
+  // Registration runs BEFORE utility: the utility account is opened against the
+  // certificate. It no longer activates the lease on its own — the move-in
+  // counter-signature does that, two lanes further on.
+  test('08 — N3: the Ejari certificate is filed and marked registered', async ({ request }) => {
+    // mark-registered LINKS AN EXISTING CERTIFICATE — it returns matched:false
+    // when there is no ejari* document to link, and correctly records nothing.
+    await step('N3 Ejari certificate uploaded', () =>
+      request.post(`${BACKEND}/documents`, {
+        headers: hdrs(S.rpToken),
+        data: {
+          ownerType: 'tenancy_contract', ownerId: S.contractId,
+          category: 'contract', documentKey: 'ejari_certificate',
+          displayName: 'Ejari certificate',
+          fileUrl: `http://localhost:3011/uploads/ejari-${TS}.pdf`,
+          mimeType: 'application/pdf',
+        },
+      }),
+    );
+    await step('N3 marked registered', () =>
+      request.patch(`${BACKEND}/contracts/${S.contractId}/ejari/mark-registered`, {
+        headers: hdrs(S.rpToken), data: {},
+      }),
+    );
+  });
+
+  // ── N4 Utility ──────────────────────────────────────────────────────────
+  test('09 — N4: the utility account is submitted and verified', async ({ request }) => {
+    await step('N4 customer submits the DEWA account', () =>
       request.patch(`${BACKEND}/contracts/tenant/${S.contractId}/utility`, {
         headers: hdrs(S.cxToken),
         // The field is `utilityAccountNumber`. Sending anything else used to reach
@@ -410,16 +436,18 @@ test.describe('Activity board — one lease, the whole cycle', () => {
         data: { utilityAccountNumber: `20${String(TS).slice(-8)}` },
       }),
     );
-    await step('N3 landlord verifies it', () =>
+    await step('N4 landlord verifies it', () =>
       request.patch(`${BACKEND}/contracts/${S.contractId}/utility/verify`, {
         headers: hdrs(S.rpToken), data: {},
       }),
     );
   });
 
-  // ── N4 Move-in ──────────────────────────────────────────────────────────
-  test('09 — N4: the move-in inspection is filled, signed and counter-signed', async ({ request }) => {
-    await step('N4 inspection filled in', () =>
+  // ── N5 Move-in → N6 Activated ───────────────────────────────────────────
+  // The counter-signature is the last gate, and it is what takes the tenancy
+  // live: registration (N3) is already on file by the time we get here.
+  test('10 — N5: the move-in inspection is filled, signed and counter-signed (N6)', async ({ request }) => {
+    await step('N5 inspection filled in', () =>
       request.patch(`${BACKEND}/contracts/${S.contractId}/inspection`, {
         headers: hdrs(S.rpToken),
         data: {
@@ -437,7 +465,7 @@ test.describe('Activity board — one lease, the whole cycle', () => {
       }),
     );
     // A SECOND link, minted for the inspection — see the note in N2.
-    const inspLink = (await step('N4 landlord sends the inspection link', () =>
+    const inspLink = (await step('N5 landlord sends the inspection link', () =>
       request.post(`${BACKEND}/portal/generate`, {
         headers: hdrs(S.rpToken),
         data: {
@@ -448,39 +476,16 @@ test.describe('Activity board — one lease, the whole cycle', () => {
     )) as { token?: string; link?: string } | null;
     const inspToken = String(inspLink?.token ?? (inspLink?.link ?? '').split('/portal/')[1]?.split('/')[0] ?? '');
     if (inspToken) {
-      await step('N4 customer signs the report via the portal', () =>
+      await step('N5 customer signs the report via the portal', () =>
         request.post(`${BACKEND}/portal/${inspToken}/contracts/${S.contractId}/inspection/sign`, {
           data: { type: 'move_in', signatureImage: SIG, signatoryName: 'Journey Customer', consent: true },
         }),
       );
     }
-    await step('N4 landlord counter-signs', () =>
+    await step('N5 landlord counter-signs — this is what activates the lease', () =>
       request.post(`${BACKEND}/contracts/${S.contractId}/inspection/counter-sign`, {
         headers: hdrs(S.rpToken),
         data: { type: 'move_in', signatureImage: SIG, signatoryName: 'Journey Landlord', consent: true },
-      }),
-    );
-  });
-
-  // ── N5 Registration → N6 Activated ──────────────────────────────────────
-  test('10 — N5: Ejari registered, which activates the lease (N6)', async ({ request }) => {
-    // mark-registered LINKS AN EXISTING CERTIFICATE — it returns matched:false
-    // when there is no ejari* document to link, and correctly records nothing.
-    await step('N5 Ejari certificate uploaded', () =>
-      request.post(`${BACKEND}/documents`, {
-        headers: hdrs(S.rpToken),
-        data: {
-          ownerType: 'tenancy_contract', ownerId: S.contractId,
-          category: 'contract', documentKey: 'ejari_certificate',
-          displayName: 'Ejari certificate',
-          fileUrl: `http://localhost:3011/uploads/ejari-${TS}.pdf`,
-          mimeType: 'application/pdf',
-        },
-      }),
-    );
-    await step('N5 marked registered', () =>
-      request.patch(`${BACKEND}/contracts/${S.contractId}/ejari/mark-registered`, {
-        headers: hdrs(S.rpToken), data: {},
       }),
     );
 

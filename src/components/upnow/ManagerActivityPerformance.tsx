@@ -144,9 +144,11 @@ const PENDING_LANE: Record<string, string> = {
   'New Lease · Payment plan': 'L3',
   'New Lease · Signature by Customer': 'N2',
   'New Lease · Signature by Landlord': 'N2',
-  'New Lease · Utility': 'N3',
-  'New Lease · Move-in': 'N4',
-  'New Lease · Contract Registration': 'N5',
+  // N3 Registration → N4 Utility → N5 Move-in — the lane ids are the server's
+  // (audit/action-catalog LANE_TITLES); change them there and here together.
+  'New Lease · Contract Registration': 'N3',
+  'New Lease · Utility': 'N4',
+  'New Lease · Move-in': 'N5',
   'New Lease · Ready to activate': 'N6',
   'Renewal · Draft': 'R1',
   'Renewal · Notice Sent': 'R2',

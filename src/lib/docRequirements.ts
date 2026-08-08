@@ -81,9 +81,20 @@ export const EXPIRY_DOC_BASES = [
   'emirates_id', 'passport', 'visa', 'trade_license',
 ];
 
+/**
+ * Sides that are the SAME physical document as another slot, and so must not be
+ * asked for a date of their own. A UAE Emirates ID prints one expiry, on the
+ * FRONT — asking on both sides asks the same question twice and lets two
+ * different answers be recorded for one card. The front is where the date is
+ * read from; the backend copies it onto the back row (syncEmiratesIdExpiry), so
+ * every surface that reads a per-document expiry still sees a dated back copy.
+ */
+const EXPIRY_INHERITED_KEYS = ['emirates_id_back'];
+
 /** Whether uploading this document key should prompt the RP for an expiry date. */
 export function docNeedsExpiry(documentKey: string | null | undefined): boolean {
   const k = (documentKey ?? '').toLowerCase();
+  if (EXPIRY_INHERITED_KEYS.some(part => k.includes(part))) return false;
   return EXPIRY_DOC_BASES.some(base => k.includes(base));
 }
 
