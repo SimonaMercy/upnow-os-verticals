@@ -17,15 +17,15 @@ import {
   ArrowLeft, Building2, Home, Users as UsersIcon, FileText, Mail, Phone,
   ShieldCheck, ShieldAlert, BadgeCheck, Clock, ChevronRight,
   Wrench, Truck, MapPin, Star, UserCog, CheckCircle2, Zap, CalendarClock,
-  UserX, UserCheck, Ban, Banknote,
+  UserX, UserCheck, Banknote, Eye,
 } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, LabelList,
 } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
-import { openDocViewer } from '@/lib/docViewer';
+import { openDocViewerByIds } from '@/lib/docViewer';
 
 const roleLabel: Record<string, string> = {
   customer: 'Customer',
@@ -50,6 +50,8 @@ interface UserDetail {
       rentalProviderId: number; companyName: string | null;
       entityType: string | null; companyType: string | null;
       tradeLicenseNumber: string | null;
+      hasPoa?: boolean; poaPersonName?: string | null; poaPersonPhone?: string | null;
+      poaPersonEmail?: string | null; poaStatus?: string | null;
     };
     summary: {
       properties: number; units: number; occupiedUnits: number;
@@ -58,8 +60,8 @@ interface UserDetail {
     properties: { id: number; buildingName: string; spaceCategory: string; fullAddress: string | null; unitCount: number; occupiedCount: number; units: { id: number; unitNumber: string; unitName: string | null; unitType: string; availability: string; rentalPrice: number | null }[] }[];
     units: { id: number; unitNumber: string; unitName: string | null; unitType: string; availability: string; rentalPrice: number | null; propertyId: number; propertyName: string | null }[];
     documents: { id: number; documentKey: string; displayName: string | null; category: string | null; fileUrl: string | null; status: string | null; issueDate: string | null; expiryDate: string | null }[];
-    customers: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean }[];
-    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null }[];
+    customers: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean; renting?: boolean }[];
+    leases: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null; phase?: 'current' | 'awaiting' | 'ended' }[];
     payments: { id: number; contractId: number | null; customerName: string; unitNumber: string | null; paymentType: string | null; paymentMethod: string | null; chequeNumber: string | null; amountPaid: number; vatAmount: number; chequeStatus: string; transactionDate: string | null; description: string | null }[];
     activity: {
       summary: { totalActions: number; last30dActions: number; distinctEntities: number; lastActionAt: string | null };
@@ -78,7 +80,14 @@ interface UserDetail {
       collections: { byStatus: Record<string, { count: number; amount: number }>; collectedAmount: number; pendingAmount: number; bouncedCount: number; collectionRatePct: number };
       listings: { byStatus: Record<string, number>; published: number; total: number };
       leaseLifecycle: { byStatus: Record<string, number>; expiring30: number; expiring60: number; expiring90: number; renewalBacklog: number };
-      pipeline: { byStage: Record<string, number>; totalLeads: number; convertedLeads: number; conversionPct: number };
+      pipeline: { byStage: Record<string, number>; bySource?: Record<string, number>; totalLeads: number; convertedLeads: number; conversionPct: number };
+      /** Public listing traffic, from `listing_views` ONLY — never summed with the
+       *  other two tracking tables. Optional so an older cached payload still renders. */
+      traffic?: {
+        views: number; visitors: number; unitsViewed: number; views30: number;
+        byReferrer: Record<string, number>;
+        topUnits: { unitId: number; unitNumber: string | null; views: number; visitors: number; leads: number; lastViewAt: string | null }[];
+      };
       unitMix: Record<string, number>;
     };
   };
@@ -269,26 +278,63 @@ const ROW_STYLE = { border: '1px solid var(--color-base-200)', backgroundColor: 
 // ── Charts (recharts) — palette/conventions shared with the admin dashboard ──
 const CHART = { teal: '#2e9f82', amber: '#d97706', red: '#dc2626', blue: '#2563eb', purple: '#7c3aed', gray: '#d4d2cc' };
 const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
-const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K` : String(v));
+// Millions collapse to "19M" rather than "19000K": a portfolio's cleared-rent
+// axis runs to eight figures, and the K form overflows the 38px axis gutter and
+// renders clipped ("0000K").
+const aedAxis = (v: number) =>
+  Math.abs(v) >= 1_000_000 ? `${Math.round(v / 1_000_000)}M`
+    : Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K`
+      : String(v);
 const leaseStatusColor: Record<string, string> = {
   active: CHART.teal, expired: CHART.gray, terminated: CHART.red, pending: CHART.amber, issued: CHART.blue,
 };
 
+/**
+ * The one card shell, matching the admin Pulse dashboard: a hairline border
+ * rather than a drop shadow. Fifteen cards each carrying their own shadow is
+ * what made this page read as noise instead of as a set of sections.
+ */
+const CARD = 'bg-white rounded-2xl border border-[#e8e6e0] p-4';
+
+/**
+ * Section divider, lifted from the Pulse dashboard: a numbered category label
+ * over the QUESTION that section answers. The question is the point — it tells
+ * an admin what they are meant to learn from the cards underneath, which a bare
+ * noun like "Financials" never did.
+ */
+function SectionHead({ no, q, id }: { no: string; q: string; id: string }) {
+  return (
+    <div id={id} className="flex items-baseline gap-3 mt-8 mb-3 pt-4 border-t border-[#e0ded8] scroll-mt-20">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-[#1e5fae]">{no}</span>
+      <h2 className="text-[15px] font-bold text-[#1a1916]">{q}</h2>
+    </div>
+  );
+}
+
 function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
-      <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{title}</h3>
-      {sub && <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>{sub}</p>}
+    <div className={CARD}>
+      <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5">{sub}</p>}
       <div className="mt-2">{children}</div>
     </div>
   );
 }
 
-/** Simple vertical bar chart over [{name,value,fill?}]. AED toggles K-axis + currency tooltip. */
-function CountBars({ data, aedMode }: { data: { name: string; value: number; fill?: string }[]; aedMode?: boolean }) {
+/**
+ * Simple vertical bar chart over [{name,value,fill?}]. AED toggles K-axis + currency tooltip.
+ *
+ * `labelKey` prints an exact figure above each bar. It exists so the chart can be
+ * the ONLY home for its numbers: a K-rounded axis is too coarse to read a real
+ * figure off, which is what used to justify a panel below repeating every bar as
+ * a label/value row. Point it at `count` (with `aedMode`) to get bar = amount,
+ * label = cheque count in a single mark.
+ */
+type BarDatum = { name: string; value: number; fill?: string; count?: number };
+function CountBars({ data, aedMode, labelKey }: { data: BarDatum[]; aedMode?: boolean; labelKey?: 'value' | 'count' }) {
   return (
     <ResponsiveContainer width="100%" height={180}>
-      <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+      <BarChart data={data} margin={{ top: 14, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
         <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} />
         <YAxis allowDecimals={false} tickFormatter={aedMode ? aedAxis : undefined} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={aedMode ? 38 : 28} />
@@ -297,7 +343,11 @@ function CountBars({ data, aedMode }: { data: { name: string; value: number; fil
           contentStyle={tooltipStyle}
           cursor={{ fill: '#fafaf8' }}
         />
+        {/* LabelList must precede the Cells and carry its text attributes via
+            `style` — as direct props, or placed after the Cells, recharts drops
+            the labels silently and the exact figures are lost. */}
         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+          {labelKey && <LabelList dataKey={labelKey} position="top" style={{ fontSize: 10, fill: '#6b6860' }} />}
           {data.map((d, i) => <Cell key={i} fill={d.fill ?? CHART.teal} />)}
         </Bar>
       </BarChart>
@@ -342,18 +392,18 @@ function Legend({ items }: { items: { name: string; value: number; fill: string 
 
 function KpiCard({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: string }) {
   return (
-    <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
-      <p className="text-xs mb-1.5" style={{ color: 'var(--color-neutral-500)' }}>{label}</p>
-      <p className="text-xl font-bold leading-tight truncate" style={{ color: accent ?? 'var(--color-neutral-900)' }}>{value}</p>
-      {sub && <p className="text-[11px] mt-1 truncate" style={{ color: 'var(--color-neutral-400)' }}>{sub}</p>}
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5 h-full">
+      <p className="text-[10px] uppercase tracking-wide font-semibold text-[#9b9890]">{label}</p>
+      <p className="text-xl font-bold mt-1.5 leading-none tabular-nums truncate" style={{ color: accent ?? '#1a1916' }}>{value}</p>
+      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
     </div>
   );
 }
 
 function MiniPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
-      <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-neutral-900)' }}>{title}</h3>
+    <div className={CARD}>
+      <h3 className="text-sm font-bold text-[#1a1916] mb-3">{title}</h3>
       <div className="space-y-1.5">{children}</div>
     </div>
   );
@@ -424,110 +474,223 @@ function penaltyValue(p: { enabled: boolean; fee: number | null; pct: number | n
 
 type LandlordInsights = NonNullable<UserDetail['landlord']>['insights'];
 
-function Insights({ ins }: { ins: LandlordInsights }) {
-  const f = ins.financials, o = ins.occupancy, col = ins.collections, ls = ins.leaseLifecycle, lst = ins.listings, pl = ins.pipeline;
-  const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1];
-  const occData = [
-    { name: 'Occupied', value: o.occupiedUnits, fill: CHART.teal },
-    { name: 'Vacant', value: o.vacantUnits, fill: CHART.gray },
-  ];
-  const statusData = Object.entries(ls.byStatus).map(([k, v]) => ({ name: titleCase(k), value: v, fill: leaseStatusColor[k] ?? CHART.blue }));
-  const collData = [
-    { name: 'Cleared', value: col.byStatus.cleared?.amount ?? 0, fill: CHART.teal },
-    { name: 'Pending', value: col.byStatus.pending?.amount ?? 0, fill: CHART.amber },
-    { name: 'Bounced', value: col.byStatus.bounced?.amount ?? 0, fill: CHART.red },
-  ];
+/**
+ * The landlord's insight cards, split into named pieces rather than one block.
+ *
+ * They used to render as a single strip-charts-panels slab, which is why the
+ * page had no categories: there was nowhere to put a section boundary. Each
+ * piece now goes under the section whose question it answers.
+ */
+function insightData(ins: LandlordInsights) {
+  const ls = ins.leaseLifecycle, col = ins.collections, o = ins.occupancy;
+  return {
+    occData: [
+      { name: 'Occupied', value: o.occupiedUnits, fill: CHART.teal },
+      { name: 'Vacant', value: o.vacantUnits, fill: CHART.gray },
+    ],
+    statusData: Object.entries(ls.byStatus).map(([k, v]) => ({ name: titleCase(k), value: v, fill: leaseStatusColor[k] ?? CHART.blue })),
+    // Bar height is the AMOUNT, the label printed on the bar is the cheque COUNT.
+    collData: [
+      { name: 'Cleared', value: col.byStatus.cleared?.amount ?? 0, count: col.byStatus.cleared?.count ?? 0, fill: CHART.teal },
+      { name: 'Pending', value: col.byStatus.pending?.amount ?? 0, count: col.byStatus.pending?.count ?? 0, fill: CHART.amber },
+      { name: 'Bounced', value: col.byStatus.bounced?.amount ?? 0, count: col.byStatus.bounced?.count ?? 0, fill: CHART.red },
+    ],
+  };
+}
+
+const byCountDesc2 = (a: [string, number], b: [string, number]) => b[1] - a[1];
+
+/** Headline money — the three figures, all on the current-book basis. */
+function MoneyKpis({ ins }: { ins: LandlordInsights }) {
+  const f = ins.financials, o = ins.occupancy, col = ins.collections;
   return (
-    <>
-      {/* KPI strip */}
-      {/* 4 across, not 7: a seventh card squeezes the money values into an
-          ellipsis at this width, and a truncated figure is worse than a second row. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
-        {/* Asking vs contracted, side by side. Market rent is Σ units.rental_price
-            across every unit — what the landlord asks. */}
-        <KpiCard label="Market rent (asking)" value={aed(f.marketRent)} sub={`${o.totalUnits} units · ${aed(o.vacantRentPotential)} vacant`} />
-        {/* The denominator is stated because it is NOT the occupied count beside
-            it: a term with confirmed PDCs earns before its unit flips to occupied.
-            Where that applies the count is named, so the two figures read as
-            reconcilable rather than contradictory. */}
-        <KpiCard
-          label="Annual recurring rent"
-          value={aed(f.annualRecurringRent)}
-          sub={
-            f.unitsAwaitingActivation > 0
-              ? `${f.earningUnits} earning · ${f.unitsAwaitingActivation} on confirmed cheques`
-              : `${f.earningUnits} earning units · avg ${aed(f.avgRentActive)}`
-          }
-          accent="var(--color-primary)"
-        />
-        <KpiCard label="Occupancy" value={`${o.occupancyPct}%`} sub={`${o.occupiedUnits}/${o.totalUnits} · ${o.vacantUnits} vacant`} />
-        <KpiCard label="Rent collected" value={aed(col.collectedAmount)} sub={`${aed(col.pendingAmount)} pending · ${col.bouncedCount} bounced`} />
-        <KpiCard label="Listed units" value={`${lst.published}/${lst.total}`} sub="published on platform" accent={lst.total > 0 && lst.published === 0 ? 'var(--color-error)' : undefined} />
-        <KpiCard label="Renewal backlog" value={ls.renewalBacklog} sub="expired leases" accent={ls.renewalBacklog > 0 ? 'var(--color-gold)' : undefined} />
-        <KpiCard label="Expiring ≤90d" value={ls.expiring90} sub={`30d: ${ls.expiring30} · 60d: ${ls.expiring60}`} />
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* Asking vs contracted, side by side. Market rent is Σ units.rental_price. */}
+      <KpiCard label="Market rent (asking)" value={aed(f.marketRent)} sub={`${o.totalUnits} units · ${aed(o.vacantRentPotential)} vacant`} />
+      {/* The denominator is stated because it is NOT the occupied count: a term
+          with confirmed PDCs earns before its unit flips to occupied. */}
+      <KpiCard
+        label="Annual recurring rent"
+        value={aed(f.annualRecurringRent)}
+        sub={
+          f.unitsAwaitingActivation > 0
+            ? `${f.earningUnits} earning · ${f.unitsAwaitingActivation} on confirmed cheques`
+            : `${f.earningUnits} earning units · avg ${aed(f.avgRentActive)}`
+        }
+        accent="var(--color-primary)"
+      />
+      <KpiCard label="Rent collected" value={aed(col.collectedAmount)} sub="cleared rent, current leases" />
+    </div>
+  );
+}
 
-      {/* Charts — portfolio at a glance */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <ChartCard title="Occupancy" sub={`${o.occupiedUnits}/${o.totalUnits} units occupied`}>
-          <Donut data={occData} center={`${o.occupancyPct}%`} label="occupied" />
-          <Legend items={occData} />
-        </ChartCard>
-        <ChartCard title="Lease status mix" sub="all tenancies">
-          <CountBars data={statusData} />
-        </ChartCard>
-        <ChartCard title="Collections" sub="cheque amounts by status">
-          <CountBars data={collData} aedMode />
-        </ChartCard>
-      </div>
+function OccupancyCard({ ins }: { ins: LandlordInsights }) {
+  const { occData } = insightData(ins);
+  return (
+    <ChartCard title="Occupancy" sub="units marked occupied">
+      <Donut data={occData} center={`${ins.occupancy.occupancyPct}%`} label="occupied" />
+      <Legend items={occData} />
+    </ChartCard>
+  );
+}
 
-      {/* Detail panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <MiniPanel title="Financials & collections">
-          <KV label="Total contract value" value={aed(f.totalContractValue)} />
-          <KV label="VAT collected" value={aed(f.vatCollected)} />
-          <KV label="Deposits held" value={aed(f.depositsHeld)} />
+function ListingsPanel({ ins }: { ins: LandlordInsights }) {
+  return (
+    <MiniPanel title="Listings & unit mix">
+      <Caption>Listing status</Caption>
+      {Object.entries(ins.listings.byStatus).sort(byCountDesc2).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+      <Divider />
+      <Caption>Unit mix</Caption>
+      {Object.entries(ins.unitMix).sort(byCountDesc2).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+    </MiniPanel>
+  );
+}
+
+function LeaseMixCard({ ins }: { ins: LandlordInsights }) {
+  const { statusData } = insightData(ins);
+  return (
+    <ChartCard title="Lease status mix" sub="all tenancies">
+      <CountBars data={statusData} labelKey="value" />
+    </ChartCard>
+  );
+}
+
+/** Bar = amount, printed label = cheque count. */
+function CollectionsCard({ ins }: { ins: LandlordInsights }) {
+  const { collData } = insightData(ins);
+  return (
+    <ChartCard title="Collections" sub="cheque amounts by status · labels are counts">
+      <CountBars data={collData} aedMode labelKey="count" />
+    </ChartCard>
+  );
+}
+
+function FinancialsPanel({ ins }: { ins: LandlordInsights }) {
+  const f = ins.financials, col = ins.collections;
+  return (
+    <MiniPanel title="Financials & collections">
+      <KV label="Total contract value" value={aed(f.totalContractValue)} />
+      <KV label="VAT collected" value={aed(f.vatCollected)} />
+      {/* Held against the whole tenancy CHAIN, not the current term — on a
+          renewal the deposit stays on the root lease. See users.service. */}
+      <KV label="Deposits held" value={aed(f.depositsHeld)} />
+      <Divider />
+      {/* Per-status cheque counts and amounts are NOT repeated here — the
+          Collections chart owns them (bars = amount, labels = count). */}
+      <KV label="Collection rate" value={`${col.collectionRatePct}%`} />
+    </MiniPanel>
+  );
+}
+
+/**
+ * Listing traffic — how much public interest the listings actually attract.
+ *
+ * Read from `listing_views` alone. The platform has three tracking tables and
+ * only this one carries a unit id, so it is the only one attributable to a
+ * landlord; the other two overlap with it and must never be added to it. The
+ * card states its source so nobody later "completes" the number by summing.
+ *
+ * Views are shown against LEADS, not on their own: no views and views-without-
+ * enquiries are opposite problems with opposite fixes, and a bare view count
+ * cannot tell them apart.
+ */
+function TrafficPanel({ ins }: { ins: LandlordInsights }) {
+  const t = ins.traffic;
+  if (!t) return null;
+  const lst = ins.listings;
+  // Views per visitor, and the share of the book anyone has ever looked at.
+  const perVisitor = t.visitors ? (t.views / t.visitors).toFixed(1) : '—';
+  const refs = Object.entries(t.byReferrer).sort((a, b) => b[1] - a[1]);
+  return (
+    <MiniPanel title="Listing traffic">
+      <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+        Public views of this landlord&apos;s listings, from listing views only — not combined with
+        portal page views or site visits, which count different things.
+      </p>
+      <KV label="Listing views" value={t.views} />
+      <KV label="Unique visitors" value={`${t.visitors}${t.visitors ? ` · ${perVisitor} views each` : ''}`} />
+      <KV label="Views in last 30 days" value={t.views30} />
+      <Divider />
+      {/* Against the LISTED count, not the total unit count: an unpublished unit
+          has no page to be viewed, so counting it as unviewed is not a finding. */}
+      <KV
+        label="Listings viewed"
+        value={`${t.unitsViewed} of ${lst.published} published`}
+        dot={lst.published > 0 && t.unitsViewed < lst.published ? 'var(--color-gold)' : undefined}
+      />
+      {refs.length > 0 && (
+        <>
           <Divider />
-          <KV label="Cleared cheques" value={`${col.byStatus.cleared?.count ?? 0} · ${aed(col.byStatus.cleared?.amount ?? 0)}`} dot="var(--color-primary)" />
-          <KV label="Pending cheques" value={`${col.byStatus.pending?.count ?? 0} · ${aed(col.byStatus.pending?.amount ?? 0)}`} dot="var(--color-gold)" />
-          <KV label="Bounced cheques" value={`${col.byStatus.bounced?.count ?? 0} · ${aed(col.byStatus.bounced?.amount ?? 0)}`} dot="var(--color-error)" />
-          <KV label="Collection rate" value={`${col.collectionRatePct}%`} />
-        </MiniPanel>
+          <Caption>Came from</Caption>
+          {refs.map(([k, v]) => <KV key={k} label={k} value={v} />)}
+        </>
+      )}
+    </MiniPanel>
+  );
+}
 
-        <MiniPanel title="Lease lifecycle">
-          {Object.entries(ls.byStatus).sort(byCount).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
-          <Divider />
-          <KV label="Expiring 30 / 60 / 90 days" value={`${ls.expiring30} / ${ls.expiring60} / ${ls.expiring90}`} />
-          <KV label="Renewal backlog (expired)" value={ls.renewalBacklog} />
-        </MiniPanel>
+/** The listings people actually opened, each against the leads it produced. */
+function TopViewedPanel({ ins }: { ins: LandlordInsights }) {
+  const rows = ins.traffic?.topUnits ?? [];
+  return (
+    <Section title="Most-viewed listings" count={rows.length}>
+      <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+        Views beside the leads each unit produced — traffic with no enquiry is a different
+        problem from no traffic at all.
+      </p>
+      {rows.map((r) => (
+        <Link key={r.unitId} href={`/dashboard/admin/units/${r.unitId}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+          <Eye size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+              {r.unitNumber ? `Unit ${r.unitNumber}` : `Unit #${r.unitId}`}
+            </p>
+            <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+              {r.views} view{r.views === 1 ? '' : 's'} · {r.visitors} visitor{r.visitors === 1 ? '' : 's'}
+              {r.lastViewAt ? ` · last ${fmtDate(r.lastViewAt)}` : ''}
+            </p>
+          </div>
+          <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+            style={r.leads > 0
+              ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }
+              : { backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}>
+            {r.leads > 0 ? `${r.leads} lead${r.leads === 1 ? '' : 's'}` : 'no enquiry'}
+          </span>
+          <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+        </Link>
+      ))}
+    </Section>
+  );
+}
 
-        <MiniPanel title="Listings & unit mix">
-          <Caption>Listing status</Caption>
-          {Object.entries(lst.byStatus).sort(byCount).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+function PipelinePanel({ ins }: { ins: LandlordInsights }) {
+  const pl = ins.pipeline;
+  return (
+    <MiniPanel title="Demand pipeline">
+      <KV label="Total leads" value={pl.totalLeads} />
+      <KV label="Converted" value={`${pl.convertedLeads} (${pl.conversionPct}%)`} />
+      {Object.keys(pl.bySource ?? {}).length > 0 && (
+        <>
           <Divider />
-          <Caption>Unit mix</Caption>
-          {Object.entries(ins.unitMix).sort(byCount).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
-        </MiniPanel>
-
-        <MiniPanel title="Demand pipeline">
-          <KV label="Total leads" value={pl.totalLeads} />
-          <KV label="Converted" value={`${pl.convertedLeads} (${pl.conversionPct}%)`} />
-          <Divider />
-          {pl.totalLeads === 0
-            ? <p className="text-sm" style={{ color: 'var(--color-neutral-400)' }}>No platform leads yet.</p>
-            : Object.entries(pl.byStage).sort(byCount).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
-        </MiniPanel>
-      </div>
-    </>
+          <Caption>Lead source</Caption>
+          {Object.entries(pl.bySource ?? {}).sort(byCountDesc2).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+        </>
+      )}
+      <Divider />
+      <Caption>Stage</Caption>
+      {pl.totalLeads === 0
+        ? <p className="text-sm" style={{ color: 'var(--color-neutral-400)' }}>No platform leads yet.</p>
+        : Object.entries(pl.byStage).sort(byCountDesc2).map(([k, v]) => <KV key={k} label={titleCase(k)} value={v} />)}
+    </MiniPanel>
   );
 }
 
 /** A breakdown card: header (title + count) and an internally-scrolling body. */
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl flex flex-col overflow-hidden" style={{ boxShadow: 'var(--shadow-sm)', maxHeight: 440 }}>
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] flex flex-col overflow-hidden" style={{ maxHeight: 440 }}>
       <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-base-200)' }}>
-        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{title}</h3>
+        <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
         <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>{count}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -565,11 +728,125 @@ function DocRow({ d, sub }: { d: OwnedDoc; sub?: string }) {
           {sub ? `${sub} · ` : ''}{d.category ? titleCase(d.category) : '—'}{d.expiryDate ? ` · expires ${fmtDate(d.expiryDate)}` : ''}
         </p>
       </div>
+      {/* Opened by id, not by file_url: the stored URL points straight at a
+          private bucket that 403s an anonymous browser fetch, so the viewer used
+          to open on a document it could never load. See openDocViewerByIds. */}
       {d.fileUrl ? (
-        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: label })} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
+        <button type="button" onClick={() => void openDocViewerByIds([{ id: d.id, caption: label }], label)} className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 cursor-pointer" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>View</button>
       ) : (
         <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>Requested</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Power of Attorney — the holder and the paperwork, lifted out of the flat
+ * document list.
+ *
+ * Two reasons it is its own block. A POA row buried in a mixed document list is
+ * just another filename, when it is the instrument that lets somebody else sign
+ * for this landlord. And a flat list can only render what EXISTS: with no POA
+ * section, a landlord who declared a POA but never uploaded the deed looked
+ * identical to one who has no POA at all. Absence is stated here, not left to be
+ * inferred from a row that simply is not there.
+ *
+ * `poa_*` is the same prefix rule the admin KYC page groups these by, so both
+ * surfaces agree on what counts as POA paperwork.
+ */
+function PoaPanel({ profile, docs }: {
+  profile: NonNullable<UserDetail['landlord']>['profile'];
+  docs: OwnedDoc[];
+}) {
+  // The deed itself. `poa_document` is the signed Power of Attorney; every other
+  // poa_* key is supporting identity for the holder.
+  const hasDeed = docs.some((d) => d.documentKey === 'poa_document' && !!d.fileUrl);
+  const holder = ([
+    ['Holder', profile.poaPersonName],
+    ['Phone', profile.poaPersonPhone],
+    ['Email', profile.poaPersonEmail],
+  ] as [string, string | null | undefined][]).filter((r): r is [string, string] => !!r[1]);
+
+  return (
+    <div className="bg-white rounded-2xl p-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <ShieldCheck size={15} style={{ color: 'var(--color-primary)' }} />
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>Power of Attorney</h3>
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={profile.hasPoa
+            ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }
+            : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
+          {profile.hasPoa ? 'Declared' : 'Not declared'}
+        </span>
+        {profile.poaStatus && <Pill value={profile.poaStatus} />}
+      </div>
+
+      {holder.length > 0
+        ? <div className="space-y-1.5 mb-3">{holder.map(([l, v]) => <KV key={l} label={l} value={v} />)}</div>
+        : <p className="text-sm mb-3" style={{ color: 'var(--color-neutral-400)' }}>No POA holder recorded.</p>}
+
+      {!hasDeed && (
+        <p className="text-xs mb-2 px-2.5 py-2 rounded-lg" style={{ backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}>
+          No signed Power of Attorney deed on file
+          {profile.hasPoa ? ' — yet this landlord has declared one.' : '.'}
+          {docs.length > 0 && ' The documents below are holder identity only.'}
+        </p>
+      )}
+
+      <div className="space-y-1.5">
+        {docs.length === 0
+          ? <p className="text-sm" style={{ color: 'var(--color-neutral-400)' }}>No POA documents uploaded.</p>
+          : docs.map((d) => <DocRow key={d.id} d={d} />)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One customer in the landlord's roster. The chip states which of the three
+ * buckets the row is in, so a card read out of context still says what it is.
+ */
+function CustomerRow({ c, tone }: {
+  c: { tenantId: number; userId: number; name: string; email: string | null; phone: string | null; hasLease: boolean; renting?: boolean };
+  tone: 'active' | 'ended' | 'lead';
+}) {
+  const chip = tone === 'active'
+    ? { label: 'Renting', bg: 'var(--color-primary-50)', fg: 'var(--color-primary)' }
+    : tone === 'ended'
+      ? { label: 'Ended', bg: 'var(--color-base-100)', fg: 'var(--color-neutral-500)' }
+      : { label: 'Never signed', bg: '#fef9eb', fg: 'var(--color-gold)' };
+  return (
+    <Link href={`/dashboard/admin/users/${c.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+      <UsersIcon size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{c.name}</p>
+        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{c.email ?? '—'}{c.phone ? ` · ${c.phone}` : ''}</p>
+      </div>
+      <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: chip.bg, color: chip.fg }}>{chip.label}</span>
+      <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+    </Link>
+  );
+}
+
+/** One lease row. `payments` is the count hanging off it, shown when non-zero. */
+function LeaseRow({ c, payments }: {
+  c: { id: number; status: string; contractStartDate: string | null; contractEndDate: string | null; annualRent: number | null; tenantName: string; unitNumber: string | null };
+  payments?: number;
+}) {
+  return (
+    <div className={ROW} style={ROW_STYLE}>
+      <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+          {c.tenantName}
+          {c.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {c.unitNumber}</span>}
+        </p>
+        <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+          {fmtDate(c.contractStartDate)} → {fmtDate(c.contractEndDate)} · {aed(c.annualRent)}/yr
+          {(payments ?? 0) > 0 && ` · ${payments} payment${payments === 1 ? '' : 's'}`}
+        </p>
+      </div>
+      <Pill value={c.status} />
     </div>
   );
 }
@@ -899,7 +1176,7 @@ function ManagerView({ m }: { m: NonNullable<UserDetail['manager']> }) {
                     {(unitsByProp[p.id] ?? []).map((un) => (
                       <span key={un.id} className="text-[11px] font-medium px-1.5 py-0.5 rounded"
                         style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>
-                        {un.unitNumber || un.unitName || `#${un.id}`}
+                        {un.unitNumber || `#${un.id}`}
                         {un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}
                       </span>
                     ))}
@@ -1571,14 +1848,11 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Suspend / ban / reactivate without going back to the list. Ban asks first —
-  // it locks the account out entirely.
+  // Suspend / reactivate without going back to the list. Ban is retired — the
+  // status it wrote was never checked at login, so it locked nobody out.
   const changeStatus = useCallback(async (next: string) => {
     const target = data?.user;
     if (!target) return;
-    if (next === 'banned' && !window.confirm(
-      `Ban ${target.name}?\n\nThey lose access to the platform immediately. You can reactivate them from this page.`,
-    )) return;
     setStatusBusy(true);
     try {
       await apiPatch(`/admin/users/${target.id}/status`, { status: next });
@@ -1622,6 +1896,61 @@ export default function AdminUserDetailPage() {
     },
     {},
   );
+
+  // Payments hang off the lease that produced them rather than standing as their
+  // own section — a cheque only means anything next to its tenancy. Same nesting
+  // the Buildings & units section uses for units under their property.
+  const paymentsByLease = (L?.payments ?? []).reduce<Record<number, NonNullable<UserDetail['landlord']>['payments']>>(
+    (acc, p) => {
+      if (p.contractId == null) return acc;
+      (acc[p.contractId] ??= []).push(p);
+      return acc;
+    },
+    {},
+  );
+  // Rows the API returned that no lease on this page claims — a payment whose
+  // contract_id is null. Counted so the total is never silently short.
+  const unlinkedPayments = (L?.payments ?? []).filter((p) => p.contractId == null).length;
+
+  /**
+   * The customer roster is LIFETIME — everyone who has ever rented here, plus
+   * converted leads. Split into who is renting now and who has gone, because a
+   * single "Customers 116" next to the landlord's own directory reading 93 looks
+   * like the two pages disagree when they are simply answering different
+   * questions. `renting` is the backend's two-tier live-lease rule, identical to
+   * the one the RP directory uses, so the halves match that page customer for
+   * customer (RP 2: 93 renting / 21 ended / 2 never signed).
+   */
+  const allCustomers = L?.customers ?? [];
+  const rentingCustomers = allCustomers.filter((c) => c.renting);
+  // Had a lease, none live now. Kept apart from the never-signed leads below —
+  // a former tenant and a lead who never converted are not the same record.
+  const endedCustomers = allCustomers.filter((c) => !c.renting && c.hasLease);
+  const leadOnlyCustomers = allCustomers.filter((c) => !c.renting && !c.hasLease);
+
+  /**
+   * Leases segregated by where each one is in its life. The list is the landlord's
+   * whole history — 369 rows on RP 2 — and a status chip alone cannot separate a
+   * running tenancy from one that ended two years ago, least of all the six rows
+   * that still read `active` after their termination took effect.
+   *
+   * `phase` is computed backend-side from the same predicate the money figures
+   * use, so these buckets and the rent totals never disagree.
+   */
+  const allLeases = L?.leases ?? [];
+  const currentLeases = allLeases.filter((l) => (l.phase ?? 'current') === 'current');
+  const awaitingLeases = allLeases.filter((l) => l.phase === 'awaiting');
+  const endedLeases = allLeases.filter((l) => l.phase === 'ended');
+
+  // POA paperwork gets its own panel, so it comes OUT of the general document
+  // list rather than appearing in both. Same `poa_*` rule as the admin KYC page.
+  const isPoaDoc = (k: string | null | undefined) => (k ?? '').startsWith('poa_');
+  const poaDocs = (L?.documents ?? []).filter((d) => isPoaDoc(d.documentKey));
+  const rpDocs = (L?.documents ?? []).filter((d) => !isPoaDoc(d.documentKey));
+  // Rendered whenever there is anything to say about a POA — declared, a holder
+  // named, or paperwork on file. A landlord with none of the three has no POA and
+  // gets no panel.
+  const showPoa = !!L && (L.profile.hasPoa === true || poaDocs.length > 0 || !!L.profile.poaPersonName);
 
   const caps = L?.settings?.settlementDiscountCaps;
   const setCaps: [string, string][] = ([
@@ -1682,28 +2011,18 @@ export default function AdminUserDetailPage() {
               </div>
             </div>
 
-            {/* Account actions — super admins are never suspendable or bannable */}
+            {/* Account actions — super admins are never suspendable */}
             {u.role !== 'super_admin' && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {u.status !== 'suspended' && u.status !== 'banned' && (
+                {u.status !== 'suspended' && (
                   <button
                     onClick={() => void changeStatus('suspended')}
                     disabled={statusBusy}
                     className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-opacity disabled:opacity-50"
                     style={{ backgroundColor: '#fef2f2', color: 'var(--color-error)' }}
+                    title="Block this user from signing in"
                   >
                     <UserX size={13} /> Suspend
-                  </button>
-                )}
-                {u.status !== 'banned' && (
-                  <button
-                    onClick={() => void changeStatus('banned')}
-                    disabled={statusBusy}
-                    className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-opacity disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--color-error)', color: '#fff' }}
-                    title="Ban this user from the platform"
-                  >
-                    <Ban size={13} /> Ban
                   </button>
                 )}
                 {(u.status === 'suspended' || u.status === 'banned') && (
@@ -1723,21 +2042,234 @@ export default function AdminUserDetailPage() {
           {/* ── Role-specific breakdown ── */}
           {L && (
             <>
-              {/* Profile line */}
-              {(L.profile.companyName || L.profile.tradeLicenseNumber) && (
-                <div className="bg-white rounded-2xl p-4 mb-6 flex flex-wrap gap-x-8 gap-y-2 text-sm" style={{ boxShadow: 'var(--shadow-sm)' }}>
-                  {L.profile.companyName && <span><span style={{ color: 'var(--color-neutral-400)' }}>Company: </span><span style={{ color: 'var(--color-neutral-800)', fontWeight: 600 }}>{L.profile.companyName}</span></span>}
-                  <span><span style={{ color: 'var(--color-neutral-400)' }}>Type: </span><span style={{ color: 'var(--color-neutral-800)', fontWeight: 600 }}>{titleCase(L.profile.companyType ?? L.profile.entityType)}</span></span>
-                  {L.profile.tradeLicenseNumber && <span><span style={{ color: 'var(--color-neutral-400)' }}>Trade License: </span><span style={{ color: 'var(--color-neutral-800)', fontWeight: 600 }}>{L.profile.tradeLicenseNumber}</span></span>}
+              {/* ── Headline ──
+                  The three money figures lead, then a jump nav, then numbered
+                  sections — the same shape as the admin Pulse dashboard. This
+                  page previously ran fifteen shadowed cards end to end with no
+                  category boundary, so nothing told the reader what any group of
+                  cards was FOR. Each section now states the question it answers.
+                  The detail order inside them is unchanged: Properties → Units →
+                  Customers → Leases → Payments. */}
+              <MoneyKpis ins={L.insights} />
+
+              <nav className="flex gap-2 flex-wrap mt-4">
+                {([
+                  ['#sec-profile', '1 · Profile'],
+                  ['#sec-portfolio', '2 · Portfolio'],
+                  ['#sec-tenancies', '3 · Tenancies'],
+                  ['#sec-money', '4 · Money'],
+                  ['#sec-demand', '5 · Demand'],
+                  ['#sec-governance', '6 · Governance'],
+                  ['#sec-activity', '7 · Activity'],
+                ] as [string, string][]).map(([href, label]) => (
+                  <a key={href} href={href} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] bg-white rounded-full px-3 py-1 hover:border-[#1e5fae] hover:text-[#1a1916]">{label}</a>
+                ))}
+              </nav>
+
+              {/* ── 1 · PROFILE ── everything describing the LANDLORD rather than
+                  their portfolio: identity, own paperwork, and the Power of
+                  Attorney that lets somebody else act for them. */}
+              <SectionHead id="sec-profile" no="Section 1 · Profile" q="Who is this landlord?" />
+              <div className="flex flex-col gap-4">
+                <div className={CARD}>
+                  <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-neutral-900)' }}>Profile</h3>
+                  <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+                    {L.profile.companyName && <ProfileBit label="Company" value={L.profile.companyName} />}
+                    <ProfileBit label="Type" value={titleCase(L.profile.companyType ?? L.profile.entityType)} />
+                    {L.profile.tradeLicenseNumber && <ProfileBit label="Trade License" value={L.profile.tradeLicenseNumber} />}
+                    <ProfileBit label="Provider ID" value={`#${L.profile.rentalProviderId}`} />
+                  </div>
                 </div>
-              )}
 
-              {/* Platform insights */}
-              <Insights ins={L.insights} />
+                {/* RP-owned documents — inline view-only; empty file_url = requested/missing.
+                    POA paperwork is excluded here and presented in its own panel below. */}
+                <Section title="Rental Provider Documents" count={rpDocs.length}>
+                  {rpDocs.length === 0 ? (
+                    <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this rental provider.</p>
+                  ) : rpDocs.map((d) => <DocRow key={d.id} d={d} />)}
+                </Section>
+                {showPoa && <PoaPanel profile={L.profile} docs={poaDocs} />}
+              </div>
 
-              {/* Charging rules + delegated access. Only what this landlord has
-                  actually set is rendered — empty slots are dropped, not shown
-                  as "not set", so the panel reads as data rather than a config form. */}
+              {/* ── 2 · PORTFOLIO ── */}
+              <SectionHead id="sec-portfolio" no="Section 2 · Portfolio" q="What do they own?" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <OccupancyCard ins={L.insights} />
+                <ListingsPanel ins={L.insights} />
+              </div>
+              {/* Properties | Units side by side — the two halves of the same
+                  question, and each card scrolls internally so the pair stays the
+                  height of one. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Properties. Units are no longer nested here — they are their
+                    own card beside this one, so each step of the hierarchy is
+                    readable on its own. */}
+                <Section title="Properties" count={L.properties.length}>
+                  {L.properties.map((p) => (
+                    <Link key={p.id} href={`/dashboard/admin/properties/${p.id}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+                      <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{p.fullAddress ?? '—'}</p>
+                      </div>
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{titleCase(p.spaceCategory)}</span>
+                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-500)' }}>{p.occupiedCount}/{p.unitCount} occupied</span>
+                      <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+                    </Link>
+                  ))}
+                </Section>
+                {/* Units — flat, each naming its property so the card stands on
+                    its own now that it is not nested under one. */}
+                <Section title="Units" count={L.units.length}>
+                  {L.units.map((un) => (
+                    <Link key={un.id} href={`/dashboard/admin/units/${un.id}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
+                      <Home size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                          {un.unitNumber ? `Unit ${un.unitNumber}` : `Unit #${un.id}`}
+                          {un.unitName && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · {un.unitName}</span>}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                          {un.propertyName ?? '—'} · {titleCase(un.unitType)}
+                          {un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}
+                        </p>
+                      </div>
+                      <Pill value={un.availability} />
+                      <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
+                    </Link>
+                  ))}
+                </Section>
+              </div>
+
+              {/* ── 3 · TENANCIES ── */}
+              <SectionHead id="sec-tenancies" no="Section 3 · Tenancies" q="Who is renting, and on what terms?" />
+              {/* Lease mix takes the full row — it is the header for the section,
+                  read before the two lists that break it down. */}
+              <div className="mb-4">
+                <LeaseMixCard ins={L.insights} />
+              </div>
+              {/* Renting now | Leases side by side; the customers who have GONE
+                  get their own card below, so a former tenant is never counted
+                  in with a current one. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Section title="Customers renting now" count={rentingCustomers.length}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Holding a live lease, or an in-flight renewal on a unit they occupy — the
+                    same rule as the landlord&apos;s own Customers directory, so the two agree.
+                  </p>
+                  {rentingCustomers.map((c) => <CustomerRow key={c.tenantId} c={c} tone="active" />)}
+                </Section>
+                <Section title="Current leases" count={currentLeases.length}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Running now — activated, or post-dated cheques in hand. Counted per LEASE, so
+                    this need not equal the landlord dashboard&apos;s tile, which counts one per unit.
+                  </p>
+                  {currentLeases.map((c) => <LeaseRow key={c.id} c={c} payments={paymentsByLease[c.id]?.length} />)}
+                </Section>
+              </div>
+
+              {/* The other two phases, side by side underneath. Keeping them out
+                  of "Current" is the point: 369 rows with only a status chip put a
+                  tenancy that ended two years ago next to a running one. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                <Section title="Leases awaiting activation" count={awaitingLeases.length}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Drafted or issued, cheques not yet confirmed. Not earning, and not ended —
+                    these are the ones still in the pipeline.
+                  </p>
+                  {awaitingLeases.map((c) => <LeaseRow key={c.id} c={c} payments={paymentsByLease[c.id]?.length} />)}
+                </Section>
+
+                <Section title="Ended leases" count={endedLeases.length}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Expired, terminated, or wound down through an accepted termination that has
+                    taken effect — including rows whose status column still reads active.
+                  </p>
+                  {endedLeases.map((c) => <LeaseRow key={c.id} c={c} payments={paymentsByLease[c.id]?.length} />)}
+                </Section>
+              </div>
+
+              {/* Customers who have GONE, kept apart from those who are here.
+                  These are exactly the rows behind the gap between this page's
+                  lifetime roster and the landlord's own active directory. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                <Section title="Customers with ended leases" count={endedCustomers.length}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Rented here before and hold no live lease now — whether the term simply expired
+                    or the tenancy was terminated. The landlord&apos;s Ended Leases nav is narrower:
+                    it lists only the terminated ones.
+                  </p>
+                  {endedCustomers.map((c) => <CustomerRow key={c.tenantId} c={c} tone="ended" />)}
+                </Section>
+
+                {/* Only rendered when it is non-empty: on most landlords there are
+                    none, and an empty third card would imply a bucket that matters. */}
+                {leadOnlyCustomers.length > 0 && (
+                  <Section title="Converted leads, never signed" count={leadOnlyCustomers.length}>
+                    <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                      A lead was converted to a customer record but no contract ever followed. They
+                      count in the roster total and in neither list above.
+                    </p>
+                    {leadOnlyCustomers.map((c) => <CustomerRow key={c.tenantId} c={c} tone="lead" />)}
+                  </Section>
+                )}
+              </div>
+
+              {/* ── 4 · MONEY ── */}
+              <SectionHead id="sec-money" no="Section 4 · Money" q="What are they earning, and is it being collected?" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <CollectionsCard ins={L.insights} />
+                <FinancialsPanel ins={L.insights} />
+              </div>
+              <div className="flex flex-col gap-4">
+                {/* 5 · Payments — follows Leases, and each row names the lease it
+                    belongs to, because a cheque only means something beside its
+                    tenancy. */}
+                <Section title="Payments" count={L.payments?.length ?? 0}>
+                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Most recent 200 rows, all payment types — fee rows appear here alongside rent, so this
+                    does not tie to the rent-only collection figures above.
+                    {unlinkedPayments > 0 && ` ${unlinkedPayments} row${unlinkedPayments === 1 ? '' : 's'} carry no lease.`}
+                  </p>
+                  {(L.payments ?? []).map((p) => (
+                    <div key={p.id} className={ROW} style={ROW_STYLE}>
+                      <Banknote size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
+                          {p.customerName}
+                          {p.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {p.unitNumber}</span>}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                          {titleCase(p.paymentType)} · {fmtDate(p.transactionDate)}
+                          {p.chequeNumber ? ` · cheque ${p.chequeNumber}` : ''}
+                          {p.vatAmount > 0 ? ` · incl. VAT ${aed(p.vatAmount)}` : ''}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--color-neutral-900)' }}>{aed(p.amountPaid)}</span>
+                      <Pill value={p.chequeStatus} />
+                    </div>
+                  ))}
+                </Section>
+              </div>
+
+              {/* ── 5 · DEMAND ── */}
+              <SectionHead id="sec-demand" no="Section 5 · Demand" q="Where is new business coming from?" />
+              {/* Traffic first, then enquiries: the funnel reads left to right —
+                  who looked, then who asked, then which listings did the work. */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <TrafficPanel ins={L.insights} />
+                <PipelinePanel ins={L.insights} />
+              </div>
+              <TopViewedPanel ins={L.insights} />
+
+              {/* ── 6 · GOVERNANCE ── the rules this landlord charges under, and
+                  who besides them can act on the account. */}
+              <SectionHead id="sec-governance" no="Section 6 · Governance" q="Who else can act for them, and under what rules?" />
+              {/* Charging rules — moved to the tail with the other
+                  administrative panels, so the landlord's portfolio leads the
+                  page. Only what this landlord actually set is rendered — empty
+                  slots are dropped, not shown as "not set", so the panel reads
+                  as data rather than a config form. */}
               {L.settings && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                   {(setPrefs.length > 0 || setPenalties.length > 0 || Object.keys(feeByCategory).length > 0) && (
@@ -1790,139 +2322,49 @@ export default function AdminUserDetailPage() {
                     </MiniPanel>
                   )}
 
-                  <div className="flex flex-col gap-4">
-                    {setCaps.length > 0 && (
-                      <MiniPanel title="Settlement discount caps">
-                        <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
-                          The most a manager may waive on a final settlement, per category.
-                        </p>
-                        {setCaps.map(([label, value]) => <KV key={label} label={label} value={value} />)}
-                      </MiniPanel>
-                    )}
-
-                    <Section title="Managers with access" count={L.managers?.length ?? 0}>
-                      {(L.managers ?? []).map((mg) => (
-                        <Link key={mg.userId} href={`/dashboard/admin/users/${mg.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={{ ...ROW_STYLE, opacity: mg.isActive ? 1 : 0.6 }}>
-                          <UserCog size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-sm truncate flex items-center gap-2" style={{ color: 'var(--color-neutral-900)' }}>
-                              {mg.name}
-                              {!mg.isActive && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
-                                  Revoked
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-                              {mg.grantedCount} permissions · since {fmtDate(mg.grantedAt)}
-                              {mg.grantedByRole ? ` · granted by ${titleCase(mg.grantedByRole)}` : ''}
-                            </p>
-                          </div>
-                          {mg.accountStatus && <Pill value={mg.accountStatus} />}
-                          <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
-                        </Link>
-                      ))}
-                    </Section>
-                  </div>
+                  {setCaps.length > 0 && (
+                    <MiniPanel title="Settlement discount caps">
+                      <p className="text-xs mb-2" style={{ color: 'var(--color-neutral-400)' }}>
+                        The most a manager may waive on a final settlement, per category.
+                      </p>
+                      {setCaps.map(([label, value]) => <KV key={label} label={label} value={value} />)}
+                    </MiniPanel>
+                  )}
                 </div>
               )}
-
-              {/* Breakdown — two per row, each scrolls internally */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Buildings & units — hierarchy: each building (clickable → property
-                    detail) with its units nested + clickable → unit detail (SCRUM-587/588). */}
-                <Section title="Buildings & units" count={L.properties.length}>
-                  {L.properties.map((p) => (
-                    <div key={p.id} className="mb-2">
-                      <Link href={`/dashboard/admin/properties/${p.id}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
-                        <Building2 size={16} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.buildingName}</p>
-                          <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{p.fullAddress ?? '—'}</p>
-                        </div>
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{titleCase(p.spaceCategory)}</span>
-                        <span className="text-xs flex-shrink-0" style={{ color: 'var(--color-neutral-500)' }}>{p.occupiedCount}/{p.unitCount}</span>
-                        <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
-                      </Link>
-                      {p.units.length > 0 && (
-                        <div className="ml-4 pl-3 mt-1 space-y-1" style={{ borderLeft: '1px solid var(--color-base-200, #e8e6e0)' }}>
-                          {p.units.map((un) => (
-                            <Link key={un.id} href={`/dashboard/admin/units/${un.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors hover:brightness-95" style={ROW_STYLE}>
-                              <Home size={13} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                              <span className="text-xs font-medium truncate flex-1" style={{ color: 'var(--color-neutral-800)' }}>{un.unitNumber ? `Unit ${un.unitNumber}` : (un.unitName || `Unit #${un.id}`)}</span>
-                              <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{titleCase(un.unitType)}{un.rentalPrice != null ? ` · ${aed(un.rentalPrice)}` : ''}</span>
-                              <Pill value={un.availability} />
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </Section>
-
-                {/* RP-owned documents — inline view-only; empty file_url = requested/missing. */}
-                <Section title="Documents" count={L.documents.length}>
-                  {L.documents.length === 0 ? (
-                    <p className="text-sm py-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>No documents on file for this rental provider.</p>
-                  ) : L.documents.map((d) => <DocRow key={d.id} d={d} />)}
-                </Section>
-
-                <Section title="Customers" count={L.customers.length}>
-                  {L.customers.map((c) => (
-                    <Link key={c.tenantId} href={`/dashboard/admin/users/${c.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={ROW_STYLE}>
-                      <UsersIcon size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
+              {/* Delegated access closes the page. It used to sit up in the
+                  settings block beside the charging rules, which pushed the
+                  landlord's own portfolio down the page behind other people's
+                  permissions. */}
+              <div className="mt-4">
+                <Section title="Managers with access" count={L.managers?.length ?? 0}>
+                  {(L.managers ?? []).map((mg) => (
+                    <Link key={mg.userId} href={`/dashboard/admin/users/${mg.userId}`} className={`${ROW} transition-colors hover:brightness-95`} style={{ ...ROW_STYLE, opacity: mg.isActive ? 1 : 0.6 }}>
+                      <UserCog size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>{c.name}</p>
-                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>{c.email ?? '—'}{c.phone ? ` · ${c.phone}` : ''}</p>
+                        <p className="font-semibold text-sm truncate flex items-center gap-2" style={{ color: 'var(--color-neutral-900)' }}>
+                          {mg.name}
+                          {!mg.isActive && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide flex-shrink-0" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>
+                              Revoked
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                          {mg.grantedCount} permissions · since {fmtDate(mg.grantedAt)}
+                          {mg.grantedByRole ? ` · granted by ${titleCase(mg.grantedByRole)}` : ''}
+                        </p>
                       </div>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0" style={c.hasLease ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>{c.hasLease ? 'Tenant' : 'Lead'}</span>
+                      {mg.accountStatus && <Pill value={mg.accountStatus} />}
                       <ChevronRight size={15} style={{ color: 'var(--color-neutral-300)' }} className="flex-shrink-0" />
                     </Link>
                   ))}
                 </Section>
+              </div>
 
-                <Section title="Leases" count={L.leases.length}>
-                  {L.leases.map((c) => (
-                    <div key={c.id} className={ROW} style={ROW_STYLE}>
-                      <FileText size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                          {c.tenantName}
-                          {c.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {c.unitNumber}</span>}
-                        </p>
-                        <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{fmtDate(c.contractStartDate)} → {fmtDate(c.contractEndDate)} · {aed(c.annualRent)}/yr</p>
-                      </div>
-                      <Pill value={c.status} />
-                    </div>
-                  ))}
-                </Section>
-
-                {/* Itemised money rows behind the collection KPIs. All payment
-                    types — the KPI strip above counts rent only. */}
-                <Section title="Payments" count={L.payments?.length ?? 0}>
-                  <p className="text-[11px] px-1 pb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                    Most recent 200 rows. The collection figures above cover rent only; fee rows appear here too.
-                  </p>
-                  {(L.payments ?? []).map((p) => (
-                    <div key={p.id} className={ROW} style={ROW_STYLE}>
-                      <Banknote size={15} style={{ color: 'var(--color-neutral-400)' }} className="flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                          {p.customerName}
-                          {p.unitNumber && <span className="font-normal" style={{ color: 'var(--color-neutral-400)' }}> · Unit {p.unitNumber}</span>}
-                        </p>
-                        <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-                          {titleCase(p.paymentType)} · {fmtDate(p.transactionDate)}
-                          {p.chequeNumber ? ` · cheque ${p.chequeNumber}` : ''}
-                          {p.vatAmount > 0 ? ` · incl. VAT ${aed(p.vatAmount)}` : ''}
-                        </p>
-                      </div>
-                      <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--color-neutral-900)' }}>{aed(p.amountPaid)}</span>
-                      <Pill value={p.chequeStatus} />
-                    </div>
-                  ))}
-                </Section>
-
+              {/* ── 7 · ACTIVITY ── */}
+              <SectionHead id="sec-activity" no="Section 7 · Activity" q="What has been happening on this account?" />
+              <div className="flex flex-col gap-4">
                 {/* Own-account audit trail. Manager work for this landlord is
                     attributed to the manager and lives on the manager's page. */}
                 <Section title="Recent activity" count={L.activity?.recent.length ?? 0}>
