@@ -48,9 +48,20 @@ interface Queue {
   key: string; label: string; count: number; amount: number | null;
   oldestDays: number | null; href: string | null; items: QueueItem[]; truncated: boolean;
 }
-/** Leasing funnel over `days`; the card re-asks GET /admin/pulse/funnel on change. */
+/**
+ * Lease pipeline over `days`; the card re-asks GET /admin/pulse/funnel on change.
+ *
+ * One cohort — leases ORIGINATED in the window — sliced into mutually exclusive
+ * buckets, so `live + awaitingActivation + awaitingSignature + awaitingResponse
+ * + cancelled === started`. `ejari`/`utility`/`moveIn`/`eSigned` are counts
+ * WITHIN `live`, not stages: a lease goes live without any of them.
+ */
 interface Funnel {
-  days: number; leads: number; drafted: number; signed: number; ejari: number; activated: number;
+  days: number; started: number;
+  live: number; awaitingActivation: number; awaitingSignature: number;
+  awaitingResponse: number; cancelled: number;
+  ejari: number; utility: number; moveIn: number; eSigned: number;
+  leads: number; leadsConverted: number;
 }
 interface ProviderRow {
   rpId: number; ownerUserId: number | null; name: string; arr: number; market: number; units: number;
@@ -148,7 +159,7 @@ interface Pulse {
  *  its `signal()` helper stay wired so flipping this back to true restores it. */
 const SHOW_PROVIDER_ENGAGEMENT = false;
 
-/** Windows the Leasing funnel picker offers. Mirrors FUNNEL_DAY_OPTIONS on the
+/** Windows the Lease pipeline picker offers. Mirrors FUNNEL_DAY_OPTIONS on the
  *  API, which clamps anything else to 1–730 days. */
 const FUNNEL_WINDOWS = [30, 90, 180, 365];
 /** One label for the option and the card title, so they cannot read differently. */
@@ -949,15 +960,27 @@ export default function PlatformPulsePage() {
     p.ownerUserId != null ? `/dashboard/admin/users/${p.ownerUserId}` : `/dashboard/admin/kyc/rental-provider/${p.rpId}`;
   // A window fetched for another provider is not this provider's funnel.
   const funnel = funnelOverride?.rp === rpFilter ? funnelOverride.data : data.growth.funnel;
-  // Event counts in the window, not a strict cohort — renewals and walk-in
-  // contracts enter mid-funnel, so a stage can exceed the one above it and a
-  // "% of previous" label would be fiction.
+  // Where each lease STARTED in the window has got to — one cohort, mutually
+  // exclusive buckets that sum to `started`, so every bar is a share of the
+  // same whole and "% of cohort" is a real number rather than a guess. The bars
+  // are ordered furthest-along first, and coloured by what they need: done
+  // (jade), waiting on someone (amber/grey), dead (grey).
+  const funnelPct = (v: number) => (funnel.started ? `${v} · ${Math.round((v / funnel.started) * 100)}%` : String(v));
   const funnelRows = [
-    { name: 'Leads', value: funnel.leads },
-    { name: 'Contracts drafted', value: funnel.drafted },
-    { name: 'Signed online', value: funnel.signed },
-    { name: 'Ejari registered', value: funnel.ejari },
-    { name: 'Activated', value: funnel.activated },
+    { name: 'Live', value: funnel.live, color: JADE },
+    { name: 'Signed, not live', value: funnel.awaitingActivation, color: BLUE },
+    { name: 'Awaiting signature', value: funnel.awaitingSignature, color: AMBER },
+    { name: 'No response yet', value: funnel.awaitingResponse, color: GRAY },
+    { name: 'Cancelled', value: funnel.cancelled, color: '#c9c5bd' },
+  ].map((r) => ({ ...r, label: funnelPct(r.value) }));
+  // Compliance steps and e-signature are shares of the LIVE leases, not stages —
+  // a lease reaches Live without any of them, which is precisely why they can
+  // never sit on the funnel's axis.
+  const funnelChips = [
+    { label: 'Ejari registered', v: funnel.ejari },
+    { label: 'Utility verified', v: funnel.utility },
+    { label: 'Move-in inspected', v: funnel.moveIn },
+    { label: 'e-signed in-app', v: funnel.eSigned },
   ];
   const signal = (d: number | null) =>
     d == null ? <span className="text-[12px] text-[#9b9890]">—</span>
@@ -1201,8 +1224,8 @@ export default function PlatformPulsePage() {
       </ChartCard>
       )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
-        <ChartCard title={`Leasing funnel — ${funnelWindowLabel(funnel.days).toLowerCase()}`}
-          sub="Pipeline events in the window: leads in, contracts drafted, signed, registered, activated. Signed counts only leases e-signed by BOTH parties in-app — paper signatures marked on file are excluded (bulk-import days excluded; renewals enter mid-funnel)"
+        <ChartCard title={`Lease pipeline — ${funnelWindowLabel(funnel.days).toLowerCase()}`}
+          sub={`${funnel.started} lease${funnel.started === 1 ? '' : 's'} started in the window and where each one stands today — one cohort, so the bars sum to ${funnel.started}. New leases and renewals both; amendments, replaced drafts and bulk-import days excluded`}
           action={(
             <label className="flex items-center gap-1.5 shrink-0">
               <span className="sr-only">Funnel window</span>
@@ -1215,7 +1238,30 @@ export default function PlatformPulsePage() {
               {funnelLoading && <span className="text-[10px] text-[#9b9890]">…</span>}
             </label>
           )}>
-          <HBars rows={funnelRows} color={BLUE} height={190} />
+          <HBars rows={funnelRows} color={BLUE} height={150} labelWidth={120} />
+          {/* Everything below the bars is a share of the LIVE leases or a
+              separate population — never a sixth bar. Keeping them out of the
+              chart is what stops the stages growing as they descend. */}
+          <div className="border-t border-[#f0ede8] mt-2 pt-2">
+            {funnel.live > 0 && (<>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#9b9890]">
+              Of the {funnel.live} live · steps completed
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+              {funnelChips.map((c) => (
+                <span key={c.label} className="text-[11px] text-[#6b6860] tabular-nums">
+                  <span className="font-semibold text-[#1a1916]">{c.v}</span>
+                  <span className="text-[#9b9890]">/{funnel.live}</span> {c.label}
+                </span>
+              ))}
+            </div>
+            </>)}
+            <p className="text-[11px] text-[#9b9890] mt-1.5">
+              {funnel.live > 0 && 'These are not pipeline gates — a lease goes live without them, so they sit beside the funnel rather than under it. '}
+              Separately, {funnel.leads} marketplace lead{funnel.leads === 1 ? '' : 's'} came in this window
+              {funnel.leads ? ` (${funnel.leadsConverted} converted)` : ''} — most leases are drafted directly by a provider and never pass through a lead.
+            </p>
+          </div>
         </ChartCard>
         <ChartCard title="Occupancy trend" sub={`Trailing 12 months, derived from lease terms — leases covering each month over today's ${tl.units} units`}>
           <ResponsiveContainer width="100%" height={190}>
