@@ -9,7 +9,8 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity,
+  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge,
+  HeartPulse,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -153,46 +154,74 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings, soon: true },
   ],
   admin: [
-    { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
-    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity },
-    { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
-    { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList },
-    { section: 'Listings' },
-    { label: 'Rental Provider',  href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
-    { label: 'Service Provider', href: '/dashboard/admin/listings/service-providers', icon: Wrench },
-    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
+    // `/dashboard/admin` now renders Platform Pulse, so Overview IS the pulse —
+    // the separate "Platform Pulse" entry would be a second door to one room.
+    { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
+    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
+    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, hidden: true },
+    { section: 'Users' },
+    { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
+    { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
+    // The two provider types get their own sections — they are different
+    // businesses with different surfaces, and lumping them under one "Listings"
+    // header hid that. Platform Billing sits under Rental Provider because it
+    // bills exactly them (subscription + lease origination / renewal /
+    // settlement fees); the SP side is commission-based and billed elsewhere.
+    { section: 'Rental Provider' },
+    { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
     { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
-    { divider: true },
-    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert },
-    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
+    { section: 'Service Provider' },
+    { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
+    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
+    // Reviews, Payouts and Disputes are SP-business surfaces, not general admin
+    // ones: reviews are of a service provider on a booking, payouts settle SP
+    // earnings, disputes are raised against SP jobs. They live under this
+    // section rather than in a loose block at the bottom of the rail.
     { label: 'Reviews',          href: '/dashboard/admin/reviews',             icon: Star },
     { label: 'Payouts',          href: '/dashboard/admin/payouts',             icon: Wallet },
+    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
     { divider: true },
-    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2 },
-    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true },
+    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
+    { divider: true },
+    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
+    { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
+    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
+    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true, hidden: true },
   ],
   super_admin: [
-    { label: 'Overview',         href: '/dashboard/admin',                     icon: LayoutDashboard },
-    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity },
-    { label: 'Users',            href: '/dashboard/admin/users',               icon: Users },
-    { label: 'KYC Queue',        href: '/dashboard/admin/kyc',                 icon: ShieldCheck },
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList },
-    { section: 'Listings' },
-    { label: 'Rental Provider',  href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
-    { label: 'Service Provider', href: '/dashboard/admin/listings/service-providers', icon: Wrench },
-    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
+    // `/dashboard/admin` now renders Platform Pulse, so Overview IS the pulse —
+    // the separate "Platform Pulse" entry would be a second door to one room.
+    { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
+    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
+    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, hidden: true },
+    { section: 'Users' },
+    { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
+    { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
+    // The two provider types get their own sections — they are different
+    // businesses with different surfaces, and lumping them under one "Listings"
+    // header hid that. Platform Billing sits under Rental Provider because it
+    // bills exactly them (subscription + lease origination / renewal /
+    // settlement fees); the SP side is commission-based and billed elsewhere.
+    { section: 'Rental Provider' },
+    { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
     { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
-    { divider: true },
-    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert },
-    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
+    { section: 'Service Provider' },
+    { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
+    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
+    // Reviews, Payouts and Disputes are SP-business surfaces, not general admin
+    // ones: reviews are of a service provider on a booking, payouts settle SP
+    // earnings, disputes are raised against SP jobs. They live under this
+    // section rather than in a loose block at the bottom of the rail.
     { label: 'Reviews',          href: '/dashboard/admin/reviews',             icon: Star },
     { label: 'Payouts',          href: '/dashboard/admin/payouts',             icon: Wallet },
+    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
     { divider: true },
-    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2 },
-    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true },
+    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
+    { divider: true },
+    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
+    { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
+    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
+    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true, hidden: true },
   ],
 };
 
@@ -280,21 +309,36 @@ function Sidebar({
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
   // withholds, say, all Finance permissions doesn't leave an empty "Finance").
-  const navItems = role === 'manager'
-    ? rawNav
-        .filter(item => {
-          if (!('requirePerm' in item)) return true;
-          return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
-        })
-        .filter((item, i, arr) => {
-          if (!('section' in item)) return true;
-          for (let j = i + 1; j < arr.length; j++) {
-            if ('section' in arr[j]) return false;   // next section → this one is empty
-            if ('label' in arr[j]) return true;      // a visible link → keep header
-          }
-          return false;                              // trailing empty section
-        })
+  const permFiltered = role === 'manager'
+    ? rawNav.filter(item => {
+        if (!('requirePerm' in item)) return true;
+        return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
+      })
     : rawNav;
+  // Drop any section header left with nothing under it. This runs for EVERY
+  // role, not just managers: a section can be emptied by a withheld permission
+  // *or* by parking all of its links with `hidden: true` — which is exactly
+  // what happens to the admin's Service Provider section today.
+  const sectionsKept = permFiltered.filter((item, i, arr) => {
+    if (!('section' in item)) return true;
+    for (let j = i + 1; j < arr.length; j++) {
+      if ('section' in arr[j]) return false;   // next section → this one is empty
+      if ('label' in arr[j]) return true;      // a visible link → keep header
+    }
+    return false;                              // trailing empty section
+  });
+  // …then collapse dividers the same filtering has stranded. Parking every link
+  // between two rules leaves them drawn back-to-back with nothing in between,
+  // which is exactly what the admin rail does now that only Risk sits there.
+  const navItems = sectionsKept.reduce<NavItem[]>((acc, item) => {
+    if ('divider' in item) {
+      const prev = acc[acc.length - 1];
+      if (!prev || 'divider' in prev) return acc;   // leading, or a repeat
+    }
+    acc.push(item);
+    return acc;
+  }, []);
+  while (navItems.length && 'divider' in navItems[navItems.length - 1]) navItems.pop();
   const navHrefs = navItems.flatMap((it) => ('href' in it ? [it.href] : []));
   const { user, signOut } = useAuth();
 

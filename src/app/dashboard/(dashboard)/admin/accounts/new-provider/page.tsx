@@ -120,7 +120,7 @@ export default function NewProviderAccountPage() {
         {success && (
           <div className="rounded-xl p-4 mb-6 text-sm font-medium"
             style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>
-            Account created successfully. Redirecting to KYC queue…
+            Account created successfully. Redirecting to Profile Verification…
           </div>
         )}
         {serverError && (

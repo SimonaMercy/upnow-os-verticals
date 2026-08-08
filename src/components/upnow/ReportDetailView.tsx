@@ -1010,7 +1010,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'vacancy-analysis': {
     title: 'Vacant Units',
-    description: 'Vacant units to action — each available unit with its Market Price (units.rental_price, the asking rent · revenue at stake) and the Annual Rent it last let for (latest lease, net of discount), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
+    description: 'Vacant units to action — each available unit with its Market Rent (units.rental_price, the asking rent · revenue at stake) and the Annual Rent it last let for (latest lease, net of discount), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
     endpoint: '/api/reports/vacancy-analysis',
     buildingLeaseFilter: true,
     columns: [
@@ -1019,7 +1019,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'unitType', label: 'Type', type: 'stage' },
       { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
       { key: 'listingStatus', label: 'Listing', type: 'stage' },
-      { key: 'askingRentFils', label: 'Market Price', align: 'right', type: 'aed' },
+      { key: 'askingRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
       { key: 'lastAnnualRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
     ],
     rowLink: { idKey: 'unitId', colKey: 'unitLabel', target: 'unit' },
@@ -1028,7 +1028,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'listed', label: 'Listed', type: 'number' },
       { key: 'unlisted', label: 'Unlisted', type: 'number' },
-      { key: 'vacantAskingFils', label: 'Market Price', type: 'aed' },
+      { key: 'vacantAskingFils', label: 'Market Rent', type: 'aed' },
       { key: 'vacantLastRentFils', label: 'Annual Rent', type: 'aed' },
     ],
   },
@@ -1074,7 +1074,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     description: 'Every unit in the portfolio against its asking price, grouped by building — rent is negotiated building by building, so that is where the uplift is actionable. Each section is one property with its unit count, what it earns and what it could; expand it for the units. Buildings run A→Z and units run in unit-number order, so you can look a unit up. Units earning nothing today sit at the foot of their building with their asking price, each stating what is outstanding on it — a renewal drafted but never proceeded ("In renewal"), a lease issued and waiting on signature or cheques ("Lease issued"), a term that has run out ("Holding over"), or simply "Vacant". "At market" is within ±5% of the asking price.',
     endpoint: '/api/reports/rent-vs-market',
     buildingLeaseFilter: true,
-    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The sections list the same unit count as the Portfolio report. A unit earning nothing is not simply "vacant" — its Position is read from whatever lease is still open on it, and the row links to that lease: "In renewal" (a renewal drafted but never proceeded), "Lease issued" (issued, waiting on signature or cheques), "Holding over" (still active though its term has run out), "Lease active" (a live in-term lease on a unit its own availability flag calls vacant — a data mismatch worth fixing), "Not leased" (flagged occupied with nothing open) and "Vacant". None of them carry a gap — a vacant unit\'s asking price is lost rent, not uplift at renewal — so the uplift total stays renewal-only. Market price is the rental value of EVERY unit in scope, with no occupancy filter, while Annual rent counts only the leases that are earning \u2014 so the Difference between them is the whole opportunity, under-renting and unlet stock together. The panel under the table splits it into those two halves, because they are fixed in different ways: under-renting is repriced at renewal, unlet stock has to be let.',
+    dataNote: 'The benchmark is each unit\'s asking price (rental_price) as maintained on the Units page — update it there if it looks stale. Units without an asking price are listed but excluded from the uplift total. The sections list the same unit count as the Portfolio report. A unit earning nothing is not simply "vacant" — its Position is read from whatever lease is still open on it, and the row links to that lease: "In renewal" (a renewal drafted but never proceeded), "Lease issued" (issued, waiting on signature or cheques), "Holding over" (still active though its term has run out), "Lease active" (a live in-term lease on a unit its own availability flag calls vacant — a data mismatch worth fixing), "Not leased" (flagged occupied with nothing open) and "Vacant". None of them carry a gap — a vacant unit\'s asking price is lost rent, not uplift at renewal — so the uplift total stays renewal-only. Market rent is the rental value of EVERY unit in scope, with no occupancy filter, while Annual rent counts only the leases that are earning \u2014 so the Difference between them is the whole opportunity, under-renting and unlet stock together. The panel under the table splits it into those two halves, because they are fixed in different ways: under-renting is repriced at renewal, unlet stock has to be let.',
     layout: 'grouped',
     // Section header: the building, its unit count and what it earns against
     // asking. (Count columns other than Units are left off deliberately — a
@@ -1084,7 +1084,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'units', label: 'Units', align: 'right', type: 'number' },
       // Same order as the tiles — market, then annual, then the gap between them
       // — so the section header reads as the headline restated per building.
-      { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed' },
       { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
       // Each building's own gap, so the ones carrying the portfolio's difference
       // are visible without dividing two columns by eye.
@@ -1104,7 +1104,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'tenantName', label: 'Customer', width: '16%' },
         { key: 'unitType', label: 'Type', type: 'stage', width: '9%' },
         { key: 'currentRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
-        { key: 'marketRentFils', label: 'Market price', align: 'right', type: 'aed', width: '11%' },
+        { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed', width: '11%' },
         { key: 'gapFils', label: 'Gap', align: 'right', type: 'delta', width: '10%' },
         { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate', width: '7%' },
         { key: 'position', label: 'Position', type: 'stage', width: '11%' },
@@ -1121,13 +1121,13 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     // them stated as a percentage rather than left to be divided by eye, and then
     // the report's own measures.
     //
-    // The two sides are deliberately asymmetric: Market price is EVERY unit's
+    // The two sides are deliberately asymmetric: Market rent is EVERY unit's
     // rental value with no occupancy filter, Annual rent is the earning leases
     // only. So the difference is the whole opportunity — under-renting AND unlet
     // stock — and the panel below splits it into those two halves.
     totals: [
       { key: 'occupiedUnits', label: 'Occupied units', type: 'number' },
-      { key: 'marketRentFils', label: 'Market price', type: 'aed' },
+      { key: 'marketRentFils', label: 'Market rent', type: 'aed' },
       { key: 'currentRentFils', label: 'Annual rent', type: 'aed' },
       { key: 'differencePct', label: 'Difference', type: 'rate', decimals: 2 },
       { key: 'upliftFils', label: 'Uplift at renewal', type: 'aed' },
@@ -1141,9 +1141,9 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     summaryPanels: [
       {
         title: 'What the difference is made of',
-        note: 'Market price counts every unit; Annual rent counts only the leases that are earning. So the gap is two problems in one figure. Under-renting is repriced at renewal; unlet stock has to be let. The Uplift tile above is the renewal half only \u2014 a vacant unit\u2019s asking price is lost rent, not uplift.',
+        note: 'Market rent counts every unit; Annual rent counts only the leases that are earning. So the gap is two problems in one figure. Under-renting is repriced at renewal; unlet stock has to be let. The Uplift tile above is the renewal half only \u2014 a vacant unit\u2019s asking price is lost rent, not uplift.',
         rows: [
-          { label: 'Market price \u2014 every unit', key: 'marketRentFils' },
+          { label: 'Market rent \u2014 every unit', key: 'marketRentFils' },
           { label: 'Annual rent \u2014 earning leases', key: 'currentRentFils' },
           { label: 'Difference', key: 'differenceFils', total: true },
           { label: '\u2026of which under-renting on let units', key: 'pricingGapFils', note: 'asking vs contracted, same units' },
@@ -1596,7 +1596,7 @@ const STAGE_STYLE: Record<string, string> = {
   below_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent under market → red
   at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
   above_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent over market → green
-  no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market price set
+  no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market rent set
   vacant:       'bg-[#fef3c7] text-[#854d0e]',  // amber — earning nothing
   not_leased:   'bg-[#fef3c7] text-[#854d0e]',  // occupied flag, no counting lease
   // …and why it earns nothing: the work outstanding on the unit's open lease.

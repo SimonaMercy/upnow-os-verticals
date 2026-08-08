@@ -15,7 +15,7 @@
  *   PATCH  /api/leads/:leadId/cheques-ready
  *   POST   /api/contracts/tenant/:id/sign                { signatoryName, signatureImage }
  *   PATCH  /api/contracts/tenant/:id/utility             { utilityAccountNumber }
- *   POST   /api/contracts/tenant/:id/termination/request { reason, effectiveDate }
+ *   POST   /api/contracts/tenant/:id/termination/request { reason, reasonCode, effectiveDate }
  *   PATCH  /api/contracts/tenant/:id/termination/respond { response }
  *   PATCH  /api/contracts/:parentId/renewal/accept
  *   PATCH  /api/contracts/:parentId/renewal/reject
@@ -62,6 +62,8 @@ import {
 } from '@/lib/customerJourney';
 import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
+import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
+import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
 
 /* ─── Brand palette ─────────────────────────────────────────────────── */
 const PALETTE: React.CSSProperties = {
@@ -197,6 +199,8 @@ interface ApiTermination {
   requestedByRole: 'tenant' | 'rental_provider' | null;
   requestedAt: string | null;
   reason: string | null;
+  /** Coded move-out reason (migration 0198). NULL on pre-0198 terminations. */
+  reasonCode: string | null;
   effectiveDate: string | null;
   response: 'pending' | 'accepted' | 'rejected' | null;
 }
@@ -4448,15 +4452,20 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
 function TerminationRequestModal({ contract, onClose, onSuccess }: { contract: ApiContract; onClose: () => void; onSuccess: () => void }) {
   const [date, setDate] = useState('');
   const [reason, setReason] = useState('');
+  // The coded reason the Move-out Reasons report counts. Asked of the CUSTOMER
+  // because they are the only one who actually knows why they are leaving —
+  // staff can only guess after the fact.
+  const [reasonCode, setReasonCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   async function submit() {
-    if (!reason.trim()) { setErr('Please provide a reason.'); return; }
+    if (!reasonCode) { setErr('Please choose a reason for leaving.'); return; }
+    if (!moveOutReasonReady(reasonCode, reason)) { setErr('Please tell us a little more about your reason.'); return; }
     if (!date) { setErr('Please pick an effective date.'); return; }
     setBusy(true); setErr(null);
     try {
-      const res = await fetch(`/api/contracts/tenant/${contract.id}/termination/request`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason.trim(), effectiveDate: date }) });
+      const res = await fetch(`/api/contracts/tenant/${contract.id}/termination/request`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason.trim(), reasonCode, effectiveDate: date }) });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
       onSuccess();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(false); }
@@ -4476,8 +4485,18 @@ function TerminationRequestModal({ contract, onClose, onSuccess }: { contract: A
             style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit' }} />
         </div>
         <div>
-          <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Reason</label>
-          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Why are you ending the contract early?"
+          <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Why are you leaving?</label>
+          <MoveOutReasonSelect
+            value={reasonCode} onChange={setReasonCode} audience="customer"
+            className=""
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit', background: '#fff' }}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+            Anything to add{moveOutReason(reasonCode)?.requiresNote ? '' : ' (optional)'}
+          </label>
+          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Anything your provider should know"
             style={{ width: '100%', padding: '12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' }} />
         </div>
         {err && <ErrorBox msg={err} />}
@@ -4493,6 +4512,7 @@ function TerminationSentAction({ resolved }: { resolved: Resolved }) {
       <div style={{ background: 'var(--saffron-soft)', border: '1px solid #f0d68f', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 10, color: 'var(--saffron-deep)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Your request</p>
         <p style={{ fontSize: 14, color: 'var(--ink)', margin: '6px 0 2px', fontWeight: 600 }}>Effective {t?.effectiveDate ? fmtDateLong(t.effectiveDate) : '—'}</p>
+        {t?.reasonCode && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', fontWeight: 600 }}>{moveOutReasonLabel(t.reasonCode)}</p>}
         {t?.reason && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>{t.reason}</p>}
       </div>
       <WaitingBadge />
@@ -4519,6 +4539,7 @@ function TerminationReceivedAction({ resolved, onRefresh }: { resolved: Resolved
       <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 10, color: 'var(--brick)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0, fontWeight: 700 }}>Rental provider&rsquo;s request</p>
         <p style={{ fontSize: 14, color: 'var(--ink)', margin: '6px 0 2px', fontWeight: 600 }}>Effective {t?.effectiveDate ? fmtDateLong(t.effectiveDate) : '—'}</p>
+        {t?.reasonCode && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', fontWeight: 600 }}>{moveOutReasonLabel(t.reasonCode)}</p>}
         {t?.reason && <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>{t.reason}</p>}
       </div>
       {err && <ErrorBox msg={err} />}
@@ -4630,6 +4651,10 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   // Decline intent: negotiate (open to a new offer, lease keeps running) vs
   // vacate (leaving at lease end → move-out inspection + deposit settlement).
   const [rejectIntent, setRejectIntent] = useState<'negotiate' | 'vacate'>('negotiate');
+  // Declining to VACATE is a move-out — the single biggest source of them — so
+  // it carries the same coded reason as a termination and lands in the same
+  // column. Declining to NEGOTIATE is not a move-out and asks for none.
+  const [rejectReasonCode, setRejectReasonCode] = useState('');
 
   // Phase 6 — same "Attach payment references" experience as the new-lease
   // payment_review step. The customer drops in cheque photos, transfer
@@ -4725,7 +4750,11 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
       const init: RequestInit = { method: 'PATCH', credentials: 'include' };
       if (verb === 'reject') {
         init.headers = { 'Content-Type': 'application/json' };
-        init.body = JSON.stringify({ reason: rejectReason.trim() || undefined, intent: rejectIntent });
+        init.body = JSON.stringify({
+          reason: rejectReason.trim() || undefined,
+          intent: rejectIntent,
+          ...(rejectIntent === 'vacate' ? { reasonCode: rejectReasonCode } : {}),
+        });
       }
       const res = await fetch(`/api/contracts/${parent!.id}/renewal/${verb}`, init);
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
@@ -4733,6 +4762,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         setRejectOpen(false);
         setRejectReason('');
         setRejectIntent('negotiate');
+        setRejectReasonCode('');
       }
       onRefresh();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed'); } finally { setBusy(null); }
@@ -4859,9 +4889,24 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
                   );
                 })}
               </div>
+              {rejectIntent === 'vacate' && (
+                <div>
+                  <label htmlFor="renewal-vacate-reason-code" style={{ fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Why are you leaving?
+                  </label>
+                  <MoveOutReasonSelect
+                    id="renewal-vacate-reason-code"
+                    value={rejectReasonCode} onChange={setRejectReasonCode} audience="customer"
+                    className=""
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--mist-strong)', fontSize: 13, fontFamily: 'inherit', color: 'var(--ink)', background: 'var(--surface)' }}
+                  />
+                </div>
+              )}
               <div>
                 <label htmlFor="renewal-reject-reason" style={{ fontSize: 11, color: 'var(--ink-2)', fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {rejectIntent === 'vacate' ? 'Note to your provider (optional)' : 'What would make it work? (optional but recommended)'}
+                  {rejectIntent === 'vacate'
+                    ? `Note to your provider${moveOutReason(rejectReasonCode)?.requiresNote ? '' : ' (optional)'}`
+                    : 'What would make it work? (optional but recommended)'}
                 </label>
                 <textarea
                   id="renewal-reject-reason"
@@ -4885,7 +4930,7 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
               <SecondaryBtn onClick={() => !busy && setRejectOpen(false)}>Cancel</SecondaryBtn>
               <PrimaryBtn
                 onClick={() => act('reject')}
-                disabled={!!busy}
+                disabled={!!busy || (rejectIntent === 'vacate' && !moveOutReasonReady(rejectReasonCode, rejectReason))}
                 data-testid="renewal-reject-submit"
               >
                 {busy === 'reject' ? <Loader2 size={16} className="animate-spin" /> : null}

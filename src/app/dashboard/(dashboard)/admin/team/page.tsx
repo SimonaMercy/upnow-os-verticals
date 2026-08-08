@@ -2,7 +2,7 @@
 
 /**
  * Admin — Team oversight. Managers and technicians are invited sub-accounts
- * with no KYC, so they don't appear in the KYC queue. This page is where an
+ * with no KYC, so they don't appear in Profile Verification. This page is where an
  * admin sees who's been delegated to whom: managers grouped with their
  * landlords + exact granted permissions, and technicians with their provider.
  */

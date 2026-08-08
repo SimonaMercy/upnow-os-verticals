@@ -183,7 +183,7 @@ interface MixLayout {
   sqmLo: number | null; sqmHi: number | null;
   sqftLo: number | null; sqftHi: number | null;
   priceLo: number | null; priceHi: number | null;
-  marketSum: number;    // Σ units.rental_price (asking / market price) over priced units
+  marketSum: number;    // Σ units.rental_price (asking / market rent) over priced units
   leaseSum: number;     // Σ latest-lease annual_rent (already net of discount); leased units only
   unpriced: number;
   hasPlan: boolean;     // a matching floor-plan exists (→ editable)
@@ -230,7 +230,7 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
       g.layouts.push(l);
     }
     // Two money figures per unit:
-    //  • Market Price — the unit's asking rent (units.rental_price).
+    //  • Market Rent — the unit's asking rent (units.rental_price).
     //  • Annual Rent  — the annual_rent of the lease counting as current income
     //    (backend currentLeaseRent: running today, or the next term whose cheques
     //    are already collected), counted ONLY while the unit is occupied. It is
@@ -599,7 +599,7 @@ export function PropertyDetailsModal({
     { label: 'UNITS', value: String(stats.units), color: C.ink },
     { label: 'OCCUPIED', value: String(stats.occupied), color: C.ink },
     { label: 'VACANT', value: String(vacant), color: C.ink },
-    { label: 'MARKET PRICE', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
+    { label: 'MARKET RENT', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
   ] : [];
 
   const hasMapLink = p.latitude != null && p.longitude != null;
@@ -782,7 +782,7 @@ export function PropertyDetailsModal({
                     <div style={{ minWidth: 840 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Market Price', 'Annual Rent', ''].map((h, i) => (
+                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Market Rent', 'Annual Rent', ''].map((h, i) => (
                           <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>
@@ -799,7 +799,7 @@ export function PropertyDetailsModal({
                           <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.planLabel ? r.label : bedroomsLabel(r.bedrooms)}</div>
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
-                          {/* Market Price — Σ units.rental_price (asking) for the layout */}
+                          {/* Market Rent — Σ units.rental_price (asking) for the layout */}
                           <div style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: r.marketSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.marketSum > 0 ? `AED ${aed(r.marketSum)}` : '—'}</span>
                             {r.unpriced > 0 && r.marketSum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
@@ -838,7 +838,7 @@ export function PropertyDetailsModal({
               {!unitsLoading && units.length > 0 && (
                 <>
                   <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
-                    Tap a layout to see its grouped detail · Market Price = Σ asking rent · Annual Rent = Σ current lease (running, or next term with cheques collected), net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                    Tap a layout to see its grouped detail · Market Rent = Σ asking rent · Annual Rent = Σ current lease (running, or next term with cheques collected), net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
                   </div>
                 </>
               )}

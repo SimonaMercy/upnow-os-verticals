@@ -246,7 +246,7 @@ export function UnitPreviewModal({
   fetchQuery?: string;
   propertyName?: string | null;
   /** Parent property's leasing model — `'sub'` shows the auto-calculated
-   *  sub-lease charge (20% of Market Price + 5% VAT), matching the layout view. */
+   *  sub-lease charge (20% of Market Rent + 5% VAT), matching the layout view. */
   leasingType?: 'direct' | 'sub' | 'management' | null;
   unit: Unit;
   /** Current / latest contract — drives the renewal history when `contracts` is absent. */
@@ -398,7 +398,7 @@ export function UnitPreviewModal({
   additionalPayments
     .filter((p) => !isSubleaseChargeRow(p.label))
     .forEach((p) => pushFee(p.vat > 0 ? `${p.label} (incl. VAT)` : p.label, aed(p.amount + p.vat)));
-  // Sub-lease charge — auto-calculated from Market Price (20% + 5% VAT on that
+  // Sub-lease charge — auto-calculated from Market Rent (20% + 5% VAT on that
   // 20%), only for sub-lease properties. Matches the layout Details view.
   const subFees: Array<{ label: string; value: string }> = [];
   if (leasingType === 'sub' && rent != null && Number(rent) > 0) {
@@ -664,7 +664,7 @@ export function UnitPreviewModal({
               <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, overflow: 'hidden', marginBottom: 28 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 14, padding: '16px 18px', background: C.soft, borderBottom: `1px solid ${C.line2}`, flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>MARKET PRICE</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: C.mute4 }}>MARKET RENT</div>
                     <div style={{ fontSize: 26, fontWeight: 800, color: C.greenD, letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>{rent != null ? `AED ${Number(rent).toLocaleString('en-AE')}` : '—'}</div>
                   </div>
                   {fees.length > 0 && <div style={{ fontSize: 11.5, color: C.mute3 }}>Excludes deposit &amp; one-off fees below</div>}
@@ -681,7 +681,7 @@ export function UnitPreviewModal({
                 )}
                 {subFees.length > 0 && (
                   <div style={{ borderTop: `1px solid ${C.line3}`, background: '#fbf6ea', padding: '13px 18px' }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Price</div>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Rent</div>
                     <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : 'repeat(2,1fr)', gap: '10px 18px' }}>
                       {subFees.map((f, i) => (
                         <div key={`${f.label}-${i}`}>

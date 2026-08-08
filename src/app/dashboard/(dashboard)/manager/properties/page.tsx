@@ -50,7 +50,7 @@ interface ManagedProperty {
   unitCount?:      number;
   listedCount?:    number;
   occupiedCount?:  number;
-  rentTotal?:      number;        // Σ units.rental_price — Market Price (asking, all units)
+  rentTotal?:      number;        // Σ units.rental_price — Market Rent (asking, all units)
   annualRentTotal?: number;       // Σ latest lease annual_rent — contracted Annual Rent (leased units)
   coverPhotoUrl?:  string | null;
   emirate?:        { nameEn: string } | null;
@@ -133,7 +133,7 @@ interface CardVM {
   hasVacancy: boolean;
   vacancyLabel: string;
   occText: string;
-  rentText: string;      // Market Price (asking) headline
+  rentText: string;      // Market Rent (asking) headline
   rentUnit: string;
   rentColor: string;
   annualText: string | null;  // contracted Annual Rent — null when nothing is leased
@@ -252,10 +252,10 @@ function PropertyCard({
         </div>
       </div>
 
-      {/* Tail — market price / annual rent + occupancy + action (wraps on mobile) */}
+      {/* Tail — market rent / annual rent + occupancy + action (wraps on mobile) */}
       <div className={s.dxRowTail}>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
+          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
           <div style={{ fontSize: 16, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
             {vm.rentText}<span style={{ fontSize: 11.5, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
           </div>
@@ -309,7 +309,7 @@ function PropertyGridCard({
         {/* Footer: rent + occupancy + action */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 13, paddingTop: 12, borderTop: '1px solid #f1f3f0' }}>
           <div>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET PRICE</div>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums' }}>
               {vm.rentText}<span style={{ fontSize: 11, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
             </div>
@@ -484,14 +484,14 @@ export default function ManagerPropertiesPage() {
   const totalAnnualRent = scoped.reduce((sum, p) => sum + (p.annualRentTotal ?? 0), 0);
   const landlordCount   = rpFilter ? 1 : (stats?.rps.length ?? 0);
 
-  // Four-up KPI strip (Properties · Total units · Occupancy · Market price / Annual rent).
-  // The money tile pairs Market Price (Σ asking rent, all units) with the contracted
+  // Four-up KPI strip (Properties · Total units · Occupancy · Market rent / Annual rent).
+  // The money tile pairs Market Rent (Σ asking rent, all units) with the contracted
   // Annual Rent (Σ latest lease, leased units) so the asking-vs-earning gap is visible.
   const kpis: Array<{ label: string; value: string; sub: string; icon: ReactNode; iconBg: string; iconColor: string; color: string }> = [
     { label: 'PROPERTIES', value: String(totalProperties), sub: rpFilter ? 'For this landlord' : 'Across your landlords', icon: <Building2 size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'TOTAL UNITS', value: String(totalUnits), sub: 'Across all properties', icon: <DoorClosed size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'MARKET PRICE / ANNUAL RENT', value: fmtRentKpi(totalRent), sub: `Annual rent ${totalAnnualRent ? fmtRentKpi(totalAnnualRent) : '—'} · asking vs contracted`, icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+    { label: 'MARKET RENT / ANNUAL RENT', value: fmtRentKpi(totalRent), sub: `Annual rent ${totalAnnualRent ? fmtRentKpi(totalAnnualRent) : '—'} · asking vs contracted`, icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
   ];
 
   const filtersDirty = !!search || categoryFilter !== 'all' || ownershipFilter !== 'all' || sort !== 'default';

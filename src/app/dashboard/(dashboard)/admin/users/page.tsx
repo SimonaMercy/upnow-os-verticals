@@ -3,17 +3,20 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, Ban, ChevronDown, ChevronRight } from 'lucide-react';
+import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
 
+// `banned` is retired — no button writes it any more — but it stays filterable
+// and renderable so any row left on that status from before is still findable.
 const STATUSES = ['', 'active', 'pending_verification', 'suspended', 'banned'];
 
-// Role tabs — split the user list by role (the user-facing term for
-// `rental_provider` is "Landlords").
+// Role tabs — the list is always filtered to exactly one role; there is no "All"
+// pour-everything-in view. Rental Providers leads because it is the role admins
+// open this page for. Landing tab, and the fallback for any unknown ?role=.
+const DEFAULT_ROLE = 'rental_provider';
 const ROLE_TABS: { key: string; label: string }[] = [
-  { key: '', label: 'All' },
   { key: 'rental_provider', label: 'Rental Providers' },
   { key: 'manager', label: 'Managers' },
   { key: 'service_provider', label: 'Service Providers' },
@@ -56,15 +59,6 @@ const statusColor: Record<string, { bg: string; color: string }> = {
   banned: { bg: '#fef2f2', color: 'var(--color-error)' },
 };
 
-const roleLabel: Record<string, string> = {
-  customer: 'Customer',
-  rental_provider: 'Rental Provider',
-  service_provider: 'Service Provider',
-  technician: 'Technician',
-  manager: 'Manager',
-  admin: 'Admin',
-  super_admin: 'Super Admin',
-};
 
 export default function AdminUsersPage() {
   useAuth();
@@ -74,7 +68,7 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState(DEFAULT_ROLE);
   const [statusFilter, setStatusFilter] = useState('');
   const [engagementFilter, setEngagementFilter] = useState('');
   const [offset, setOffset] = useState(0);
@@ -107,7 +101,9 @@ export default function AdminUsersPage() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const r = p.get('role'); const s = p.get('status'); const q = p.get('search'); const e = p.get('engagement');
-    if (r != null) setRoleFilter(r);
+    // Old links carrying ?role= (the retired All tab) land on the default role
+    // rather than on an unfiltered list with no tab lit up.
+    if (ROLE_TABS.some((t) => t.key === r)) setRoleFilter(r!);
     if (s != null) setStatusFilter(s);
     if (q != null) setSearch(q);
     if (e != null) setEngagementFilter(e);
@@ -123,12 +119,10 @@ export default function AdminUsersPage() {
     window.history.replaceState(null, '', url.toString());
   }, [roleFilter, engagementFilter]);
 
-  // Ban is the one status change that isn't routine housekeeping — it locks the
-  // account out entirely, so it asks first. Suspend/reactivate stay one-click.
-  async function updateStatus(userId: number, status: string, userName?: string) {
-    if (status === 'banned' && !window.confirm(
-      `Ban ${userName ?? 'this user'}?\n\nThey lose access to the platform immediately. You can reactivate them later from this list.`,
-    )) return;
+  // Suspend is the only lock-out. Ban used to sit beside it but set a status the
+  // auth service never checked, so it blocked nothing — it is gone rather than
+  // fixed, since a working Ban would have been Suspend under another name.
+  async function updateStatus(userId: number, status: string) {
     setActionLoading(userId);
     try {
       await apiPatch(`/admin/users/${userId}/status`, { status });
@@ -142,12 +136,14 @@ export default function AdminUsersPage() {
 
   const totalPages = Math.ceil(total / limit);
   const currentPage = Math.floor(offset / limit) + 1;
+  // One role is always in force, so the count is that role's — never a platform total.
+  const activeRoleLabel = ROLE_TABS.find((t) => t.key === roleFilter)?.label ?? 'users';
 
   return (
     <DashboardPage
       back
       title="User Management"
-      subtitle={`${total} users on the platform`}
+      subtitle={`${total} ${activeRoleLabel.toLowerCase()}`}
     >
       {/* Role tabs */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -155,7 +151,7 @@ export default function AdminUsersPage() {
           const active = roleFilter === t.key;
           return (
             <button
-              key={t.key || 'all'}
+              key={t.key}
               onClick={() => { setRoleFilter(t.key); setEngagementFilter(''); setOffset(0); }}
               className="px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors"
               style={
@@ -257,133 +253,126 @@ export default function AdminUsersPage() {
         <>
           <SectionHeader title={`Showing ${offset + 1}–${Math.min(offset + users.length, total)} of ${total}`} />
 
-          <div className="space-y-2 mb-6">
-            {users.map((u) => {
-              const sc = statusColor[u.status] ?? { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' };
-              return (
-                <div
-                  key={u.id}
-                  onClick={() => router.push(`/dashboard/admin/users/${u.id}`)}
-                  className="bg-white rounded-2xl p-4 flex flex-wrap items-center gap-4 cursor-pointer transition-shadow hover:shadow-md"
-                  style={{ boxShadow: 'var(--shadow-sm)' }}
-                >
-                  {/* Icon */}
-                  <div
-                    className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-base-100)' }}
-                  >
-                    <Users size={16} style={{ color: 'var(--color-neutral-500)' }} />
-                  </div>
-
-                  {/* Info */}
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-sm truncate" style={{ color: 'var(--color-neutral-900)' }}>
-                      {u.name}
-                    </p>
-                    <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-                      {u.email}
-                      {u.phone ? ` · ${u.phone}` : ''}
-                    </p>
-                  </div>
-
-                  {/* Role */}
-                  <span
-                    className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}
-                  >
-                    {roleLabel[u.role] ?? u.role}
-                  </span>
-
-                  {/* Engagement badges (customers only) */}
-                  {u.role === 'customer' && u.rentalActive && (
-                    <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: '#eff6ff', color: '#3b82f6' }}>
-                      Rental
-                    </span>
-                  )}
-                  {u.role === 'customer' && u.serviceActive && (
-                    <span className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>
-                      Service
-                    </span>
-                  )}
-
-                  {/* Status */}
-                  <span
-                    className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: sc.bg, color: sc.color }}
-                  >
-                    {u.status.replace('_', ' ')}
-                  </span>
-
-                  {/* KYC */}
-                  {u.kycStatus === 'pending_review' && (
-                    <span
-                      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}
-                    >
-                      <ShieldCheck size={11} /> KYC Pending
-                    </span>
-                  )}
-
-                  {/* Actions — super admins are never suspendable or bannable */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {u.status !== 'suspended' && u.status !== 'banned' && u.role !== 'super_admin' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended', u.name); }}
-                        disabled={actionLoading === u.id}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                        style={{
-                          backgroundColor: '#fef2f2',
-                          color: 'var(--color-error)',
-                          opacity: actionLoading === u.id ? 0.5 : 1,
-                        }}
+          <div className="bg-white rounded-2xl overflow-hidden mb-6" style={{ boxShadow: 'var(--shadow-sm)' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr style={{ backgroundColor: 'var(--color-base-100)' }}>
+                    {['Details', 'Status', 'Last active', 'Action'].map((h, i) => (
+                      <th
+                        key={h}
+                        className={`px-4 py-3 text-[11px] font-bold uppercase tracking-[0.06em] whitespace-nowrap ${i === 3 ? 'text-right' : 'text-left'}`}
+                        style={{ color: 'var(--color-neutral-500)' }}
                       >
-                        <UserX size={12} />
-                        Suspend
-                      </button>
-                    )}
-                    {u.status !== 'banned' && u.role !== 'super_admin' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'banned', u.name); }}
-                        disabled={actionLoading === u.id}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                        style={{
-                          backgroundColor: 'var(--color-error)',
-                          color: '#fff',
-                          opacity: actionLoading === u.id ? 0.5 : 1,
-                        }}
-                        title="Ban this user from the platform"
+                        {h}
+                      </th>
+                    ))}
+                    <th className="w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const sc = statusColor[u.status] ?? { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' };
+                    return (
+                      <tr
+                        key={u.id}
+                        onClick={() => router.push(`/dashboard/admin/users/${u.id}`)}
+                        className="cursor-pointer transition-colors hover:bg-[var(--color-base-100)]"
+                        style={{ borderTop: '1px solid var(--color-base-200)' }}
                       >
-                        <Ban size={12} />
-                        Ban
-                      </button>
-                    )}
-                    {(u.status === 'suspended' || u.status === 'banned') && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active', u.name); }}
-                        disabled={actionLoading === u.id}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors"
-                        style={{
-                          backgroundColor: 'var(--color-primary-50)',
-                          color: 'var(--color-primary)',
-                          opacity: actionLoading === u.id ? 0.5 : 1,
-                        }}
-                      >
-                        <UserCheck size={12} />
-                        Reactivate
-                      </button>
-                    )}
-                  </div>
+                        {/* Details — identity, and the badges that qualify it */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: 'var(--color-base-100)' }}
+                            >
+                              <Users size={16} style={{ color: 'var(--color-neutral-500)' }} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{u.name}</p>
+                              <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
+                                {u.email}{u.phone ? ` · ${u.phone}` : ''}
+                              </p>
+                            </div>
+                            {/* Engagement badges (customers only) */}
+                            {u.role === 'customer' && u.rentalActive && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: '#eff6ff', color: '#3b82f6' }}>Rental</span>
+                            )}
+                            {u.role === 'customer' && u.serviceActive && (
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>Service</span>
+                            )}
+                          </div>
+                        </td>
 
-                  {/* Date */}
-                  <span className="text-xs ml-auto flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }}>
-                    {new Date(u.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}
-                  </span>
-                  <ChevronRight size={16} className="flex-shrink-0" style={{ color: 'var(--color-neutral-300)' }} />
-                </div>
-              );
-            })}
+                        {/* Status — account state, plus KYC only when it needs a decision */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap"
+                              style={{ backgroundColor: sc.bg, color: sc.color }}>
+                              {u.status.replace('_', ' ')}
+                            </span>
+                            {u.kycStatus === 'pending_review' && (
+                              <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap"
+                                style={{ backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}>
+                                <ShieldCheck size={11} /> KYC Pending
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Last active — last sign-in, not sign-up */}
+                        <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+                          {u.lastLoginAt
+                            ? new Date(u.lastLoginAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })
+                            : <span style={{ color: 'var(--color-neutral-300)' }}>Never signed in</span>}
+                        </td>
+
+                        {/* Action — super admins are never suspendable */}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {u.status !== 'suspended' && u.role !== 'super_admin' && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended'); }}
+                                disabled={actionLoading === u.id}
+                                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                                style={{
+                                  backgroundColor: '#fef2f2',
+                                  color: 'var(--color-error)',
+                                  opacity: actionLoading === u.id ? 0.5 : 1,
+                                }}
+                                title="Block this user from signing in"
+                              >
+                                <UserX size={12} /> Suspend
+                              </button>
+                            )}
+                            {(u.status === 'suspended' || u.status === 'banned') && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active'); }}
+                                disabled={actionLoading === u.id}
+                                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                                style={{
+                                  backgroundColor: 'var(--color-primary-50)',
+                                  color: 'var(--color-primary)',
+                                  opacity: actionLoading === u.id ? 0.5 : 1,
+                                }}
+                              >
+                                <UserCheck size={12} /> Reactivate
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="pr-3">
+                          <ChevronRight size={16} style={{ color: 'var(--color-neutral-300)' }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Pagination */}

@@ -11,8 +11,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, X, Archive, Loader2, RefreshCw, Calendar, CalendarX } from 'lucide-react';
 import { type EndedCustomerRow, type EndedCustomerDetail } from '@/components/upnow/EndedLeaseDetailModal';
 import SettlementStatementModal from '@/components/contract/SettlementStatementModal';
+import { moveOutReasonLabel, moveOutReasonSide } from '@/lib/moveOutReasons';
 
 const OUTCOME_LABELS: Record<string, string> = { expired: 'Expired', terminated: 'Terminated' };
+/** Fill for the reason dot — the side that drove the exit. Matches the
+ *  Move-out Reasons report so the two surfaces read as one thing. */
+const SIDE_DOT: Record<string, string> = {
+  customer: '#2e9f82', landlord: '#6b6ad8', breach: '#c9553f',
+};
 const OUTCOME_STYLE: Record<string, string> = {
   expired: 'bg-[#fef3c7] text-[#92400e]',
   terminated: 'bg-[#fee2e2] text-[#b91c1c]',
@@ -123,6 +129,20 @@ export default function EndedLeasesPage() {
   const endedLeaseTotal = yearScoped.reduce((s, r) => s + r.endedLeaseCount, 0);
   const depositsToSettle = yearScoped.filter(r => r.depositStatus === 'held').length;
   const depositsSettled = yearScoped.filter(r => ['returned', 'partial_return', 'forfeited'].includes(r.depositStatus)).length;
+  // The single most common recorded move-out reason for the scoped year. Rows
+  // with no code are excluded from the RANKING (they'd always win on volume for
+  // historic years) but the card names how many they are, so the headline is
+  // never mistaken for full coverage.
+  const topReason = useMemo(() => {
+    const tally = new Map<string, number>();
+    for (const r of yearScoped) {
+      if (!r.moveOutReasonCode) continue;
+      tally.set(r.moveOutReasonCode, (tally.get(r.moveOutReasonCode) ?? 0) + 1);
+    }
+    const best = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+    return best ? { label: moveOutReasonLabel(best[0]), count: best[1] } : null;
+  }, [yearScoped]);
+  const withReason = yearScoped.filter(r => !!r.moveOutReasonCode).length;
 
   return (
     <div className="p-6">
@@ -149,16 +169,19 @@ export default function EndedLeasesPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {[
           { label: 'Ended Customers', value: String(yearScoped.length), sub: filterYear === 'all' ? 'all time' : `in ${filterYear}` },
           { label: 'Ended Leases', value: String(endedLeaseTotal), sub: 'tenancies' },
+          { label: 'Top Move-out Reason', value: topReason?.label ?? '—', sub: topReason ? `${topReason.count} of ${withReason} recorded` : 'none recorded yet', small: true },
           { label: 'Deposits to Settle', value: String(depositsToSettle), sub: 'still held' },
           { label: 'Deposits Settled', value: String(depositsSettled), sub: 'returned / deducted' },
         ].map((s, i) => (
           <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-[#f0ede8]">
             <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
-            <div className="font-bold text-xl text-[#1a1916] mt-1 truncate">{s.value}</div>
+            {/* A reason is a phrase, not a figure — it gets a readable size
+                instead of the tile's headline number treatment. */}
+            <div className={`font-bold text-[#1a1916] mt-1 truncate ${'small' in s && s.small ? 'text-sm leading-6' : 'text-xl'}`} title={s.value}>{s.value}</div>
             <div className="text-xs text-[#9b9890] mt-0.5">{s.sub}</div>
           </div>
         ))}
@@ -222,7 +245,7 @@ export default function EndedLeasesPage() {
             <table className="w-full text-left min-w-[900px]">
               <thead>
                 <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
-                  {['Customer', 'Last Property / Unit', 'Last Lease', 'Period', 'Ended On', 'Outcome', 'Deposit'].map(h => (
+                  {['Customer', 'Last Property / Unit', 'Last Lease', 'Period', 'Ended On', 'Outcome', 'Move-out reason', 'Deposit'].map(h => (
                     <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
@@ -248,6 +271,15 @@ export default function EndedLeasesPage() {
                     <td className="px-4 py-3.5">
                       <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${OUTCOME_STYLE[r.outcome] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
                         {OUTCOME_LABELS[r.outcome] ?? r.outcome}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className="inline-flex items-center gap-1.5 text-xs">
+                        <span className="w-2 h-2 rounded-[2px] shrink-0"
+                          style={{ background: SIDE_DOT[moveOutReasonSide(r.moveOutReasonCode) ?? ''] ?? '#d6d3cc' }} />
+                        <span className={r.moveOutReasonCode ? 'text-[#3d3b35]' : 'text-[#9b9890] italic'}>
+                          {moveOutReasonLabel(r.moveOutReasonCode)}
+                        </span>
                       </span>
                     </td>
                     <td className="px-4 py-3.5">

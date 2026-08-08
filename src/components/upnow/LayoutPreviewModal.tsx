@@ -122,7 +122,7 @@ export function LayoutPreviewModal({
   units: LayoutUnitLite[];
   propertyName?: string | null;
   /** Parent property's leasing model — when `'sub'`, the Pricing & fees grid
-   *  shows the auto-calculated sub-lease charge (20% of Market Price + 5% VAT). */
+   *  shows the auto-calculated sub-lease charge (20% of Market Rent + 5% VAT). */
   leasingType?: 'direct' | 'sub' | 'management' | null;
   /** When true, the header/footer expose the "Edit layout" action. */
   canEdit?: boolean;
@@ -231,7 +231,7 @@ export function LayoutPreviewModal({
     pushFee('Service Charges', plan.serviceCharges);
   }
   // Sub-lease charge — shown only for sub-lease properties, auto-calculated from
-  // each unit's Market Price (20% + 5% VAT on that 20%). Uses the layout's price
+  // each unit's Market Rent (20% + 5% VAT on that 20%). Uses the layout's price
   // range so a mixed-price layout still reads correctly; skipped when unpriced.
   const subFees: Array<{ label: string; value: string }> = [];
   if (leasingType === 'sub' && agg.rentLo != null && agg.rentHi != null) {
@@ -338,7 +338,7 @@ export function LayoutPreviewModal({
                     {/* header — labels the two money columns */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Unit</span>
-                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Market Price</span>
+                      <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Market Rent</span>
                       <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right', fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: C.mute4, textTransform: 'uppercase' }}>Annual Rent</span>
                       <span style={{ flex: '0 0 auto', width: 92 }} />
                     </div>
@@ -354,7 +354,7 @@ export function LayoutPreviewModal({
                           <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff' }}>
                             <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, background: C.line3, padding: '4px 10px', borderRadius: 7, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{u.unitNumber}</span>
                             <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: '#6b756f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.unitName || titleCase(u.unitType)}</span>
-                            {/* Market Price — the unit's asking rent */}
+                            {/* Market Rent — the unit's asking rent */}
                             <span style={{ flex: '0 0 auto', width: 96, textAlign: 'right' }}>
                               {market != null && market > 0
                                 ? <span style={{ fontSize: 12.5, fontWeight: 700, color: C.greenD, fontVariantNumeric: 'tabular-nums' }}>AED {aed(market)}</span>
@@ -440,7 +440,7 @@ export function LayoutPreviewModal({
                 )}
                 {subFees.length > 0 && (
                   <div style={{ borderTop: `1px solid ${C.line3}`, background: '#fbf6ea', padding: '13px 18px' }}>
-                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Price · per unit</div>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.07em', color: '#8a7a4e', textTransform: 'uppercase', marginBottom: 9 }}>Sub-lease charge · auto-calculated from Market Rent · per unit</div>
                     <div style={{ display: 'grid', gridTemplateColumns: isTight ? '1fr' : 'repeat(2,1fr)', gap: '10px 18px' }}>
                       {subFees.map((f, i) => (
                         <div key={`${f.label}-${i}`}>

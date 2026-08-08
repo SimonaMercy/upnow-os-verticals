@@ -47,6 +47,9 @@ export interface EndedCustomerRow {
   startDate: string | null;
   endDate: string | null;
   depositStatus: string;
+  /** Coded move-out reason for the most recent ended tenancy (migration 0198).
+   *  null = not recorded — every tenancy that ended before it existed. */
+  moveOutReasonCode?: string | null;
 }
 
 interface LeaseHist {

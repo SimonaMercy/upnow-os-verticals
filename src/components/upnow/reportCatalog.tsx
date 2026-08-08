@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck,
+  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck, LogOut,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -120,6 +120,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'renewal-forecast',   title: 'Renewal Plan - Monthly',    description: 'Every lease up for renewal in a year, month by month with annual rent — expand a month for the per-customer detail.',  Icon: RefreshCw,    available: true,  group: 'renewals' },
   { slug: 'renewal-vacancy',    title: 'Renewal Plan - Yearly',     description: 'Per-property summary for a year — occupied units by renewal month + Vacant + Total units, straight from each unit\'s Available/Occupied status. Click Vacant to list the units.', Icon: Building2, available: true, group: 'renewals' },
   { slug: 'rent-vs-market',     title: 'Rent vs Asking',           description: 'Current contracted rent vs the unit’s asking price — uplift recoverable at renewal.', Icon: TrendingUp, available: true, group: 'renewals' },
+  { slug: 'move-out-reasons',   title: 'Move-out Reasons',         description: 'Why customers left — the reason recorded at move-out, counted. Reasons biggest-first, the same exits read by who drove them (customer-driven / landlord-driven / breach), how each tenancy ended, the month they left, and the leases behind every figure with length of stay and the annual rent that walked. A move-out is an accepted termination, a renewal declined to vacate, or a term that ran out with nothing continuing it — voided leases and tenancies that simply renewed are excluded. Move-outs with no recorded reason stay in the totals as “Not recorded” so no percentage is inflated. Exportable to CSV.', Icon: LogOut, available: true, group: 'renewals' },
   // ── Rent & Collections ─────────────────────────────────────────────────
   { slug: 'rent-receivable',    title: 'Cash Management', description: 'Every occupied unit with all its rent payments month by month \u2014 no calendar cut, so a tenancy is never split across two years. Bounced cheques that were made good are kept out of the totals.', Icon: BarChart2,    available: true,  group: 'collections' },
   { slug: 'cheques-management', title: 'Cheques Management', description: 'Every cheque you are holding \u2014 one row per occupied unit, grouped by property, with each cheque\'s due date and a month-by-month grid. No calendar cut; a bounce that was made good is kept out of the value.', Icon: CalendarDays, available: true,  group: 'collections' },

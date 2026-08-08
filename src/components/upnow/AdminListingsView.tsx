@@ -6,7 +6,7 @@ import {
   Building2, RefreshCw, Wrench,
   CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
   ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, Info, Tag,
-  MousePointerClick, FileText, ExternalLink,
+  MousePointerClick, FileText, ExternalLink, Inbox,
   Star, Mail, Phone, ShieldCheck, Layers, Zap, Store,
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
@@ -326,7 +326,7 @@ function UnitCard({ u, selected, onClick }: { u: UnitListing; selected: boolean;
       }}>
       <div className="flex items-start justify-between gap-2 mb-1">
         <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>
-          Unit {u.unitNumber}{u.unitName ? ` — ${u.unitName}` : ''}
+          Unit {u.unitNumber}
         </span>
         <StatusBadge s={u.listingStatus} />
       </div>
@@ -470,7 +470,7 @@ function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
         <div className="mb-3 pb-3 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <h2 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>
-              Unit {row.unitNumber}{row.unitName ? ` — ${row.unitName}` : ''}
+              Unit {row.unitNumber}
             </h2>
             <StatusBadge s={row.listingStatus} />
             <Link href={`/dashboard/admin/units/${row.id}`} className="ml-auto text-xs" style={{ color: 'var(--color-primary)' }}>
@@ -995,6 +995,9 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
   const loading = mode === 'sp' ? spLoading : rpLoading;
   const listLen = mode === 'sp' ? spData.length : rpData.length;
   const loaded = mode === 'sp' ? spLoaded : rpLoaded;
+  // "Nothing here" only after a settled fetch — an in-flight first load is the
+  // spinner state, not an empty one.
+  const isEmpty = !loading && loaded && listLen === 0;
   const total = mode === 'sp' ? spTotal : rpTotal;
   const page = mode === 'sp' ? spPage : rpPage;
   const selectedUnit = mode === 'rp' && rpSel != null ? rpData.find((u) => u.id === rpSel) ?? null : null;
@@ -1053,52 +1056,57 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
           />
         </div>
 
-        {loading && (
-          <div className="rounded-2xl p-8 bg-white text-center text-sm flex-shrink-0" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
-            Loading…
-          </div>
-        )}
+        {/* The split panel is always mounted — loading and "nothing here" are
+            states *inside* the layout, not replacements for it, so the page
+            never collapses to a bare message. */}
+        <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
+          style={{ borderColor: 'var(--color-base-200)', boxShadow: 'var(--shadow-sm)' }}>
 
-        {!loading && loaded && !error && listLen === 0 && (
-          <div className="flex flex-col items-center justify-center flex-1 gap-2" style={{ color: 'var(--color-neutral-400)' }}>
-            <MousePointerClick size={28} strokeWidth={1.5} />
-            <p className="text-sm">{mode === 'sp' ? 'No providers with listings match these filters.' : 'No unit listings match these filters.'}</p>
-          </div>
-        )}
-
-        {!loading && listLen > 0 && (
-          <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
-            style={{ borderColor: 'var(--color-base-200)', boxShadow: 'var(--shadow-sm)' }}>
-
-            {/* LEFT — master list (RP: units · SP: one row per provider) */}
-            <div className="flex flex-col shrink-0 border-r overflow-hidden"
-              style={{ width: 300, borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
-              <div className="flex-1 overflow-y-auto">
-                {mode === 'rp'
-                  ? rpData.map((u) => <UnitCard key={u.id} u={u} selected={rpSel === u.id} onClick={() => setRpSel(u.id)} />)
-                  : spData.map((sp) => <ProviderCard key={sp.id} p={sp} selected={spSel === sp.id} onClick={() => setSpSel(sp.id)} />)}
-              </div>
-              <Pagination page={page} total={total} pageSize={PAGE_SIZE}
-                onChange={(pp) => { if (mode === 'rp') { setRpPage(pp); setRpSel(null); } else { setSpPage(pp); setSpSel(null); } }} />
-            </div>
-
-            {/* RIGHT — detail */}
-            <div className="flex-1 overflow-hidden" style={{ backgroundColor: '#fafafa' }}>
-              {!hasSelection ? (
-                <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: 'var(--color-neutral-400)' }}>
-                  <MousePointerClick size={32} strokeWidth={1.5} />
-                  <p className="text-sm">{mode === 'sp' ? 'Select a provider to review their listings' : 'Select a listing to review'}</p>
+          {/* LEFT — master list (RP: units · SP: one row per provider) */}
+          <div className="flex flex-col shrink-0 border-r overflow-hidden"
+            style={{ width: 300, borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center h-full gap-2 px-4 text-center" style={{ color: 'var(--color-neutral-400)' }}>
+                  <RefreshCw size={22} strokeWidth={1.5} className="animate-spin" />
+                  <p className="text-sm">Loading…</p>
                 </div>
-              ) : selectedUnit ? (
-                <UnitDetailPanel row={selectedUnit} acting={acting}
-                  onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')}
-                  onExpire={(u) => void actOnUnit(u, 'expire')} />
-              ) : selectedProvider ? (
-                <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
-              ) : null}
+              ) : isEmpty ? (
+                <div className="flex flex-col items-center justify-center h-full gap-1.5 px-5 text-center" style={{ color: 'var(--color-neutral-400)' }}>
+                  <Inbox size={28} strokeWidth={1.5} />
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-600)' }}>No listings found</p>
+                  <p className="text-xs">{mode === 'sp' ? 'No providers with listings match these filters.' : 'No unit listings match these filters.'}</p>
+                </div>
+              ) : mode === 'rp' ? (
+                rpData.map((u) => <UnitCard key={u.id} u={u} selected={rpSel === u.id} onClick={() => setRpSel(u.id)} />)
+              ) : (
+                spData.map((sp) => <ProviderCard key={sp.id} p={sp} selected={spSel === sp.id} onClick={() => setSpSel(sp.id)} />)
+              )}
             </div>
+            <Pagination page={page} total={total} pageSize={PAGE_SIZE}
+              onChange={(pp) => { if (mode === 'rp') { setRpPage(pp); setRpSel(null); } else { setSpPage(pp); setSpSel(null); } }} />
           </div>
-        )}
+
+          {/* RIGHT — detail */}
+          <div className="flex-1 overflow-hidden" style={{ backgroundColor: '#fafafa' }}>
+            {!hasSelection ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>
+                <MousePointerClick size={32} strokeWidth={1.5} />
+                <p className="text-sm">
+                  {isEmpty
+                    ? 'Nothing to review with these filters'
+                    : mode === 'sp' ? 'Select a provider to review their listings' : 'Select a listing to review'}
+                </p>
+              </div>
+            ) : selectedUnit ? (
+              <UnitDetailPanel row={selectedUnit} acting={acting}
+                onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')}
+                onExpire={(u) => void actOnUnit(u, 'expire')} />
+            ) : selectedProvider ? (
+              <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -10,9 +10,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Instrument_Serif } from "next/font/google";
 import { useRouter } from "next/navigation";
 import {
-  Bell, AlertCircle, Briefcase, Check, ChevronRight, ChevronLeft,
+  Bell, AlertCircle, Check, ChevronRight, ChevronLeft,
   FileText, Home, Lock, LogOut, Phone, Plus, Minus, Send, ShieldCheck, Sparkles,
-  Trash2, Upload, User, Users, Pencil,
+  Trash2, Upload, User, Pencil,
 } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,11 +43,12 @@ const TRADE_AUTHORITIES = [
   "Ajman DED","Fujairah DED","RAK DED","UAQ DED","Sharjah Free Zone","HFZA","SHAMS","IFZA",
 ];
 
+// Only two account types are offered. "Property Management" / "Property
+// Management Agent" were retired — the parent-brokerage plumbing they needed
+// (parentBrokerageName, the /brokerages lookup) went with them.
 const ACCOUNT_TYPES = [
-  { id: "individual", title: "Individual Landlord", desc: "Private person owning properties under your own name.",                Icon: User,      docs: 1, entityType: "individual", companyType: null as null | "landlord" | "brokerage" | "agents" },
-  { id: "landlord",   title: "Landlord Company",    desc: "Company that owns and lets its own properties.",                       Icon: Home,      docs: 2, entityType: "company",    companyType: "landlord" as const },
-  { id: "brokerage",  title: "Property Management",       desc: "Licensed firm managing properties on behalf of owners.",               Icon: Briefcase, docs: 3, entityType: "company",    companyType: "brokerage" as const },
-  { id: "agents",     title: "Property Management Agent", desc: "Agent operating under a parent property-management firm's licence.",   Icon: Users,     docs: 4, entityType: "company",    companyType: "agents" as const },
+  { id: "individual", title: "Individual Landlord",  desc: "Private person owning properties under your own name.", Icon: User, docs: 1, entityType: "individual", companyType: null as null | "landlord" },
+  { id: "landlord",   title: "Landlord as Company",  desc: "Company that owns and lets its own properties.",        Icon: Home, docs: 2, entityType: "company",    companyType: "landlord" as const },
 ] as const;
 
 const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
@@ -92,7 +93,6 @@ export default function RentalProviderOnboardingPage() {
   const [accountKindId, setAccountKindId] = useState<typeof ACCOUNT_TYPES[number]["id"]>("individual");
   const kind = ACCOUNT_TYPES.find((k) => k.id === accountKindId)!;
   const isCompany = kind.entityType === "company";
-  const isAgent = kind.companyType === "agents";
 
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -111,8 +111,6 @@ export default function RentalProviderOnboardingPage() {
   const [companyName, setCompanyName] = useState("");
   const [tradeLicenseNumber, setTradeLicenseNumber] = useState("");
   const [tradeLicenseAuthority, setTradeLicenseAuthority] = useState("");
-  const [parentBrokerageName, setParentBrokerageName] = useState("");
-  const [brokerageOptions, setBrokerageOptions] = useState<Array<{ id: number; companyName: string }>>([]);
 
   // Extended KYC fields
   const [dateOfBirth, setDateOfBirth] = useState("");
@@ -176,9 +174,13 @@ export default function RentalProviderOnboardingPage() {
           return;
         }
 
-        const matched = ACCOUNT_TYPES.find(
-          (k) => k.entityType === p.entityType && (k.companyType ?? null) === (p.companyType ?? null),
-        );
+        // Legacy profiles may carry a retired companyType ('brokerage' /
+        // 'agents'). Match on entityType alone in that case so they land on
+        // "Landlord as Company" rather than silently defaulting to individual.
+        const matched =
+          ACCOUNT_TYPES.find(
+            (k) => k.entityType === p.entityType && (k.companyType ?? null) === (p.companyType ?? null),
+          ) ?? ACCOUNT_TYPES.find((k) => k.entityType === p.entityType);
         if (matched) setAccountKindId(matched.id);
 
         setFullName(user.name ?? "");
@@ -189,7 +191,6 @@ export default function RentalProviderOnboardingPage() {
         if (p.companyName)               setCompanyName(p.companyName);
         if (p.tradeLicenseNumber)        setTradeLicenseNumber(p.tradeLicenseNumber);
         if (p.tradeLicenseAuthority)     setTradeLicenseAuthority(p.tradeLicenseAuthority);
-        if (p.parentBrokerageName)       setParentBrokerageName(p.parentBrokerageName);
         if (p.hasPoa)                    setHasPoa(true);
         if (p.poaPersonName)             setPoaPersonName(p.poaPersonName);
         if (p.poaPersonPhone)            setPoaPersonPhone(p.poaPersonPhone);
@@ -235,12 +236,6 @@ export default function RentalProviderOnboardingPage() {
     })();
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    apiGet<Array<{ id: number; companyName: string }>>("/profiles/rental-provider/brokerages")
-      .then((rows) => setBrokerageOptions(rows ?? []))
-      .catch(() => setBrokerageOptions([]));
-  }, []);
-
   const sections = useMemo(() => {
     const arr: Array<{ id: string; label: string }> = [
       { id: "account", label: "Account Type" },
@@ -248,11 +243,11 @@ export default function RentalProviderOnboardingPage() {
     ];
     if (isCompany) {
       arr.push({ id: "business", label: "Business" });
-      if (kind.companyType !== "agents") arr.push({ id: "shareholders", label: "Shareholders" });
+      arr.push({ id: "shareholders", label: "Shareholders" });
     }
     arr.push({ id: "documents", label: "Documents" });
     return arr;
-  }, [isCompany, kind.companyType]);
+  }, [isCompany]);
 
   useEffect(() => {
     if (currentIdx >= sections.length) setCurrentIdx(sections.length - 1);
@@ -271,15 +266,6 @@ export default function RentalProviderOnboardingPage() {
       { key: "emirates_id", displayName: "Emirates ID",          required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
       { key: "passport",    displayName: "Passport",             required: true,  description: "Bio-data page of your valid passport." },
       { key: "visa",        displayName: "UAE Residency Visa",   required: false, description: "Residency visa page. Required for expatriate residents." },
-    ];
-    if (kind.id === "brokerage") return [
-      ...COMPANY_BASE,
-      { key: "brokerage_license", displayName: "Property Management License", required: true, description: "Valid real-estate brokerage licence from the relevant emirate regulator." },
-    ];
-    if (kind.id === "agents") return [
-      ...COMPANY_BASE,
-      { key: "broker_registration",        displayName: "Agent Registration Certificate", required: true, description: "Real-estate agent registration certificate (BRN card or equivalent)." },
-      { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Firm", required: true, description: "Signed agreement authorising you to operate under the parent brokerage." },
     ];
     return COMPANY_BASE;
   }
@@ -313,20 +299,17 @@ export default function RentalProviderOnboardingPage() {
       m.business =
         !!companyName.trim() &&
         !!tradeLicenseNumber.trim() &&
-        !!tradeLicenseAuthority.trim() &&
-        (!isAgent || !!parentBrokerageName.trim());
+        !!tradeLicenseAuthority.trim();
 
-      if (kind.companyType !== "agents") {
-        const hasAny = shareholders.length > 0;
-        const allFilled = !hasAny || shareholders.every(
-          (sh) => !!sh.name.trim() && sh.ownershipPercent > 0 && !!shDocs[`${sh.id}_emirates_id`]?.uploaded,
-        );
-        const totalOK = !hasAny || Math.abs(totalSharePct - 100) < 0.01;
-        // Step is "done" only when:
-        //   • the user has filled at least one valid shareholder OR
-        //   • they explicitly confirmed 0 shareholders via "Save & continue".
-        m.shareholders = (hasAny || shareholdersConfirmed) && allFilled && totalOK;
-      }
+      const hasAny = shareholders.length > 0;
+      const allFilled = !hasAny || shareholders.every(
+        (sh) => !!sh.name.trim() && sh.ownershipPercent > 0 && !!shDocs[`${sh.id}_emirates_id`]?.uploaded,
+      );
+      const totalOK = !hasAny || Math.abs(totalSharePct - 100) < 0.01;
+      // Step is "done" only when:
+      //   • the user has filled at least one valid shareholder OR
+      //   • they explicitly confirmed 0 shareholders via "Save & continue".
+      m.shareholders = (hasAny || shareholdersConfirmed) && allFilled && totalOK;
     }
 
     // A required doc counts as uploaded if EITHER the server checklist says so
@@ -342,7 +325,7 @@ export default function RentalProviderOnboardingPage() {
     ).length;
     m.documents = reqMissing === 0 && docsForKind.length > 0;
     return m;
-  }, [fullName, phoneVerified, isCompany, isAgent, kind, nationality, hasPoa, poaPersonName, poaPersonPhone, poaPersonEmail, shDocs, companyName, tradeLicenseNumber, tradeLicenseAuthority, parentBrokerageName, shareholders, totalSharePct, shareholdersConfirmed, checklist, docsForKind]);
+  }, [fullName, phoneVerified, isCompany, nationality, hasPoa, poaPersonName, poaPersonPhone, poaPersonEmail, shDocs, companyName, tradeLicenseNumber, tradeLicenseAuthority, shareholders, totalSharePct, shareholdersConfirmed, checklist, docsForKind]);
 
   const completedCount = sections.filter((sec) => completion[sec.id]).length;
   const allDone = sections.every((sec) => completion[sec.id]);
@@ -514,9 +497,8 @@ export default function RentalProviderOnboardingPage() {
         payload.companyType = kind.companyType;
         payload.tradeLicenseNumber = tradeLicenseNumber.trim() || null;
         payload.tradeLicenseAuthority = tradeLicenseAuthority.trim() || null;
-        payload.parentBrokerageName = kind.companyType === "agents" ? parentBrokerageName.trim() : null;
-        // Agents operate under a parent brokerage and have no shareholders.
-        payload.shareholders = kind.companyType === "agents" ? null : (shareholders.length ? shareholders : null);
+        payload.parentBrokerageName = null;
+        payload.shareholders = shareholders.length ? shareholders : null;
         // Signatory identity — shared columns, company-context labels.
         payload.emiratesIdNumber = emiratesIdNumber.trim() || null;
         payload.passportNumber = passportNumber.trim() || null;
@@ -805,7 +787,6 @@ export default function RentalProviderOnboardingPage() {
                     onSelect={(id) => {
                       setAccountKindId(id);
                       const k = ACCOUNT_TYPES.find((x) => x.id === id)!;
-                      if (k.companyType === "agents") { setShareholderCount(0); setShareholders([]); }
                       if (k.entityType === "company") { setHasPoa(false); setPoaPersonName(""); setPoaPersonPhone(""); setPoaPersonEmail(""); }
                     }}
                     onContinue={goNext}
@@ -838,15 +819,12 @@ export default function RentalProviderOnboardingPage() {
 
                 {sec.id === "business" && (
                   <SectionBusiness
-                    isAgent={isAgent}
                     companyName={companyName} setCompanyName={setCompanyName}
                     tradeLicenseNumber={tradeLicenseNumber} setTradeLicenseNumber={setTradeLicenseNumber}
                     tradeLicenseAuthority={tradeLicenseAuthority} setTradeLicenseAuthority={setTradeLicenseAuthority}
                     contactAddress={contactAddress} setContactAddress={setContactAddress}
                     emiratesIdNumber={emiratesIdNumber} setEmiratesIdNumber={setEmiratesIdNumber}
                     passportNumber={passportNumber} setPassportNumber={setPassportNumber}
-                    parentBrokerageName={parentBrokerageName} setParentBrokerageName={setParentBrokerageName}
-                    brokerageOptions={brokerageOptions}
                     onBack={goBack} onContinue={goNext}
                   />
                 )}
@@ -1304,28 +1282,24 @@ function DocMini({ docKey, label, required, docs, uploading, errors, onUploadCli
 // Business ────────────────────
 
 function SectionBusiness(props: {
-  isAgent: boolean;
   companyName: string; setCompanyName: (v: string) => void;
   tradeLicenseNumber: string; setTradeLicenseNumber: (v: string) => void;
   tradeLicenseAuthority: string; setTradeLicenseAuthority: (v: string) => void;
   contactAddress: string; setContactAddress: (v: string) => void;
   emiratesIdNumber: string; setEmiratesIdNumber: (v: string) => void;
   passportNumber: string; setPassportNumber: (v: string) => void;
-  parentBrokerageName: string; setParentBrokerageName: (v: string) => void;
-  brokerageOptions: Array<{ id: number; companyName: string }>;
   onBack: () => void; onContinue: () => void;
 }) {
   const {
-    isAgent, companyName, setCompanyName, tradeLicenseNumber, setTradeLicenseNumber,
+    companyName, setCompanyName, tradeLicenseNumber, setTradeLicenseNumber,
     tradeLicenseAuthority, setTradeLicenseAuthority,
     contactAddress, setContactAddress,
     emiratesIdNumber, setEmiratesIdNumber,
     passportNumber, setPassportNumber,
-    parentBrokerageName, setParentBrokerageName,
-    brokerageOptions, onBack, onContinue,
+    onBack, onContinue,
   } = props;
 
-  const done = !!companyName.trim() && !!tradeLicenseNumber.trim() && !!tradeLicenseAuthority.trim() && (!isAgent || !!parentBrokerageName.trim());
+  const done = !!companyName.trim() && !!tradeLicenseNumber.trim() && !!tradeLicenseAuthority.trim();
 
   return (
     <div className={s.secBody}>
@@ -1352,24 +1326,6 @@ function SectionBusiness(props: {
           </div>
         </div>
       </div>
-
-      {isAgent && (
-        <div className={cn(s.field, s.fieldFull)}>
-          <label className={s.fieldLabel}>Parent brokerage <span className={s.req}>*</span></label>
-          <div className={s.hint}>The brokerage you operate under. Pick from registered firms or type the name.</div>
-          <div className={s.input}>
-            <input
-              list="brokerage-options"
-              value={parentBrokerageName}
-              onChange={(e) => setParentBrokerageName(e.target.value)}
-              placeholder="Search registered brokerages or type a name…"
-            />
-            <datalist id="brokerage-options">
-              {brokerageOptions.map((b) => <option key={b.id} value={b.companyName} />)}
-            </datalist>
-          </div>
-        </div>
-      )}
 
       <div className={s.grid2}>
         <div className={s.field}>
