@@ -4,11 +4,15 @@
  * Platform Status — the internal uptime page for the platform's external
  * dependencies (`/api/admin/status`).
  *
- * Everything drawn here is a probe result. The backend probes Postgres, object
- * storage, SendGrid, the Anthropic API, Google Vision, and Google Places every
- * five minutes and stores one row per component; this page renders the current
- * state and 90 days of daily history. Nothing is inferred, and a component the
- * platform has never probed says "no data" rather than showing a green bar.
+ * Everything drawn here is a probe result. The backend probes the frontend, its
+ * own HTTP layer, Postgres, object storage and SendGrid every five minutes and
+ * stores one row per component; this page renders the current state and 90 days
+ * of daily history. Nothing is inferred, and a component the platform has never
+ * probed says "no data" rather than showing a green bar.
+ *
+ * The component list lives entirely in the backend service — this page maps
+ * whatever it is handed, in order, so adding or dropping a component needs no
+ * change here.
  *
  * ── Why state is never carried by colour alone ───────────────────────────────
  * Operational green and down red are the classic red/green confusion pair —
