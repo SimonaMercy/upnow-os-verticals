@@ -66,7 +66,7 @@ import { tenantDisplayName } from '@/lib/tenantName';
 import { allowedInstallmentPlans, installmentLabel } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { recomputeSubleaseCharges, classifySubleaseCharge } from '@/lib/subleaseCharges';
-import { configuredFeeFromRules, type FeeRuleLite } from '@/lib/feeRules';
+import { configuredFeeFromRules, feeVatFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
@@ -5559,6 +5559,16 @@ function RenewalProposeModal({
   if (adminN > 0) rows.push({ key: 'admin', d: 'Admin Fee', date: feeDate, net: adminN, vat: 0 });
   if (ejariN > 0) rows.push({ key: 'ejari', d: 'Contract Registration Fee', date: feeDate, net: ejariN, vat: 0 });
   if (commN > 0)  rows.push({ key: 'comm',  d: 'Commission', date: feeDate, net: commN, vat: 0 });
+  // Fees are NET above, and their tax rides ONE combined "Fees VAT" cheque due with
+  // the first cheque — exactly what proposeRenewal stamps (ruleFeeVat per fee, then
+  // splitVatToOwnCheques). Without this the preview was short by the fee tax and the
+  // RP approved a plan whose total didn't match the cheques that got raised.
+  const feeVat = Math.round((
+    feeVatFromRules(feeRules, 'adminFee', adminN, rent)
+    + feeVatFromRules(feeRules, 'ejariFee', ejariN, rent)
+    + feeVatFromRules(feeRules, 'commission', commN, rent)
+  ) * 100) / 100;
+  if (feeVat > 0) rows.push({ key: 'feevat', d: 'Fees VAT', date: feeDate, net: 0, vat: feeVat });
   extras.forEach((e, i) => {
     const amt = parseFloat(e.amount) || 0;
     if (e.description.trim() && amt > 0) rows.push({ key: `x${i}`, d: e.description.trim(), date: e.dueDate || (dueDates[n - 1] ?? ''), net: amt, vat: 0 });

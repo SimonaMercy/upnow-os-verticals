@@ -15,6 +15,10 @@ export interface FeeRuleLite {
   valueType: string;
   value: number;
   isActive: boolean;
+  /** Whether this fee is VAT-rated, and at what rate. Optional so older callers
+   *  that only price the net keep compiling; feeVatFromRules needs them. */
+  vatApplicable?: boolean;
+  vatRate?: number;
 }
 
 /** Unit-form fee field key → fee-rule `fee_type`. */
@@ -56,4 +60,30 @@ export const configuredFeeFromRules = (
   if (!r) return null;
   if (!r.isActive) return 0;
   return r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
+};
+
+/**
+ * The VAT (AED) on a fee the RP is charging at `net`, from its rule.
+ *
+ * MIRROR of the backend `ruleFeeVat` (contracts.service.ts) — including its
+ * rounding order, so a preview can never disagree with the cheque that gets
+ * raised: the rule's own VAT is rounded to whole AED first, then scaled by how
+ * far the RP's entered net sits from the rule's amount. An inactive or
+ * non-VAT-rated fee is 0; so is a fee the RP zeroed.
+ *
+ * Ejari is exempt in the UAE defaults, so this returns 0 for it unless the RP
+ * has explicitly made it VAT-rated.
+ */
+export const feeVatFromRules = (
+  rules: FeeRuleLite[] | undefined,
+  key: string,
+  net: number,
+  rent: number,
+): number => {
+  const r = rules?.find((x) => x.feeType === FEE_RULE_TYPE[key]);
+  if (!r || !r.isActive || !r.vatApplicable || !(net > 0)) return 0;
+  const base = r.valueType === 'fixed_aed' ? Math.round(r.value) : Math.round((rent * r.value) / 100);
+  const ruleVat = Math.round((base * (r.vatRate ?? 0)) / 100);
+  if (base <= 0 || ruleVat <= 0) return 0;
+  return Math.round(net * (ruleVat / base) * 100) / 100;
 };
