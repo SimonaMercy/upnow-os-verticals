@@ -86,13 +86,25 @@ function unitSpecLine(u: UnitOpt): string {
   return bits.join(' · ');
 }
 
-/** Where the enquiry came from — the one thing the public flow can't tell us. */
+/**
+ * Where the enquiry came from — the one thing the public flow can't tell us.
+ *
+ * Keys mirror `LEAD_SOURCES` in upnow-backend/src/leads/lead-sources.ts, minus
+ * `portal`: the marketplace stamps that one itself and nobody picks it by hand.
+ * These keys are what Platform Pulse's "Lead channels" card counts, so an
+ * option missing here is a channel that can never appear on the chart.
+ */
 const SOURCES: [string, string][] = [
   ['walk_in', 'Walk-in'],
   ['phone', 'Phone'],
   ['whatsapp', 'WhatsApp'],
+  ['email', 'Email'],
   ['referral', 'Referral'],
   ['agent', 'Agent'],
+  ['property_finder', 'Property Finder'],
+  ['bayut', 'Bayut'],
+  ['dubizzle', 'Dubizzle'],
+  ['social_media', 'Social media'],
   ['other', 'Other'],
 ];
 

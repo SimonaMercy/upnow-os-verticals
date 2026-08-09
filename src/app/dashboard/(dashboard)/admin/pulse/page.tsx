@@ -62,7 +62,15 @@ interface Funnel {
   awaitingResponse: number; cancelled: number;
   ejari: number; utility: number; moveIn: number; eSigned: number;
   leads: number; leadsConverted: number;
+  /**
+   * Acquisition channel mix for the SAME lead population as `leads` — so
+   * `sum(channels[].leads) === leads` and `sum(channels[].converted) ===
+   * leadsConverted`, by construction on the server.
+   */
+  channels: LeadChannel[];
 }
+/** One row of `leads.source`. `source` is the raw key; `label` is server-resolved. */
+interface LeadChannel { source: string; label: string; leads: number; converted: number }
 interface ProviderRow {
   rpId: number; ownerUserId: number | null; name: string; arr: number; market: number; units: number;
   occupied: number; occupancyPct: number; overdue: number;
@@ -696,6 +704,115 @@ function MoveOutReasonsCard({ mo }: { mo: Pulse['customers']['moveOuts'] }) {
   );
 }
 
+/**
+ * Lead channels — where demand actually reaches the platform.
+ *
+ * Two hues, because there are two DIFFERENT facts on this axis and colouring
+ * them alike would hide the only question the card exists to answer:
+ *   · JADE  — the marketplace found this customer. UpNow's own acquisition.
+ *   · BLUE  — the provider brought the customer and logged how (walk-in,
+ *             WhatsApp, referral, a portal like Bayut …). Demand UpNow did
+ *             not generate but does now hold.
+ *   · hatched grey — no channel on the record. The ABSENCE of an answer, never
+ *             a channel of its own, so it can't be ranked against the real bars.
+ *
+ * The window is the lease-pipeline card's, on purpose: the pipeline card ends
+ * with "separately, N marketplace leads came in this window", and this card is
+ * the breakdown of that exact N. Two windows would let the two disagree.
+ */
+function LeadChannelsCard({ funnel, windowLabel }: { funnel: Funnel; windowLabel: string }) {
+  const total = funnel.leads;
+  // "Not recorded" always sits last regardless of size — it is the absence of an
+  // answer, and letting it rank second on volume reads as a channel beating
+  // Marketplace portal. Same rule as Move-out reasons.
+  // `?? []` is not paranoia: the frontend can deploy ahead of the backend, and a
+  // payload from the older API has no `channels` — an unguarded .map() there
+  // would take the WHOLE Pulse page down over one card.
+  const channels = funnel.channels ?? [];
+  const ordered = [...channels].sort((a, b) =>
+    Number(a.source === '(unrecorded)') - Number(b.source === '(unrecorded)'));
+  const rows = ordered.map((c) => ({
+    name: c.label,
+    value: c.leads,
+    label: `${c.leads} · ${total ? Math.round((c.leads / total) * 100) : 0}%`,
+    color: c.source === '(unrecorded)' ? 'url(#leadNotRecorded)'
+      : c.source === 'portal' ? JADE : BLUE,
+  }));
+  // Three shares, never two: the unrecorded rows are their OWN slice. Folding
+  // them into "provider-brought" (as `100 - portalPct` did) credits providers
+  // with demand nobody can attribute.
+  const portal = channels.find((c) => c.source === 'portal')?.leads ?? 0;
+  const unknown = channels.find((c) => c.source === '(unrecorded)')?.leads ?? 0;
+  const pct = (v: number) => (total ? Math.round((v / total) * 100) : 0);
+  const convRate = pct(funnel.leadsConverted);
+  // Only channels that produced something get a conversion chip — a wall of
+  // "0/1" for every channel reads as failure where it is really just no volume.
+  const convChips = ordered.filter((c) => c.converted > 0);
+
+  // No `href`: the lead list is a per-provider surface
+  // (/rental-provider/dashboard/leads) and admin has no cross-provider one, so a
+  // chevron here would promise a page that does not exist.
+  return (
+    <ChartCard title={`Lead channels — ${windowLabel.toLowerCase()}`}
+      sub={total
+        ? `How the ${total} lead${total === 1 ? '' : 's'} in the window reached the platform · ${funnel.leadsConverted} converted to a lease (${convRate}%). Window follows the lease-pipeline card above`
+        : `No leads created in this window · window follows the lease-pipeline card above`}>
+      {/* Same hidden-defs trick as Move-out reasons: recharts re-renders its
+          chart on resize and would drop a pattern defined inside it. */}
+      <svg width="0" height="0" aria-hidden className="absolute">
+        <defs>
+          <pattern id="leadNotRecorded" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(135)">
+            <rect width="6" height="6" fill="#f0ede8" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke={GRAY} strokeWidth="3" opacity="0.55" />
+          </pattern>
+        </defs>
+      </svg>
+      {total === 0 ? (
+        <EmptyChart text="No lead reached the platform in this window" h={150} />
+      ) : (
+        <>
+          <HBars rows={rows} labelWidth={170} height={Math.max(120, rows.length * 34)}
+            fmt={(v) => `${v} lead${v === 1 ? '' : 's'}`} />
+          <div className="border-t border-[#f0ede8] mt-2 pt-2">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span className="text-[11px] text-[#6b6860] tabular-nums">
+                <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: JADE }} />
+                Marketplace-originated <span className="font-semibold text-[#1a1916]">{pct(portal)}%</span>
+              </span>
+              <span className="text-[11px] text-[#6b6860] tabular-nums">
+                <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: BLUE }} />
+                Provider-brought <span className="font-semibold text-[#1a1916]">{pct(total - portal - unknown)}%</span>
+              </span>
+              {unknown > 0 && (
+                <span className="text-[11px] text-[#6b6860] tabular-nums">
+                  <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle border border-[#d4d2cc]" style={{ background: '#f0ede8' }} />
+                  Unattributed <span className="font-semibold text-[#1a1916]">{pct(unknown)}%</span>
+                </span>
+              )}
+            </div>
+            {convChips.length > 0 && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#9b9890] w-full">Converted to a lease</span>
+                {convChips.map((c) => (
+                  <span key={c.source} className="text-[11px] text-[#6b6860] tabular-nums">
+                    <span className="font-semibold text-[#1a1916]">{c.converted}</span>
+                    <span className="text-[#9b9890]">/{c.leads}</span> {c.label}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-[#9b9890] mt-1.5">
+              The marketplace stamps its own enquiries; every other channel is what the provider picked when logging the
+              lead, so a channel missing from this chart means nobody recorded it — not that it sent no one. Most leases
+              never pass through a lead at all, so read this as demand reaching the platform, not as the leasing funnel.
+            </p>
+          </div>
+        </>
+      )}
+    </ChartCard>
+  );
+}
+
 /* ── Page ── */
 export default function PlatformPulsePage() {
   const { user } = useAuth();
@@ -1282,6 +1399,12 @@ export default function PlatformPulsePage() {
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
+      </div>
+      {/* Full width, directly under the pipeline card whose window it shares —
+          the pipeline's closing sentence names the lead count, this is its
+          breakdown, and 12 channel labels need the room. */}
+      <div className="mt-3">
+        <LeadChannelsCard funnel={funnel} windowLabel={funnelWindowLabel(funnel.days)} />
       </div>
 
       {/* ── 2 · MONEY ── */}
