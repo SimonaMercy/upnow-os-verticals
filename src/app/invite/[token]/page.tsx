@@ -9,15 +9,21 @@
  * role profile, and permission record atomically, then returns a JWT which
  * the proxy stores as an httpOnly cookie. User lands logged in.
  *
+ * Session hand-over: there is ONE session cookie per browser, so accepting an
+ * invite necessarily replaces whoever is signed in. If a different account
+ * (landlord, customer, …) is already active we say so and make the swap an
+ * explicit choice — otherwise the invite silently signs that person out and
+ * drops them into the manager account.
+ *
  * Error states: expired token (INVITE_EXPIRED), already accepted (INVITE_NOT_PENDING).
  */
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { ShieldCheck, AlertCircle, Loader2, UserCog } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
-import { dashboardPath } from '@/contexts/AuthContext';
+import { dashboardPath, type AppUser, type UserRole } from '@/contexts/AuthContext';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,34 +42,65 @@ interface InviteDetails {
 // The invitee supplies nothing — name/email/permissions are set by the inviter
 // and sign-in is via email one-time code. Accepting just confirms the invite.
 
+const ROLE_LABELS: Record<UserRole, string> = {
+  customer: 'Customer',
+  rental_provider: 'Rental Provider',
+  service_provider: 'Service Provider',
+  manager: 'Asset Manager',
+  technician: 'Technician',
+  admin: 'Admin',
+  super_admin: 'Admin',
+};
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AcceptInvitePage() {
   const { token } = useParams<{ token: string }>();
-  const router = useRouter();
 
   const [invite, setInvite] = useState<InviteDetails | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState(false);
+  /** Whoever is signed in on THIS browser right now (null when nobody is). */
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
-  // Load invite details
+  // Load invite details + the active session side by side. /auth/me 401s when
+  // nobody is signed in, which is the common case here — treat it as "no user".
   useEffect(() => {
     if (!token) return;
-    apiGet<InviteDetails>(`/invitations/${token}`)
-      .then((data) => {
+    let active = true;
+
+    Promise.all([
+      apiGet<InviteDetails>(`/invitations/${token}`),
+      apiGet<AppUser>('/auth/me').catch(() => null),
+    ])
+      .then(([data, me]) => {
+        if (!active) return;
         setInvite(data);
+        setCurrentUser(me);
         setLoading(false);
       })
       .catch((err: Error) => {
+        if (!active) return;
         setLoadError(err.message ?? 'This invite link is invalid or has expired.');
         setLoading(false);
       });
+
+    return () => {
+      active = false;
+    };
   }, [token]);
+
+  // A different person is signed in on this browser. Accepting swaps the single
+  // session cookie, so it must be a deliberate choice, not a side effect.
+  const sessionConflict =
+    !!currentUser &&
+    !!invite &&
+    currentUser.email.trim().toLowerCase() !== invite.email.trim().toLowerCase();
 
   const onAccept = async () => {
     setFormError(null);
@@ -77,15 +114,22 @@ export default function AcceptInvitePage() {
       });
       setSuccess(true);
       // Small delay to show success, then land on the ROLE's home —
-      // a bare /dashboard has no page (it 404s).
+      // a bare /dashboard has no page (it 404s). Hard-navigate rather than
+      // router.push: the accept just swapped the session cookie, and a client
+      // navigation would carry the previous user's AuthContext into the shell.
       const home = invite ? dashboardPath(invite.role) : '/';
-      setTimeout(() => router.push(home), 1500);
+      setTimeout(() => window.location.replace(home), 1500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to accept invite. Please try again.';
       setFormError(message);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /** Leave the invite untouched and send the signed-in user back to their own area. */
+  const onKeepCurrentSession = () => {
+    window.location.replace(currentUser ? dashboardPath(currentUser.role) : '/');
   };
 
   // ── Loading state ──────────────────────────────────────────────────────────
@@ -170,6 +214,28 @@ export default function AcceptInvitePage() {
 
         {/* Accept */}
         <div className="px-6 pb-8 space-y-4">
+          {sessionConflict && currentUser && (
+            <div
+              className="rounded-xl p-3.5 text-xs space-y-1.5"
+              style={{
+                background: 'color-mix(in srgb, var(--color-warning, #f59e0b) 12%, white)',
+                border: '1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, white)',
+              }}
+            >
+              <div className="flex items-center gap-2 font-semibold">
+                <UserCog className="w-4 h-4 shrink-0" />
+                <span>
+                  You&apos;re signed in as {currentUser.name || currentUser.email} (
+                  {ROLE_LABELS[currentUser.role] ?? currentUser.role})
+                </span>
+              </div>
+              <p style={{ color: 'var(--color-neutral-600)' }}>
+                Only one account can be signed in per browser. Accepting this invite signs
+                that account out and signs you in as <strong>{invite.email}</strong>.
+              </p>
+            </div>
+          )}
+
           {formError && (
             <div className="rounded-xl p-3 text-sm" style={{ background: 'color-mix(in srgb, var(--color-error) 10%, white)', color: 'var(--color-error)' }}>
               {formError}
@@ -196,8 +262,24 @@ export default function AcceptInvitePage() {
             className="w-full py-3 rounded-xl text-sm font-semibold text-white"
             style={{ background: 'var(--color-primary)', opacity: submitting || !termsAccepted ? 0.6 : 1, cursor: submitting || !termsAccepted ? 'not-allowed' : 'pointer' }}
           >
-            {submitting ? 'Accepting…' : 'Accept Invite'}
+            {submitting
+              ? 'Accepting…'
+              : sessionConflict
+                ? 'Sign out & accept invite'
+                : 'Accept Invite'}
           </button>
+
+          {sessionConflict && currentUser && (
+            <button
+              type="button"
+              onClick={onKeepCurrentSession}
+              disabled={submitting}
+              className="w-full py-2.5 rounded-xl text-sm font-medium"
+              style={{ background: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+            >
+              Cancel — stay signed in as {currentUser.name || currentUser.email}
+            </button>
+          )}
 
           <p className="text-xs text-center" style={{ color: 'var(--color-neutral-400)' }}>
             No password needed — you&apos;ll sign in with a one-time code sent to your email.
