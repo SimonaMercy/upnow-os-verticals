@@ -44,6 +44,9 @@ next-env.d.ts
 .next-e2e/
 playwright-report-fullcycle/
 
+# flow-doc screenshot stack build output (same Tailwind v4 scanning trap)
+.next-flowdoc/
+
 # Playwright journey suite — ephemeral run state (holds portal magic-link tokens)
 e2e/journey/.state.json
 
