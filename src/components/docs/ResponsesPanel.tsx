@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import type { OpenAPISpec, ResponseObject } from '@/types/openapi';
 import { SchemaTree } from './SchemaTree';
+import { SamplePanel, collectSamples, isExampleOnlySchema } from './SamplePanel';
+import { ViewToggle } from './ViewToggle';
 
 function statusStyle(code: string): { bg: string; text: string; border: string } {
   const n = parseInt(code);
@@ -21,10 +23,17 @@ interface Props {
 export function ResponsesPanel({ responses, spec }: Props) {
   const codes = Object.entries(responses);
   const [active, setActive] = useState(codes[0]?.[0] ?? '200');
+  const [view, setView] = useState<'sample' | 'schema'>('sample');
 
   const current = responses[active] as ResponseObject | undefined;
   const contentEntries = Object.entries(current?.content ?? {});
-  const schema = contentEntries[0]?.[1]?.schema;
+  const media = contentEntries[0]?.[1];
+  const schema = media?.schema;
+  const samples = collectSamples(media);
+  // Captured response samples arrive as a schema carrying only `example`, which
+  // has no tree to draw — show the payload instead of a box reading `any`.
+  const hasSchema = !!schema && !isExampleOnlySchema(schema);
+  const showSample = samples.length > 0 && (view === 'sample' || !hasSchema);
 
   return (
     <div>
@@ -63,21 +72,28 @@ export function ResponsesPanel({ responses, spec }: Props) {
         </p>
       )}
 
-      {/* Content type + schema */}
+      {/* Content type + sample / schema */}
       {contentEntries.length > 0 ? (
         <>
-          <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <code style={{
               fontSize: 11, fontFamily: 'monospace', backgroundColor: '#f6f8fa',
               padding: '3px 9px', borderRadius: 5, border: '1px solid #e8e6e0', color: '#6b6860',
             }}>
               {contentEntries[0][0]}
             </code>
+            <div style={{ flex: 1 }} />
+            {samples.length > 0 && hasSchema && (
+              <ViewToggle value={view} onChange={setView} sampleCount={samples.length} />
+            )}
           </div>
-          {schema
-            ? <SchemaTree schema={schema} spec={spec} />
-            : <p style={{ fontSize: 13, color: '#9b9890', fontStyle: 'italic' }}>No schema defined</p>
-          }
+          {showSample ? (
+            <SamplePanel key={active} samples={samples} />
+          ) : hasSchema && schema ? (
+            <SchemaTree schema={schema} spec={spec} />
+          ) : (
+            <p style={{ fontSize: 13, color: '#9b9890', fontStyle: 'italic' }}>No schema defined</p>
+          )}
         </>
       ) : (
         !current?.description && (

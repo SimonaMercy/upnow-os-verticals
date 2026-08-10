@@ -6,6 +6,8 @@ import { MethodBadge } from './MethodBadge';
 import { ParamTable } from './ParamTable';
 import { RequestBodyPanel } from './RequestBodyPanel';
 import { ResponsesPanel } from './ResponsesPanel';
+import { groupOf, tagLabel } from './tagNames';
+import { Markdown } from './Markdown';
 
 function SectionCard({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) {
   return (
@@ -66,15 +68,30 @@ export function EndpointDetail({ endpoint, spec, swaggerBaseUrl }: Props) {
   const params = operation.parameters ?? [];
   const hasSecurity = !!operation.security?.length;
   const responseCount = Object.keys(operation.responses).length;
+  const group = groupOf(endpoint.tag);
+  const tagDescription = spec.tags?.find(t => t.name === endpoint.tag)?.description;
 
   return (
     <div style={{ maxWidth: 840, paddingBlock: 32, paddingInline: 32 }}>
-      {/* Breadcrumb */}
-      <div style={{ fontSize: 12, color: '#9b9890', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span>{endpoint.tag}</span>
+      {/* Breadcrumb — product group › tag › operation */}
+      <div style={{ fontSize: 12, color: '#9b9890', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {group && (
+          <>
+            <span style={{ fontWeight: 700, color: '#6b6860' }}>{group}</span>
+            <span>›</span>
+          </>
+        )}
+        <span>{tagLabel(endpoint.tag)}</span>
         <span>›</span>
         <span style={{ color: '#6b6860' }}>{operation.operationId ?? path}</span>
       </div>
+
+      {/* What this tag covers, straight from the spec's tag description */}
+      {tagDescription && (
+        <p style={{ fontSize: 12.5, color: '#9b9890', margin: '0 0 10px', lineHeight: 1.6 }}>
+          {tagDescription}
+        </p>
+      )}
 
       {/* Title */}
       <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1a1916', margin: '0 0 14px', lineHeight: 1.2 }}>
@@ -131,9 +148,10 @@ export function EndpointDetail({ endpoint, spec, swaggerBaseUrl }: Props) {
 
       {/* Description */}
       {operation.description && (
-        <p style={{ fontSize: 15, color: '#3d3b35', lineHeight: 1.75, marginBottom: 20, marginTop: 0 }}>
-          {operation.description}
-        </p>
+        <Markdown
+          text={operation.description}
+          style={{ fontSize: 15, color: '#3d3b35', lineHeight: 1.75, marginBottom: 20 }}
+        />
       )}
 
       {/* Parameters */}
@@ -160,12 +178,14 @@ export function EndpointDetail({ endpoint, spec, swaggerBaseUrl }: Props) {
       {/* Footer */}
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e8e6e0', display: 'flex', gap: 16, alignItems: 'center' }}>
         <a
-          href={`${swaggerBaseUrl}/docs`}
+          // The backend serves one Swagger document per product group, slugged
+          // off the group name (`/docs/rental-provider`, …).
+          href={group ? `${swaggerBaseUrl}/docs/${group.toLowerCase().replace(/\s+/g, '-')}` : `${swaggerBaseUrl}/docs`}
           target="_blank"
           rel="noopener noreferrer"
           style={{ fontSize: 13, color: '#2e9f82', textDecoration: 'none', fontWeight: 600 }}
         >
-          Open raw Swagger UI →
+          Open in Swagger UI →
         </a>
         {operation.operationId && (
           <span style={{ fontSize: 12, color: '#9b9890', fontFamily: 'monospace' }}>

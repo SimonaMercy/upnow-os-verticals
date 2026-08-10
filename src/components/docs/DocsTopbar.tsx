@@ -10,9 +10,23 @@ interface Props {
   onSearchChange: (q: string) => void;
   totalEndpoints: number;
   filteredCount: number;
+  groupNames: string[];
+  groupFilter: string | null;
+  onGroupFilterChange: (g: string | null) => void;
+  swaggerBaseUrl: string;
 }
 
-export function DocsTopbar({ title, version, searchQuery, onSearchChange, totalEndpoints, filteredCount }: Props) {
+export function DocsTopbar({
+  version,
+  searchQuery,
+  onSearchChange,
+  totalEndpoints,
+  filteredCount,
+  groupNames,
+  groupFilter,
+  onGroupFilterChange,
+  swaggerBaseUrl,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isFiltered = searchQuery.trim().length > 0;
 
@@ -111,6 +125,32 @@ export function DocsTopbar({ title, version, searchQuery, onSearchChange, totalE
 
       <div style={{ flex: 1 }} />
 
+      {/* Product filter — the counterpart of Swagger UI's spec selector */}
+      {groupNames.length > 1 && (
+        <select
+          value={groupFilter ?? ''}
+          onChange={e => onGroupFilterChange(e.target.value || null)}
+          title="Show only one product's API"
+          style={{
+            fontSize: 12,
+            padding: '5px 8px',
+            borderRadius: 6,
+            border: `1px solid ${groupFilter ? '#a7e0cd' : '#e8e6e0'}`,
+            backgroundColor: groupFilter ? '#f0faf6' : '#ffffff',
+            color: groupFilter ? '#1a5a4a' : '#6b6860',
+            fontWeight: groupFilter ? 700 : 500,
+            cursor: 'pointer',
+            flexShrink: 0,
+            maxWidth: 190,
+          }}
+        >
+          <option value="">All products</option>
+          {groupNames.map(g => (
+            <option key={g} value={g}>{g}</option>
+          ))}
+        </select>
+      )}
+
       {/* Version badge */}
       <span style={{
         fontSize: 11, backgroundColor: '#f0faf6', color: '#1a5a4a',
@@ -122,7 +162,7 @@ export function DocsTopbar({ title, version, searchQuery, onSearchChange, totalE
 
       {/* Raw Swagger link */}
       <a
-        href={`${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') ?? 'http://localhost:3001'}/docs`}
+        href={`${swaggerBaseUrl}/docs`}
         target="_blank"
         rel="noopener noreferrer"
         style={{

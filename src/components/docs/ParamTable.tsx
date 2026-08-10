@@ -1,4 +1,5 @@
 import type { Parameter, OpenAPISpec } from '@/types/openapi';
+import { resolveSchema } from './SchemaTree';
 
 const IN_STYLES: Record<string, { bg: string; text: string }> = {
   path:   { bg: '#fef3c7', text: '#b45309' },
@@ -12,7 +13,7 @@ interface Props {
   spec: OpenAPISpec;
 }
 
-export function ParamTable({ parameters, spec: _spec }: Props) {
+export function ParamTable({ parameters, spec }: Props) {
   if (!parameters.length) return null;
 
   return (
@@ -36,8 +37,13 @@ export function ParamTable({ parameters, spec: _spec }: Props) {
         <tbody>
           {parameters.map((p, i) => {
             const inStyle = IN_STYLES[p.in] ?? { bg: '#f6f8fa', text: '#6b6860' };
-            const type = p.schema?.type ?? (p.schema?.items ? 'array' : '—');
-            const format = p.schema?.format;
+            // A `$ref`'d parameter schema (an enum query param, typically) has no
+            // `type` of its own — resolve it so the column is not a dash.
+            const schema = p.schema ? resolveSchema(p.schema, spec) : undefined;
+            const type = schema?.enum
+              ? 'enum'
+              : schema?.type ?? (schema?.items ? 'array' : '—');
+            const format = schema?.format;
             const isLast = i === parameters.length - 1;
 
             return (
@@ -64,6 +70,15 @@ export function ParamTable({ parameters, spec: _spec }: Props) {
                 </td>
                 <td style={{ padding: '10px 14px', color: '#6b6860', maxWidth: 320 }}>
                   <span>{p.description ?? <span style={{ color: '#c4c2bc', fontStyle: 'italic' }}>—</span>}</span>
+                  {schema?.enum && (
+                    <div style={{ marginTop: 4, fontSize: 11, color: '#6b6860' }}>
+                      {schema.enum.map(v => (
+                        <code key={String(v)} style={{ backgroundColor: '#f4f3ef', padding: '1px 5px', borderRadius: 3, marginRight: 4 }}>
+                          {JSON.stringify(v)}
+                        </code>
+                      ))}
+                    </div>
+                  )}
                   {p.example !== undefined && (
                     <div style={{ marginTop: 3, fontSize: 11, color: '#9b9890' }}>
                       e.g.{' '}

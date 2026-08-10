@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { EndpointEntry } from '@/types/openapi';
+import type { EndpointEntry, GroupSection, TagSection } from '@/types/openapi';
 import { MethodBadge } from './MethodBadge';
 
 // ── single endpoint row ─────────────────────────────────────────
@@ -9,24 +9,26 @@ function EndpointRow({
   endpoint,
   isSelected,
   onSelect,
+  indent = 0,
 }: {
   endpoint: EndpointEntry;
   isSelected: boolean;
   onSelect: () => void;
+  indent?: number;
 }) {
   return (
     <button
       onClick={onSelect}
-      title={endpoint.path}
+      title={`${endpoint.method.toUpperCase()} ${endpoint.path}`}
       style={{
         width: '100%',
         textAlign: 'left',
-        padding: '7px 12px 7px 14px',
+        padding: '7px 12px',
+        paddingInlineStart: 14 + indent,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
         backgroundColor: isSelected ? '#f0faf6' : 'transparent',
-        borderLeft: `2px solid ${isSelected ? '#2e9f82' : 'transparent'}`,
         border: 'none',
         borderLeftStyle: 'solid',
         borderLeftWidth: 2,
@@ -58,68 +60,70 @@ function EndpointRow({
   );
 }
 
-// ── collapsible tag group ────────────────────────────────────────
+// ── collapsible tag section ─────────────────────────────────────
 function TagGroup({
-  tag,
-  endpoints,
+  section,
   selectedId,
   onSelect,
 }: {
-  tag: string;
-  endpoints: EndpointEntry[];
+  section: TagSection;
   selectedId: string | null;
-  onSelect: (id: string, tag: string) => void;
+  onSelect: (id: string) => void;
 }) {
-  const hasSelected = endpoints.some(e => `${e.method}:${e.path}` === selectedId);
-  const [open, setOpen] = useState(true);
+  const hasSelected = section.endpoints.some(e => `${e.method}:${e.path}` === selectedId);
+  const [open, setOpen] = useState(false);
+
+  // Keep the selected endpoint's section open even if the user collapsed it
+  // before selecting from search.
+  const expanded = open || hasSelected;
 
   return (
     <div>
       <button
         onClick={() => setOpen(o => !o)}
+        title={section.description ?? section.tag}
         style={{
           width: '100%',
           textAlign: 'left',
-          padding: '9px 14px',
+          padding: '7px 14px 7px 22px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 8,
           background: 'none',
           border: 'none',
-          borderBottom: '1px solid #f4f3ef',
           cursor: 'pointer',
         }}
       >
         <span style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color: hasSelected ? '#2e9f82' : '#6b6860',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          fontSize: 12,
+          fontWeight: hasSelected ? 700 : 500,
+          color: hasSelected ? '#2e9f82' : '#3d3b35',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}>
-          {tag}
+          {section.label}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{
-            fontSize: 10, backgroundColor: '#f0faf6', color: '#2e9f82',
-            padding: '1px 6px', borderRadius: 99, fontWeight: 700,
-          }}>
-            {endpoints.length}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: '#9b9890', fontWeight: 600 }}>
+            {section.endpoints.length}
           </span>
-          <span style={{ fontSize: 9, color: '#9b9890' }}>{open ? '▾' : '▸'}</span>
+          <span style={{ fontSize: 9, color: '#c4c2bc' }}>{expanded ? '▾' : '▸'}</span>
         </div>
       </button>
 
-      {open && (
-        <div style={{ paddingBlock: 4 }}>
-          {endpoints.map(ep => {
+      {expanded && (
+        <div style={{ paddingBottom: 4 }}>
+          {section.endpoints.map(ep => {
             const id = `${ep.method}:${ep.path}`;
             return (
               <EndpointRow
                 key={id}
                 endpoint={ep}
+                indent={12}
                 isSelected={selectedId === id}
-                onSelect={() => onSelect(id, tag)}
+                onSelect={() => onSelect(id)}
               />
             );
           })}
@@ -129,20 +133,86 @@ function TagGroup({
   );
 }
 
-// ── sidebar ──────────────────────────────────────────────────────
-interface Props {
-  tags: Map<string, EndpointEntry[]>;
+// ── product group ───────────────────────────────────────────────
+function ProductGroup({
+  group,
+  selectedId,
+  onSelect,
+}: {
+  group: GroupSection;
   selectedId: string | null;
-  activeTag: string | null;
-  searchQuery: string;
-  onSelect: (id: string, tag: string) => void;
-  onTagClick: (tag: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const hasSelected = group.tags.some(t =>
+    t.endpoints.some(e => `${e.method}:${e.path}` === selectedId),
+  );
+  const [open, setOpen] = useState(true);
+  const expanded = open || hasSelected;
+
+  return (
+    <div style={{ borderBottom: '1px solid #f0efeb' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#fafaf8',
+          border: 'none',
+          borderBottom: expanded ? '1px solid #f4f3ef' : 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{
+          fontSize: 11,
+          fontWeight: 800,
+          color: hasSelected ? '#2e9f82' : '#6b6860',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}>
+          {group.name}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontSize: 10, backgroundColor: '#f0faf6', color: '#2e9f82',
+            padding: '1px 6px', borderRadius: 99, fontWeight: 700,
+          }}>
+            {group.endpointCount}
+          </span>
+          <span style={{ fontSize: 9, color: '#9b9890' }}>{expanded ? '▾' : '▸'}</span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div style={{ paddingBlock: 2 }}>
+          {group.tags.map(section => (
+            <TagGroup
+              key={section.tag}
+              section={section}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-export function DocsSidebar({ tags, selectedId, searchQuery, onSelect }: Props) {
-  const tagEntries = Array.from(tags.entries());
+// ── sidebar ──────────────────────────────────────────────────────
+interface Props {
+  groups: GroupSection[];
+  selectedId: string | null;
+  searchQuery: string;
+  onSelect: (id: string) => void;
+}
+
+export function DocsSidebar({ groups, selectedId, searchQuery, onSelect }: Props) {
   const isSearching = searchQuery.trim().length > 0;
-  const totalFiltered = tagEntries.reduce((n, [, eps]) => n + eps.length, 0);
+  const totalFiltered = groups.reduce((n, g) => n + g.endpointCount, 0);
 
   return (
     <aside style={{
@@ -162,6 +232,10 @@ export function DocsSidebar({ tags, selectedId, searchQuery, onSelect }: Props) 
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
+        position: 'sticky',
+        top: 0,
+        backgroundColor: '#ffffff',
+        zIndex: 1,
       }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#6b6860', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Endpoints
@@ -178,36 +252,34 @@ export function DocsSidebar({ tags, selectedId, searchQuery, onSelect }: Props) 
       {/* No results */}
       {totalFiltered === 0 && (
         <div style={{ padding: '24px 16px', textAlign: 'center', color: '#9b9890', fontSize: 13 }}>
-          No endpoints match &quot;{searchQuery}&quot;
+          {isSearching ? `No endpoints match “${searchQuery}”` : 'No endpoints'}
         </div>
       )}
 
-      {/* Results */}
       {isSearching ? (
-        // Flat list when searching — shows tag label inline
+        // Flat list when searching — the group tree just gets in the way
         <div>
-          {tagEntries.map(([tag, endpoints]) =>
-            endpoints.map(ep => {
-              const id = `${ep.method}:${ep.path}`;
-              return (
-                <div key={id}>
+          {groups.flatMap(g =>
+            g.tags.flatMap(section =>
+              section.endpoints.map(ep => {
+                const id = `${ep.method}:${ep.path}`;
+                return (
                   <EndpointRow
+                    key={id}
                     endpoint={ep}
                     isSelected={selectedId === id}
-                    onSelect={() => onSelect(id, tag)}
+                    onSelect={() => onSelect(id)}
                   />
-                </div>
-              );
-            })
+                );
+              }),
+            ),
           )}
         </div>
       ) : (
-        // Grouped by tag
-        tagEntries.map(([tag, endpoints]) => (
-          <TagGroup
-            key={tag}
-            tag={tag}
-            endpoints={endpoints}
+        groups.map(group => (
+          <ProductGroup
+            key={group.name}
+            group={group}
             selectedId={selectedId}
             onSelect={onSelect}
           />
