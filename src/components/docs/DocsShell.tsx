@@ -186,19 +186,19 @@ function AuthScreen({
 }
 
 // ── error ────────────────────────────────────────────────────────
-function ErrorScreen({ error, specUrl }: { error: string; specUrl: string }) {
+/**
+ * `error` is the message the spec route sent, which already says what went
+ * wrong in words. The old screen printed a bare `HTTP 502 from /docs/spec` and
+ * told the reader to check that "the backend is reachable at /docs/spec" — a
+ * same-origin path they cannot do anything about.
+ */
+function ErrorScreen({ error }: { error: string }) {
   return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafaf8' }}>
-      <div style={{ textAlign: 'center', maxWidth: 420, padding: 32 }}>
+      <div style={{ textAlign: 'center', maxWidth: 460, padding: 32 }}>
         <div style={{ fontSize: 40, marginBottom: 14 }}>⚠️</div>
         <h2 style={{ color: '#1a1916', marginBottom: 8, fontSize: 18 }}>Could not load API spec</h2>
-        <p style={{ color: '#6b6860', fontSize: 14, marginBottom: 12, lineHeight: 1.6 }}>
-          Make sure the backend is running and reachable at{' '}
-          <code style={{ backgroundColor: '#f6f8fa', padding: '2px 6px', borderRadius: 4, fontSize: 12 }}>
-            {specUrl}
-          </code>
-        </p>
-        <code style={{ color: '#b91c1c', fontSize: 12, fontFamily: 'monospace' }}>{error}</code>
+        <p style={{ color: '#6b6860', fontSize: 14, lineHeight: 1.6 }}>{error}</p>
       </div>
     </div>
   );
@@ -247,7 +247,11 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
           setLoading(false);
           return;
         }
-        if (!r.ok) throw new Error(`HTTP ${r.status} from ${specUrl}`);
+        if (!r.ok) {
+          // The route replies with { message }; fall back only if that is absent.
+          const body = (await r.json().catch(() => null)) as { message?: string } | null;
+          throw new Error(body?.message ?? `The spec request failed (HTTP ${r.status}).`);
+        }
         const data = (await r.json()) as OpenAPISpec;
         if (cancelled) return;
         setSpec(data);
@@ -328,7 +332,7 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
       />
     );
   }
-  if (error || !spec) return <ErrorScreen error={error ?? 'Failed to load spec'} specUrl={specUrl} />;
+  if (error || !spec) return <ErrorScreen error={error ?? 'Failed to load spec'} />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
