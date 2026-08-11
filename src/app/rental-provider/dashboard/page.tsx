@@ -613,8 +613,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   // into the manager portal. Fee-rules nudge is RP-only.
   const rpQ = manager ? `rp=${manager.rp}&` : '';
   const contractBase = manager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
-  const receivablesHref = manager ? '/dashboard/manager/receivables' : '/rental-provider/dashboard/receivables';
-  // The pages the Properties and Units tiles hand off to — the same destinations
+    // The pages the Properties and Units tiles hand off to — the same destinations
   // the sidebar's Properties / Units entries point at, manager routes included,
   // so the tile and the nav item never land somewhere different.
   const leadsBase = manager ? '/dashboard/manager/leads' : '/rental-provider/dashboard/leads';
@@ -636,6 +635,20 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const rentVsMarketHref = manager
     ? `/dashboard/manager/reports?rp=${manager.rp}&slug=rent-vs-market`
     : '/rental-provider/dashboard/reports/rent-vs-market';
+  /**
+   * SCRUM-737 — Receivables is OFF this dashboard (CEO feedback, 11 Aug 2026).
+   * Hidden rather than deleted: the card, its period select, the cheque
+   * drill-down behind it and the report link are all still here and correct, so
+   * putting it back is this one line. The figure itself is not gone from the
+   * platform — Cash Management (`rent-receivable`) is the same money on the same
+   * basis, month by month, and remains under Reports.
+   *
+   * The month-by-month Receivables vs Collected bars the ticket also names went
+   * earlier, for their own reasons (see the Money section note below); the API
+   * still returns `chartData`, which nothing now reads.
+   */
+  const SHOW_RECEIVABLES = false;
+
   /** Receivables → Cash Management (report slug `rent-receivable`). Same money,
    *  same basis — the card is the headline, the report is the working. */
   const cashManagementHref = manager
@@ -1394,12 +1407,16 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
             Money
           </h2>
-          <span className="text-[11px] text-[var(--neutral-400)]">Receivables covers the period on its own card · Rent vs Market and Deposits are live</span>
+          <span className="text-[11px] text-[var(--neutral-400)]">what the let stock earns against what it asks, and what is being held</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Column count follows the flag: with Receivables hidden the row is two
+            cards, and a three-column grid would leave a hole where it stood. */}
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4${SHOW_RECEIVABLES ? ' lg:grid-cols-3' : ''}`}>
         {/* Hero KPI — Receivables (dark). The headline is rent FALLING DUE in the
             range, so money already banked is inside it; the split below says how
-            much, and clicking through lists the cheques on both sides of it. */}
+            much, and clicking through lists the cheques on both sides of it.
+            Hidden by SHOW_RECEIVABLES — see the flag for why and how to restore. */}
+        {SHOW_RECEIVABLES && (
         <div
           {...clickableProps(fin ? drillReceivables : undefined)}
           className={`relative overflow-hidden rounded-2xl p-5 text-white bg-gradient-to-br from-[#14201c] via-[#1d2c27] to-[#22332d] shadow-sm${fin ? ' cursor-pointer hover:shadow-md hover:brightness-110 transition-all' : ''}`}
@@ -1479,6 +1496,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           </Link>
           <ArrowUpRight size={56} className="absolute -right-3 -bottom-3 text-white/5" />
         </div>
+        )}
 
         {/* Rent vs Market — one card, because the two figures only mean anything
             against each other.
