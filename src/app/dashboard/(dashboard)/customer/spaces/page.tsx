@@ -1,7 +1,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
@@ -226,8 +226,16 @@ export default function MySpacesPage() {
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true); setError(null);
+  /** Last fetch start, for the focus-refetch throttle below. */
+  const lastFetchRef = useRef(0);
+
+  // `background` = a focus/visibility refetch rather than the first load. Those
+  // must not flip `loading`, or the whole card grid drops to skeletons on every
+  // tab switch — which reads as the page reloading on a loop.
+  const fetchAll = useCallback(async (background = false) => {
+    lastFetchRef.current = Date.now();
+    if (!background) setLoading(true);
+    setError(null);
     try {
       const [vRes, lRes, cRes, dRes] = await Promise.all([
         fetch('/api/leads/my-viewings',     { credentials: 'include' }),
@@ -240,7 +248,12 @@ export default function MySpacesPage() {
       if (!vRes.ok) throw new Error(`Failed to load viewings (${vRes.status})`);
       const vData = await vRes.json();
       setViewings(Array.isArray(vData) ? vData : []);
-      if (lRes.ok) { const d = await lRes.json(); setDirectLeads(Array.isArray(d) ? d : []); }
+      // Applications used to be guarded by a bare `if (lRes.ok)`, so a broken
+      // endpoint just rendered an empty list forever with nothing to show for
+      // it — a route-order bug hid behind that silence. Fail loudly instead.
+      if (!lRes.ok) throw new Error(`Failed to load applications (${lRes.status})`);
+      const lData = await lRes.json();
+      setDirectLeads(Array.isArray(lData) ? lData : []);
       if (cRes.ok) { const d = await cRes.json(); setContracts(Array.isArray(d) ? d : []); }
       if (dRes.ok) {
         const d = await dRes.json();
@@ -257,16 +270,18 @@ export default function MySpacesPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Refresh on return to the tab. `focus` and `visibilitychange` BOTH fire on a
+  // single tab switch, so this listens to visibility only and throttles to 30s
+  // — matching useNavBadgeCounts in DashboardShell. Previously both events ran
+  // unthrottled, firing eight requests per focus.
   useEffect(() => {
     function refetchIfVisible() {
-      if (document.visibilityState === 'visible') fetchAll();
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastFetchRef.current < 30_000) return;
+      void fetchAll(true);   // stamps lastFetchRef itself
     }
-    window.addEventListener('focus', refetchIfVisible);
     document.addEventListener('visibilitychange', refetchIfVisible);
-    return () => {
-      window.removeEventListener('focus', refetchIfVisible);
-      document.removeEventListener('visibilitychange', refetchIfVisible);
-    };
+    return () => document.removeEventListener('visibilitychange', refetchIfVisible);
   }, [fetchAll]);
 
   const groups = groupByLead(viewings);
