@@ -6,10 +6,14 @@ export const metadata = {
     'UpNow REST API reference — search endpoints, read request and response samples, and browse schemas.',
 };
 
+/**
+ * The spec is served from our own origin by `app/docs-json/route.ts`, which
+ * fetches it from the backend server-side. Pointing the browser at the backend
+ * directly would put its host in the page — and would be blocked as mixed
+ * content anyway, since that origin is plain http.
+ */
+const SPEC_URL = '/docs-json';
+
 export default function DocsPage() {
-  const apiOrigin = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/api$/, '');
-  // The spec comes through a same-origin proxy — the backend's /docs* routes are
-  // behind HTTP Basic auth, which a cross-origin fetch cannot negotiate.
-  // `apiOrigin` is still needed for the "open in Swagger UI" links.
-  return <DocsShell specUrl="/docs/spec" apiOrigin={apiOrigin} />;
+  return <DocsShell specUrl={SPEC_URL} />;
 }

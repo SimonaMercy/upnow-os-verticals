@@ -52,10 +52,9 @@ function SectionCard({ title, badge, children }: { title: string; badge?: string
 interface Props {
   endpoint: EndpointEntry;
   spec: OpenAPISpec;
-  swaggerBaseUrl: string;
 }
 
-export function EndpointDetail({ endpoint, spec, swaggerBaseUrl }: Props) {
+export function EndpointDetail({ endpoint, spec }: Props) {
   const { path, method, operation } = endpoint;
   const [copied, setCopied] = useState(false);
 
@@ -177,16 +176,6 @@ export function EndpointDetail({ endpoint, spec, swaggerBaseUrl }: Props) {
 
       {/* Footer */}
       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e8e6e0', display: 'flex', gap: 16, alignItems: 'center' }}>
-        <a
-          // The backend serves one Swagger document per product group, slugged
-          // off the group name (`/docs/rental-provider`, …).
-          href={group ? `${swaggerBaseUrl}/docs/${group.toLowerCase().replace(/\s+/g, '-')}` : `${swaggerBaseUrl}/docs`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 13, color: '#2e9f82', textDecoration: 'none', fontWeight: 600 }}
-        >
-          Open in Swagger UI →
-        </a>
         {operation.operationId && (
           <span style={{ fontSize: 12, color: '#9b9890', fontFamily: 'monospace' }}>
             {operation.operationId}

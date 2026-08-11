@@ -13,7 +13,6 @@ interface Props {
   groupNames: string[];
   groupFilter: string | null;
   onGroupFilterChange: (g: string | null) => void;
-  swaggerBaseUrl: string;
 }
 
 export function DocsTopbar({
@@ -25,7 +24,6 @@ export function DocsTopbar({
   groupNames,
   groupFilter,
   onGroupFilterChange,
-  swaggerBaseUrl,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isFiltered = searchQuery.trim().length > 0;
@@ -160,9 +158,11 @@ export function DocsTopbar({
         {version}
       </span>
 
-      {/* Raw Swagger link */}
+      {/* Raw spec — same-origin. This is a client component, so referencing
+          NEXT_PUBLIC_API_URL here would inline the backend host (a bare IP in
+          prod) into the browser bundle for anyone to read. */}
       <a
-        href={`${swaggerBaseUrl}/docs`}
+        href="/docs-json"
         target="_blank"
         rel="noopener noreferrer"
         style={{
@@ -171,7 +171,7 @@ export function DocsTopbar({
           fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0,
         }}
       >
-        Raw Swagger ↗
+        Raw spec ↗
       </a>
     </header>
   );

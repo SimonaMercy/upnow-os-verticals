@@ -100,11 +100,10 @@ interface Props {
   endpoint: EndpointEntry | null;
   spec: OpenAPISpec;
   groups: GroupSection[];
-  swaggerBaseUrl: string;
   onSelectGroup: (g: string | null) => void;
 }
 
-export function DocsMain({ endpoint, spec, groups, swaggerBaseUrl, onSelectGroup }: Props) {
+export function DocsMain({ endpoint, spec, groups, onSelectGroup }: Props) {
   return (
     <main style={{
       flex: 1,
@@ -114,7 +113,7 @@ export function DocsMain({ endpoint, spec, groups, swaggerBaseUrl, onSelectGroup
       flexDirection: 'column',
     }}>
       {endpoint
-        ? <EndpointDetail endpoint={endpoint} spec={spec} swaggerBaseUrl={swaggerBaseUrl} />
+        ? <EndpointDetail endpoint={endpoint} spec={spec} />
         : <Overview spec={spec} groups={groups} onSelectGroup={onSelectGroup} />
       }
     </main>

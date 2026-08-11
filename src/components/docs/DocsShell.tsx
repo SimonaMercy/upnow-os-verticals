@@ -104,94 +104,7 @@ function LoadingScreen() {
   );
 }
 
-// ── credentials ──────────────────────────────────────────────────
-/**
- * The backend serves `/docs*` behind HTTP Basic auth, and a `fetch` gets a bare
- * 401 rather than the browser's own credentials dialog — so the viewer asks for
- * them here and sends them through the same-origin spec proxy. They are kept in
- * `sessionStorage` only: a reload keeps you signed in, closing the tab does not.
- */
-const CREDS_KEY = 'upnow-docs-basic-auth';
-
-function AuthScreen({
-  onSubmit,
-  rejected,
-}: {
-  onSubmit: (header: string) => void;
-  rejected: boolean;
-}) {
-  const [user, setUser] = useState('');
-  const [pass, setPass] = useState('');
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user && !pass) return;
-    onSubmit(`Basic ${btoa(`${user}:${pass}`)}`);
-  };
-
-  const field: React.CSSProperties = {
-    width: '100%', boxSizing: 'border-box', padding: '9px 12px', marginBottom: 10,
-    borderRadius: 8, border: '1px solid #e8e6e0', fontSize: 14,
-    backgroundColor: '#fafaf8', color: '#1a1916', outline: 'none',
-  };
-
-  return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafaf8' }}>
-      <form onSubmit={submit} style={{ width: 340, padding: 28, backgroundColor: '#ffffff', border: '1px solid #e8e6e0', borderRadius: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-          <span style={{ fontSize: 18, fontWeight: 800, color: '#2e9f82' }}>UpNow</span>
-          <span style={{ fontSize: 12, color: '#9b9890', fontWeight: 500 }}>API Docs</span>
-        </div>
-        <p style={{ fontSize: 13, color: '#6b6860', lineHeight: 1.6, margin: '0 0 16px' }}>
-          The API reference is private. Sign in with the documentation credentials
-          (<code style={{ fontFamily: 'monospace', fontSize: 12 }}>DOCS_BASIC_AUTH_USER</code> / <code style={{ fontFamily: 'monospace', fontSize: 12 }}>PASS</code>).
-        </p>
-        {rejected && (
-          <div style={{
-            backgroundColor: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c',
-            borderRadius: 8, padding: '8px 12px', fontSize: 12.5, marginBottom: 12,
-          }}>
-            Those credentials were rejected. Try again.
-          </div>
-        )}
-        <input
-          autoFocus
-          value={user}
-          onChange={e => setUser(e.target.value)}
-          placeholder="Username"
-          autoComplete="username"
-          style={field}
-        />
-        <input
-          value={pass}
-          onChange={e => setPass(e.target.value)}
-          placeholder="Password"
-          type="password"
-          autoComplete="current-password"
-          style={field}
-        />
-        <button
-          type="submit"
-          style={{
-            width: '100%', padding: '9px 12px', borderRadius: 8, border: 'none',
-            backgroundColor: '#2e9f82', color: '#ffffff', fontWeight: 700,
-            fontSize: 14, cursor: 'pointer',
-          }}
-        >
-          View the docs
-        </button>
-      </form>
-    </div>
-  );
-}
-
 // ── error ────────────────────────────────────────────────────────
-/**
- * `error` is the message the spec route sent, which already says what went
- * wrong in words. The old screen printed a bare `HTTP 502 from /docs/spec` and
- * told the reader to check that "the backend is reachable at /docs/spec" — a
- * same-origin path they cannot do anything about.
- */
 function ErrorScreen({ error }: { error: string }) {
   return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafaf8' }}>
@@ -206,56 +119,32 @@ function ErrorScreen({ error }: { error: string }) {
 
 // ── main shell ───────────────────────────────────────────────────
 interface Props {
-  /** Same-origin proxy that fetches the spec from the API (see app/docs/spec). */
+  /** Same-origin route that fetches the spec server-side (app/docs-json). */
   specUrl: string;
-  /** API origin, for the "open in Swagger UI" links. */
-  apiOrigin: string;
 }
 
-export function DocsShell({ specUrl, apiOrigin }: Props) {
+export function DocsShell({ specUrl }: Props) {
   const [spec, setSpec] = useState<OpenAPISpec | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Read on the first render, not from an effect: a stored credential must be
-  // on the very first request, or every reload would flash the sign-in screen.
-  const [authHeader, setAuthHeader] = useState<string | null>(() =>
-    typeof window === 'undefined' ? null : window.sessionStorage.getItem(CREDS_KEY),
-  );
-  const [needsAuth, setNeedsAuth] = useState(false);
-  const [rejected, setRejected] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Mirrors Swagger UI's spec selector (/docs/common, /docs/rental-provider, …)
   const [groupFilter, setGroupFilter] = useState<string | null>(null);
 
-  const swaggerBaseUrl = apiOrigin;
-
   useEffect(() => {
     let cancelled = false;
-    fetch(specUrl, {
-      headers: authHeader ? { authorization: authHeader } : {},
-      cache: 'no-store',
-    })
+    fetch(specUrl, { cache: 'no-store' })
       .then(async r => {
-        if (r.status === 401) {
-          // A stored credential that stopped working must not be retried
-          // silently on the next load.
-          sessionStorage.removeItem(CREDS_KEY);
-          if (cancelled) return;
-          setRejected(!!authHeader);
-          setNeedsAuth(true);
-          setLoading(false);
-          return;
-        }
         if (!r.ok) {
-          // The route replies with { message }; fall back only if that is absent.
+          // The route replies with { message }; it already says what is wrong,
+          // and deliberately omits the upstream host.
           const body = (await r.json().catch(() => null)) as { message?: string } | null;
           throw new Error(body?.message ?? `The spec request failed (HTTP ${r.status}).`);
         }
         const data = (await r.json()) as OpenAPISpec;
         if (cancelled) return;
         setSpec(data);
-        setNeedsAuth(false);
         setLoading(false);
       })
       .catch((e: Error) => {
@@ -264,7 +153,7 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [specUrl, authHeader]);
+  }, [specUrl]);
 
   const endpoints = useMemo(() => (spec ? flattenEndpoints(spec) : []), [spec]);
 
@@ -318,20 +207,6 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
     : null;
 
   if (loading) return <LoadingScreen />;
-  if (needsAuth) {
-    return (
-      <AuthScreen
-        rejected={rejected}
-        onSubmit={header => {
-          window.sessionStorage.setItem(CREDS_KEY, header);
-          setRejected(false);
-          setNeedsAuth(false);
-          setLoading(true);
-          setAuthHeader(header);
-        }}
-      />
-    );
-  }
   if (error || !spec) return <ErrorScreen error={error ?? 'Failed to load spec'} />;
 
   return (
@@ -346,7 +221,6 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
         groupNames={allGroupNames}
         groupFilter={groupFilter}
         onGroupFilterChange={setGroupFilter}
-        swaggerBaseUrl={swaggerBaseUrl}
       />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <DocsSidebar
@@ -359,7 +233,6 @@ export function DocsShell({ specUrl, apiOrigin }: Props) {
           endpoint={selectedEndpoint}
           spec={spec}
           groups={groups}
-          swaggerBaseUrl={swaggerBaseUrl}
           onSelectGroup={setGroupFilter}
         />
       </div>
