@@ -1,12 +1,23 @@
 /*
  * Responsive layout for the contract documents binder.
  *
- * Desktop (default): two independently-scrolling panes side by side —
+ * Desktop (≥1100px): two independently-scrolling panes side by side —
  *   LEFT = Tenant & KYC, RIGHT = Rental documents in order.
- * Mobile (≤768px): the two panes collapse into ONE continuous vertical
+ * Narrower (≤1099px): the two panes collapse into ONE continuous vertical
  *   scroll (KYC first, then rental docs, document-by-document full previews)
- *   so a phone reads the whole binder top-to-bottom; the sticky sign bar
- *   (rendered separately, position:fixed) stays docked at the bottom.
+ *   so the binder reads top-to-bottom; the sticky sign bar (rendered
+ *   separately, position:fixed) stays docked at the bottom.
+ *
+ * ⚠️ The split point is 1100, not 768. Halving the viewport halves what each
+ * pane can hold, and the rental pane's payment plan is a TABLE — at 820px wide
+ * (a tablet, or a half-screen laptop window) each pane was ~410px, the plan card
+ * ran past its edge and the AMOUNT column was cut off the page: the landlord
+ * opening the emailed link saw a payment schedule with no amounts.
+ *
+ * 1100 is measured, not chosen: the plan table still loses 6px at 1024 (it sits
+ * in an overflow-x wrapper, so the money is behind a scrollbar nobody looks for)
+ * and is clean from 1100 up. One column is always readable; two are only worth
+ * having when both fit.
  *
  * The layout-determining properties live here (not inline) so the media
  * query can override them — inline styles would win over a class.
@@ -37,7 +48,7 @@
   column-gap: 6px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1099.98px) {
   /* The grid becomes the single scroll container; panes stop scrolling
      on their own and just stack as content blocks. */
   .body {
@@ -65,7 +76,7 @@
     border-top: 1px solid #e7e3dc;
   }
 
-  /* On mobile the binder is a plain top-to-bottom read — drop the sticky
+  /* Stacked, the binder is a plain top-to-bottom read — drop the sticky
      section quick-nav entirely so it's document-by-document, no chrome. */
   .quickNav {
     display: none;

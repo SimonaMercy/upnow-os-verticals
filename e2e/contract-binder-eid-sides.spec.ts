@@ -208,18 +208,19 @@ test('the KYC pane holds every customer-KYC document, and only those', async ({ 
     'Emirates ID — Front & Back',
     'Passport',
     'UAE Visa / Residency',
+    // Supporting docs close the CUSTOMER's pack; this lease is a renewal, so its
+    // income document is deliberately absent (re-verification stays on the
+    // original lease). The other parties' papers follow.
+    'Bank Statement',
+    'Marriage Certificate',
     'Undertaking from Guarantor',
     'Dependant Documents',
     'Dependant Documents — 2',
     'Dependant Documents — 3',
   ]);
-  // Nothing KYC leaked into the rental pack on the right, and the non-KYC
-  // supporting papers stayed there (under "Other documents" on a renewal).
+  // Nothing about the CUSTOMER is left in the rental pack on the right.
   const right = await page.locator('section').nth(1).locator('button').allInnerTexts();
-  expect(right.filter(l => /Dependant|Guarantor|Emirates ID|Passport|Visa/.test(l))).toEqual([]);
-  expect(right).toContain('Other documents');
-  await page.getByRole('button', { name: 'Other documents' }).click();
-  await expect(page.getByText('Marriage Certificate').first()).toBeVisible();
+  expect(right.filter(l => /Dependant|Guarantor|Emirates ID|Passport|Visa|Bank Statement|Marriage/.test(l))).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/05-full-kyc-pack.png` });
 });
 
@@ -248,4 +249,62 @@ test('the manager scope bar does not cover the binder', async ({ page, request }
     expect(hit.inBar, `${label} is behind the scope bar`).toBe(false);
     expect(hit.text, `${label} is covered by something else`).toContain(label);
   }
+});
+
+/**
+ * Salary certificate, bank statement and marriage certificate describe the
+ * CUSTOMER, not the tenancy. They were slots in the rental pack, which filed a
+ * payslip among the lease's own paperwork; they now close the KYC pane under
+ * their own heading (landlord's call, 11 Aug 2026).
+ *
+ * Contract 364 holds all three (its salary certificate is filed as
+ * `employment_letter`, the journey's wording) plus four occupants.
+ */
+test('supporting documents close the KYC pane instead of sitting in the rental pack', async ({ page, request }) => {
+  await setCookie(page, await loginOtp(request, RP_EMAIL));
+  await openBinder(page, 364);
+
+  // The customer's pack is whole and first — identity, then what backs it — and
+  // only then the dependants (the keys call them occupants and start at 2; the
+  // pane numbers them 1..N).
+  const left = await leftNavLabels(page);
+  expect(left).toEqual([
+    'Emirates ID — Front', 'Emirates ID — Back', 'Passport', 'UAE Visa / Residency',
+    'Salary Certificate', 'Bank Statement', 'Marriage Certificate',
+    'Dependant 1', 'Dependant 2', 'Dependant 3', 'Dependant 4',
+  ]);
+
+  const right = await page.locator('section').nth(1).locator('button').allInnerTexts();
+  for (const gone of ['Salary Certificate', 'Bank Statement', 'Marriage Certificate']) {
+    expect(right, `${gone} must not be in the rental pack`).not.toContain(gone);
+  }
+  // The lease's own utility proof stays on the right.
+  expect(right).toContain('Utility Proof of Payment');
+  // Nothing fell through to the loose bin on the way.
+  expect(right).not.toContain('Other documents');
+});
+
+/**
+ * "Other documents" — anything filed against the lease with no named slot — used
+ * to be hidden on the no-login landlord view. It holds real contract paperwork
+ * (contract 360 carries an NOC), and hiding it meant a document uploaded ONTO the
+ * lease was invisible to the party being asked to sign it.
+ */
+test('the landlord portal shows the same binder sections as the RP view', async ({ page, request }) => {
+  await setCookie(page, await loginOtp(request, RP_EMAIL));
+  await openBinder(page, CONTRACT_ID);
+  const rp = await page.locator('section').nth(1).locator('button').allInnerTexts();
+  expect(rp, 'fixture needs a document in the loose bin').toContain('Other documents');
+
+  const token = query(
+    `SELECT token FROM tenant_portal_tokens
+      WHERE tenancy_contract_id = ${CONTRACT_ID} AND revoked = false
+      ORDER BY id DESC LIMIT 1`);
+  expect(token, 'fixture needs a live portal token').toBeTruthy();
+
+  await page.context().clearCookies();
+  await page.goto(`http://localhost:3000/portal/${token}/contract/${CONTRACT_ID}`);
+  await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
+  const portal = await page.locator('section').nth(1).locator('button').allInnerTexts();
+  expect(portal).toEqual(rp);
 });

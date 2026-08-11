@@ -7,7 +7,7 @@
  *   • the landlord's no-login magic-link page (/portal/:token/contract/:id)
  *
  * Layout: LEFT pane (fixed) = the tenant identity card + KYC (Emirates ID ·
- * Passport · UAE Visa, then each occupant); RIGHT pane (scrolls) = the rental /
+ * Passport · UAE Visa, then each dependant, then the supporting pack); RIGHT pane (scrolls) = the rental /
  * financial documents in order (Payment plan · Payment Advice · Receipts ·
  * Agreement · Ejari, + new-lease extras). Every document renders full-preview on
  * a watermarked <canvas> (no download); the Agreement + Receipts render as
@@ -83,6 +83,31 @@ const isPoa = (d: BinderDoc) => /(^|_)poa(_|$)/.test(norm(d.documentKey)) || /po
 // page treats them (its KYC_KEY_RE), so they belong in this pane, not "Other".
 const isLabourDoc = (d: BinderDoc) => /labour|labor|establishment/.test(norm(d.documentKey));
 const isDependant = (d: BinderDoc) => /depend[ae]nt/.test(norm(d.documentKey)) || /depend[ae]nt/i.test(d.displayName || '');
+/**
+ * SUPPORTING documents — the customer's circumstances rather than the tenancy:
+ * what they earn, what they hold, who they are married to. They were slots in the
+ * rental pack, which put a payslip among the lease's own paperwork; they belong
+ * with the person the pack is about, at the END of the KYC pane (landlord's call,
+ * 11 Aug 2026), which is also where the RP's own tenant page files them.
+ *
+ * Matched off KEY_ALIASES so the wordings the old slots accepted still land here.
+ */
+const SUPPORTING_SLOTS = [
+  { key: 'salary_certificate', label: 'Salary Certificate' },
+  { key: 'bank_statement', label: 'Bank Statement' },
+  { key: 'marriage_certificate', label: 'Marriage Certificate' },
+] as const;
+const supportingSlotOf = (d: BinderDoc): (typeof SUPPORTING_SLOTS)[number] | null => {
+  const base = norm(d.documentKey).replace(/_\d{6,}$/, '');
+  return SUPPORTING_SLOTS.find(s =>
+    base === s.key || (KEY_ALIASES[s.key] ?? []).includes(base)
+    // `employment_letter` is the journey's wording for a salary certificate.
+    || (s.key === 'salary_certificate' && /employment/.test(base))) ?? null;
+};
+const isSupporting = (d: BinderDoc) => supportingSlotOf(d) !== null;
+/** Income re-verification lives on the ORIGINAL lease, so a renewal never asks
+ *  for it again — the same rule the rental pack used before these moved. */
+const isIncomeDoc = (d: BinderDoc) => supportingSlotOf(d)?.key === 'salary_certificate';
 const isGuarantor = (d: BinderDoc) => /(^|_)guarantor(_|$)/.test(norm(d.documentKey)) || /\bguarantor\b/i.test(d.displayName || '');
 const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant_?(\d+)/); return m ? Number(m[1]) : 1; };
 // Order of the identity docs that follow the ones the pane places itself (the
@@ -504,7 +529,8 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // certificate, bank statement, marriage certificate — stay there.
   const isCompanyTenant = !!(tenant.companyName || tenant.licenseNumber);
   const isKyc = (d: BinderDoc) =>
-    isIdentity(d) || isLicense(d) || isMoa(d) || isPoa(d) || isLabourDoc(d) || isGuarantor(d) || isDependant(d);
+    isIdentity(d) || isLicense(d) || isMoa(d) || isPoa(d) || isLabourDoc(d) || isGuarantor(d)
+    || isDependant(d) || isSupporting(d);
 
   const all = documents.filter(d => !!d.fileUrl);
   const matchDocs = (key: string): BinderDoc[] => {
@@ -530,10 +556,10 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     { kind: 'doc', key: 'ejari_certificate', label: 'Contract Registration Certificate' },
   ];
   if (!isRenewal) {
+    // Salary certificate, bank statement and marriage certificate were slots here
+    // and are now at the end of the KYC pane — they describe the customer, not
+    // the tenancy. Utility proof stays: that IS the lease's paperwork.
     seq.push({ kind: 'doc', key: 'utility_registration', label: 'Utility Proof of Payment' });
-    seq.push({ kind: 'doc', key: 'salary_certificate', label: 'Salary Certificate' });
-    seq.push({ kind: 'doc', key: 'bank_statement', label: 'Bank Statement' });
-    seq.push({ kind: 'doc', key: 'marriage_certificate', label: 'Marriage Certificate', optional: true });
   }
   if (ended) {
     seq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', pending: true });
@@ -556,22 +582,58 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const pack = (docs: BinderDoc[], prefix: string, label: (d: BinderDoc) => string): IdCard[] =>
     [...docs].sort((a, b) => copyIndex(a) - copyIndex(b) || a.id - b.id)
       .map(d => ({ key: `${prefix}${d.id}`, label: label(d), doc: d }));
-  const primaryCards: IdCard[] = [
-    ...idCardsFor(primaryId.filter(d => !isPartner(d) && !isOtherPerson(d)), { prefix: '', tenantPack: true, company: isCompanyTenant }),
-    ...idCardsFor(primaryId.filter(d => isPartner(d) && !isOtherPerson(d)), { prefix: 'p-', labelPrefix: 'Partner — ' }),
-    ...pack(primaryId.filter(isPoa), 'poa-', poaLabel),
-    ...pack(primaryId.filter(isGuarantor), 'gua-', packLabel),
-    ...pack(primaryId.filter(isDependant), 'dep-', packLabel),
+  // Identity only — the supporting pack is KYC too, but it closes the pane under
+  // its own heading rather than joining anybody's ID cards.
+  const identity = primaryId.filter(d => !isSupporting(d));
+  // THE CUSTOMER'S OWN PACK comes first and comes whole: their identity, then the
+  // papers backing it. Everything belonging to the person the lease is with is
+  // read before the pane moves on to anybody else (landlord's call, 11 Aug 2026).
+  const tenantCards: IdCard[] = idCardsFor(
+    identity.filter(d => !isPartner(d) && !isOtherPerson(d)),
+    { prefix: '', tenantPack: true, company: isCompanyTenant },
+  );
+  // Then the other parties to the tenancy — a partner on a company lease, the
+  // power-of-attorney holder, a guarantor, and any loose dependant papers.
+  const otherPeopleCards: IdCard[] = [
+    ...idCardsFor(identity.filter(d => isPartner(d) && !isOtherPerson(d)), { prefix: 'p-', labelPrefix: 'Partner — ' }),
+    ...pack(identity.filter(isPoa), 'poa-', poaLabel),
+    ...pack(identity.filter(isGuarantor), 'gua-', packLabel),
+    ...pack(identity.filter(isDependant), 'dep-', packLabel),
   ];
+  const primaryCards: IdCard[] = [...tenantCards, ...otherPeopleCards];
+  // The supporting pack, in the order the rental sequence used to list it, and
+  // last in the pane: identity says WHO the customer is, these say what backs
+  // them. A renewal drops the income document — re-verification belongs to the
+  // original lease.
+  const supportingCards: IdCard[] = SUPPORTING_SLOTS.flatMap(slot => {
+    const docs = primaryId
+      .filter(d => supportingSlotOf(d)?.key === slot.key && !(isRenewal && isIncomeDoc(d)))
+      .sort((a, b) => a.id - b.id);
+    return docs.map((d, i) => ({
+      key: `sup-${d.id}`,
+      label: `${slot.label}${docs.length > 1 ? ` — ${i + 1}` : ''}`,
+      doc: d,
+    }));
+  });
+
   // Copies no card took (e.g. a combined e-copy alongside the two faces, or a
   // second capture of the same passport). They stay out of the pane — that
   // duplication is exactly the mess this fixes — but remain downloadable,
   // unticked, so nothing on file becomes unreachable.
-  const usedIds = new Set(primaryCards.map(c => c.doc?.id).filter((id): id is number => id != null));
+  const usedIds = new Set([...primaryCards, ...supportingCards].map(c => c.doc?.id).filter((id): id is number => id != null));
   const idExtras = primaryPool.filter(d => !usedIds.has(d.id));
+  // Everyone on the lease besides the customer. The keys call them occupants and
+  // start at `occupant_2` — occupant 1 IS the customer, whose pack is above — so
+  // the pane numbers them 1..N in order and calls them DEPENDANTS, which is what
+  // they are to the tenancy and what the landlord asked for (11 Aug 2026). The
+  // anchor ids keep the real key number; only the wording is sequential.
   const occDocs = dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
   const occGroups = Array.from(new Set(occDocs.map(occNum))).sort((a, b) => a - b)
-    .map(n => ({ n, cards: idCardsFor(occDocs.filter(d => occNum(d) === n), { prefix: `occ${n}-` }) }));
+    .map((n, i) => ({
+      n,
+      label: `Dependant ${i + 1}`,
+      cards: idCardsFor(occDocs.filter(d => occNum(d) === n), { prefix: `occ${n}-` }),
+    }));
 
   const seqIds = new Set(seq.flatMap(s => (s.kind === 'doc' ? matchDocs(s.key).map(d => d.id) : [])));
   // Renewals drop the salary-certificate slot (income re-verification lives on the
@@ -582,16 +644,22 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const isSalaryDoc = (d: BinderDoc) => /salary/.test(norm(d.documentKey)) || /salary/i.test(d.displayName || '');
   const isMoveInDoc = (d: BinderDoc) => /move_?in/.test(norm(d.documentKey)) || /move[ -]?in/i.test(d.displayName || '');
   const leftover = all.filter(d => !isKyc(d) && !isOccupant(d) && !seqIds.has(d.id) && !(isRenewal && (isSalaryDoc(d) || isMoveInDoc(d))));
-  // The loose "Other documents" bin is an internal-review convenience — hide it on
-  // the no-login magic-link view (landlord portal) so the lessor only reviews the
-  // canonical binder set, not miscellaneous uploads. Authenticated RP view unchanged.
-  const showLeftover = leftover.length > 0 && !portalToken;
+  // "Other documents" is anything filed against this lease that has no named slot
+  // — an NOC, an undertaking, a letter. It used to be hidden on the no-login
+  // landlord view as an internal-review convenience, on the reasoning that the
+  // lessor should see only the canonical set; but the bin holds real contract
+  // paperwork, and hiding it meant a document uploaded ONTO the lease was
+  // invisible to the one party being asked to sign it (landlord's call, 11 Aug
+  // 2026). Both views now show the same binder.
+  const showLeftover = leftover.length > 0;
 
   const rightLabel = (s: Slot) => s.kind === 'plan' ? 'Payment plan' : s.kind === 'receipts' ? 'Receipts' : s.kind === 'agreement' ? 'Agreement' : s.label;
   const slotId = (s: Slot) => s.kind === 'doc' ? `r-${s.key}` : `r-${s.kind}`;
   const leftNav = [
-    ...primaryCards.map(c => ({ id: `l-${c.key}`, label: c.label, missing: !c.doc && !c.optional })),
-    ...occGroups.map(g => ({ id: `l-occ-${g.n}`, label: occGroups.length > 1 ? `Occupant ${g.n}` : 'Occupant' })),
+    ...tenantCards.map(c => ({ id: `l-${c.key}`, label: c.label, missing: !c.doc && !c.optional })),
+    ...supportingCards.map(c => ({ id: `l-${c.key}`, label: c.label })),
+    ...otherPeopleCards.map(c => ({ id: `l-${c.key}`, label: c.label, missing: !c.doc && !c.optional })),
+    ...occGroups.map(g => ({ id: `l-occ-${g.n}`, label: occGroups.length > 1 ? g.label : 'Dependant' })),
   ];
   // Required KYC the customer has not filed — called out at the top of the pane so
   // the gap is the first thing read, not something found by scrolling.
@@ -678,7 +746,8 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // next to the GENERATED "Agreement (tenancy contract)".
   for (const d of leftover) downloadItems.push({ ...storedItem(d.displayName ?? d.documentKey.replace(/_/g, ' '), 'Other documents (uploaded)', [d]), preselected: false });
   for (const c of primaryCards) if (c.doc) downloadItems.push(storedItem(c.label, 'Tenant & KYC', [c.doc]));
-  for (const g of occGroups) for (const c of g.cards) if (c.doc) downloadItems.push(storedItem(`Occupant ${g.n} — ${c.label}`, 'Tenant & KYC', [c.doc]));
+  for (const g of occGroups) for (const c of g.cards) if (c.doc) downloadItems.push(storedItem(`${g.label} — ${c.label}`, 'Tenant & KYC', [c.doc]));
+  for (const c of supportingCards) if (c.doc) downloadItems.push(storedItem(c.label, 'Tenant & KYC', [c.doc]));
   for (const d of idExtras) {
     downloadItems.push({ ...storedItem(`${isPartner(d) ? 'Partner — ' : ''}${idLabel(d)} · extra copy`, 'Tenant & KYC', [d]), preselected: false });
   }
@@ -726,7 +795,31 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
               </span>
             )} />
           <TenantCard t={tenant} isCompany={!!(tenant.companyName || tenant.licenseNumber)} />
-          {primaryCards.map(c => (
+          {/* The customer's own pack, whole: identity, then the papers backing it. */}
+          {tenantCards.map(c => (
+            <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
+              {c.doc
+                ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
+                : <MissingId label={c.label} href={profileHref} optional={c.optional} />}
+            </div>
+          ))}
+          {/* Supporting documents close the CUSTOMER's pack — what they earn, what
+              they hold, who they are married to. Only what is on file: unlike the
+              identity slots above, nothing here is asked of every customer, so an
+              empty position would read as a gap where there is none. */}
+          {supportingCards.length > 0 && (
+            <>
+              <SectionTitle>Supporting documents</SectionTitle>
+              {supportingCards.map(c => (
+                <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
+                  <SecurePreview url={c.doc!.fileUrl} caption={c.label} watermark={watermark} />
+                </div>
+              ))}
+            </>
+          )}
+          {/* Then the other parties: partner, POA holder, guarantor, loose
+              dependant papers — and after them, each dependant's own pack. */}
+          {otherPeopleCards.map(c => (
             <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
               {c.doc
                 ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
@@ -735,7 +828,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           ))}
           {occGroups.map(g => (
             <div key={'occ' + g.n} id={`l-occ-${g.n}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
-              <SectionTitle>{occGroups.length > 1 ? `Occupant ${g.n}` : 'Occupant'}</SectionTitle>
+              <SectionTitle>{occGroups.length > 1 ? g.label : 'Dependant'}</SectionTitle>
               {g.cards.map(c => (c.doc
                 ? <SecurePreview key={c.key} url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
                 : <MissingId key={c.key} label={c.label} href={profileHref} optional={c.optional} />))}
