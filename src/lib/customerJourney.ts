@@ -14,7 +14,7 @@
  * objects satisfy them structurally, so nobody has to reshape their payloads.
  */
 import { isDocKeySatisfied } from './docRequirements';
-import { additionalDocKey, resolveRequestedDocKey } from './requestableDocs';
+import { requestedDocKeyCandidates } from './requestableDocs';
 import { APP_TIME_ZONE } from './datetime';
 
 /* ── The states ────────────────────────────────────────────────────────────── */
@@ -256,10 +256,12 @@ export function writeDocsSubmitted(spaceKey: string) {
 export function pendingAdditionalDocs(r: JourneyInput): number {
   if (!r.requestedAdditionalDocs.length) return 0;
   const ok = new Set(r.myDocs.filter(d => d.status !== 'missing' && d.status !== 'rejected').map(d => d.documentKey));
-  return r.requestedAdditionalDocs.filter(name => {
-    const std = resolveRequestedDocKey(name);
-    return std ? !isDocKeySatisfied(std, ok) : !ok.has(additionalDocKey(name));
-  }).length;
+  // A request is answered under EITHER its catalogue slot or the `additional_*`
+  // fallback (see requestedDocKeyCandidates) — accept both, or a document the
+  // customer has already sent keeps counting as outstanding.
+  return r.requestedAdditionalDocs.filter(
+    name => !requestedDocKeyCandidates(name).some(k => isDocKeySatisfied(k, ok)),
+  ).length;
 }
 
 /**

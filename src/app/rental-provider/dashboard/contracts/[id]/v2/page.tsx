@@ -31,7 +31,8 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, requestedDocKey } from '@/lib/requestableDocs';
+import { UPLOADABLE_DOCS, acceptedNamesFor, normDocName } from '@/lib/documentCatalogue';
 import { KYC_DOCS, getRequiredDocs, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
@@ -431,46 +432,12 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'online', label: 'Online' },
 ];
 
-/** Generic upload types kept from the legacy page — the contract-specific
- *  checklist types (docRequirements mapping) are merged in front of these. */
-const BASE_DOC_TYPES = [
-  { value: 'trade_license',          label: 'Trade License',          category: 'license',    needsExpiry: true  },
-  { value: 'initial_approval',       label: 'Initial Approval',       category: 'compliance', needsExpiry: false },
-  { value: 'trade_name_reservation', label: 'Trade Name Reservation', category: 'compliance', needsExpiry: false },
-  { value: 'passport',               label: 'Passport',               category: 'identity',   needsExpiry: true  },
-  { value: 'visa',                   label: 'Visa',                   category: 'identity',   needsExpiry: true  },
-  { value: 'emirates_id',            label: 'Emirates ID',            category: 'identity',   needsExpiry: true  },
-  // Identity of the OTHER people on a company tenancy — a partner named on the
-  // trade licence, and the visa of the authorised signatory (whose EID/passport
-  // are the plain `emirates_id` / `passport` slots above). Kept as their own
-  // keys so they never collapse into the primary customer's identity slots.
-  { value: 'partner_emirates_id',    label: 'Partner EID',            category: 'identity',   needsExpiry: true  },
-  { value: 'partner_passport',       label: 'Partner Passport',       category: 'identity',   needsExpiry: true  },
-  { value: 'partner_visa',           label: 'Partner Visa',           category: 'identity',   needsExpiry: true  },
-  { value: 'signatory_visa',         label: 'Signatory Visa',         category: 'identity',   needsExpiry: true  },
-  { value: 'noc',                    label: 'NOC',                    category: 'legal',      needsExpiry: false },
-  { value: 'undertaking_letter',     label: 'Undertaking Letter',     category: 'legal',      needsExpiry: false },
-  { value: 'ejari_certificate',      label: 'Contract Registration Certificate',                  category: 'property',   needsExpiry: false },
-  { value: 'utility_registration',   label: 'Utility Registration',   category: 'property',   needsExpiry: false },
-  { value: 'move_out_report',        label: 'Move-out Inspection Report', category: 'inspection', needsExpiry: false },
-  { value: 'utility_clearance',      label: 'Utility Clearance',      category: 'property',   needsExpiry: false },
-  { value: 'utility_final_bill',     label: 'Utility Final Bill',     category: 'property',   needsExpiry: false },
-  { value: 'poa',                    label: 'POA',                    category: 'legal',      needsExpiry: false },
-  { value: 'pdc',                    label: 'PDC',                    category: 'payment',    needsExpiry: false },
-  { value: 'receipt',                label: 'Receipt',                category: 'payment',    needsExpiry: false },
-  { value: 'agreement',              label: 'Agreement',              category: 'contract',   needsExpiry: false },
-  // Added per request — tenancy document types not already covered above.
-  { value: 'cheque',                  label: 'Cheque',                    category: 'payment',    needsExpiry: false },
-  { value: 'signed_tenancy_contract', label: 'Signed Tenancy Contract',   category: 'contract',   needsExpiry: false },
-  { value: 'payment_plan',            label: 'Payment Plan',              category: 'payment',    needsExpiry: false },
-  { value: 'move_in_report',          label: 'Move-in Inspection Report', category: 'inspection', needsExpiry: false },
-  { value: 'sd_refund_form',          label: 'SD Refund Form',            category: 'payment',    needsExpiry: false },
-  { value: 'sd_receiving_voucher',    label: 'SD Receiving Voucher',      category: 'payment',    needsExpiry: false },
-  { value: 'payment_proof_transfer',  label: 'Payment Proof of Transfer', category: 'payment',    needsExpiry: false },
-  { value: 'cheque_receipt_voucher',  label: 'Cheque Receipt Voucher',    category: 'payment',    needsExpiry: false },
-  { value: 'cheque_deposit_slip',     label: 'Cheque Deposit Slip',       category: 'payment',    needsExpiry: false },
-  { value: 'other',                  label: 'Others',                 category: 'other',      needsExpiry: false },
-];
+/** Generic upload types, projected from THE document catalogue — the same list
+ *  the "request from customer" picker offers, so one document reads as one
+ *  document on both sides. The contract-specific checklist types
+ *  (docRequirements mapping) are merged in front of these. */
+const BASE_DOC_TYPES: { value: string; label: string; category: string; needsExpiry: boolean }[] =
+  UPLOADABLE_DOCS.map(e => ({ value: e.key, label: e.label, category: e.category, needsExpiry: e.needsExpiry === true }));
 
 /** Checklist doc keys whose uploads need an expiry date (identity docs + trade
  *  licence). The VAT Tax Registration Certificate and the business / activity
@@ -4172,42 +4139,40 @@ function DetailsDrawer({
             // only the re-verification docs; the full pack lives on the original
             // lease. Slots match uploads so the gaps are what need requesting.
             const isRenewal = contract.contractType === 'renewal';
-            const norm = (s: string | null | undefined) =>
-              (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-            // Upload keys / display names that satisfy a slot without matching its
-            // key verbatim (legacy combined EID, common label variants).
-            const KEY_ALIASES: Record<string, string[]> = {
+            const norm = normDocName;
+            // The Emirates ID is the one document where the two sides and the
+            // legacy combined scan satisfy each other ON THIS CHECKLIST — the
+            // same rule isDocKeySatisfied applies. It is deliberately NOT in the
+            // catalogue's own aliases: that list also feeds the customer-journey
+            // resolver, where letting one file satisfy two side slots would mark
+            // a half-supplied EID complete.
+            const EID_SIDE_ALIASES: Record<string, string[]> = {
               emirates_id_front: ['emirates_id'],
               emirates_id_back: ['emirates_id'],
               emirates_id: ['emirates_id_front', 'emirates_id_back'],
-              uae_visa: ['uae_visa_residency', 'uae_visa_residence_visa', 'residence_visa', 'visa'],
-              bank_statement: ['financial_statements', 'bank_statement_pay_slip', 'pay_slip'],
-              employment_letter: ['employment_salary_certificate', 'salary_certificate', 'employment_offer_letter'],
-              utility_clearance: ['previous_utility_closing', 'utility_move_out_clearance'],
-              tax_registration: ['tax_registration_certificate', 'vat_tax_registration_trn', 'vat_certificate'],
-              moa: ['moa_mom', 'memorandum_of_association', 'memorandum_of_association_moa'],
-              business_license: ['business_activity_license'],
-              // Universal contract slots. The Ejari certificate is named
-              // "Contract Registration" on imported leases; the rent cheques
-              // ("Payment Advice") are the same cheques uploaded in the Payments
-              // stage (pdc / cheque-copy keys), so the slot snaps onto whichever
-              // landed first.
-              ejari_certificate: ['ejari', 'ejari_certificate', 'contract_registration', 'tenancy_contract_registration', 'ejari_registration'],
-              payment_advice: ['pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques'],
-              utility_registration: ['utility_proof_of_payment', 'utility_proof', 'utility_activation'],
             };
             // A slot can hold several files (e.g. Payment Advice = every cheque
             // image the tenant uploaded). Newest first; RP uploads carry a
             // `_<timestamp>` suffix on the key — strip it so a Replace supersedes.
             const matchDocs = (key: string): ContractDoc[] => {
-              const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
+              // Every wording that means this document — the catalogue's key,
+              // label and historical aliases — so an upload and a request for
+              // the same document land on the same row.
+              const accepted = [...acceptedNamesFor(key), ...(EID_SIDE_ALIASES[key] ?? [])];
               const baseKey = (d: ContractDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
               return all
                 .filter(d => accepted.includes(baseKey(d)) || accepted.includes(norm(d.displayName)))
                 .sort((a, b) => b.id - a.id);
             };
-            const askedNames = new Set(pendingAsks.map(d => norm(d.displayName ?? d.documentKey).replace(/_\d{10,}$/, '')));
-            const askedFor = (req: DocReq) => askedNames.has(norm(req.label)) || askedNames.has(req.key);
+            const askedNames = new Set(pendingAsks.flatMap(d => [
+              norm(d.documentKey).replace(/_\d{10,}$/, ''),
+              norm(d.displayName),
+            ]));
+            // Match the "Requested — awaiting upload" badge on ANY wording of the
+            // document, not just its current label, so a request saved under an
+            // older name still marks the slot it is tracked on.
+            const askedFor = (req: DocReq) =>
+              [...acceptedNamesFor(req.key), ...(EID_SIDE_ALIASES[req.key] ?? [])].some(n => askedNames.has(n));
             // (Old intake checklist + renderDoc removed — the card body is now
             // the document binder; KYC/licenses live behind "View customer
             // documents". matchDoc / renderMissing below are reused by the
@@ -6732,7 +6697,17 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // ── Flow 6: request a document from the tenant ──  POST /api/documents/request
   const onRequestDoc = async (label: string, notes: string) => {
     if (!contract.tenant.id) throw new Error('This contract has no linked customer.');
-    const docKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' + Date.now();
+    // Ask under the CATALOGUE's key for this document, so the request lands on
+    // the same checklist row the matching upload would. Slugifying the label
+    // instead — which is what this did — meant requesting "Contract
+    // Registration Certificate" wrote `contract_registration_certificate` while
+    // uploading it wrote `ejari_certificate`: identical wording on screen, two
+    // unrelated rows in the database. Off-catalogue names still get their
+    // deterministic `additional_*` key.
+    // The `_<timestamp>` suffix is kept: it is how a re-request creates a fresh
+    // row rather than colliding with the existing one, and every reader strips
+    // it (matchDocs' baseKey) before comparing.
+    const docKey = `${requestedDocKey(label)}_${Date.now()}`;
     const res = await fetch('/api/documents/request', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -8,13 +8,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, usePathname } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import { ContractDocsBinder, LandlordLinkButton, type BinderDoc } from '@/components/upnow/ContractDocsBinder';
+import { contractHref } from '@/lib/contractHref';
 import { type PlanPayment } from '@/lib/currentPlan';
 import { toEjari } from '@/lib/toEjari';
 import { currentDocWatermark } from '@/lib/docViewer';
@@ -46,6 +47,8 @@ export default function ContractDocumentsPage() {
   // attorney — so a delegated manager needs canSignDocuments && canActAsPoa on
   // the acting landlord. RP owners (not in the /manager portal) always may.
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isManagerView = pathname?.startsWith('/dashboard/manager') ?? false;
   const { canForRp } = useManagerPermissions();
   const { user: authUser } = useAuth();
@@ -90,6 +93,27 @@ export default function ContractDocumentsPage() {
   const signerName = isManagerView ? (authUser?.name || 'Authorised Manager') : (poaHolder ?? landlordName);
   const signerOnBehalfOf = isManagerView ? landlordName : (poaHolder ? landlordName : undefined);
 
+  // Where a missing KYC side gets uploaded — the customer's profile, in whichever
+  // portal is rendering. A manager needs the landlord scope on the URL, so with no
+  // scope resolvable the binder shows the placeholder without a link.
+  const rpScope = searchParams?.get('rp') || (landlordId != null ? String(landlordId) : '');
+  const profileHref = !c.tenant?.id ? null
+    : isManagerView ? (rpScope ? `/dashboard/manager/tenants/${c.tenant.id}?rp=${rpScope}` : null)
+    : `/rental-provider/dashboard/tenants/${c.tenant.id}`;
+
+  // Close goes to the contract — this workspace is only ever reached from its
+  // "View all", so that IS the page behind it. Deliberately NOT history.back():
+  // deep-linked, opened in a new tab, or arrived at from outside the app there
+  // is nothing safe to pop, and the binder covers the whole viewport, so a Back
+  // that goes nowhere strands the user on a chromeless page.
+  const close = () => router.push(contractHref(c.id, 'lease', isManagerView && rpScope ? { rp: Number(rpScope) } : null));
+  // The wordmark is the way home, as it is on every other page — Close returns to
+  // the lease this binder belongs to, the logo leaves the lease entirely. A
+  // manager's dashboard needs its landlord scope, same as every other manager link.
+  const homeHref = isManagerView
+    ? (rpScope ? `/dashboard/manager?rp=${rpScope}` : '/dashboard/manager')
+    : '/rental-provider/dashboard';
+
   const ejari = toEjari(c, sigs);
   const sign = async ({ signatureImage, signatoryName }: { signatureImage: string; signatoryName: string }) => {
     const res = await fetch(`/api/contracts/${c.id}/sign`, {
@@ -115,8 +139,11 @@ export default function ContractDocumentsPage() {
       paymentRefs={refs}
       receipt={c as unknown as ReceiptContract}
       watermark={watermark}
+      profileHref={profileHref}
+      homeHref={homeHref}
       signatureCertificate={cert}
       headerRight={c.tenant?.id && canLandlordSign ? <LandlordLinkButton tenantId={c.tenant.id} contractId={c.id} /> : undefined}
+      onClose={close}
       signerName={signerName}
       signerOnBehalfOf={signerOnBehalfOf}
       signerDefaultName={isManagerView ? (authUser?.name || '') : (poaHolder ?? c.landlord?.name ?? c.landlord?.companyName ?? '')}

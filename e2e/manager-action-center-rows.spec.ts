@@ -31,6 +31,8 @@ const ROUTES: Array<[string, RegExp]> = [
   // where a lapsed identity doc is actually replaced.
   ['Expired Documents',            /\/dashboard\/manager\/tenants\/\d+/],
   ['Expiry Not Recorded',          /\/dashboard\/manager\/tenants\/\d+/],
+  // Required KYC nobody ever filed, for a customer living in a unit today.
+  ['Missing KYC documents',        /\/dashboard\/manager\/tenants\/\d+/],
 ];
 
 test('every bucket is grouped unit rows that click to the right screen', async ({ page }) => {

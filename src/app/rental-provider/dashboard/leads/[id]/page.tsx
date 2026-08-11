@@ -32,7 +32,7 @@ import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/compone
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
 import { putKycSlot } from '@/lib/kycSlotUpload';
-import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, parseAdditionalDocs, requestedDocKey, resolveRequestedDocKey } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, parseAdditionalDocs, requestedDocKey, requestedDocKeyCandidates, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
@@ -1640,7 +1640,10 @@ function DocsSection({
     const k = resolveRequestedDocKey(item) ?? additionalDocKey(item);
     if (seenKeys.has(k)) continue;            // already shown as a requirement slot
     seenKeys.add(k);
-    readerSlots.push({ key: `req-${k}`, label: item, group: 'Requested by you', files: filesForKey(k) });
+    // The answer may sit under the catalogue slot OR the `additional_*` fallback
+    // depending on which surface the customer uploaded from — show either.
+    const files = requestedDocKeyCandidates(item).flatMap(filesForKey);
+    readerSlots.push({ key: `req-${k}`, label: item, group: 'Requested by you', files });
   }
   for (const d of (docs ?? [])) {
     if (!d.fileUrl || seenKeys.has(d.documentKey)) continue;   // loose / legacy uploads
@@ -1816,7 +1819,13 @@ function DocsSection({
                   </DocItem>
                 );
               }
-              const doc = (docs ?? []).find(d => d.documentKey === key);
+              // Either key can hold the answer — the catalogue slot the upload
+              // link asks for, or the `additional_*` slot the customer journey
+              // falls back to when that slot isn't gateable on their page.
+              // Prefer whichever actually carries a file.
+              const candidates = requestedDocKeyCandidates(item);
+              const doc = candidates.map(k => (docs ?? []).find(d => d.documentKey === k && d.fileUrl))
+                .find(Boolean) ?? (docs ?? []).find(d => candidates.includes(d.documentKey));
               // Same rule as the checklist rows: a row with no file is the
               // request, not the document.
               const on = !!doc?.fileUrl && !['missing', 'rejected'].includes(doc.status);

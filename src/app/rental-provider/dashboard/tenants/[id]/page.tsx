@@ -208,6 +208,18 @@ export default function CustomerDetailPage() {
 
   // KYC upload popup (set to the requirement being acted on).
   const [uploadDoc, setUploadDoc] = useState<{ title: string; slots: UploadSlot[] } | null>(null);
+  // Deep link — `?kyc=<requirement key>` opens that requirement's upload popup.
+  // The checklist it needs is derived far below (it depends on the loaded
+  // customer), so the opener is filled in there and called from here; hooks
+  // cannot live past this component's early returns.
+  const kycDeepLink = searchParams.get('kyc');
+  const openKycUpload = useRef<(key: string) => void>(() => {});
+  const kycDeepLinkDone = useRef(false);
+  useEffect(() => {
+    if (!kycDeepLink || kycDeepLinkDone.current || !data) return;
+    kycDeepLinkDone.current = true;
+    openKycUpload.current(kycDeepLink);
+  }, [kycDeepLink, data]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   // Single-doc requirements (Passport, Visa, …) upload directly via a file
   // picker — no slot popup; only the two-sided Emirates ID uses the modal.
@@ -266,6 +278,12 @@ export default function CustomerDetailPage() {
   };
 
   if (loading) return <div className="p-6 text-sm text-[#9b9890]">Loading customer…</div>;
+  // `?kyc=<requirement>` (the manager dashboard's "Missing KYC documents" rows)
+  // opens that requirement's upload popup as soon as the customer has loaded, so
+  // the link lands on the control that fills the gap instead of on the page. The
+  // opener is assigned below, once the checklist exists; the effect above it fires
+  // after this render, and `kycDeepLinkDone` keeps a re-render from reopening a
+  // popup the user has closed.
   if (error || !data) {
     return (
       <div className="p-6">
@@ -422,6 +440,14 @@ export default function CustomerDetailPage() {
       ];
     }
     return [{ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(docs[0]) }];
+  };
+  // Fills in the deep-link opener declared with the other hooks: `?kyc=passport`
+  // (etc.) puts the manager straight into that requirement's upload popup. Always
+  // the popup, never `pickDirect` — a file picker opened without a click is
+  // blocked by the browser, so the direct-upload path cannot be deep-linked.
+  openKycUpload.current = (key: string) => {
+    const hit = kycChecklist.find(x => x.req.key === key);
+    if (hit) setUploadDoc({ title: hit.req.label, slots: slotsFor(hit.req, hit.docs) });
   };
   // Per unit, the lease whose deposit the RP actually holds (mirrors the
   // backend securityDepositHeld rule): prefer in-force leases, latest start

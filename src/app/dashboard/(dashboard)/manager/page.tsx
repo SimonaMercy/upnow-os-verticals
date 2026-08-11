@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight,
   RefreshCw, LogIn, LogOut, XCircle, Clock,
-  PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus, IdCard, CalendarOff,
+  PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus, IdCard, CalendarOff, FileWarning,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -27,6 +27,9 @@ interface ActionItem {
   tenant?: string; unit?: string | null; building?: string | null;
   startDate?: string | null; endDate?: string | null;
   vendor?: string; category?: string | null; doc?: string; docName?: string | null;
+  // Missing-KYC rows: whether the checklist insists on this document, and the
+  // requirement key its upload control is keyed by on the customer's KYC page.
+  required?: boolean; reqKey?: string;
   reason?: string | null; date?: string | null;
   awaitingTenant?: boolean; awaitingLandlord?: boolean; need?: string | null;
   // Cheque counts on the two cheque buckets. Rent and fee are counted separately
@@ -45,7 +48,7 @@ interface ActionCenter {
   terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
   chequesBounced: Bucket; chequesOverdue: Bucket; settlementPending: Bucket;
   amcExpired: Bucket; delayedFollowups: Bucket;
-  docsExpired: Bucket; docsNoExpiry: Bucket;
+  docsExpired: Bucket; docsNoExpiry: Bucket; docsMissing: Bucket;
 }
 
 /** Every Action Center row is the same two things: the unit, and the one state
@@ -175,6 +178,13 @@ function ManagerMultiOverview() {
    *  rather than linking to a customer page for nobody. */
   const kycHref = (i: ActionItem) =>
     i.tenantId ? `/dashboard/manager/tenants/${i.tenantId}${scopeQ(i.rpId)}` : undefined;
+  // Missing KYC: land ON the upload control for the document the row names, not
+  // on the page for the manager to find it — the card exists to get these filed.
+  const kycUploadHref = (i: ActionItem) => {
+    const base = kycHref(i);
+    if (!base || !i.reqKey) return base;
+    return `${base}${base.includes('?') ? '&' : '?'}kyc=${i.reqKey}`;
+  };
 
   return (
     <DashboardPage
@@ -246,6 +256,27 @@ function ManagerMultiOverview() {
               status: fmtDay(i.date) ? `Expired ${fmtDay(i.date)}` : 'Expired',
               overdue: true,
               href: kycHref(i),
+            })} />
+          {/* The emptier gap: KYC the landlord has NEVER been given for someone
+              living in a unit today. The two cards either side of it can only
+              speak about a document that exists — an expiry needs a row to sit
+              on — so a customer who filed nothing was invisible to both. Rows
+              name the missing document (a half-filed Emirates ID names the FACE
+              that is absent) and open the upload control for it on the
+              customer's KYC page.
+
+              The WHOLE checklist gap is listed, mandatory and optional: the card
+              is here to get documents uploaded, and the optional one nobody ever
+              asks for is precisely the one that never arrives. Only the mandatory
+              ones are painted red, so the queue still says what it owes first. */}
+          <ActionBucket icon={FileWarning} color="#b45309" label="Missing KYC documents" href={`/dashboard/manager/tenants${scopeQ()}`}
+            loading={actionLoading} bucket={action?.docsMissing}
+            groupBy={i => i.tenant ?? 'Customer'}
+            compact={i => ({
+              unit: (i.docName ?? i.doc ?? 'Document').replace(/_/g, ' '),
+              status: i.required ? 'Required · upload' : 'Optional · upload',
+              overdue: !!i.required,
+              href: kycUploadHref(i),
             })} />
           {/* The blind spot behind the card above: nothing can flag a document
               whose validity was never captured, so these read as compliant and
