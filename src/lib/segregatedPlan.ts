@@ -186,12 +186,24 @@ export interface AggregatePlanInput {
 
 export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput[] {
   const rows: SegPaymentInput[] = [];
-  const rentGross = (p.rentFils ?? 0) + (p.rentVatFils ?? 0);
-  // Instalment due dates from the RENT rows of the schedule only. Deposit, fee and
-  // extra rows are excluded: an extra row sitting in here shifted every instalment
-  // onto the wrong date (instalment 2 inheriting the extra's date, and so on down).
+  // Does this plan collect its VAT as its OWN cheques? Plans issued since the VAT
+  // split carry `type:'vat'` items and NET rent/fee rows; older ones fold the tax
+  // into the gross amounts and have no such item. Reading the category totals as
+  // gross for a split plan charges the same tax twice — it inflated every
+  // instalment by its share of the rent VAT and hid the VAT cheque the customer
+  // was actually issued. Mirrors planFeeVatIsOwnCheque / netFeeInputsForPlan on
+  // the backend, which apply exactly this rule when the lead becomes a contract.
+  const vatItems = (p.items ?? []).filter(it => (it.type ?? '').toLowerCase() === 'vat');
+  const isFeeVat = (desc?: string | null) => /fees\s*vat/i.test(desc ?? '');
+  const rentVatIsOwnCheque = vatItems.some(it => !isFeeVat(it.description));
+  const feeVatIsOwnCheque = vatItems.some(it => isFeeVat(it.description));
+  const rentGross = (p.rentFils ?? 0) + (rentVatIsOwnCheque ? 0 : (p.rentVatFils ?? 0));
+  // Instalment due dates from the RENT rows of the schedule only. Deposit, fee,
+  // VAT and extra rows are excluded: a row sitting in here shifted every instalment
+  // onto the wrong date (instalment 2 inheriting the VAT cheque's date, and so on
+  // down, with the last instalment's date dropped off the end).
   const rentRows = (p.items ?? [])
-    .filter(it => { const t = (it.type ?? '').toLowerCase(); return t !== 'security_deposit' && t !== 'fee' && t !== 'extra_installment'; });
+    .filter(it => { const t = (it.type ?? '').toLowerCase(); return t !== 'security_deposit' && t !== 'fee' && t !== 'extra_installment' && t !== 'vat'; });
   const rentDates = rentRows.map(it => it.dueDate ?? null);
   // Payment methods live on the schedule items; the category totals above carry
   // none, so each derived row is matched back to the item it came from.
@@ -213,12 +225,28 @@ export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput
   }
   const isDeposit = (it: NonNullable<AggregatePlanInput['items']>[number]) => (it.type ?? '') === 'security_deposit';
   if ((p.securityDepositFils ?? 0) > 0) rows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: (p.securityDepositFils ?? 0) / 100, chequeNumber: null, transactionDate: dateOf(isDeposit), paymentMethod: methodOf(isDeposit) ?? defaultPlanMethod('deposit') });
-  const admin = (p.adminFeeFils ?? 0) + (p.adminFeeVatFils ?? 0);
+  // Fees are NET when their VAT rides on its own "Fees VAT" cheque (below).
+  const feeVat = (fils?: number | null) => feeVatIsOwnCheque ? 0 : (fils ?? 0);
+  const admin = (p.adminFeeFils ?? 0) + feeVat(p.adminFeeVatFils);
   if (admin > 0) rows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: admin / 100, chequeNumber: null, transactionDate: dateOf(isFee('Admin')), paymentMethod: feeMethod('Admin') ?? defaultPlanMethod('fee') });
-  const comm = (p.commissionFils ?? 0) + (p.commissionVatFils ?? 0);
+  const comm = (p.commissionFils ?? 0) + feeVat(p.commissionVatFils);
   if (comm > 0) rows.push({ paymentType: 'commission', description: 'Commission', amount: comm / 100, chequeNumber: null, transactionDate: dateOf(isFee('Commission')), paymentMethod: feeMethod('Commission') ?? defaultPlanMethod('fee') });
-  const ejari = (p.ejariFils ?? 0) + (p.ejariVatFils ?? 0);
+  const ejari = (p.ejariFils ?? 0) + feeVat(p.ejariVatFils);
   if (ejari > 0) rows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: ejari / 100, chequeNumber: null, transactionDate: dateOf(isFee('Contract Registration')), paymentMethod: feeMethod('Contract Registration') ?? defaultPlanMethod('fee') });
+  // The VAT cheques themselves — one per rent cheque, or a single annual one, per
+  // the landlord's "Rent VAT collection" setting, plus the fee VAT. They are the
+  // landlord's to collect and remit, so they file under Third Party, and they are
+  // read from the ITEMS: the plan already decided how many there are and when.
+  for (const it of vatItems) {
+    rows.push({
+      paymentType: isFeeVat(it.description) ? 'vat_fees' : 'vat_rental',
+      description: it.description || 'VAT',
+      amount: (it.amountFils ?? 0) / 100,
+      chequeNumber: null,
+      transactionDate: it.dueDate ?? null,
+      paymentMethod: it.paymentMethod ?? defaultPlanMethod('fee'),
+    });
+  }
   for (const f of (p.customFees ?? [])) {
     const match = (it: NonNullable<AggregatePlanInput['items']>[number]) => it.description === f.label;
     rows.push({ paymentType: 'other', description: f.label, amount: (f.netFils + f.vatFils) / 100, chequeNumber: null, transactionDate: dateOf(match), paymentMethod: methodOf(match) ?? defaultPlanMethod('fee') });

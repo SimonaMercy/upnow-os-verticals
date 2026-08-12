@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { Send, ExternalLink, Mail, Copy, Check, X, FileText, Paperclip } from 'lucide-react';
-import { REQUESTABLE_DOCS } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, groupRequestNames } from '@/lib/requestableDocs';
 
 /**
  * Shared "request documents from the customer" control — used wherever a
@@ -299,12 +299,18 @@ export function DocsLinkButton({
                     if (matches.length === 0) return null;
                     return (
                       <div style={{ position: 'absolute', zIndex: 30, marginTop: 4, width: '100%', maxHeight: 220, overflowY: 'auto', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 22px rgba(0,0,0,0.10)' }}>
-                        {matches.map(d => (
-                          <button key={d} type="button" onMouseDown={e => e.preventDefault()} onClick={() => addDoc(d)}
-                            onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}>
-                            <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {d}
-                          </button>
+                        {/* Grouped by section, as in the upload picker. */}
+                        {groupRequestNames(matches).map(g => (
+                          <div key={g.section}>
+                            <p style={{ margin: 0, padding: '6px 12px 4px', fontSize: 10.5, fontWeight: 700, letterSpacing: .4, textTransform: 'uppercase', color: '#9b9890', background: '#faf9f6', position: 'sticky', top: 0 }}>{g.label}</p>
+                            {g.names.map(d => (
+                              <button key={d} type="button" onMouseDown={e => e.preventDefault()} onClick={() => addDoc(d)}
+                                onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}>
+                                <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {d}
+                              </button>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     );

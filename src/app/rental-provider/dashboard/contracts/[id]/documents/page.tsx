@@ -132,6 +132,20 @@ export default function ContractDocumentsPage() {
       contractType={c.contractType}
       ended={c.status === 'terminated' || c.termination?.response === 'accepted' || !!c.vacateAtEnd}
       documents={c.documents ?? []}
+      // Re-file a misfiled document. The section is where the document lives, so
+      // the backend moves its owner too — moving one to Customer KYC starts
+      // showing it on the customer's profile and on their other leases.
+      onSetSection={async (doc, next) => {
+        const res = await fetch(`/api/documents/${doc.id}/section`, {
+          method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section: next, contractId: c.id }),
+        });
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({})) as { message?: string | string[] };
+          throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Could not move the document (${res.status})`));
+        }
+        refresh();
+      }}
       tenant={ejari.tenant}
       ejari={ejari}
       planContract={c}

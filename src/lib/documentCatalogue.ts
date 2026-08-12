@@ -31,6 +31,12 @@ export interface DocCatalogueEntry {
   /** The single wording shown in BOTH pickers and on the checklist row. */
   label: string;
   category: string;
+  /**
+   * Overrides the category → section DEFAULT below. Set ONLY where a category
+   * genuinely splits, and say why — an override that merely restates the rule
+   * is drift waiting to happen. Either way the RP can still change it at upload.
+   */
+  section?: DocSection;
   /** Whether an upload of this document prompts the RP for an expiry date. */
   needsExpiry?: boolean;
   /** Offer it in the RP's upload picker. Default true. */
@@ -51,6 +57,72 @@ export interface DocCatalogueEntry {
 /** The shape both pickers and the matcher compare with: lowercase, `_`-joined. */
 export function normDocName(s: string | null | undefined): string {
   return (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * WHERE A DOCUMENT LIVES — the customer's own pack, or this lease's paperwork.
+ *
+ *   kyc     — who the customer is and what backs them: identity, the company's
+ *             own registration papers, income, standing. Filed against the
+ *             CUSTOMER, so it shows on their profile and in every lease binder
+ *             of theirs — the same passport is the same passport on every lease.
+ *   tenancy — paperwork belonging to THIS lease: the contract, the money, the
+ *             unit, the inspections. Filed against the lease; on the customer's
+ *             profile it appears only under "History Documents".
+ *
+ * ⚠️ THE RP DECIDES THIS, NOT THIS FILE. Everything below is only the DEFAULT
+ * the upload form pre-selects — the person filing the document can change it,
+ * and their answer is stored on `documents.section` (migration 0204). Only when
+ * a row has no stored answer does a reader fall back to these defaults.
+ *
+ * Which is the point: the catalogue can say a Passport is usually KYC, but only
+ * the RP holding the file knows whether THIS bank statement was collected to
+ * vet the customer or to evidence a payment on this lease.
+ */
+export type DocSection = 'kyc' | 'tenancy';
+
+/** The heading each section shows — in the pickers and in the binder. */
+export const SECTION_LABEL: Record<DocSection, string> = {
+  kyc: 'Customer KYC',
+  tenancy: 'Tenancy documents',
+};
+
+/** Reading order: the customer first, then the lease. */
+export const SECTION_ORDER: DocSection[] = ['kyc', 'tenancy'];
+
+/**
+ * The DEFAULT, stated once for every value of the `document_category` enum. A
+ * document's category already says what KIND of paper it is; for all but a
+ * handful that is a good enough opening guess for the upload form to pre-select.
+ *
+ * `legal` is the one category that reads either way — a POA or an MOA identifies
+ * the customer, an NOC is the lease's own paperwork. It sits under `kyc` because
+ * that is what most legal documents here are (and what the customer's own tenant
+ * page and the ended-lease view already treat them as); the two that are not
+ * carry an explicit `section` on their entry.
+ *
+ * Getting one of these "wrong" is cheap now — it costs the RP one click in the
+ * upload form, or a re-file afterwards. So prefer the common case over agonising
+ * about the edge.
+ */
+export const CATEGORY_SECTION: Record<string, DocSection> = {
+  identity: 'kyc',
+  license: 'kyc',
+  compliance: 'kyc',
+  banking: 'kyc',
+  legal: 'kyc',
+  contract: 'tenancy',
+  property: 'tenancy',
+  payment: 'tenancy',
+  inspection: 'tenancy',
+  report: 'tenancy',
+  other: 'tenancy',
+};
+
+/** Section for a raw `documents.category`. An unknown one is lease paperwork —
+ *  never guess a document into the customer's pack. */
+export function sectionForCategory(category: string | null | undefined): DocSection {
+  return CATEGORY_SECTION[normDocName(category)] ?? 'tenancy';
 }
 
 /**
@@ -90,10 +162,22 @@ export const DOC_CATALOGUE: DocCatalogueEntry[] = [
   { key: 'partner_passport', label: 'Partner Passport', category: 'identity', needsExpiry: true },
   { key: 'partner_visa', label: 'Partner Visa', category: 'identity', needsExpiry: true },
   { key: 'signatory_visa', label: 'Signatory Visa', category: 'identity', needsExpiry: true },
+  // A THIRD PARTY on the tenancy — somebody who is neither the customer, nor a
+  // partner on their trade licence, nor the authorised signatory: a co-signer, a
+  // sponsor, the party a sub-lease runs through. Their papers keep their own
+  // keys for the same reason the partner's do — without the prefix the binder
+  // reads `third_party_emirates_id` as the customer's own Emirates ID and one of
+  // the two silently takes the other's slot.
+  { key: 'third_party_emirates_id', label: 'Third Party EID', category: 'identity', needsExpiry: true, aliases: ['third_party_eid'] },
+  { key: 'third_party_passport', label: 'Third Party Passport', category: 'identity', needsExpiry: true },
+  { key: 'third_party_visa', label: 'Third Party Visa', category: 'identity', needsExpiry: true },
 
   // ── Licensing / compliance ──────────────────────────────────────────────
   { key: 'trade_license', label: 'Trade License', category: 'license', needsExpiry: true, aliases: ['trade_licence'] },
   { key: 'business_license', label: 'Business / Activity License', category: 'license', aliases: ['business_activity_license'] },
+  // The third party's own licence — kept apart from `trade_license` so a company
+  // tenancy's Trade License slot is never filled by somebody else's.
+  { key: 'third_party_trade_license', label: 'Third-party Trade License', category: 'license', needsExpiry: true, aliases: ['third_party_trade_licence'] },
   {
     key: 'tax_registration', label: 'Tax Registration Certificate', category: 'license',
     // One document, three past wordings. `vat_certificate` was simultaneously
@@ -115,9 +199,15 @@ export const DOC_CATALOGUE: DocCatalogueEntry[] = [
   { key: 'board_resolution', label: 'Board Resolution / Power of Attorney', category: 'legal' },
   { key: 'poa', label: 'Power of Attorney (POA)', category: 'legal', aliases: ['power_of_attorney', 'power_of_attorney_poa'] },
   { key: 'signatory_authorization', label: 'Signatory Authorization Letter', category: 'legal', aliases: ['signatory_authorization_letter'] },
-  { key: 'noc', label: 'NOC (No Objection Certificate)', category: 'legal', aliases: ['no_objection_certificate', 'noc_no_objection_certificate'] },
+  // A bare NOC on a lease is consent for the LEASE — the developer's or owner's
+  // no-objection to the letting or the fit-out — not a paper about the customer.
+  // (`noc_landlord` is the opposite: a reference from the customer's current
+  // landlord, which is their standing, so it keeps the category's `kyc`.)
+  { key: 'noc', label: 'NOC (No Objection Certificate)', category: 'legal', section: 'tenancy', aliases: ['no_objection_certificate', 'noc_no_objection_certificate'] },
   { key: 'noc_landlord', label: 'NOC from Current Landlord', category: 'legal', aliases: ['noc_from_current_landlord'] },
-  { key: 'undertaking_letter', label: 'Undertaking Letter', category: 'legal' },
+  // An undertaking is given about THIS tenancy (how the unit will be used, what
+  // will be paid), so it files with the lease.
+  { key: 'undertaking_letter', label: 'Undertaking Letter', category: 'legal', section: 'tenancy' },
   { key: 'police_clearance', label: 'Police Clearance', category: 'legal' },
   { key: 'guarantor_documents', label: 'Guarantor Documents', category: 'legal' },
 
@@ -195,6 +285,56 @@ const byKey = new Map(DOC_CATALOGUE.map(e => [e.key, e]));
 /** Catalogue entry for a document_key, or undefined when off-catalogue. */
 export function docEntry(key: string): DocCatalogueEntry | undefined {
   return byKey.get(key);
+}
+
+/** The default section for this document type: its own, else its category's. */
+export function sectionOf(entry: DocCatalogueEntry): DocSection {
+  return entry.section ?? sectionForCategory(entry.category);
+}
+
+/**
+ * The DEFAULT section for a document key, or null when the catalogue does not
+ * know that key. This is what the upload form pre-selects, and what a reader
+ * falls back to for a row whose `section` column is NULL.
+ *
+ * ⚠️ Never call this for a document that HAS a stored `section` — that is the
+ * RP's actual decision and it wins. See `resolveDocSection`.
+ *
+ * Null is the honest answer for an unknown key, not a default: callers fall back
+ * to whatever they did before, which is what keeps historic rows where they
+ * already are. Roughly a third of the documents on file carry keys no picker
+ * offers today (`contract_agreement`, `first_installment_slip`, `poa_id`,
+ * `occupant_2_passport`, every `_2` second capture), and guessing a section for
+ * those would move documents between panes without anybody asking.
+ */
+export function sectionForDocKey(documentKey: string | null | undefined): DocSection | null {
+  // An upload appends a millisecond timestamp (`passport_1785740942770`); strip
+  // it, since it names the same document. A copy suffix (`bank_statement_2`) is
+  // deliberately NOT stripped — the binder treats numbered copies under its own
+  // rules, and resolving them here would relocate rows already on file.
+  const base = normDocName(documentKey).replace(/_\d{10,}$/, '');
+  const key = docKeyForName(base);
+  const entry = key ? byKey.get(key) : undefined;
+  return entry ? sectionOf(entry) : null;
+}
+
+/**
+ * THE question every read path asks: which section is this document in?
+ *
+ * Precedence, and it matters:
+ *   1. `section` stored on the row — the RP said so, at upload or by re-filing.
+ *      Nothing may second-guess it.
+ *   2. the catalogue default for its key — nobody has decided, but we know what
+ *      this KIND of document usually is.
+ *   3. null — an unknown key with no decision. The caller falls back to its own
+ *      historic behaviour rather than guessing; that is what keeps the ~1,200
+ *      pre-0204 documents filed under off-catalogue keys exactly where they are.
+ */
+export function resolveDocSection(
+  doc: { section?: string | null; documentKey: string },
+): DocSection | null {
+  if (doc.section === 'kyc' || doc.section === 'tenancy') return doc.section;
+  return sectionForDocKey(doc.documentKey);
 }
 
 /** Entries offered in the RP's upload picker, in catalogue order. */

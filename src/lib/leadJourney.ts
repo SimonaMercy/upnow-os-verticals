@@ -94,8 +94,17 @@ export interface PaymentPlan {
   ejariFils: number;
   commissionFils: number;
   securityDepositFils: number;
-  customFees?: Array<{ label: string; netFils: number; vatFils: number }>;
+  customFees?: Array<{
+    label: string; netFils: number; vatFils: number;
+    /** Set only when the RP moved the row off the first cheque / off the plan's
+     *  method in the editor — see lib/planRows. */
+    dueDate?: string; paymentMethod?: PaymentMethodKind;
+  }>;
   customFeesFils?: number;
+  /** The RP's collection choices for the DERIVED rows (unit charges, VAT
+   *  cheques). Those rows are rebuilt on every re-issue, so this list is the only
+   *  record of which dates/methods were chosen rather than inherited. */
+  derivedRows?: Array<{ key: string; dueDate?: string; paymentMethod?: PaymentMethodKind }>;
   /** Rent VAT % applied to the rent (0 / absent = exempt, e.g. residential).
    *  Set by the backend, which is the only place that knows whether a sub-lease
    *  makes an otherwise-exempt unit taxable. */

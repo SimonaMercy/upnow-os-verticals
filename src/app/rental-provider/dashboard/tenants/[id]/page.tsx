@@ -41,6 +41,9 @@ type Doc = {
   status: string | null; fileUrl: string | null; mimeType?: string | null; issueDate: string | null;
   expiryDate: string | null; createdAt: string | null;
   ownerType?: string | null; ownerId?: number | null; leaseId?: number | null;
+  /** The RP's declared home for this document (`documents.section`, migr 0204).
+   *  Null on everything filed before the choice existed. */
+  section?: string | null;
 };
 type Financials = {
   totalActiveRent: number; securityDepositHeld: number;
@@ -133,9 +136,17 @@ const prettyKey = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.to
 // proofs, deposit receipts, lease paperwork) is the lease/contract paperwork,
 // surfaced contract-wise via the "History Documents" reader.
 const KYC_KEY_RE = /emirates|passport|visa|trade_license|moa|poa|labour|establishment/;
-const isKycDoc = (d: Doc) =>
-  (d.ownerType ?? 'customer') === 'customer' &&
-  (d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey));
+const isKycDoc = (d: Doc) => {
+  // The RP's declared section wins, in BOTH directions — that is the point of
+  // asking them. `kyc` promotes a document filed from a lease into this
+  // customer's pack; `tenancy` keeps one out of it even when the key and
+  // category say identity (a passport scan attached purely as evidence on one
+  // lease, say). Only an undeclared row falls through to the old guess.
+  if (d.section === 'kyc') return true;
+  if (d.section === 'tenancy') return false;
+  return (d.ownerType ?? 'customer') === 'customer' &&
+    (d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey));
+};
 // Additional-occupant identity docs (occupant 2..N) hang off the customer with
 // `occupant_<n>_*` keys. They get their own section, not the primary KYC card —
 // otherwise they'd land in "extra" KYC docs as view-only rows with no upload.

@@ -32,12 +32,13 @@ import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/compone
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
 import { putKycSlot } from '@/lib/kycSlotUpload';
-import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, parseAdditionalDocs, requestedDocKey, requestedDocKeyCandidates, resolveRequestedDocKey } from '@/lib/requestableDocs';
+import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, groupRequestNames, parseAdditionalDocs, requestedDocKey, requestedDocKeyCandidates, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
+import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
@@ -1879,10 +1880,17 @@ function DocsSection({
             const exact = REQUESTABLE_DOCS.some(d => d.toLowerCase() === q);
             return (
               <div className="addmenu">
-                {matches.map(d => (
-                  <button key={d} type="button" onMouseDown={e => e.preventDefault()} onClick={() => addDocByName(d)}>
-                    <FileText size={11} /> {d}
-                  </button>
+                {/* Grouped by section, as in the upload picker — the RP sees
+                    whether they are asking for KYC or tenancy paperwork. */}
+                {groupRequestNames(matches).map(g => (
+                  <div key={g.section}>
+                    <p className="addmenu-group">{g.label}</p>
+                    {g.names.map(d => (
+                      <button key={d} type="button" onMouseDown={e => e.preventDefault()} onClick={() => addDocByName(d)}>
+                        <FileText size={11} /> {d}
+                      </button>
+                    ))}
+                  </div>
                 ))}
                 {docSearch.trim() && !exact && (
                   <button type="button" className="custom" onMouseDown={e => e.preventDefault()} onClick={() => addDocByName(docSearch.trim())}>
@@ -2072,11 +2080,19 @@ function PlanEditor({
     slot.kind === 'deposit' || slot.kind === 'fee' || slot.kind === 'unit_charge' || (slot.kind === 'installment' && slot.index === 0)
       ? 'bank_transfer'
       : 'cheque';
-  // Rows the RP cannot edit here: they are DERIVED — VAT from the rent/fee
-  // amounts, the unit charges from the unit's own facilities — and the backend
-  // rebuilds both on every re-issue, so a change made on them would be dropped.
+  // DERIVED rows — the VAT cheques and the unit's own charges. Their AMOUNTS are
+  // computed (from the rent, from the unit) and the backend rebuilds them on
+  // every re-issue, but WHEN and HOW they are collected is the landlord's call.
+  // Each carries a stable key so that choice survives the rebuild; it is sent as
+  // `derivedRows` and stored on the plan, which is also how a row the RP never
+  // touched keeps following the cheque it derives from.
   const isDerived = (slot: Slot): slot is Extract<Slot, { kind: 'vat' | 'unit_charge' }> =>
     slot.kind === 'vat' || slot.kind === 'unit_charge';
+  const [derived, setDerived] = useState<Record<string, { dueDate?: string; paymentMethod?: PaymentMethodKind }>>(
+    () => Object.fromEntries((plan.derivedRows ?? []).map(o => [o.key, { dueDate: o.dueDate, paymentMethod: o.paymentMethod }])),
+  );
+  const setDerivedField = (key: string, patch: { dueDate?: string; paymentMethod?: PaymentMethodKind }) =>
+    setDerived(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   const methodOfItem = (pred: (it: PaymentPlanItem) => boolean): PaymentMethodKind | undefined =>
     plan.items.find(it => pred(it) && !!it.paymentMethod)?.paymentMethod as PaymentMethodKind | undefined;
   const [methods, setMethods] = useState<{
@@ -2095,6 +2111,46 @@ function PlanEditor({
     ],
     extras: extrasInit.map(e => methodOfItem(it => it.description === e.description)),
   }));
+
+  // ── One row's date + method ───────────────────────────────────────────────
+  // A derived row keeps its own override if the RP set one; otherwise it reports
+  // what it inherits, so it keeps tracking the cheque it belongs to as that cheque
+  // moves. Every other row writes back to the field it came from.
+  const rowDate = (slot: Slot, fallback: string): string =>
+    isDerived(slot) ? (derived[slot.rowKey]?.dueDate ?? slot.inherits.dueDate) : fallback;
+  const setRowDate = (slot: Slot, v: string) => {
+    if (isDerived(slot)) { setDerivedField(slot.rowKey, { dueDate: v }); return; }
+    if (slot.kind === 'deposit') setDepositDate(v);
+    // The fees ride on the first cheque, so their date IS the first instalment's.
+    else if (slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)) setBundleDate(v);
+    else if (slot.kind === 'installment') setInstDates(prev => prev.map((d, j) => j === slot.index - 1 ? v : d));
+    else setExtras(prev => prev.map((x, i) => i === slot.index ? { ...x, dueDate: v } : x));
+  };
+  const rowMethod = (slot: Slot): PaymentMethodKind =>
+    (slot.kind === 'deposit' ? methods.deposit
+      : slot.kind === 'fee' ? methods[slot.fee]
+      : slot.kind === 'installment' ? methods.installments[slot.index]
+      : isDerived(slot) ? (derived[slot.rowKey]?.paymentMethod ?? slot.inherits.paymentMethod)
+      : methods.extras[slot.index]) ?? defaultMethodFor(slot);
+  const setRowMethod = (slot: Slot, v: PaymentMethodKind) => {
+    if (isDerived(slot)) { setDerivedField(slot.rowKey, { paymentMethod: v }); return; }
+    setMethods(prev => {
+      if (slot.kind === 'deposit') return { ...prev, deposit: v };
+      if (slot.kind === 'fee') return { ...prev, [slot.fee]: v };
+      if (slot.kind === 'installment') {
+        const next = [...prev.installments]; next[slot.index] = v; return { ...prev, installments: next };
+      }
+      const next = [...prev.extras]; next[slot.index] = v; return { ...prev, extras: next };
+    });
+  };
+  /** A derived schedule row, showing the RP's override where they made one. */
+  const derivedRow = (r: {
+    key: string; rowKey: string; kind: 'vat' | 'unit_charge';
+    label: string; amountFils: number; inheritsDate: string; inheritsMethod: PaymentMethodKind;
+  }): Row => {
+    const slot = { kind: r.kind, rowKey: r.rowKey, inherits: { dueDate: r.inheritsDate, paymentMethod: r.inheritsMethod } } as Slot;
+    return { key: r.key, label: r.label, amountFils: r.amountFils, dueDate: rowDate(slot, r.inheritsDate), slot };
+  };
 
   const applyStart = (d: string, n: number) => { setBundleDate(d); setInstDates(installmentsFromStart(d, n)); };
   const resizeInst = (n: number) => {
@@ -2161,19 +2217,32 @@ function PlanEditor({
   const feeVatFils = vatOn(adminFils, rateOf('admin_fee')) + vatOn(ejariFils, rateOf('ejari_fee')) + vatOn(commFils, rateOf('commission'));
   // One VAT line per rent cheque, on that cheque's own date — or a single annual
   // line due with the first. Mirrors splitPlanVatToOwnItems on the backend.
+  // A VAT cheque inherits the date AND the method of the cheque it was split off
+  // — that is what splitPlanVatToOwnItems does — so that is what it shows until
+  // the RP moves it. It used to show a flat "Cheque" for all of them, including
+  // the one riding with instalment 1, which is issued by bank transfer.
   const rentVatRows: Row[] = rentVatRate > 0 && effRent > 0
     ? (rentVatMode === 'annual'
-        ? [{ key: 'rentvat', label: `Rental VAT (${rentVatRate}%)`, amountFils: perVat * (installmentCount - 1) + lastVat, dueDate: bundleDate, slot: { kind: 'vat' as const } }]
-        : Array.from({ length: installmentCount }, (_, i) => ({
-            key: `rentvat-${i}`,
+        ? [derivedRow({
+            key: 'rentvat', rowKey: rentVatRowKey('annual'), kind: 'vat',
+            label: `Rental VAT (${rentVatRate}%)`,
+            amountFils: perVat * (installmentCount - 1) + lastVat,
+            inheritsDate: bundleDate, inheritsMethod: rowMethod({ kind: 'installment', index: 0 }),
+          })]
+        : Array.from({ length: installmentCount }, (_, i) => derivedRow({
+            key: `rentvat-${i}`, rowKey: rentVatRowKey(i + 1), kind: 'vat',
             label: `Rental VAT (${rentVatRate}%)`,
             amountFils: i === installmentCount - 1 ? lastVat : perVat,
-            dueDate: i === 0 ? bundleDate : (instDates[i - 1] ?? ''),
-            slot: { kind: 'vat' as const },
+            inheritsDate: i === 0 ? bundleDate : (instDates[i - 1] ?? ''),
+            inheritsMethod: rowMethod({ kind: 'installment', index: i }),
           })))
     : [];
   const feeVatRows: Row[] = feeVatFils > 0
-    ? [{ key: 'feevat', label: 'Fees VAT', amountFils: feeVatFils, dueDate: bundleDate, slot: { kind: 'vat' as const } }]
+    ? [derivedRow({
+        key: 'feevat', rowKey: FEE_VAT_ROW_KEY, kind: 'vat', label: 'Fees VAT', amountFils: feeVatFils,
+        // Split off the fee cheques, so it rides with them.
+        inheritsDate: bundleDate, inheritsMethod: rowMethod({ kind: 'fee', fee: 'adminFee' }),
+      })]
     : [];
   const vatTotalFils = rentVatRows.reduce((s, r) => s + r.amountFils, 0) + feeVatFils;
 
@@ -2199,12 +2268,12 @@ function PlanEditor({
       .map(f => ({ description: f.label, amount: String(f.netFils / 100), vatFils: f.vatFils })),
     effRent / 100,
   )
-    .map((f, i) => ({
-      key: `unitfee-${i}`,
+    .map((f, i) => derivedRow({
+      key: `unitfee-${i}`, rowKey: unitChargeRowKey(f.description), kind: 'unit_charge',
       label: f.description,
       amountFils: Math.round((parseFloat(f.amount) || 0) * 100) + f.vatFils,
-      dueDate: bundleDate,          // collected with the first cheque, like the fees
-      slot: { kind: 'unit_charge' as const },
+      inheritsDate: bundleDate,          // collected with the first cheque, like the fees
+      inheritsMethod: 'bank_transfer',
     }))
     .filter(r => r.amountFils > 0);
   const unitChargeTotalFils = unitChargeRows.reduce((s, r) => s + r.amountFils, 0);
@@ -2220,12 +2289,13 @@ function PlanEditor({
     | { kind: 'installment'; index: number }        // 0 = instalment 1 (first cheque)
     | { kind: 'fee'; fee: 'adminFee' | 'ejari' | 'commission' }
     | { kind: 'extra'; index: number }
-    // VAT lines are DERIVED from the rent/fee amounts and their dates — there is
-    // nothing to edit on them directly, so they carry no writable slot.
-    | { kind: 'vat' }
-    // Likewise the unit's RP-defined charges: they come from the unit, not from
-    // this form, and are rebuilt from it on save.
-    | { kind: 'unit_charge' };
+    // DERIVED rows. Their amount is computed, so there is no amount to edit — but
+    // the date and method are the landlord's, and `rowKey` is what carries that
+    // choice through the rebuild (see lib/planRows). `inherits` is where the row
+    // sits when the RP has expressed no choice: the cheque it was split off, or
+    // the first cheque for a unit charge.
+    | { kind: 'vat'; rowKey: string; inherits: { dueDate: string; paymentMethod: PaymentMethodKind } }
+    | { kind: 'unit_charge'; rowKey: string; inherits: { dueDate: string; paymentMethod: PaymentMethodKind } };
   type Row = { key: string; label: string; amountFils: number; dueDate: string; slot: Slot };
   type Group = { key: SegKey; title: string; rows: Row[] };
 
@@ -2278,35 +2348,24 @@ function PlanEditor({
   // Rent and fees are net here, so VAT is added once — as its own cheques above.
   const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils + vatTotalFils + unitChargeTotalFils;
 
-  const setRowDate = (slot: Slot, v: string) => {
-    // A VAT line follows the cheque it was split off — it has no date of its own,
-    // and a unit charge rides on the first cheque the same way.
-    if (isDerived(slot)) return;
-    if (slot.kind === 'deposit') setDepositDate(v);
-    // The fees ride on the first cheque, so their date IS the first instalment's.
-    else if (slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)) setBundleDate(v);
-    else if (slot.kind === 'installment') setInstDates(prev => prev.map((d, j) => j === slot.index - 1 ? v : d));
-    else setExtras(prev => prev.map((x, i) => i === slot.index ? { ...x, dueDate: v } : x));
-  };
-  const rowMethod = (slot: Slot): PaymentMethodKind =>
-    (slot.kind === 'deposit' ? methods.deposit
-      : slot.kind === 'fee' ? methods[slot.fee]
-      : slot.kind === 'installment' ? methods.installments[slot.index]
-      : isDerived(slot) ? undefined
-      : methods.extras[slot.index]) ?? defaultMethodFor(slot);
-  const setRowMethod = (slot: Slot, v: PaymentMethodKind) => setMethods(prev => {
-    if (isDerived(slot)) return prev;
-    if (slot.kind === 'deposit') return { ...prev, deposit: v };
-    if (slot.kind === 'fee') return { ...prev, [slot.fee]: v };
-    if (slot.kind === 'installment') {
-      const next = [...prev.installments]; next[slot.index] = v; return { ...prev, installments: next };
-    }
-    const next = [...prev.extras]; next[slot.index] = v; return { ...prev, extras: next };
-  });
+  // What to send for the derived rows. The METHOD always goes, so the row is
+  // issued as the schedule above shows it rather than falling back to whatever
+  // conversion would otherwise pick. The DATE goes only when the RP actually set
+  // one — leaving it out is what keeps the row following its cheque, so moving
+  // instalment 1 still drags the unit charges and the fee VAT with it.
+  const derivedRowPayload = groups
+    .flatMap(g => g.rows)
+    .filter((r): r is Row & { slot: Extract<Slot, { kind: 'vat' | 'unit_charge' }> } => isDerived(r.slot))
+    .map(r => ({
+      key: r.slot.rowKey,
+      paymentMethod: rowMethod(r.slot),
+      ...(derived[r.slot.rowKey]?.dueDate ? { dueDate: derived[r.slot.rowKey].dueDate } : {}),
+    }));
 
   async function submit() {
     if (!rentAed || isNaN(rentFils) || rentFils <= 0) { setError('Enter a valid annual rent'); return; }
     if (!bundleDate || !depositDate || instDates.some(d => !d)) { setError('All cheque due dates are required'); return; }
+    if (groups.some(g => g.rows.some(r => !r.dueDate))) { setError('All cheque due dates are required'); return; }
     const validExtra = extras.filter(e => e.description.trim() && e.dueDate && parseFloat(e.amountAed) > 0);
     setError(null);
     await onSubmit({
@@ -2327,6 +2386,8 @@ function PlanEditor({
         installments: Array.from({ length: installmentCount }, (_, i) => rowMethod({ kind: 'installment', index: i })),
         extras: validExtra.map((_, i) => rowMethod({ kind: 'extra', index: i })),
       },
+      // When + how the DERIVED rows are collected (unit charges, VAT cheques).
+      ...(derivedRowPayload.length ? { derivedRows: derivedRowPayload } : {}),
       notes: notes.trim() || undefined,
       extraItems: validExtra.length ? validExtra.map(e => ({ description: e.description.trim(), amountFils: Math.round(parseFloat(e.amountAed) * 100), dueDate: e.dueDate })) : undefined,
       // `chequesPayableTo` is not asked for here — the backend fills it from the
@@ -2389,7 +2450,7 @@ function PlanEditor({
           <div className="subhead">Payment schedule ({rowCount}) · total {aed(totalFils)}</div>
           <p className="note" style={{ margin: '0 0 8px' }}>
             Grouped the way the customer sees it. Each line is its own payment: what is collected at signing goes by bank transfer, the later instalments are cheques — change any row.
-            {unitChargeRows.length > 0 && <> The unit&rsquo;s own charges are collected with the first cheque and come from the unit itself — edit them on the unit, not here.</>}
+            {unitChargeRows.length > 0 && <> The unit&rsquo;s own charges are collected with the first cheque unless you give them a date of their own; their amounts come from the unit.</>}
           </p>
           {groups.map(g => (
             <div key={g.key} style={{ marginBottom: 10 }}>
@@ -2402,16 +2463,11 @@ function PlanEditor({
                   <div key={row.key} className="schedrow">
                     <span className="sl">{row.label}</span>
                     <span className="sa">{row.amountFils > 0 ? aed(row.amountFils) : '—'}</span>
-                    {/* Derived rows (VAT, the unit's own charges) are shown but not
-                        editable — they follow the cheque they were split off / the
-                        unit they come from, and an edit here would be discarded on
-                        save rather than stick. */}
-                    <select className="qinput" style={{ width: 116 }} value={rowMethod(row.slot)} disabled={isDerived(row.slot)}
-                      title={isDerived(row.slot) ? 'Collected with the first cheque — set on the unit, not here' : undefined}
+                    <select className="qinput" style={{ width: 116 }} value={rowMethod(row.slot)}
                       onChange={e => setRowMethod(row.slot, e.target.value as PaymentMethodKind)}>
                       {PAYMENT_METHOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    <input className="qinput sd" type="date" value={row.dueDate} disabled={isDerived(row.slot)}
+                    <input className="qinput sd" type="date" value={row.dueDate}
                       onChange={e => setRowDate(row.slot, e.target.value)} />
                   </div>
                 ))}
@@ -2934,6 +2990,7 @@ function GlobalStyle() {
       .quest-page .addmenu button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 12px; padding: 8px 10px; background: none; border: 0; cursor: pointer; color: var(--ink); }
       .quest-page .addmenu button:hover { background: var(--jade-tint); }
       .quest-page .addmenu button.custom { color: var(--jade-deep); font-weight: 700; border-top: 1px solid var(--mist); }
+      .quest-page .addmenu-group { position: sticky; top: 0; margin: 0; padding: 6px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--slate-soft, #9b9890); background: var(--sand, #faf9f6); }
 
       /* Small on-brand modal (doc reject reason) */
       .quest-page .qmodal-scrim { position: fixed; inset: 0; background: rgba(26,23,20,.32); display: grid; place-items: center; z-index: 60; padding: 20px; }

@@ -128,31 +128,37 @@ export const RESIDENTIAL_RENTAL_DOCS: DocReq[] = [
 ];
 
 /**
- * Commercial rental docs. The licensing pack (Trade License, Tax Registration
- * Certificate) is MANDATORY for any commercial lease — Ejari registration of a
- * commercial tenancy needs it, and it applies regardless of whether the tenant
- * is an individual or a company. MOA / MOM is OPTIONAL (collected when available
- * but never a gate). Financial Statements / Rental History / Previous Utility
- * Closing were removed from the checklist (Jun 2026); admin can still request
- * them ad hoc via REQUESTABLE_DOCS.
+ * Commercial rental docs — collected on the checklist, none of them BLOCKING.
+ *
+ * These used to be `required: true`, on the reasoning that Ejari registration of
+ * a commercial tenancy needs them "regardless of whether the tenant is an
+ * individual or a company". That reasoning is sound for Ejari and wrong as a
+ * customer gate: an INDIVIDUAL leasing a shop has no trade licence and no TRN to
+ * give, so the Documents step could never be completed — and because the
+ * in-form Submit gate only ever counted the identity pack, the button enabled
+ * anyway and then bounced them back to "Documents required" with nothing on
+ * screen explaining why (see getRequiredDocs).
+ *
+ * What a COMPANY must provide now lives in exactly one place, COMPANY_KYC_DOCS,
+ * which is where the identity pack puts it. This section is the licensing pack
+ * as supporting evidence: shown, uploadable, chased ad hoc by admin through
+ * REQUESTABLE_DOCS — never a wall. Mirrors the backend CUSTOMER_INDIVIDUAL /
+ * CUSTOMER_COMPANY matrices, neither of which makes these mandatory.
  */
 export const COMMERCIAL_RENTAL_DOCS: DocReq[] = [
-  { key: 'trade_license',     label: 'Trade License',                     category: 'license', required: true,  hint: 'Valid UAE trade license' },
-  { key: 'tax_registration',  label: 'Tax Registration Certificate',      category: 'license', required: true,  hint: 'UAE VAT / tax registration certificate' },
+  { key: 'trade_license',     label: 'Trade License',                     category: 'license', required: false, hint: 'Valid UAE trade license — if the tenancy is taken in a company name' },
+  { key: 'tax_registration',  label: 'Tax Registration Certificate',      category: 'license', required: false, hint: 'UAE VAT / tax registration certificate, if registered' },
   { key: 'moa',               label: 'MOA / MOM',                         category: 'legal',   required: false, hint: 'Memorandum of Association or Minutes of Meeting (optional)' },
 ];
 
 /**
- * Industrial rental docs. The Trade License is MANDATORY for any industrial
- * lease (same rationale as commercial). The Business / Activity License is
- * OPTIONAL — plenty of industrial tenants operate entirely under the activities
- * already printed on their trade licence and have no separate activity permit
- * to give, so blocking the whole Documents step on it stranded them. It stays
- * on the checklist and is still collected when it exists; admin can chase it
- * ad hoc via the request flow. Financial / history docs stay optional.
+ * Industrial rental docs. Same treatment as commercial: collected, not blocking.
+ * The Business / Activity License in particular is one plenty of industrial
+ * tenants simply do not have — they operate under the activities already printed
+ * on their trade licence — so gating the whole step on it stranded them.
  */
 export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
-  { key: 'trade_license',     label: 'Trade License',               category: 'license', required: true,  hint: 'Valid UAE trade license' },
+  { key: 'trade_license',     label: 'Trade License',               category: 'license', required: false, hint: 'Valid UAE trade license — if the tenancy is taken in a company name' },
   { key: 'business_license',  label: 'Business / Activity License', category: 'license', required: false, hint: 'License specific to warehouse / industrial activity (optional)' },
 ];
 
@@ -172,14 +178,6 @@ export const CONTRACT_DOCS: DocReq[] = [
   { key: 'ejari_certificate', label: 'Contract Registration Certificate', category: 'contract', required: false, hint: 'Contract Registration / DLD tenancy-contract registration certificate' },
   { key: 'payment_advice',    label: 'Payment Confirmation',  category: 'payment',  required: false, hint: 'Rent cheques / payment confirmation — the cheques recorded in the Payments section' },
 ];
-
-/** Keys that become REQUIRED for a company tenant on a commercial/industrial
- *  lease (the company's legal/licensing pack the Ejari registration needs).
- *  MOA is intentionally excluded — it's collected when available but optional,
- *  and so is the Business / Activity License: a company tenant must not be
- *  promoted back to mandatory on a document the base pack deliberately leaves
- *  optional (see INDUSTRIAL_RENTAL_DOCS). */
-const COMPANY_REQUIRED_KEYS = ['trade_license'];
 
 export function getRentalSectionDocs(
   unitType: string | null | undefined,
@@ -206,19 +204,15 @@ export function getRentalSectionDocs(
   if (entityType === 'company' && !isCommercial && !isIndustrial) {
     return COMPANY_SUPPORTING_DOCS.filter(notInKyc);
   }
-  const base = (isCommercial ? COMMERCIAL_RENTAL_DOCS
+  // Nothing in this section is a gate for anyone. A company's mandatory
+  // licensing pack is COMPANY_KYC_DOCS' job and the filter above has already
+  // removed those keys from here, so the promotion pass that used to re-mark
+  // `trade_license` / `business_license` required is gone: it could only ever
+  // fire on a key the identity pack owns, and it was what dragged an individual
+  // leasing a shop into an unsatisfiable Documents step.
+  return (isCommercial ? COMMERCIAL_RENTAL_DOCS
     : isIndustrial ? INDUSTRIAL_RENTAL_DOCS
     : RESIDENTIAL_RENTAL_DOCS).filter(notInKyc);
-
-  // A company renting a commercial/industrial space must provide its licensing
-  // pack — promote those rows to required (mirrors the backend CUSTOMER_COMPANY
-  // requirement). Individuals and residential leases are unchanged.
-  if (entityType === 'company' && (isCommercial || isIndustrial)) {
-    return base.map(d =>
-      COMPANY_REQUIRED_KEYS.includes(d.key) ? { ...d, required: true } : d,
-    );
-  }
-  return base;
 }
 
 /** All docs (KYC + rental) combined — used by the spaces page journey tracker. */

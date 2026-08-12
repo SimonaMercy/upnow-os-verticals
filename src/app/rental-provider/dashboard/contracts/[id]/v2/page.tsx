@@ -31,8 +31,8 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { REQUESTABLE_DOCS, requestedDocKey } from '@/lib/requestableDocs';
-import { UPLOADABLE_DOCS, acceptedNamesFor, normDocName } from '@/lib/documentCatalogue';
+import { REQUESTABLE_DOCS, groupRequestNames, requestedDocKey } from '@/lib/requestableDocs';
+import { SECTION_LABEL, SECTION_ORDER, UPLOADABLE_DOCS, acceptedNamesFor, normDocName, sectionForCategory, sectionForDocKey, sectionOf, type DocSection } from '@/lib/documentCatalogue';
 import { KYC_DOCS, getRequiredDocs, getRentalSectionDocs, getRenewalRequiredDocs, CONTRACT_DOCS } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import {
@@ -435,9 +435,14 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
 /** Generic upload types, projected from THE document catalogue — the same list
  *  the "request from customer" picker offers, so one document reads as one
  *  document on both sides. The contract-specific checklist types
- *  (docRequirements mapping) are merged in front of these. */
-const BASE_DOC_TYPES: { value: string; label: string; category: string; needsExpiry: boolean }[] =
-  UPLOADABLE_DOCS.map(e => ({ value: e.key, label: e.label, category: e.category, needsExpiry: e.needsExpiry === true }));
+ *  (docRequirements mapping) are merged in front of these.
+ *
+ *  `section` rides along so the picker can group by it: the RP states whether
+ *  they are filing a customer-KYC paper or a tenancy one AS they upload, instead
+ *  of the binder inferring it from the key afterwards. */
+type DocTypeOption = { value: string; label: string; category: string; needsExpiry: boolean; section: DocSection };
+const BASE_DOC_TYPES: DocTypeOption[] =
+  UPLOADABLE_DOCS.map(e => ({ value: e.key, label: e.label, category: e.category, needsExpiry: e.needsExpiry === true, section: sectionOf(e) }));
 
 /** Checklist doc keys whose uploads need an expiry date (identity docs + trade
  *  licence). The VAT Tax Registration Certificate and the business / activity
@@ -2609,7 +2614,7 @@ function DetailsDrawer({
   /** PATCH /api/contracts/:id/confirm-pdc — confirm post-dated cheques received. */
   onConfirmPdc: () => Promise<void>;
   /** upload-url → PUT → POST /api/documents — attach a contract document. */
-  onUploadDoc: (file: File, meta: { key: string; label: string; category: string }, visibleToTenant: boolean, expiryDate: string) => Promise<void>;
+  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string) => Promise<void>;
   /** POST /api/documents/request — request a document from the tenant. */
   onRequestDoc: (label: string, notes: string) => Promise<void>;
   /** Running tenancy notes log (newest first). */
@@ -3260,6 +3265,24 @@ function DetailsDrawer({
   const [upExpiry, setUpExpiry] = useState('');
   const [upBusy, setUpBusy] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
+  // What to CALL this particular file. The type says what kind of document it is
+  // — one catalogue key, so every slot and checklist still matches — while the
+  // name says which one: an NOC is a Vehicle NOC or a Property NOC, and the
+  // reader needs to know which without opening it. Blank falls back to the
+  // type's label, which is exactly what every upload did before.
+  const [upName, setUpName] = useState('');
+  // Document-type combobox. The list runs to ~60 entries, so it is searched
+  // rather than scrolled; `upTypeQuery` doubles as the input's display value and
+  // holds the chosen label whenever the menu is shut.
+  const [upTypeQuery, setUpTypeQuery] = useState('');
+  const [upTypeMenuOpen, setUpTypeMenuOpen] = useState(false);
+  // The section the RP is filing under. Pre-selected from the picked type — the
+  // catalogue knows a Passport is usually KYC — but theirs to change: only the
+  // person holding the file knows whether THIS bank statement vets the customer
+  // or evidences a payment on this lease. `upSectionTouched` keeps a deliberate
+  // choice from being overwritten when they then switch document type.
+  const [upSection, setUpSection] = useState<DocSection>('tenancy');
+  const [upSectionTouched, setUpSectionTouched] = useState(false);
   // Full mapped pack for the unit's category — KYC + commercial / industrial /
   // residential section (company promotions applied). Shown on new contracts;
   // renewals show only the re-verification slots (renewalDocs).
@@ -3273,14 +3296,20 @@ function DetailsDrawer({
     () => contract.contractType === 'renewal' ? getRenewalRequiredDocs(contract.unit.type) : [],
     [contract.contractType, contract.unit.type]);
   // Upload type picker = checklist types first (most relevant), then the
-  // legacy generic types — so an upload lands on the exact checklist key.
+  // legacy generic types — so an upload lands on the exact checklist key. The
+  // picker groups these by section, so "first" means first WITHIN its group.
   const DOC_TYPES = useMemo(() => {
-    const fromChecklist: { value: string; label: string; category: string; needsExpiry: boolean }[] = [];
+    const fromChecklist: DocTypeOption[] = [];
     const seen = new Set<string>();
     for (const d of [...CONTRACT_DOCS, ...renewalDocs, ...fullPackDocs]) {
       if (seen.has(d.key)) continue;
       seen.add(d.key);
-      fromChecklist.push({ value: d.key, label: d.label, category: d.category, needsExpiry: EXPIRY_DOC_KEYS.has(d.key) });
+      // A checklist key the catalogue doesn't carry (a renewal-only slot, say)
+      // still gets a section — from its category, by the same rule.
+      fromChecklist.push({
+        value: d.key, label: d.label, category: d.category, needsExpiry: EXPIRY_DOC_KEYS.has(d.key),
+        section: sectionForDocKey(d.key) ?? sectionForCategory(d.category),
+      });
     }
     return [...fromChecklist, ...BASE_DOC_TYPES.filter(t => !seen.has(t.value))];
   }, [renewalDocs, fullPackDocs]);
@@ -3291,7 +3320,16 @@ function DetailsDrawer({
     setShowUpload(true);
     // Only preselect a type the picker actually knows — an unknown legacy key
     // would slip past submitUpload's lookup. Blank → the user picks the type.
-    setUpType(DOC_TYPES.some(t => t.value === d.key) ? d.key : '');
+    const known = DOC_TYPES.find(t => t.value === d.key);
+    setUpType(known?.value ?? '');
+    setUpTypeQuery(known?.label ?? '');
+    setUpTypeMenuOpen(false);
+    // Filing from a checklist row starts from that document's default section,
+    // and the RP can still change it before saving.
+    setUpSection(known?.section ?? sectionForDocKey(d.key) ?? sectionForCategory(d.category));
+    setUpSectionTouched(false);
+    // Filling a named checklist slot — the slot's own wording is the right name.
+    setUpName('');
     setUpExpiry('');
     setUpErr(null);
     requestAnimationFrame(() => {
@@ -3301,13 +3339,33 @@ function DetailsDrawer({
   };
   const upSelected = DOC_TYPES.find(t => t.value === upType);
   const upShowExpiry = upSelected?.needsExpiry ?? false;
+  // Types matching what has been typed. An empty query lists everything, so
+  // opening the box still works as a plain browse.
+  const upTypeMatches = useMemo(() => {
+    const q = upTypeQuery.trim().toLowerCase();
+    // The chosen label sits in the box; treat that as "no filter" so re-opening
+    // shows the whole list rather than the one entry already selected.
+    if (!q || q === DOC_TYPES.find(t => t.value === upType)?.label.toLowerCase()) return DOC_TYPES;
+    return DOC_TYPES.filter(t => t.label.toLowerCase().includes(q));
+  }, [upTypeQuery, upType, DOC_TYPES]);
+  const pickUpType = (value: string) => {
+    setUpType(value); setUpExpiry('');
+    const t = DOC_TYPES.find(x => x.value === value);
+    setUpTypeQuery(t?.label ?? '');
+    if (t && !upSectionTouched) setUpSection(t.section);
+  };
   const submitUpload = async () => {
     if (!upFile || !upType) return;
     const meta = DOC_TYPES.find(t => t.value === upType)!;
     setUpBusy(true); setUpErr(null);
     try {
-      await onUploadDoc(upFile, { key: meta.value, label: meta.label, category: meta.category }, upVisible, upExpiry);
-      setShowUpload(false); setUpFile(null); setUpType(''); setUpVisible(false); setUpExpiry('');
+      await onUploadDoc(
+        upFile,
+        { key: meta.value, label: upName.trim() || meta.label, category: meta.category, section: upSection },
+        upVisible, upExpiry,
+      );
+      setShowUpload(false); setUpFile(null); setUpType(''); setUpTypeQuery(''); setUpVisible(false); setUpExpiry('');
+      setUpSection('tenancy'); setUpSectionTouched(false); setUpName('');
       if (docFileRef.current) docFileRef.current.value = '';
     } catch (e) {
       setUpErr(e instanceof Error ? e.message : 'Upload failed');
@@ -4438,28 +4496,144 @@ function DetailsDrawer({
                   {showUpload && (
                     <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
                       <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={() => { setShowUpload(false); setUpErr(null); }} />
-                      <div ref={uploadBoxRef} style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 460, padding: 18, maxHeight: '90vh', overflowY: 'auto' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
-                          <p className="subhead" style={{ margin: 0 }}>Upload a document</p>
+                      {/* Paired questions sit side by side — type|name, then the
+                          two places it can go — so the whole form reads in three
+                          rows instead of one long stack. */}
+                      <div ref={uploadBoxRef} style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 560, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '16px 18px 12px', borderBottom: '1px solid #f0eee9' }}>
+                          <div>
+                            <p className="subhead" style={{ margin: 0 }}>Upload a document</p>
+                            <p className="note" style={{ margin: "2px 0 0" }}>{contract.ref} · {contract.tenant.name ?? "the customer"}</p>
+                          </div>
                           <button type="button" className="mini-btn view" onClick={() => { setShowUpload(false); setUpErr(null); }}><X size={12} /></button>
                         </div>
+                        <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1 }}>
                         <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
                           onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
-                        <div className="field">
-                          <label>File</label>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => docFileRef.current?.click()}>Choose file</button>
-                            <span className="note" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{upFile ? upFile.name : 'No file chosen'}</span>
-                          </div>
-                        </div>
-                        <div className="field">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+                        {/* Searchable, because the list is ~60 entries long and a
+                            native <select> makes you hunt. Same two section
+                            groups the "File under" control below offers, so
+                            picking a type also sets a sane default there. */}
+                        <div className="field" style={{ position: 'relative', marginBottom: 0 }}>
                           <label>Document type</label>
-                          <select className="input" value={upType} onChange={e => { setUpType(e.target.value); setUpExpiry(''); }}>
-                            <option value="">Select type…</option>
-                            {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                          </select>
+                          <input
+                            className="input" data-testid="up-doctype" role="combobox" aria-expanded={upTypeMenuOpen} aria-controls="v2-doctype-menu"
+                            value={upTypeQuery}
+                            placeholder="Search document types…"
+                            onChange={e => { setUpTypeQuery(e.target.value); setUpTypeMenuOpen(true); }}
+                            onFocus={e => { setUpTypeMenuOpen(true); e.currentTarget.select(); }}
+                            onBlur={() => setTimeout(() => {
+                              setUpTypeMenuOpen(false);
+                              // Restore the chosen label — a half-typed query left
+                              // in the box would read as the document's name.
+                              setUpTypeQuery(DOC_TYPES.find(t => t.value === upType)?.label ?? '');
+                            }, 150)}
+                            onKeyDown={e => {
+                              if (e.key === 'Escape') { setUpTypeMenuOpen(false); return; }
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const first = upTypeMatches[0];
+                                if (first) { pickUpType(first.value); setUpTypeMenuOpen(false); }
+                              }
+                            }}
+                          />
+                          {upTypeMenuOpen && upTypeMatches.length > 0 && (
+                            <div id="v2-doctype-menu" style={{ position: 'absolute', zIndex: 30, marginTop: 4, width: '100%', maxHeight: 240, overflowY: 'auto', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 22px rgba(0,0,0,0.10)' }}>
+                              {SECTION_ORDER.map(sec => {
+                                const opts = upTypeMatches.filter(t => t.section === sec);
+                                if (opts.length === 0) return null;
+                                return (
+                                  <div key={sec}>
+                                    <p style={{ margin: 0, padding: '6px 12px 4px', fontSize: 10.5, fontWeight: 700, letterSpacing: .4, textTransform: 'uppercase', color: '#9b9890', background: '#faf9f6', position: 'sticky', top: 0 }}>{SECTION_LABEL[sec]}</p>
+                                    {opts.map(t => (
+                                      <button
+                                        key={t.value} type="button"
+                                        onMouseDown={e => e.preventDefault()}
+                                        onClick={() => { pickUpType(t.value); setUpTypeMenuOpen(false); }}
+                                        onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')}
+                                        onMouseLeave={e => (e.currentTarget.style.background = t.value === upType ? '#f4f3ef' : 'transparent')}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: t.value === upType ? '#f4f3ef' : 'transparent', border: 'none', fontWeight: t.value === upType ? 700 : 400 }}
+                                      >
+                                        <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {t.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {upTypeMenuOpen && upTypeMatches.length === 0 && (
+                            <p className="note" style={{ marginTop: 4 }}>No document type matches &ldquo;{upTypeQuery.trim()}&rdquo;.</p>
+                          )}
                         </div>
+                        {/* The name this file is READ under. The type stays the
+                            catalogue key so slots and checklists keep matching;
+                            this says WHICH one it is — Vehicle NOC vs Property NOC. */}
+                        <div className="field" style={{ marginBottom: 0 }}>
+                          <label>Document name <span style={{ fontWeight: 400, color: '#9b9890' }}>· optional</span></label>
+                          <input
+                            className="input" data-testid="up-docname" value={upName} maxLength={255}
+                            placeholder={upSelected ? upSelected.label : 'e.g. Vehicle NOC'}
+                            onChange={e => setUpName(e.target.value)}
+                          />
+                        </div>
+                        </div>
+                        <p className="note" style={{ margin: '4px 0 14px' }}>
+                          {upName.trim()
+                            ? <>Filed as <strong>{upName.trim()}</strong>.</>
+                            : upSelected ? <>Leave the name blank to file it as &ldquo;{upSelected.label}&rdquo;.</> : 'One type, many papers — a Vehicle NOC and a Property NOC are both an NOC.'}
+                        </p>
+                        <button
+                          type="button" onClick={() => docFileRef.current?.click()}
+                          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 16, borderRadius: 10, cursor: 'pointer', background: upFile ? 'var(--jade-tint, #eef9f4)' : '#faf9f6', border: `1px ${upFile ? 'solid' : 'dashed'} ${upFile ? 'var(--jade-deep, #2e9f82)' : '#d9d5cd'}` }}
+                        >
+                          <UploadCloud size={16} style={{ color: upFile ? 'var(--jade-deep, #2e9f82)' : '#9b9890', flexShrink: 0 }} />
+                          <span style={{ minWidth: 0, flex: 1 }}>
+                            <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1a1916', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {upFile ? upFile.name : 'Choose a file'}
+                            </span>
+                            <span style={{ display: 'block', fontSize: 11.5, color: '#6b6860', marginTop: 1 }}>
+                              {upFile ? `${(upFile.size / 1024).toFixed(0)} KB · click to replace` : 'PDF, Word or image'}
+                            </span>
+                          </span>
+                        </button>
+                        {upShowExpiry && (
+                          <div className="field">
+                            <label>Expiry date <span style={{ fontWeight: 400, color: 'var(--brick)' }}>· required for {upSelected?.label}</span></label>
+                            <input type="date" className="input" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                          </div>
+                        )}
+                        {/* WHERE THE DOCUMENT WILL LIVE. Not a display preference:
+                            Customer KYC files it against the customer, so it also
+                            appears on their profile and on their other leases. */}
                         <div className="field">
+                          <label>File under</label>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            {SECTION_ORDER.map(sec => (
+                              <label key={sec} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer', border: `1px solid ${upSection === sec ? 'var(--jade-deep, #2e9f82)' : '#e8e6e0'}`, background: upSection === sec ? 'var(--jade-tint, #eef9f4)' : '#fff', borderRadius: 10, padding: '8px 10px' }}>
+                                <input
+                                  type="radio" name="v2DocSection" data-testid={`up-section-${sec}`} checked={upSection === sec} style={{ marginTop: 2 }}
+                                  onChange={() => { setUpSection(sec); setUpSectionTouched(true); }}
+                                />
+                                <span>
+                                  <span style={{ fontWeight: 600 }}>{SECTION_LABEL[sec]}</span>
+                                  <span style={{ display: 'block', fontSize: 11.5, color: '#6b6860', marginTop: 1 }}>
+                                    {sec === 'kyc'
+                                      ? `Files against ${contract.tenant.name ?? 'the customer'} — shows on their profile and on every lease of theirs.`
+                                      : 'Files against this lease only — on the customer profile it appears under History Documents.'}
+                                  </span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                          {upSelected && upSection !== upSelected.section && (
+                            <p className="note" style={{ marginTop: 6 }}>
+                              Filed as {SECTION_LABEL[upSection]} rather than the usual {SECTION_LABEL[upSelected.section]} for {upSelected.label}.
+                            </p>
+                          )}
+                        </div>
+                        <div className="field" style={{ marginBottom: 0 }}>
                           <label>Visibility</label>
                           <div style={{ display: 'flex', gap: 18 }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
@@ -4470,18 +4644,21 @@ function DetailsDrawer({
                             </label>
                           </div>
                         </div>
-                        {upShowExpiry && (
-                          <div className="field">
-                            <label>Expiry date (required for {upSelected?.label})</label>
-                            <input type="date" className="input" value={upExpiry} onChange={e => setUpExpiry(e.target.value)} />
+                        </div>
+                        <div style={{ padding: '12px 18px 16px', borderTop: '1px solid #f0eee9' }}>
+                          {upErr && <p className="note" style={{ color: 'var(--brick)', margin: '0 0 8px' }}>{upErr}</p>}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
+                              <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
+                            </button>
+                            <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
+                            {/* Says in one line what the two choices above add up to. */}
+                            {upFile && upType && (
+                              <span className="note" style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                                → {SECTION_LABEL[upSection]}
+                              </span>
+                            )}
                           </div>
-                        )}
-                        {upErr && <p className="note" style={{ color: 'var(--brick)' }}>{upErr}</p>}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                          <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
-                            <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
-                          </button>
-                          <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
                         </div>
                       </div>
                     </div>
@@ -4577,17 +4754,24 @@ function DetailsDrawer({
                         if (matches.length === 0) return null;
                         return (
                           <div style={{ position: 'absolute', zIndex: 30, marginTop: 4, width: '100%', maxHeight: 220, overflowY: 'auto', background: '#fff', border: '1px solid #e8e6e0', borderRadius: 10, boxShadow: '0 8px 22px rgba(0,0,0,0.10)' }}>
-                            {matches.map(d => (
-                              <button
-                                key={d} type="button"
-                                onMouseDown={e => e.preventDefault()}
-                                onClick={() => addReqDoc(d)}
-                                onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')}
-                                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}
-                              >
-                                <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {d}
-                              </button>
+                            {/* Same two groups as the upload picker — asking for a
+                                document and filing one land in the same place. */}
+                            {groupRequestNames(matches).map(g => (
+                              <div key={g.section}>
+                                <p style={{ margin: 0, padding: '6px 12px 4px', fontSize: 10.5, fontWeight: 700, letterSpacing: .4, textTransform: 'uppercase', color: '#9b9890', background: '#faf9f6', position: 'sticky', top: 0 }}>{g.label}</p>
+                                {g.names.map(d => (
+                                  <button
+                                    key={d} type="button"
+                                    onMouseDown={e => e.preventDefault()}
+                                    onClick={() => addReqDoc(d)}
+                                    onMouseEnter={e => (e.currentTarget.style.background = '#f0faf6')}
+                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 12px', fontSize: 13, color: '#1a1916', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                                  >
+                                    <FileText size={12} style={{ color: '#9b9890', flexShrink: 0 }} /> {d}
+                                  </button>
+                                ))}
+                              </div>
                             ))}
                           </div>
                         );
@@ -6654,18 +6838,31 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   };
 
   // ── Flow 5: upload KYC / contract document ──
-  // upload-url → PUT → POST /api/documents (mirrors old page uploadDocument payload:
-  // ownerType 'tenancy_contract', ownerId = contract.id, with category/visibility/expiry).
+  // upload-url → PUT → POST /api/documents.
+  //
+  // The RP's chosen SECTION decides the owner, because the section is where the
+  // document lives rather than how it is labelled:
+  //   kyc     → owner_type 'customer'         — travels with the customer, so it
+  //             shows on their profile and in every lease binder of theirs
+  //   tenancy → owner_type 'tenancy_contract' — this lease only
+  // Either way the contract detail API returns both owner scopes, so a KYC
+  // upload made here still appears on this page.
   const onUploadDoc = async (
     file: File,
-    meta: { key: string; label: string; category: string },
+    meta: { key: string; label: string; category: string; section: DocSection },
     visibleToTenant: boolean,
     expiryDate: string,
   ) => {
+    const asKyc = meta.section === 'kyc';
+    if (asKyc && !contract.tenant.id) {
+      throw new Error('This contract has no linked customer, so the document cannot be filed as customer KYC.');
+    }
+    const ownerType = asKyc ? 'customer' : 'tenancy_contract';
+    const ownerId = asKyc ? contract.tenant.id! : contract.id;
     const docKey = `${meta.key}_${Date.now()}`;
     const urlRes = await fetch('/api/documents/upload-url', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: contract.id, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
+      body: JSON.stringify({ ownerType, ownerId, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
     });
     if (!urlRes.ok) {
       const b = await urlRes.json().catch(() => ({})) as { message?: string | string[] };
@@ -6676,7 +6873,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     const putRes = await fetch(target, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
     if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
     const docBody: Record<string, unknown> = {
-      ownerType: 'tenancy_contract', ownerId: contract.id, category: meta.category,
+      ownerType, ownerId, category: meta.category, section: meta.section,
       documentKey: docKey, displayName: meta.label, fileUrl,
       // s3Key lets the backend re-sign View URLs (private bucket)
       s3Key: fileKey,

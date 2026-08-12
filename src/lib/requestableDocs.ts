@@ -14,9 +14,13 @@
 import {
   DOC_CATALOGUE,
   REQUESTABLE_ENTRIES,
+  SECTION_LABEL,
+  SECTION_ORDER,
   acceptedNamesFor,
   docKeyForName,
   normDocName,
+  sectionForDocKey,
+  type DocSection,
 } from './documentCatalogue';
 
 /**
@@ -26,6 +30,30 @@ import {
  * when something genuinely isn't listed.
  */
 export const REQUESTABLE_DOCS: string[] = REQUESTABLE_ENTRIES.map(e => e.label);
+
+/**
+ * Which section a requested document will land in. Asking for a document and
+ * uploading one are the same act seen from two ends, so the request picker shows
+ * the same two groups the upload picker does.
+ *
+ * A genuinely off-catalogue custom name has no declared section and reads as
+ * tenancy paperwork — the binder files it under "Other documents", which is
+ * where an unrecognised name belongs rather than guessed into the customer's pack.
+ */
+export function sectionForRequestName(name: string): DocSection {
+  return sectionForDocKey(resolveRequestedDocKey(name) ?? '') ?? 'tenancy';
+}
+
+/**
+ * Split a list of requestable NAMES into the sections a picker renders, in
+ * reading order, dropping any section nothing matched. Presentation only — the
+ * backend mirror has no picker, so this has no counterpart there.
+ */
+export function groupRequestNames(names: string[]): { section: DocSection; label: string; names: string[] }[] {
+  return SECTION_ORDER
+    .map(section => ({ section, label: SECTION_LABEL[section], names: names.filter(n => sectionForRequestName(n) === section) }))
+    .filter(g => g.names.length > 0);
+}
 
 /**
  * RP-requested additional documents are stored as a JSON array of free-text

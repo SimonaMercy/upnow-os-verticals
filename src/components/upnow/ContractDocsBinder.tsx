@@ -26,6 +26,7 @@ import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { resolveDocSection } from '@/lib/documentCatalogue';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import { segRowsFromContract } from '@/lib/segregatedPlan';
 import ds from './ContractDocsBinder.module.css';
@@ -44,7 +45,14 @@ const ReceiptInline = dynamic(() => import('@/components/upnow/PaymentReceiptPdf
 });
 const FULL = 100000; // height so the inline canvas never hits its own scroll cap
 
-export interface BinderDoc { id: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string }
+export interface BinderDoc {
+  id: number; documentKey: string; displayName: string | null; fileUrl: string;
+  category?: string | null; ownerType?: string;
+  /** The RP's declared home for this document (`documents.section`, migration
+   *  0204). Null on every row filed before the choice existed — those fall back
+   *  to the catalogue default and then to the key matchers below. */
+  section?: string | null;
+}
 
 const KEY_ALIASES: Record<string, string[]> = {
   ejari_certificate: ['ejari', 'contract_registration', 'tenancy_contract_registration', 'ejari_registration'],
@@ -75,6 +83,12 @@ const isOccupant = (d: BinderDoc) => /occupant/.test(norm(d.documentKey)) || /oc
 // doc needs no such split: the signatory IS the primary person, whose EID and
 // passport are the plain `emirates_id` / `passport` keys.)
 const isPartner = (d: BinderDoc) => /(^|_)partner(_|$)/.test(norm(d.documentKey)) || /\bpartner\b/i.test(d.displayName || '');
+// A THIRD PARTY — neither the customer, nor a partner on their trade licence,
+// nor the authorised signatory: a co-signer, a sponsor, the party a sub-lease
+// runs through. Same reason as the partner split above: without this,
+// `third_party_emirates_id` matches isEid with no person prefix and takes the
+// customer's own Emirates ID slot, hiding one of the two.
+const isThirdParty = (d: BinderDoc) => /(^|_)third_party(_|$)/.test(norm(d.documentKey)) || /\bthird[- ]party\b/i.test(d.displayName || '');
 // Power-of-attorney papers identify the HOLDER, not the tenant — `poa_emirates_id`
 // would otherwise be matched as the tenant's own EID and take the signatory's slot.
 // They keep their own person prefix and render as their own small pack.
@@ -138,7 +152,8 @@ const personPrefix = (d: BinderDoc) =>
   : isPoa(d) ? 'poa:'
   : isGuarantor(d) ? 'guarantor:'
   : isDependant(d) ? 'dependant:'
-  : isPartner(d) ? 'partner:' : '';
+  : isPartner(d) ? 'partner:'
+  : isThirdParty(d) ? 'thirdparty:' : '';
 // The EID's three shapes each keep their OWN slot — front, back and the combined
 // e-copy are different documents, so dedupe only collapses true duplicates of the
 // same shape (the same scan stored against both the customer and this lease).
@@ -271,12 +286,40 @@ const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontW
 const chip: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: '#4a4742', cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto', lineHeight: 1.3 };
 const JUMP_OFFSET = 88;
 
-function SecurePreview({ url, caption, watermark }: { url: string; caption: string; watermark: string }) {
+function SecurePreview({ url, caption, watermark, action }: { url: string; caption: string; watermark: string; action?: React.ReactNode }) {
   return (
     <div style={cardCss}>
-      <div style={capCss}>{caption}</div>
+      <div style={{ ...capCss, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ minWidth: 0, flex: 1 }}>{caption}</span>
+        {action}
+      </div>
       <SecureDocCanvas fileUrl={url} isImage={isImageUrl(url)} caption={caption} watermark={watermark} />
     </div>
+  );
+}
+
+/**
+ * Re-file this document into the other section. Shown only on the authenticated
+ * RP/manager binder — the no-login landlord portal passes no handler, and the
+ * lessor has no business moving the landlord's filing around.
+ *
+ * The wording says what will HAPPEN, not what the document is: moving to
+ * Customer KYC re-owns the row to the customer, so it starts appearing on their
+ * profile and on their other leases.
+ */
+function RefileButton({ doc, to, onSetSection }: { doc: BinderDoc; to: 'kyc' | 'tenancy'; onSetSection: (doc: BinderDoc, next: 'kyc' | 'tenancy') => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button" disabled={busy}
+      title={to === 'kyc'
+        ? "File this against the customer — it will also show on their profile and on their other leases"
+        : 'File this against this lease only — it will leave the customer\'s KYC pack'}
+      onClick={async () => { setBusy(true); try { await onSetSection(doc, to); } finally { setBusy(false); } }}
+      style={{ flex: '0 0 auto', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: busy ? '#9b9890' : '#4a4742', cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+    >
+      {busy ? 'Moving…' : to === 'kyc' ? '⇄ Move to Customer KYC' : '⇄ Move to Tenancy'}
+    </button>
   );
 }
 
@@ -505,6 +548,11 @@ export interface ContractDocsBinderProps {
    *  is hidden (the tenancy contract is landlord/POA-only). */
   canLandlordSign?: boolean;
   onSign: (p: { signatureImage: string; signatoryName: string }) => Promise<void>;
+  /** Re-file a document into the other section (PATCH /documents/:id/section).
+   *  Omit on the no-login landlord portal — the lessor reads the pack, they do
+   *  not decide how the landlord files it. Provided → each stored document card
+   *  offers "Move to Customer KYC" / "Move to Tenancy". */
+  onSetSection?: (doc: BinderDoc, next: 'kyc' | 'tenancy') => Promise<void>;
 }
 
 type Slot =
@@ -514,7 +562,7 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, profileHref, homeHref, signatureCertificate, headerRight, onClose, signerName, signerDefaultName, signerOnBehalfOf, landlordSigned, canLandlordSign = true, onSign } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, profileHref, homeHref, signatureCertificate, headerRight, onClose, signerName, signerDefaultName, signerOnBehalfOf, landlordSigned, canLandlordSign = true, onSign, onSetSection } = props;
   const planRefNo = paymentRefs?.planRefNo ?? null;
   // Enrich the receipt contract so per-payment receipts print their real gapless
   // number and the plan number (see PaymentReceiptPdf).
@@ -523,14 +571,29 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // EVERY customer-KYC document belongs in the left "Tenant & KYC" pane, never in
   // the generic "Other documents" bucket: identity papers, the company's own
   // (trade licence, MOA — the corporate equivalent of an individual's Emirates ID),
-  // power-of-attorney papers and labour/establishment cards. Same membership as the
-  // customer's own tenant page (its KYC_KEY_RE), so the two surfaces agree on what
-  // "KYC" means. Documents with a slot of their own on the right — salary
-  // certificate, bank statement, marriage certificate — stay there.
+  // power-of-attorney papers and labour/establishment cards.
+  //
+  // The pane is the RP's OWN answer, in three steps (resolveDocSection):
+  //   1. `section` stored on the row — they said so when they filed it
+  //   2. the catalogue default for that document type
+  //   3. neither → the key matchers below
+  // Step 3 is not vestigial: ~1,200 of the 2,966 documents on file predate the
+  // choice AND carry keys no picker offers (`contract_agreement`, `poa_id`,
+  // `occupant_2_passport`, every `_2` second capture). Guessing a section for
+  // those would misfile documents nobody touched.
   const isCompanyTenant = !!(tenant.companyName || tenant.licenseNumber);
-  const isKyc = (d: BinderDoc) =>
-    isIdentity(d) || isLicense(d) || isMoa(d) || isPoa(d) || isLabourDoc(d) || isGuarantor(d)
-    || isDependant(d) || isSupporting(d);
+  const isKyc = (d: BinderDoc) => {
+    const declared = resolveDocSection(d);
+    if (declared) return declared === 'kyc';
+    // Historic rows. Same membership as the customer's own tenant page (its
+    // KYC_KEY_RE), so the two surfaces agree on what "KYC" means.
+    return isIdentity(d) || isLicense(d) || isMoa(d) || isPoa(d) || isLabourDoc(d) || isGuarantor(d)
+      || isDependant(d) || isSupporting(d);
+  };
+
+  // "Move to the other section" on each stored card. Authenticated surfaces only.
+  const refile = (d: BinderDoc, to: 'kyc' | 'tenancy') =>
+    onSetSection ? <RefileButton doc={d} to={to} onSetSection={onSetSection} /> : undefined;
 
   const all = documents.filter(d => !!d.fileUrl);
   const matchDocs = (key: string): BinderDoc[] => {
@@ -589,13 +652,14 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // papers backing it. Everything belonging to the person the lease is with is
   // read before the pane moves on to anybody else (landlord's call, 11 Aug 2026).
   const tenantCards: IdCard[] = idCardsFor(
-    identity.filter(d => !isPartner(d) && !isOtherPerson(d)),
+    identity.filter(d => !isPartner(d) && !isThirdParty(d) && !isOtherPerson(d)),
     { prefix: '', tenantPack: true, company: isCompanyTenant },
   );
   // Then the other parties to the tenancy — a partner on a company lease, the
   // power-of-attorney holder, a guarantor, and any loose dependant papers.
   const otherPeopleCards: IdCard[] = [
     ...idCardsFor(identity.filter(d => isPartner(d) && !isOtherPerson(d)), { prefix: 'p-', labelPrefix: 'Partner — ' }),
+    ...idCardsFor(identity.filter(d => isThirdParty(d) && !isOtherPerson(d)), { prefix: 'tp-', labelPrefix: 'Third party — ' }),
     ...pack(identity.filter(isPoa), 'poa-', poaLabel),
     ...pack(identity.filter(isGuarantor), 'gua-', packLabel),
     ...pack(identity.filter(isDependant), 'dep-', packLabel),
@@ -799,7 +863,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           {tenantCards.map(c => (
             <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
               {c.doc
-                ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
+                ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} action={refile(c.doc, 'tenancy')} />
                 : <MissingId label={c.label} href={profileHref} optional={c.optional} />}
             </div>
           ))}
@@ -812,7 +876,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
               <SectionTitle>Supporting documents</SectionTitle>
               {supportingCards.map(c => (
                 <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
-                  <SecurePreview url={c.doc!.fileUrl} caption={c.label} watermark={watermark} />
+                  <SecurePreview url={c.doc!.fileUrl} caption={c.label} watermark={watermark} action={refile(c.doc!, 'tenancy')} />
                 </div>
               ))}
             </>
@@ -822,7 +886,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           {otherPeopleCards.map(c => (
             <div key={c.key} id={`l-${c.key}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
               {c.doc
-                ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
+                ? <SecurePreview url={c.doc.fileUrl} caption={c.label} watermark={watermark} action={refile(c.doc, 'tenancy')} />
                 : <MissingId label={c.label} href={profileHref} optional={c.optional} />}
             </div>
           ))}
@@ -830,7 +894,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
             <div key={'occ' + g.n} id={`l-occ-${g.n}`} style={{ scrollMarginTop: JUMP_OFFSET }}>
               <SectionTitle>{occGroups.length > 1 ? g.label : 'Dependant'}</SectionTitle>
               {g.cards.map(c => (c.doc
-                ? <SecurePreview key={c.key} url={c.doc.fileUrl} caption={c.label} watermark={watermark} />
+                ? <SecurePreview key={c.key} url={c.doc.fileUrl} caption={c.label} watermark={watermark} action={refile(c.doc, 'tenancy')} />
                 : <MissingId key={c.key} label={c.label} href={profileHref} optional={c.optional} />))}
             </div>
           ))}
@@ -871,7 +935,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           {showLeftover && (
             <div id="r-other" style={{ scrollMarginTop: JUMP_OFFSET }}>
               {leftover.map(d => (
-                <SecurePreview key={'x' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} watermark={watermark} />
+                <SecurePreview key={'x' + d.id} url={d.fileUrl} caption={d.displayName ?? d.documentKey.replace(/_/g, ' ')} watermark={watermark} action={refile(d, 'kyc')} />
               ))}
             </div>
           )}
