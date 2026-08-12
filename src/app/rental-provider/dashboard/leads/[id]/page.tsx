@@ -37,6 +37,7 @@ import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
+import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
@@ -2068,9 +2069,14 @@ function PlanEditor({
   // changed on any row; rows are seeded from whatever the plan already carries so
   // re-editing never resets a choice.
   const defaultMethodFor = (slot: Slot): PaymentMethodKind =>
-    slot.kind === 'deposit' || slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)
+    slot.kind === 'deposit' || slot.kind === 'fee' || slot.kind === 'unit_charge' || (slot.kind === 'installment' && slot.index === 0)
       ? 'bank_transfer'
       : 'cheque';
+  // Rows the RP cannot edit here: they are DERIVED — VAT from the rent/fee
+  // amounts, the unit charges from the unit's own facilities — and the backend
+  // rebuilds both on every re-issue, so a change made on them would be dropped.
+  const isDerived = (slot: Slot): slot is Extract<Slot, { kind: 'vat' | 'unit_charge' }> =>
+    slot.kind === 'vat' || slot.kind === 'unit_charge';
   const methodOfItem = (pred: (it: PaymentPlanItem) => boolean): PaymentMethodKind | undefined =>
     plan.items.find(it => pred(it) && !!it.paymentMethod)?.paymentMethod as PaymentMethodKind | undefined;
   const [methods, setMethods] = useState<{
@@ -2171,6 +2177,38 @@ function PlanEditor({
     : [];
   const vatTotalFils = rentVatRows.reduce((s, r) => s + r.amountFils, 0) + feeVatFils;
 
+  // ── The unit's own RP-defined charges (sub-lease share + its VAT, service
+  // charge, …) ──────────────────────────────────────────────────────────────
+  // These are NOT editor fields: `issuePaymentPlan` re-derives them from the
+  // unit's facilities on every Update, so they are shown here read-only. Leaving
+  // them out entirely meant a sub-lease unit's largest line — AED 30,450 on a
+  // 145k shed — vanished the moment the RP opened the editor, and the schedule's
+  // total disagreed with the plan that was actually issued.
+  // Read from the plan being edited — the same snapshot the card above renders,
+  // so the two never disagree. (`costPreview` is only served while a lead has NO
+  // plan, which is never the case here, but it costs nothing as a fallback.)
+  //
+  // The sub-lease pass-throughs are a PERCENTAGE of the rent, declared only by
+  // their label, and the unit stores them computed off its Market Price — so they
+  // are re-derived here against the rent being typed, exactly as
+  // `buildCustomFeeItems` will re-derive them on save. Without this the editor
+  // quoted 20% of the ASKING rent while Update wrote 20% of the agreed one. Flat
+  // charges carry no percentage and are returned untouched.
+  const unitChargeRows: Row[] = recomputeSubleaseCharges(
+    (plan.customFees ?? lead.costPreview?.customFees ?? [])
+      .map(f => ({ description: f.label, amount: String(f.netFils / 100), vatFils: f.vatFils })),
+    effRent / 100,
+  )
+    .map((f, i) => ({
+      key: `unitfee-${i}`,
+      label: f.description,
+      amountFils: Math.round((parseFloat(f.amount) || 0) * 100) + f.vatFils,
+      dueDate: bundleDate,          // collected with the first cheque, like the fees
+      slot: { kind: 'unit_charge' as const },
+    }))
+    .filter(r => r.amountFils > 0);
+  const unitChargeTotalFils = unitChargeRows.reduce((s, r) => s + r.amountFils, 0);
+
   // The schedule, laid out as the four groups the customer is shown (Security
   // Deposit · Rental Installments · Management Fee · Third Party) rather than one
   // "Admin + Contract Registration + Commission + Installment 1" lump. Each line
@@ -2184,7 +2222,10 @@ function PlanEditor({
     | { kind: 'extra'; index: number }
     // VAT lines are DERIVED from the rent/fee amounts and their dates — there is
     // nothing to edit on them directly, so they carry no writable slot.
-    | { kind: 'vat' };
+    | { kind: 'vat' }
+    // Likewise the unit's RP-defined charges: they come from the unit, not from
+    // this form, and are rebuilt from it on save.
+    | { kind: 'unit_charge' };
   type Row = { key: string; label: string; amountFils: number; dueDate: string; slot: Slot };
   type Group = { key: SegKey; title: string; rows: Row[] };
 
@@ -2220,10 +2261,12 @@ function PlanEditor({
     {
       key: 'third_party' as const, title: 'Third Party',
       // Contract Registration first (a government fee collected in full), then
-      // the VAT the landlord collects for the FTA — same order the lease's
-      // Third Party section uses (see lib/segregatedPlan).
+      // the unit's own pass-through charges, then the VAT the landlord collects
+      // for the FTA — same order the lease's Third Party section uses and the
+      // same order the plan card above renders (see lib/segregatedPlan).
       rows: [
         ...(ejariFils > 0 ? [{ key: 'ejari', label: 'Contract Registration Fee', amountFils: ejariFils, dueDate: bundleDate, slot: { kind: 'fee' as const, fee: 'ejari' as const } }] : []),
+        ...unitChargeRows,
         ...rentVatRows,
         ...feeVatRows,
         ...extraRows,
@@ -2233,11 +2276,12 @@ function PlanEditor({
   const rowCount = groups.reduce((n, g) => n + g.rows.length, 0);
   const extraTotalFils = extraRows.reduce((s, r) => s + r.amountFils, 0);
   // Rent and fees are net here, so VAT is added once — as its own cheques above.
-  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils + vatTotalFils;
+  const totalFils = effRent + adminFils + ejariFils + commFils + depositFils + extraTotalFils + vatTotalFils + unitChargeTotalFils;
 
   const setRowDate = (slot: Slot, v: string) => {
-    // A VAT line follows the cheque it was split off — it has no date of its own.
-    if (slot.kind === 'vat') return;
+    // A VAT line follows the cheque it was split off — it has no date of its own,
+    // and a unit charge rides on the first cheque the same way.
+    if (isDerived(slot)) return;
     if (slot.kind === 'deposit') setDepositDate(v);
     // The fees ride on the first cheque, so their date IS the first instalment's.
     else if (slot.kind === 'fee' || (slot.kind === 'installment' && slot.index === 0)) setBundleDate(v);
@@ -2248,10 +2292,10 @@ function PlanEditor({
     (slot.kind === 'deposit' ? methods.deposit
       : slot.kind === 'fee' ? methods[slot.fee]
       : slot.kind === 'installment' ? methods.installments[slot.index]
-      : slot.kind === 'vat' ? undefined
+      : isDerived(slot) ? undefined
       : methods.extras[slot.index]) ?? defaultMethodFor(slot);
   const setRowMethod = (slot: Slot, v: PaymentMethodKind) => setMethods(prev => {
-    if (slot.kind === 'vat') return prev;
+    if (isDerived(slot)) return prev;
     if (slot.kind === 'deposit') return { ...prev, deposit: v };
     if (slot.kind === 'fee') return { ...prev, [slot.fee]: v };
     if (slot.kind === 'installment') {
@@ -2345,6 +2389,7 @@ function PlanEditor({
           <div className="subhead">Payment schedule ({rowCount}) · total {aed(totalFils)}</div>
           <p className="note" style={{ margin: '0 0 8px' }}>
             Grouped the way the customer sees it. Each line is its own payment: what is collected at signing goes by bank transfer, the later instalments are cheques — change any row.
+            {unitChargeRows.length > 0 && <> The unit&rsquo;s own charges are collected with the first cheque and come from the unit itself — edit them on the unit, not here.</>}
           </p>
           {groups.map(g => (
             <div key={g.key} style={{ marginBottom: 10 }}>
@@ -2357,11 +2402,17 @@ function PlanEditor({
                   <div key={row.key} className="schedrow">
                     <span className="sl">{row.label}</span>
                     <span className="sa">{row.amountFils > 0 ? aed(row.amountFils) : '—'}</span>
-                    <select className="qinput" style={{ width: 116 }} value={rowMethod(row.slot)}
+                    {/* Derived rows (VAT, the unit's own charges) are shown but not
+                        editable — they follow the cheque they were split off / the
+                        unit they come from, and an edit here would be discarded on
+                        save rather than stick. */}
+                    <select className="qinput" style={{ width: 116 }} value={rowMethod(row.slot)} disabled={isDerived(row.slot)}
+                      title={isDerived(row.slot) ? 'Collected with the first cheque — set on the unit, not here' : undefined}
                       onChange={e => setRowMethod(row.slot, e.target.value as PaymentMethodKind)}>
                       {PAYMENT_METHOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
-                    <input className="qinput sd" type="date" value={row.dueDate} onChange={e => setRowDate(row.slot, e.target.value)} />
+                    <input className="qinput sd" type="date" value={row.dueDate} disabled={isDerived(row.slot)}
+                      onChange={e => setRowDate(row.slot, e.target.value)} />
                   </div>
                 ))}
               </div>
