@@ -1779,6 +1779,7 @@ export default function SettingsPage() {
               ownerType="rental_provider"
               compact
               excludeKeys={POA_DOC_KEYS}
+              allowDownload
             />
           </div>
 
@@ -1850,8 +1851,9 @@ export default function SettingsPage() {
                     ownerType="rental_provider"
                     compact
                     onlyKeys={POA_DOC_KEYS}
+                    allowDownload
                   />
-                  <p className="text-[11px] text-[#9b9890] mt-2">The holder’s Emirates ID, Passport &amp; Visa are shared with their manager account once they’re invited and linked.</p>
+                  <p className="text-[11px] text-[#9b9890] mt-2">The holder’s Emirates ID, Passport &amp; Visa are shared with their manager account once they’re invited and linked. Each document can be downloaded — the POA pack is often needed off-platform (Ejari, the bank, a notary).</p>
                 </div>
               </div>
             )}

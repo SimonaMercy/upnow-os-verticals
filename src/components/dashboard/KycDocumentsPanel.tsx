@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { DownloadDocButton } from "@/components/upnow/DownloadDocButton";
 import { SecureDocCanvas } from "@/components/upnow/SecureDocCanvas";
 import { currentDocWatermark } from "@/lib/docViewer";
 import { useBackClose } from "@/lib/useSlideOver";
@@ -120,6 +121,18 @@ export interface KycDocumentsPanelProps {
   onlyKeys?: string[];
   /** Hide documents whose key is in this list (e.g. POA docs shown elsewhere). */
   excludeKeys?: string[];
+  /**
+   * Opt-in per-document "Download" (clean file, no watermark) on each row and
+   * inside the in-screen viewer. OFF by default: uploaded identity documents are
+   * view-only unless the surface explicitly allows saving them (see
+   * lib/downloadDoc.ts). Enabled on the landlord's OWN packs (settings → KYC
+   * Documents and the Power of Attorney card): these are their own trade
+   * licence, IDs and POA deed, which they have to hand to Ejari / the bank / a
+   * notary, so they can't live only behind a watermarked canvas. A customer's
+   * documents stay view-only. The backend still authorises every download
+   * (documents/:id/download → assertDocAccess).
+   */
+  allowDownload?: boolean;
 }
 
 // ─── Client-side requirements (mirrors backend document-requirements.ts) ──────
@@ -207,6 +220,7 @@ export function KycDocumentsPanel({
   compact = false,
   onlyKeys,
   excludeKeys,
+  allowDownload = false,
 }: KycDocumentsPanelProps) {
   // This panel serves three cases: an RP or SP recording expiry on their OWN compliance
   // docs (fine — they are the reviewer), and a customer uploading their own identity docs
@@ -231,8 +245,10 @@ export function KycDocumentsPanel({
   >({});
   // In-screen document viewer (replaces opening a new browser tab). Holds the
   // list of docs to render as a scrollable feed; null = closed.
+  // `id` is the documents-table id — present only for a doc already on file, and
+  // only used to offer the clean download when `allowDownload` is set.
   const [viewerDocs, setViewerDocs] = useState<
-    { name: string; url: string; mimeType: string }[] | null
+    { name: string; url: string; mimeType: string; id?: number | null }[] | null
   >(null);
   // Identity stamp captured when the viewer opens (stable while it's open).
   const [viewerWatermark, setViewerWatermark] = useState("");
@@ -511,6 +527,7 @@ export function KycDocumentsPanel({
         name: c.displayName,
         url: local?.url ?? c.fileUrl ?? "",
         mimeType: local?.mimeType ?? c.mimeType ?? "",
+        id: c.documentId,
       };
     })
     .filter((d) => d.url);
@@ -721,13 +738,22 @@ export function KycDocumentsPanel({
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, id: item.documentId }])
                           }
                           className="text-xs font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
                           style={{ color: "var(--color-primary)" }}
                         >
                           <Eye className="w-3.5 h-3.5" /> View
                         </button>
+                      )}
+                      {allowDownload && item.documentId != null && (
+                        <DownloadDocButton
+                          documentId={item.documentId}
+                          label="Download"
+                          title={`Download ${item.displayName}`}
+                          className="text-xs font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          style={{ color: "var(--color-primary)" }}
+                        />
                       )}
                       <button
                         type="button"
@@ -872,12 +898,12 @@ export function KycDocumentsPanel({
 
                   {/* Inline preview — opens the in-screen viewer, never a new tab. */}
                   {previewUrl && (
-                    <div className="mt-3">
+                    <div className="mt-3 flex items-center gap-3 flex-wrap">
                       {isImage ? (
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, id: item.documentId }])
                           }
                           className="block cursor-pointer"
                         >
@@ -897,7 +923,7 @@ export function KycDocumentsPanel({
                         <button
                           type="button"
                           onClick={() =>
-                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime }])
+                            setViewerDocs([{ name: item.displayName, url: previewUrl, mimeType: previewMime, id: item.documentId }])
                           }
                           className="inline-flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 cursor-pointer"
                           style={{ color: "var(--color-primary)" }}
@@ -905,6 +931,15 @@ export function KycDocumentsPanel({
                           <FileText className="w-3.5 h-3.5" />
                           View PDF
                         </button>
+                      )}
+                      {allowDownload && item.documentId != null && (
+                        <DownloadDocButton
+                          documentId={item.documentId}
+                          label="Download"
+                          title={`Download ${item.displayName}`}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 cursor-pointer"
+                          style={{ color: "var(--color-primary)" }}
+                        />
                       )}
                     </div>
                   )}
@@ -1046,10 +1081,21 @@ export function KycDocumentsPanel({
                 const isImg = d.mimeType.startsWith("image/");
                 return (
                   <div key={`${d.url}-${i}`}>
-                    {viewerDocs.length > 1 && (
-                      <p className="text-xs font-semibold mb-1.5" style={{ color: "var(--color-neutral-600)" }}>
-                        {d.name}
-                      </p>
+                    {(viewerDocs.length > 1 || (allowDownload && d.id != null)) && (
+                      <div className="flex items-center justify-between gap-3 mb-1.5">
+                        <p className="text-xs font-semibold truncate" style={{ color: "var(--color-neutral-600)" }}>
+                          {viewerDocs.length > 1 ? d.name : ""}
+                        </p>
+                        {allowDownload && d.id != null && (
+                          <DownloadDocButton
+                            documentId={d.id}
+                            label="Download"
+                            title={`Download ${d.name}`}
+                            className="text-xs font-semibold hover:underline shrink-0 cursor-pointer"
+                            style={{ color: "var(--color-primary)" }}
+                          />
+                        )}
+                      </div>
                     )}
                     <div className="rounded-xl border overflow-hidden bg-white" style={{ borderColor: "var(--color-base-200)" }}>
                       <SecureDocCanvas
