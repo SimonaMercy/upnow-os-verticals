@@ -143,13 +143,17 @@ export const COMMERCIAL_RENTAL_DOCS: DocReq[] = [
 ];
 
 /**
- * Industrial rental docs. The licensing pack (Trade License + Business /
- * Activity License) is MANDATORY for any industrial lease (same rationale as
- * commercial). Financial / history docs stay optional.
+ * Industrial rental docs. The Trade License is MANDATORY for any industrial
+ * lease (same rationale as commercial). The Business / Activity License is
+ * OPTIONAL — plenty of industrial tenants operate entirely under the activities
+ * already printed on their trade licence and have no separate activity permit
+ * to give, so blocking the whole Documents step on it stranded them. It stays
+ * on the checklist and is still collected when it exists; admin can chase it
+ * ad hoc via the request flow. Financial / history docs stay optional.
  */
 export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
   { key: 'trade_license',     label: 'Trade License',               category: 'license', required: true,  hint: 'Valid UAE trade license' },
-  { key: 'business_license',  label: 'Business / Activity License', category: 'license', required: true,  hint: 'License specific to warehouse / industrial activity' },
+  { key: 'business_license',  label: 'Business / Activity License', category: 'license', required: false, hint: 'License specific to warehouse / industrial activity (optional)' },
 ];
 
 /**
@@ -171,8 +175,11 @@ export const CONTRACT_DOCS: DocReq[] = [
 
 /** Keys that become REQUIRED for a company tenant on a commercial/industrial
  *  lease (the company's legal/licensing pack the Ejari registration needs).
- *  MOA is intentionally excluded — it's collected when available but optional. */
-const COMPANY_REQUIRED_KEYS = ['trade_license', 'business_license'];
+ *  MOA is intentionally excluded — it's collected when available but optional,
+ *  and so is the Business / Activity License: a company tenant must not be
+ *  promoted back to mandatory on a document the base pack deliberately leaves
+ *  optional (see INDUSTRIAL_RENTAL_DOCS). */
+const COMPANY_REQUIRED_KEYS = ['trade_license'];
 
 export function getRentalSectionDocs(
   unitType: string | null | undefined,
@@ -181,15 +188,27 @@ export function getRentalSectionDocs(
   const t = unitType ?? '';
   const isCommercial = COMMERCIAL_TYPES.includes(t);
   const isIndustrial = INDUSTRIAL_TYPES.includes(t);
+  // Nothing the identity pack already asks for is asked again here. The two
+  // lists render as adjacent sections on the customer's Documents step, so a
+  // key carried by both showed one physical document as two upload slots under
+  // two labels: a COMPANY tenant was asked for `trade_license` twice on a
+  // commercial or industrial unit (COMPANY_KYC_DOCS + the licensing pack), and
+  // for `moa` twice on a commercial one ("MOA / Establishment Card" vs
+  // "MOA / MOM"). First-wins on the identity pack, the same precedence
+  // dedupeByKey applies, so the rendered checklist and the required-doc count
+  // agree instead of contradicting each other.
+  const kycKeys = new Set(getKycDocs(entityType).map(d => d.key));
+  const notInKyc = (d: DocReq) => !kycKeys.has(d.key);
+
   // A company renting a RESIDENTIAL unit (staff accommodation, a director's
   // apartment) is still a company: asking it for an employment letter or a
   // marriage certificate is nonsense. It gets the company supporting pack.
   if (entityType === 'company' && !isCommercial && !isIndustrial) {
-    return COMPANY_SUPPORTING_DOCS;
+    return COMPANY_SUPPORTING_DOCS.filter(notInKyc);
   }
-  const base = isCommercial ? COMMERCIAL_RENTAL_DOCS
+  const base = (isCommercial ? COMMERCIAL_RENTAL_DOCS
     : isIndustrial ? INDUSTRIAL_RENTAL_DOCS
-    : RESIDENTIAL_RENTAL_DOCS;
+    : RESIDENTIAL_RENTAL_DOCS).filter(notInKyc);
 
   // A company renting a commercial/industrial space must provide its licensing
   // pack — promote those rows to required (mirrors the backend CUSTOMER_COMPANY
@@ -263,7 +282,9 @@ export function deriveOccupantCount(docKeys: Iterable<string>): number {
  *
  * - Residential: Emirates ID + Passport
  * - Commercial:  Trade License
- * - Industrial:  Trade License + Business License
+ * - Industrial:  Trade License, plus an optional Business / Activity License
+ *   slot — offered because a renewing industrial tenant who HAS one should be
+ *   able to refresh it, but never blocking (see INDUSTRIAL_RENTAL_DOCS).
  */
 export function getRenewalRequiredDocs(unitType: string | null | undefined): DocReq[] {
   const t = unitType ?? '';
@@ -274,8 +295,8 @@ export function getRenewalRequiredDocs(unitType: string | null | undefined): Doc
   }
   if (INDUSTRIAL_TYPES.includes(t)) {
     return [
-      { key: 'trade_license',    label: 'Trade License',               category: 'license', required: true, hint: 'Current valid UAE trade license' },
-      { key: 'business_license', label: 'Business / Activity License', category: 'license', required: true, hint: 'License specific to warehouse / industrial activity' },
+      { key: 'trade_license',    label: 'Trade License',               category: 'license', required: true,  hint: 'Current valid UAE trade license' },
+      { key: 'business_license', label: 'Business / Activity License', category: 'license', required: false, hint: 'License specific to warehouse / industrial activity (optional)' },
     ];
   }
   // Residential default — renewal needs fresh copies of the Emirates ID
