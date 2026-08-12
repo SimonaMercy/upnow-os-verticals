@@ -158,7 +158,6 @@ const NAV: Record<UserRole, NavItem[]> = {
     // the separate "Platform Pulse" entry would be a second door to one room.
     { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
     { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, hidden: true },
     { section: 'Users' },
     { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
     { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
@@ -171,6 +170,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
     { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
     { section: 'Service Provider' },
+    // Dispatch is the daily operational surface for the SP business — the
+    // needs-assignment queue and the live job board — so it leads the section
+    // ahead of the configuration surfaces. It was built but left hidden, which
+    // meant the only way in was typing the URL.
+    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, match: ['/dashboard/admin/operations'] },
     { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
     { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
     // Reviews, Payouts and Disputes are SP-business surfaces, not general admin
@@ -193,7 +197,6 @@ const NAV: Record<UserRole, NavItem[]> = {
     // the separate "Platform Pulse" entry would be a second door to one room.
     { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
     { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, hidden: true },
     { section: 'Users' },
     { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
     { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
@@ -206,6 +209,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
     { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
     { section: 'Service Provider' },
+    // Dispatch is the daily operational surface for the SP business — the
+    // needs-assignment queue and the live job board — so it leads the section
+    // ahead of the configuration surfaces. It was built but left hidden, which
+    // meant the only way in was typing the URL.
+    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, match: ['/dashboard/admin/operations'] },
     { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
     { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
     // Reviews, Payouts and Disputes are SP-business surfaces, not general admin

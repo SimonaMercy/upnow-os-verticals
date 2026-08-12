@@ -611,6 +611,10 @@ export function CoverageCard({ status, absorb, back, embedded }: CardProps) {
 export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { hideGapChips?: boolean }) {
   const [techs, setTechs] = useState<Tech[] | null>(null);
   const [services, setServices] = useState<SpService[]>([]);
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const t = status.cards.team;
 
   useEffect(() => {
@@ -619,6 +623,40 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
       .then((d) => setServices((Array.isArray(d) ? d : []) as SpService[]))
       .catch(() => {});
   }, []);
+
+  // A technician needs no login to be dispatchable — the roster row is what the
+  // matcher reads. Adding here (rather than only via invite, which creates the
+  // row on ACCEPT) is what makes this step completable during setup.
+  const addTechnician = async () => {
+    const name = newName.trim();
+    if (!name || addBusy) return;
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      absorb(await apiPost<JobReadyStatus>('/service-provider/technicians', {
+        name,
+        phone: newPhone.trim() || undefined,
+        isLeadCapable: true,
+      }));
+      setTechs(await apiGet<Tech[]>('/service-provider/technicians'));
+      setNewName('');
+      setNewPhone('');
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Could not add the technician.');
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const removeTechnician = async (tech: Tech) => {
+    setAddError(null);
+    try {
+      absorb(await apiDelete<JobReadyStatus>(`/service-provider/technicians/${tech.id}`));
+      setTechs((list) => list?.filter((x) => x.id !== tech.id) ?? null);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Could not remove the technician.');
+    }
+  };
 
   const byCategory = useMemo(() => {
     const m = new Map<string, SpService[]>();
@@ -681,6 +719,14 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
                   <Toggle on={tech.isLeadCapable} onChange={(v) => void patchLead(tech, v)} label={`${tech.name} lead`} />
                   <span className="text-[9.5px] font-bold tracking-wider" style={{ color: tech.isLeadCapable ? GREEN : '#A6B0A9' }}>LEAD</span>
                 </div>
+                <button
+                  onClick={() => void removeTechnician(tech)}
+                  aria-label={`Remove ${tech.name}`}
+                  title="Remove from team"
+                  className="rounded-[8px] p-1.5 transition-colors hover:bg-black/[.04]"
+                  style={{ color: '#A6B0A9' }}>
+                  <Trash2 size={15} />
+                </button>
               </div>
 
               {/* skills: category master chip + adopted services as sub-chips */}
@@ -732,6 +778,55 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
             </div>
           );
         })}
+      </div>
+
+      {/* Add a crew member — without this the step is impossible to finish on a
+          brand-new account, since invited people only become technicians once
+          they accept. */}
+      <div className="mt-3 p-4" style={card({ border: techs.length === 0 ? '1.5px solid #9CCDB4' : CARD_BORDER })}>
+        <div className="flex items-center gap-2">
+          <Users size={15} style={{ color: GREEN }} />
+          <p className="text-[14px] font-bold" style={{ color: INK }}>
+            {techs.length === 0 ? 'Add your first technician' : 'Add another technician'}
+          </p>
+        </div>
+        <p className="mt-1 text-[12.5px]" style={{ color: MUTE }}>
+          They don&apos;t need an account to be sent jobs. You can invite them to their own
+          login later from Settings → Team.
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void addTechnician(); }}
+            placeholder="Full name"
+            aria-label="Technician full name"
+            className="min-w-[180px] flex-1 rounded-[10px] px-3 py-2.5 text-[14px] outline-none"
+            style={{ border: '1px solid #D7DCD7', color: INK }}
+          />
+          <input
+            value={newPhone}
+            onChange={(e) => setNewPhone(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void addTechnician(); }}
+            placeholder="Mobile (optional)"
+            aria-label="Technician mobile number"
+            className="min-w-[150px] flex-1 rounded-[10px] px-3 py-2.5 text-[14px] outline-none"
+            style={{ border: '1px solid #D7DCD7', color: INK }}
+          />
+          <button
+            onClick={() => void addTechnician()}
+            disabled={!newName.trim() || addBusy}
+            className="flex items-center justify-center gap-1.5 rounded-[10px] px-4 py-2.5 text-[13.5px] font-bold text-white disabled:opacity-50"
+            style={{ background: GREEN_DARK }}>
+            {addBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            Add
+          </button>
+        </div>
+
+        {addError && (
+          <p className="mt-2 text-[12.5px] font-medium" style={{ color: RED }}>{addError}</p>
+        )}
       </div>
 
       <p className="mt-3 text-[12.5px]" style={{ color: FAINT }}>

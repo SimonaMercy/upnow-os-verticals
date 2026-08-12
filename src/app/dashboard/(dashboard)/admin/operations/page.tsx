@@ -15,6 +15,14 @@ interface Booking {
   id: number; status: string; pricingMode: string | null; serviceName: string | null;
   scheduledAt: string; createdAt: string; totalAmount: number | string | null; serviceProviderId: number | null;
   tenant?: { user?: { name?: string | null } | null } | null;
+  // Enriched by the admin branch of GET /bookings so the board can show what is
+  // actually happening on a job, not just its status word.
+  category?: string | null;
+  addressText?: string | null;
+  emirate?: string | null;
+  technicianName?: string | null;
+  stageSince?: string | null;
+  escrowStatus?: string | null;
 }
 interface Provider { id: number; businessName: string; compliant: boolean; jobReady: boolean; technicians: { id: number; name: string }[] }
 
@@ -31,6 +39,19 @@ const ageLabel = (hours: number) => {
   return `${Math.floor(h / 24)}d`;
 };
 // A booking is "overdue" once its slot has passed and it isn't done or cancelled.
+/**
+ * How long this job has been sitting at its current stage.
+ *
+ * A job in motion moves through assigned -> on the way -> in progress; a stalled
+ * one just accumulates hours in one of them. Finished states are not "waiting",
+ * so they read as a dash rather than an ever-growing number.
+ */
+const stageAge = (b: Booking, now: number) => {
+  if (['completed', 'cancelled'].includes(b.status)) return '—';
+  if (!b.stageSince) return '—';
+  return ageLabel((now - new Date(b.stageSince).getTime()) / HOUR);
+};
+
 const isOverdue = (b: Booking, now: number) =>
   new Date(b.scheduledAt).getTime() < now && !['completed', 'cancelled'].includes(b.status);
 // Urgency of an unplaced booking: how long it has waited + how close the slot is.
@@ -162,7 +183,7 @@ export default function AdminOperationsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
             <thead>
               <tr style={{ color: FAINT, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                {['Booking', 'Customer', 'When', 'Status', 'Provider', ''].map((h) => (
+                {['Booking', 'Category', 'Customer', 'When', 'Status', 'In stage', 'Provider · Technician', 'Value', ''].map((h) => (
                   <th key={h} style={{ textAlign: 'left', padding: '10px 18px', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
@@ -174,11 +195,30 @@ export default function AdminOperationsPage() {
                 const canAssign = ['confirmed', 'assigned'].includes(b.status) || (b.status === 'booked' && b.pricingMode === 'quote');
                 return (
                   <tr key={b.id} style={{ borderTop: i === 0 ? BORDER : '1px solid #f6f6f4', color: INK }}>
-                    <td style={{ padding: '11px 18px' }}><span style={{ fontWeight: 600 }}>{b.serviceName ?? 'Service'}</span> <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span></td>
+                    <td style={{ padding: '11px 18px' }}>
+                      <span style={{ fontWeight: 600 }}>{b.serviceName ?? 'Service'}</span> <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span>
+                      {b.addressText && <div style={{ color: FAINT, fontSize: 11.5, marginTop: 2 }}>{b.emirate ? `${b.emirate} · ` : ''}{b.addressText}</div>}
+                    </td>
+                    <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>
+                      {b.category ?? '—'}
+                      {b.pricingMode === 'quote' && <span title="Quote-priced job" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#6d28d9', background: '#ede9fe', borderRadius: 999, padding: '2px 6px' }}>QUOTE</span>}
+                    </td>
                     <td style={{ padding: '11px 18px', color: MUTE }}>{b.tenant?.user?.name ?? '—'}</td>
                     <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>{fmtWhen(b.scheduledAt)}</td>
                     <td style={{ padding: '11px 18px', whiteSpace: 'nowrap' }}><span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: st.bg, color: st.fg }}>{st.label}</span>{isOverdue(b, now) && <span title="Slot passed, not completed" style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: '#991b1b', background: '#fee2e2', borderRadius: 999, padding: '2px 7px' }}>Overdue</span>}</td>
-                    <td style={{ padding: '11px 18px', color: pName ? INK : FAINT }}>{pName ?? 'Unassigned'}</td>
+                    {/* How long the job has sat at this stage — a job in motion moves
+                        through stages; a stalled one accumulates hours here. */}
+                    <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>{stageAge(b, now)}</td>
+                    <td style={{ padding: '11px 18px', color: pName ? INK : FAINT }}>
+                      {pName ?? 'Unassigned'}
+                      <div style={{ color: b.technicianName ? MUTE : FAINT, fontSize: 11.5, marginTop: 2 }}>
+                        {b.technicianName ?? (b.serviceProviderId ? 'No technician' : '—')}
+                      </div>
+                    </td>
+                    <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>
+                      {aed(b.totalAmount)}
+                      {b.escrowStatus && <div style={{ color: FAINT, fontSize: 11.5, marginTop: 2, textTransform: 'capitalize' }}>{b.escrowStatus}</div>}
+                    </td>
                     <td style={{ padding: '11px 18px', textAlign: 'right' }}>
                       {canAssign && <button onClick={() => openAssign(b.id)} style={{ background: 'none', border: BORDER, borderRadius: 8, padding: '5px 11px', fontSize: 12.5, fontWeight: 600, color: PRIMARY, cursor: 'pointer' }}>{b.serviceProviderId ? 'Reassign' : (b.status === 'booked' ? 'Place callout' : 'Assign')}</button>}
                     </td>
