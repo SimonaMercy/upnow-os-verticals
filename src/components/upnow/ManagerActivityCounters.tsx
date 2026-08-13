@@ -35,6 +35,9 @@ interface PersonRow { months: Array<number | null>; total: number; repeats: numb
 interface Row {
   key: string; label: string; side: string; source: 'table' | 'audit';
   note: string | null; live: boolean;
+  /** The names on this row are a guess at WHOSE QUEUE the work sits in — nobody
+   *  performed it. Outstanding work, never output. */
+  inferred: boolean;
   months: Array<number | null>;
   total: number; repeats: number | null;
   /** A full twelve-month row per person. null = the source records no actor,
@@ -52,11 +55,18 @@ interface Rec {
   title: string | null; person: string | null;
   /** WHAT was actioned — the document, cheque, inspection, settlement. */
   item: string | null;
+  /** The same list unjoined, each openable where it can be. A customer's KYC row
+   *  groups every document verified for them. */
+  items: Array<{ label: string; href: string | null }>;
   /** Actioned more than once inside this cell (three cheques on one lease). */
   times: number | null;
   /** WHEN the action happened — its own timestamp, not the record's. */
   at: string | null; firstAt: string | null;
+  /** WHO acted, in the source's own words — a signature names its signatory,
+   *  which on a POA is not the account holder. */
   by: string | null;
+  /** Whose login it was captured on, when that is somebody else on the team. */
+  byNote: string | null;
 }
 interface Payload {
   year: number;
@@ -74,11 +84,65 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const SIDE_ACCENT: Record<string, string> = {
   manager: '#2e9f82', customer: '#1f6f9c', landlord: '#8a6a1e',
 };
+// No `landlord` entry: the landlord is not a sheet of their own any more. Their
+// acts as a party to the lease sit on their personal sheet, because the account
+// and the party are one person and two sheets read as two people.
 const SIDE_BLURB: Record<string, string> = {
   manager: 'Work done by your managers, and by you on your own account.',
   customer: 'The tenant’s own acts. Never counted as the team’s output.',
-  landlord: 'Only what the landlord does as a party to the lease — their operational work is on the team sheet.',
 };
+
+/**
+ * The landlord's sheet, in PROCESS order.
+ *
+ * Their acts as a party are not a separate block appended at the end — that is
+ * how they came to look like a second person in the first place. They belong at
+ * the point in the journey where they happen: the lease is signed once the
+ * cheques are in and before it is registered, and the landlord answers a
+ * termination request before the move-out begins.
+ */
+const PARTY_AFTER: Record<string, string> = { cheques_collected: 'contract_signed_landlord' };
+const PARTY_BEFORE: Record<string, string> = { moveout_initiated: 'termination_responded' };
+/** A manager never signs the lease — that is the landlord or their POA. The
+ *  column is inspection counter-signatures, so on the landlord's own sheet it
+ *  reads as if they had done a manager's job. */
+const NOT_ON_LANDLORD_SHEET = new Set(['manager_sign']);
+
+/**
+ * The steps no person can be credited with — but only when at least one of them
+ * actually happened in the period on screen.
+ *
+ * An empty sheet headed "Not attributed to a person" is an accusation with no
+ * evidence: it reads as work going uncredited when the truthful answer is that
+ * none of those steps occurred. Returning [] hides the whole section, and the
+ * moment any of them does occur the full section comes back — every row, not
+ * just the ones with a figure, so the list of what CAN go uncredited stays
+ * readable.
+ */
+function unattributedRows(team: Row[]): Row[] {
+  const rows = team.filter((r) => r.people == null);
+  return rows.some((r) => r.total > 0) ? rows : [];
+}
+
+function landlordSheetRows(team: Row[], asParty: Row[]): Row[] {
+  const party = new Map(asParty.map((r) => [r.key, r]));
+  const placed = new Set<string>();
+  const out: Row[] = [];
+  const take = (key: string | undefined) => {
+    const r = key ? party.get(key) : undefined;
+    if (r && !placed.has(r.key)) { out.push(r); placed.add(r.key); }
+  };
+  for (const r of team) {
+    if (NOT_ON_LANDLORD_SHEET.has(r.key)) continue;
+    take(PARTY_BEFORE[r.key]);
+    out.push(r);
+    take(PARTY_AFTER[r.key]);
+  }
+  // A party act this map has never heard of still goes on the sheet: a new
+  // landlord counter must never disappear because nobody updated the ordering.
+  for (const r of asParty) if (!placed.has(r.key)) out.push(r);
+  return out;
+}
 export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: string; backHref: string }) {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,28 +190,47 @@ export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: stri
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
     const lines: string[] = [`Activity by side,${data.year}`];
+    // The caveat has to survive the export: a spreadsheet column headed with a
+    // manager's name and a bare number is exactly where outstanding work gets
+    // read as output.
+    const rowLabel = (r: Row) => (r.inferred ? `${r.label} (outstanding — not done)` : r.label);
     const team = data.sides.find((x) => x.side === 'manager');
     // One block per person, exactly as the page reads — a shared block would be
     // the "together" view this report exists to replace.
+    // The landlord's acts as a party ride on their own block, exactly as the page
+    // reads them — one person, one block. They are ROLE rows, so they export
+    // whole rather than narrowed to the landlord's user id.
+    const asParty = data.sides.find((x) => x.side === 'landlord')?.rows ?? [];
     for (const person of data.people) {
-      const rows = (team?.rows ?? []).filter((r) => r.people != null);
+      // Same list the page draws, in the same process order — an export that
+      // re-sorts is a second version of the report.
+      const rows = (person.kind === 'landlord'
+        ? landlordSheetRows(team?.rows ?? [], asParty)
+        : (team?.rows ?? []))
+        .filter((r) => r.side !== 'manager' || r.people != null);
       if (!rows.length) continue;
       lines.push('');
       lines.push([person.name, ...MONTHS, 'Year', 'Times recorded'].map(q).join(','));
       for (const r of rows) {
-        const pr = r.people![person.userId] ?? { months: Array(12).fill(0), total: 0, repeats: null };
-        lines.push([r.label, ...pr.months.map((m) => (r.live ? '' : (m ?? 0))), pr.total, pr.repeats ?? pr.total].map(q).join(','));
+        // A party act counts whoever held the pen, so it exports whole — never
+        // narrowed to this person, or a signature taken on a manager's login
+        // would vanish from the file.
+        const role = r.side !== 'manager';
+        const fig = role ? r : (r.people![person.userId] ?? { months: Array(12).fill(0), total: 0, repeats: null });
+        lines.push([role ? `${r.label} (as a party to the lease)` : rowLabel(r),
+          ...fig.months.map((m) => m ?? 0), fig.total, fig.repeats ?? fig.total].map(q).join(','));
       }
     }
     for (const [title, rows] of [
-      ['Not attributed to a person', (team?.rows ?? []).filter((r) => r.people == null)],
-      ...data.sides.filter((x) => x.side !== 'manager').map((x) => [x.title, x.rows] as const),
+      ['Not attributed to a person', unattributedRows(team?.rows ?? [])],
+      ...data.sides.filter((x) => x.side !== 'manager' && x.side !== 'landlord')
+        .map((x) => [x.title, x.rows] as const),
     ] as Array<readonly [string, Row[]]>) {
       if (!rows.length) continue;
       lines.push('');
       lines.push([title, ...MONTHS, 'Year', 'Times recorded'].map(q).join(','));
       for (const r of rows) {
-        lines.push([r.label, ...r.months.map((m) => (r.live ? '' : (m ?? 0))), r.total, r.repeats ?? r.total].map(q).join(','));
+        lines.push([rowLabel(r), ...r.months.map((m) => m ?? 0), r.total, r.repeats ?? r.total].map(q).join(','));
       }
     }
     const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' }));
@@ -223,7 +306,20 @@ export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: stri
         // are all still there; the ones with no actor recorded simply show a
         // dot in a person's column, and their real figure on the sheet below.
         const all = team?.rows ?? [];
-        const unattributed = all.filter((r) => r.people == null);
+        const unattributed = unattributedRows(all);
+        /**
+         * The landlord's acts AS A PARTY to the lease — signing it, answering a
+         * termination request. They used to be a sheet of their own headed "The
+         * landlord", sitting below a sheet headed with the landlord's name, which
+         * read as two different people. It is one person wearing two hats, so it
+         * is one sheet: the operational steps first, these last.
+         *
+         * They stay ROLE rows, never person-filtered — see `personFor` in Sheet.
+         * The landlord's slot on a lease can be filled by a manager holding the
+         * pen (one of the eight signatures was), and filtering to the landlord's
+         * user id would drop it from the report altogether.
+         */
+        const asParty = data.sides.find((x) => x.side === 'landlord')?.rows ?? [];
         return (
           <>
             {data.people.map((p) => (
@@ -231,10 +327,10 @@ export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: stri
                 key={p.userId}
                 title={p.name}
                 blurb={p.kind === 'landlord'
-                  ? 'The landlord’s own account — their operational work, kept separate from the managers’.'
+                  ? 'Their own account, read along the journey: the operational work they did themselves, and the acts they perform as a party to the lease, each at the step where it happens.'
                   : 'This manager’s own work. Nothing here is anybody else’s.'}
                 accent={p.kind === 'landlord' ? SIDE_ACCENT.landlord : SIDE_ACCENT.manager}
-                rows={all}
+                rows={p.kind === 'landlord' ? landlordSheetRows(all, asParty) : all}
                 person={p.userId}
                 year={data.year}
                 cutMonth={data.cutMonth}
@@ -255,7 +351,9 @@ export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: stri
                 onPick={setCell}
               />
             )}
-            {data.sides.filter((x) => x.side !== 'manager').map((sd) => (
+            {/* The landlord side is folded into the landlord's own sheet above —
+                it was never a second person. Only the customer remains. */}
+            {data.sides.filter((x) => x.side !== 'manager' && x.side !== 'landlord').map((sd) => (
               <Sheet
                 key={sd.side}
                 title={sd.title}
@@ -306,8 +404,8 @@ export function ManagerActivityCounters({ endpoint, backHref }: { endpoint: stri
 function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPick }: {
   title: string; blurb: string; accent: string;
   rows: Row[];
-  /** Whose sheet this is — null for the customer, the landlord-as-party, and
-   *  the unattributed steps. */
+  /** Whose sheet this is — null for the customer's. A person's sheet may still
+   *  carry ROLE rows (the landlord's acts as a party), which read whole. */
   person: number | null;
   year: number;
   /** Months before this are outside the count — greyed, not removed. */
@@ -323,19 +421,47 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
    * name — 45 leases pending registration read as Sherif's 45, and clicking it
    * returned nothing, because not one of those records is his.
    */
-  const unattributable = (r: Row) => person != null && !r.people;
+  /**
+   * Whether this row is read as THIS PERSON's, or whole.
+   *
+   * Operational steps are the person's — that is the whole point of a sheet per
+   * manager. A ROLE row is not: "signed as landlord" counts the acts done in the
+   * landlord's slot on the lease, and one of those eight was signed by a manager
+   * holding the pen. Narrowing it to the landlord's user id would silently drop
+   * that signature from the report.
+   */
+  const personFor = (r: Row) => (r.side === 'manager' ? person : null);
+  /**
+   * Shows as `·` — "this happened, but on nobody's sheet; its figure is below".
+   * `total > 0` is what makes that sentence true. A step that never happened is
+   * simply empty and reads `–` like any other empty cell, and pointing at a
+   * section that is now correctly hidden would be a dangling reference.
+   */
+  const unattributable = (r: Row) => personFor(r) != null && !r.people && r.total > 0;
   const ZERO = { months: Array(12).fill(null), total: 0, repeats: null };
-  /** This sheet's own figures — the person's row when it is a person's sheet. */
+  /** This sheet's own figures — the person's row when the row is theirs to own. */
   const mine = (r: Row): { months: Array<number | null>; total: number; repeats: number | null } => {
-    if (person == null) return r;
+    const who = personFor(r);
+    if (who == null) return r;
     if (!r.people) return ZERO;
-    return r.people[person] ?? ZERO;
+    return r.people[who] ?? ZERO;
   };
-  // A live counter (registration pending) is a snapshot of today, so it has no
-  // month column to sit in — it shows only against the year row.
-  const cellOf = (r: Row, m: number) => (r.live ? null : (mine(r).months[m] ?? 0));
+  // A live counter (registration pending) is a snapshot of TODAY, and the server
+  // buckets it into the month today falls in — so it reads like every other cell
+  // instead of leaving a dash in all twelve and the figure floating in the year
+  // column, which read as a broken row.
+  const cellOf = (r: Row, m: number) => mine(r).months[m] ?? 0;
   const isOn = (r: Row, m: number) =>
-    cell?.counter === r.key && cell?.month === m && cell?.person === person;
+    cell?.counter === r.key && cell?.month === m && cell?.person === personFor(r);
+  /**
+   * A role row sitting on somebody's personal sheet — the landlord's acts as a
+   * party, threaded into their operational work at the step where each happens.
+   *
+   * No rule down the table any more: these columns are interleaved, not a block
+   * on the end, and a divider would have to be drawn on both sides of each one.
+   * The badge on the column head carries the distinction instead.
+   */
+  const isRole = (r: Row) => person != null && r.side !== 'manager';
 
   return (
     <div style={{ marginBottom: 22 }}>
@@ -351,14 +477,34 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
               {rows.map((r) => (
                 <th key={r.key} title={r.note ?? undefined}
                   style={{ ...hcell, textAlign: 'right', minWidth: 104, verticalAlign: 'bottom',
+                    
                     color: /NOT CAPTURED/.test(r.note ?? '') ? '#8a6a1e' : FAINT }}>
                   {r.label}
+                  {/* The sheet holds two different kinds of work. Without this the
+                      landlord's signature column reads as another operational
+                      step they performed for the business. */}
+                  {isRole(r) && (
+                    <span title="Done as a party to the lease, not as an operator — and counted whoever held the pen, including a manager signing in the landlord's slot."
+                      style={{ display: 'block', marginTop: 3, font: `600 8px ${MONO}`, color: SIDE_ACCENT.landlord }}>
+                      as a party
+                    </span>
+                  )}
                   {r.source === 'audit' && (
                     <span title="From the activity log, which only begins 7 Jul 2026"
                       style={{ display: 'block', marginTop: 3, font: `600 8px ${MONO}`, color: '#8a6a1e' }}>audit</span>
                   )}
                   {r.live && (
-                    <span style={{ display: 'block', marginTop: 3, font: `600 8px ${MONO}`, color: DIM }}>live</span>
+                    <span title="A snapshot of today, not a month's work — the figure sits in the month we are in and repeats as the year total."
+                      style={{ display: 'block', marginTop: 3, font: `600 8px ${MONO}`, color: DIM }}>live · today</span>
+                  )}
+                  {/* Outstanding work carrying a guessed name. Marked on the
+                      column itself, so it is impossible to read the number under
+                      a manager as something they did. */}
+                  {r.inferred && (
+                    <span title="Work OUTSTANDING, not work done. Nobody is recorded as having performed this step — the figure is filed under the manager whose queue it sits in, the same way the Operations board names a handler."
+                      style={{ display: 'block', marginTop: 3, font: `600 8px ${MONO}`, color: '#8a6a1e' }}>
+                      inferred · not done
+                    </span>
                   )}
                 </th>
               ))}
@@ -380,15 +526,20 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
                   return (
                     <td key={r.key} style={{ padding: 0, textAlign: 'right' }}>
                       <button
-                        onClick={() => v && onPick({ counter: r.key, month: i + 1, person })}
+                        onClick={() => v && onPick({ counter: r.key, month: i + 1, person: personFor(r) })}
                         disabled={!v}
                         title={unattributable(r)
                           ? 'No actor is recorded for this step — its figure is on the “not attributed” sheet below.'
-                          : undefined}
+                          : r.inferred
+                            ? 'Outstanding work, not work done — this manager is who it falls to, not who did it.'
+                            : undefined}
                         style={{ width: '100%', border: 0, borderRadius: 0,
                           background: isOn(r, i + 1) ? '#f0faf6' : 'transparent',
                           cursor: v ? 'pointer' : 'default', padding: '7px 12px', textAlign: 'right',
-                          font: `${v ? 600 : 500} 12px ${MONO}`, color: v ? INK : '#d5d1c9',
+                          font: `${v ? 600 : 500} 12px ${MONO}`,
+                          // Amber, never the ink the performed steps use: a
+                          // guessed-owner figure must not read like output.
+                          color: v ? (r.inferred ? '#8a6a1e' : INK) : '#d5d1c9',
                           textDecoration: v ? 'underline dotted' : 'none', textUnderlineOffset: 3 }}>
                         {v || (unattributable(r) ? '·' : '–')}
                       </button>
@@ -410,7 +561,7 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
                 return (
                   <td key={r.key} style={{ padding: 0, textAlign: 'right' }}>
                     <button
-                      onClick={() => m.total && !na && onPick({ counter: r.key, month: 0, person })}
+                      onClick={() => m.total && !na && onPick({ counter: r.key, month: 0, person: personFor(r) })}
                       disabled={!m.total || na}
                       title={na
                         ? 'No actor is recorded for this step — its figure is on the “not attributed” sheet below.'
@@ -418,7 +569,8 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
                       style={{ width: '100%', border: 0, borderRadius: 0,
                         background: isOn(r, 0) ? '#e6f5ef' : 'transparent',
                         cursor: m.total ? 'pointer' : 'default', padding: '9px 12px', textAlign: 'right',
-                        font: `700 13px ${MONO}`, color: m.total ? (uncaptured ? '#8a6a1e' : INK) : '#c9c5bd',
+                        font: `700 13px ${MONO}`,
+                        color: m.total ? (uncaptured || r.inferred ? '#8a6a1e' : INK) : '#c9c5bd',
                         textDecoration: m.total ? 'underline dotted' : 'none', textUnderlineOffset: 3 }}>
                       {na ? '·' : (m.total || (uncaptured ? 'n/c' : '–'))}
                       {/* Distinct records is the figure; the repeat is a footnote,
@@ -440,12 +592,79 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
   );
 }
 
+/* ── what was actioned on one record: one line, or a list behind a count ──── */
+/** What the grouped items ARE, so the collapsed line names them instead of
+ *  saying "5 items" and making the reader open it to find out. */
+const ITEM_NOUN: Record<string, [string, string]> = {
+  tenant: ['document', 'documents'],
+  document: ['document', 'documents'],
+  payment: ['payment', 'payments'],
+  viewing: ['viewing', 'viewings'],
+};
+function ItemCell({ rec, open, onToggle }: { rec: Rec; open: boolean; onToggle: () => void }) {
+  const items = rec.items ?? [];
+  const badge = rec.times != null && (
+    <span style={{ marginLeft: 7, font: `600 9.5px ${MONO}`, color: '#8a6a1e',
+      background: '#fdf3dd', padding: '2px 5px' }}>×{rec.times}</span>
+  );
+  // Nothing to collapse: a single item reads better as itself than as "1 document".
+  if (items.length <= 1) {
+    const only = items[0];
+    if (!only) return <span style={{ color: FAINT }}>—</span>;
+    return (
+      <>
+        {only.href
+          ? <a href={only.href} target="_blank" rel="noreferrer"
+              style={{ color: DEEP, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{only.label}</a>
+          : only.label}
+        {badge}
+      </>
+    );
+  }
+  const [one, many] = ITEM_NOUN[rec.kind] ?? ['item', 'items'];
+  return (
+    <>
+      <button onClick={onToggle}
+        style={{ border: 0, background: 'transparent', padding: 0, cursor: 'pointer',
+          font: `600 12.5px ${SANS}`, color: DEEP, textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>
+        {items.length} {items.length === 1 ? one : many} {open ? '▾' : '▸'}
+      </button>
+      {badge}
+      {open && (
+        <ul style={{ margin: '7px 0 0', padding: 0, listStyle: 'none',
+          borderLeft: `2px solid ${LINE}`, paddingLeft: 10 }}>
+          {items.map((it, i) => (
+            <li key={`${it.href ?? ''}-${it.label}-${i}`} style={{ margin: '0 0 3px', fontSize: 12 }}>
+              {/* The file opens same-origin and inline, so it renders in a tab. */}
+              {it.href
+                ? <a href={it.href} target="_blank" rel="noreferrer"
+                    style={{ color: DEEP, textDecoration: 'none',
+                      display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                    {it.label} <ExternalLink size={10} />
+                  </a>
+                : <span style={{ color: MID }}>{it.label}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
 /* ── the records behind one cell — that step only ─────────────────────────── */
 function Drill({ label, who, month, year, records, loading, onClose }: {
   label: string; who: string | null; month: number; year: number;
   records: Rec[]; loading: boolean; onClose: () => void;
 }) {
   const when = month === 0 ? String(year) : `${MONTHS[month - 1]} ${year}`;
+  /** Which rows have their item list expanded. Collapsed is the default: the
+   *  table has to stay scannable at ten rows. */
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const toggle = (id: number) => setOpen((s) => {
+    const n = new Set(s);
+    if (!n.delete(id)) n.add(id);
+    return n;
+  });
   return (
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(26,25,22,.35)',
@@ -479,13 +698,12 @@ function Drill({ label, who, month, year, records, loading, onClose }: {
                   <tr key={`${r.kind}-${r.id}`} style={{ borderTop: '1px solid #f4f2ee' }}>
                     <td style={{ padding: '9px 14px', font: `600 11.5px ${MONO}`, whiteSpace: 'nowrap' }}>{r.ref}</td>
                     {/* The actioned item — without it the row names a lease and
-                        leaves the reader to guess what happened to it. */}
-                    <td style={{ padding: '9px 14px', fontSize: 12.5 }}>
-                      {r.item ?? <span style={{ color: FAINT }}>—</span>}
-                      {r.times != null && (
-                        <span style={{ marginLeft: 7, font: `600 9.5px ${MONO}`, color: '#8a6a1e',
-                          background: '#fdf3dd', padding: '2px 5px' }}>×{r.times}</span>
-                      )}
+                        leaves the reader to guess what happened to it. One item
+                        reads inline; a whole KYC pack collapses behind its count,
+                        because eight file names run together turned every row
+                        into a column-height paragraph. */}
+                    <td style={{ padding: '9px 14px', fontSize: 12.5, minWidth: 190 }}>
+                      <ItemCell rec={r} open={open.has(r.id)} onToggle={() => toggle(r.id)} />
                     </td>
                     <td style={{ padding: '9px 14px', font: `500 11px ${MONO}`, color: DIM, whiteSpace: 'nowrap' }}>
                       {r.at ? new Date(r.at).toLocaleString('en-GB', {
@@ -501,10 +719,18 @@ function Drill({ label, who, month, year, records, loading, onClose }: {
                     <td style={{ padding: '9px 14px', fontSize: 12.5, color: MID }}>
                       {[r.title, r.person].filter(Boolean).join(' · ') || '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', font: `500 11px ${MONO}`, color: r.by ? DEEP : FAINT }}>
+                    <td style={{ padding: '9px 14px', font: `500 11px ${MONO}`, color: r.by ? DEEP : FAINT,
+                      minWidth: 180, maxWidth: 280 }}>
                       {/* Blank where the source carries the date but not the
                           person — never guessed. */}
                       {r.by ?? 'not recorded'}
+                      {/* The signatory is the answer; the login it was taken on
+                          is evidence about it, so it sits under, not instead. */}
+                      {r.byNote && (
+                        <span style={{ display: 'block', marginTop: 2, font: `500 9.5px ${MONO}`, color: FAINT }}>
+                          {r.byNote}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '9px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {/* A document opens the FILE; a lease or lead opens its page. */}
