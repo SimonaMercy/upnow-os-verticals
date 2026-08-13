@@ -13,7 +13,11 @@
  *   - Quotes      quote_after_callout bookings whose quote is not yet approved
  *                 (ServiceQuote: draft → submitted; approved re-enters Requests)
  *   - Active Jobs en_route / in_progress           (work happening today)
- *   - Closure     completed / escrow_release / dispute (sign-off → payout)
+ *   - Closure     completed / dispute (sign-off → payout). "Payment released"
+ *                 is an ESCROW fact: nothing ever writes booking status
+ *                 escrow_release (unused enum member) — the booking stays
+ *                 completed and the lane reads escrowStatus === 'released'
+ *                 from the booking's escrow row instead (SP-255).
  *   - cancelled bookings are excluded (they live in the Jobs register).
  *
  * Data: GET bookingsPath (default /bookings). The booking engine ships in
@@ -54,6 +58,8 @@ export interface SpBooking {
   category?: string | null;
   technician?: { name?: string | null } | null;
   quote?: { status?: string | null } | null;
+  /** Status of the booking's escrow row ('held' | 'released' | 'refunded' | …). */
+  escrowStatus?: string | null;
 }
 
 interface Props {
@@ -92,6 +98,9 @@ const ACTIVE_STAGES: StageDef[] = [
   { key: 'en_route',    title: 'En route',    match: ['en_route'] },
   { key: 'in_progress', title: 'In progress', match: ['in_progress'] },
 ];
+// Closure lanes partition on TWO sources: Dispute reads the booking status;
+// Payment released reads the escrow row (stageOf handles this — the match
+// arrays here only cover the defensive booking-status fallback).
 const CLOSURE_STAGES: StageDef[] = [
   { key: 'completed', title: 'Completion & sign-off', match: ['completed'] },
   { key: 'released',  title: 'Payment released',      match: ['escrow_release'] },
@@ -175,6 +184,11 @@ function stageOf(b: SpBooking, tab: TabKey): string {
     return stages.find(s => s.match.includes(q))?.key ?? 'callout';
   }
   const st = norm(b.status);
+  if (tab === 'closure') {
+    if (st === 'dispute') return 'dispute';
+    if (st === 'escrow_release' || norm(b.escrowStatus) === 'released') return 'released';
+    return 'completed';
+  }
   return stages.find(s => s.match.includes(st))?.key ?? stages[0].key;
 }
 
