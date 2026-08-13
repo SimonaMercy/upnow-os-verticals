@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
   ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, Info, Tag,
   MousePointerClick, FileText, ExternalLink, Inbox,
-  Star, Mail, Phone, ShieldCheck, Layers, Zap, Store,
+  Star, Mail, Phone, ShieldCheck, Layers, Zap, Store, Users,
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { apiGet, apiPatch } from '@/lib/api';
@@ -143,6 +143,49 @@ interface SpContext {
   checklist: SpChecklistItem[];
   completionScore: number;
   services: SpContextService[];
+  /** Evidence behind the Job-ready chip (SP-247) — GET /admin/kyc/service-providers/:id. */
+  operationalProfile?: OperationalProfile | null;
+}
+
+interface OperationalProfile {
+  jobReady: boolean;
+  jobReadyAt: string | null;
+  cards: {
+    coverage: { complete: boolean; zoneCount: number };
+    team: {
+      complete: boolean;
+      adoptedCategories: string[];
+      coveredCategories: string[];
+      missingCategories: string[];
+      uncoveredServices: { id: number; name: string; category: string }[];
+      activeTechnicians: number;
+      leadCapable: number;
+    };
+    fleet: { complete: boolean; vehicles: number; effectiveMaxConcurrentJobs: number };
+    hours: { complete: boolean; daysConfigured: number };
+    rules: {
+      complete: boolean;
+      acceptedAt: string | null;
+      minNoticeHours: number;
+      dispatchLogic: string | null;
+      emergencyResponse: boolean;
+    };
+  };
+  team: {
+    id: number;
+    name: string;
+    status: string;
+    isLeadCapable: boolean;
+    hasPhoto: boolean;
+    complianceStatus: string | null;
+    specialization: string | null;
+    categorySkills: string[];
+    serviceSkills: string[];
+  }[];
+  coverageZones: string[];
+  fleet: { type: string; label: string | null }[];
+  weeklyHours: { weekday: number; opensAt: string; closesAt: string }[];
+  timeOff: { startsOn: string; endsOn: string; reason: string | null }[];
 }
 
 // One row per provider in the grouped moderation queue — GET /admin/service-listing-providers
@@ -184,6 +227,9 @@ function serviceCategoryLabel(id: string): string {
     ?? id.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+// sp_working_hours.weekday: 0 = Sunday … 6 = Saturday (mirrors SpJobReady).
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 // All / Pending / Approved / Rejected — the backend maps these buckets onto each
 // side's underlying status values.
 const STATUS_FILTERS: { id: string; label: string }[] = [
@@ -213,6 +259,9 @@ const statusCfg: Record<string, { label: string; className: string; Icon: React.
   approved:  { label: 'Approved',   className: 'bg-emerald-100 text-emerald-700', Icon: CheckCircle2 },
   rejected:  { label: 'Rejected',   className: 'bg-red-100 text-red-700',         Icon: XCircle },
   expired:   { label: 'Expired',    className: 'bg-orange-100 text-orange-700',   Icon: XCircle },
+  // Auto-set when the provider loses their last qualified lead technician for
+  // the service (SP-249); Approve is the admin's restore action.
+  suspended_no_qualified_technician: { label: 'Suspended — no lead', className: 'bg-amber-100 text-amber-700', Icon: AlertCircle },
 };
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
@@ -717,6 +766,10 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
   const pendingCount = ctx.services.filter((s) => s.listingStatus === 'pending').length;
   const rejectedCount = ctx.services.filter((s) => s.listingStatus === 'rejected').length;
   const requiredMissing = ctx.checklist.filter((c) => c.required && !c.uploaded).length;
+  const op = ctx.operationalProfile ?? null;
+  // Adopted services with no lead-capable technician skilled in that EXACT
+  // service — flagged (not blocked) on the approve row (SP-247).
+  const uncoveredIds = new Set((op?.cards.team.uncoveredServices ?? []).map((u) => u.id));
 
   return (
     <div className="flex flex-col h-full">
@@ -806,6 +859,110 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
           </div>
         </Section>
 
+        {/* Operational profile — the evidence behind the Job-ready chip (SP-247).
+            Read-only: corrections happen on the provider's own Setup Guide. */}
+        <Section icon={Users} title="Operational profile">
+          {!op ? (
+            <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>No operational profile yet — the provider has not started the Get Job-Ready setup.</p>
+          ) : (
+            <div className="space-y-3">
+              {/* Team + per-technician skills */}
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                  Team · {op.cards.team.activeTechnicians} active · {op.cards.team.leadCapable} lead-capable
+                </p>
+                {op.team.length === 0 ? (
+                  <p className="text-xs" style={{ color: '#dc2626' }}>No technicians on the roster.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {op.team.map((t) => (
+                      <div key={t.id} className="rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-800)' }}>{t.name}</span>
+                          {t.isLeadCapable && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#f0fdf4', color: '#16a34a' }}>Lead</span>}
+                          {t.status !== 'active' && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{t.status}</span>}
+                          {t.complianceStatus && t.complianceStatus !== 'compliant' && (
+                            <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#fef9eb', color: '#b45309' }}>{t.complianceStatus.replace(/_/g, ' ')}</span>
+                          )}
+                          {!t.hasPhoto && <span className="text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>no photo</span>}
+                        </div>
+                        {(t.serviceSkills.length > 0 || t.categorySkills.length > 0) && (
+                          <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
+                            {t.serviceSkills.length > 0 ? t.serviceSkills.join(' · ') : t.categorySkills.map(serviceCategoryLabel).join(' · ')}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Coverage — the named communities, not the emirates CSV */}
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                  Coverage · {op.cards.coverage.zoneCount} zone{op.cards.coverage.zoneCount === 1 ? '' : 's'}
+                </p>
+                {op.coverageZones.length === 0 ? (
+                  <p className="text-xs" style={{ color: '#dc2626' }}>No coverage zones picked.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {op.coverageZones.slice(0, 14).map((z) => (
+                      <span key={z} className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{z}</span>
+                    ))}
+                    {op.coverageZones.length > 14 && (
+                      <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>+{op.coverageZones.length - 14} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Fleet + hours + rules, compact */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Fleet · {op.cards.fleet.effectiveMaxConcurrentJobs} concurrent crew{op.cards.fleet.effectiveMaxConcurrentJobs === 1 ? '' : 's'}
+                  </p>
+                  {op.fleet.length === 0 ? (
+                    <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>No vehicles.</p>
+                  ) : (
+                    op.fleet.map((v, i) => (
+                      <p key={i} className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>
+                        {v.type.replace(/_/g, ' ')}{v.label ? ` · ${v.label}` : ''}
+                      </p>
+                    ))
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
+                    Hours · {op.cards.hours.daysConfigured} day{op.cards.hours.daysConfigured === 1 ? '' : 's'}
+                  </p>
+                  {op.weeklyHours.length === 0 ? (
+                    <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Not configured.</p>
+                  ) : (
+                    op.weeklyHours.map((h, i) => (
+                      <p key={i} className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>
+                        {WEEKDAY_LABELS[h.weekday] ?? h.weekday} {String(h.opensAt).slice(0, 5)}–{String(h.closesAt).slice(0, 5)}
+                      </p>
+                    ))
+                  )}
+                  {op.timeOff.length > 0 && (
+                    <p className="text-[11px] mt-1" style={{ color: '#b45309' }}>
+                      Time off: {op.timeOff.map((t) => `${t.startsOn} → ${t.endsOn}`).join(', ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-[11px]" style={{ color: 'var(--color-neutral-500)' }}>
+                Job rules: {op.cards.rules.minNoticeHours}h min notice
+                {op.cards.rules.dispatchLogic ? ` · ${op.cards.rules.dispatchLogic.replace(/_/g, ' ')}` : ''}
+                {op.cards.rules.emergencyResponse ? ' · emergency response' : ''}
+                {op.cards.rules.acceptedAt ? ` · rules accepted ${new Date(op.cards.rules.acceptedAt).toLocaleDateString('en-AE')}` : ' · rules NOT acknowledged'}
+              </p>
+            </div>
+          )}
+        </Section>
+
         {/* Services — every listing, each approvable/rejectable inline */}
         <Section icon={Layers} title={`Services (${ctx.services.length}) · ${approvedCount} approved · ${pendingCount} pending · ${rejectedCount} rejected`}>
           {!compliant && pendingCount > 0 && (
@@ -833,6 +990,12 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                           </p>
                           <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{ctxSvcPrice(sv)}</p>
                         </div>
+                        {uncoveredIds.has(sv.id) && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" title="No lead-capable technician is skilled in this exact service"
+                            style={{ backgroundColor: '#fef9eb', color: '#b45309' }}>
+                            No qualified lead
+                          </span>
+                        )}
                         <StatusBadge s={sv.listingStatus} />
                         <div className="flex items-center gap-1 shrink-0">
                           {sv.listingStatus !== 'approved' && (

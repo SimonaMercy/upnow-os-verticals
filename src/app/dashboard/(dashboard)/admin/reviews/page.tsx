@@ -12,7 +12,7 @@ const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background
 
 interface AdminReview {
   id: number; rating: number; title: string | null; body: string | null;
-  providerResponse: string | null; createdAt: string; hidden: boolean; hiddenReason: string | null;
+  createdAt: string; hidden: boolean; hiddenReason: string | null;
   reviewerName: string; providerName: string | null; serviceProviderId: number | null;
   serviceName: string | null; bookingId: number | null;
 }
@@ -104,7 +104,6 @@ export default function AdminReviewsPage() {
                 </div>
                 {r.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: INK, marginTop: 8 }}>{r.title}</div>}
                 {r.body && <p style={{ fontSize: 13.5, color: MUTE, marginTop: 4 }}>{r.body}</p>}
-                {r.providerResponse && <p style={{ fontSize: 12.5, color: MUTE, marginTop: 6, paddingLeft: 10, borderLeft: '2px solid #ececea' }}><b style={{ color: INK }}>Provider:</b> {r.providerResponse}</p>}
                 {r.hidden && r.hiddenReason && <p style={{ fontSize: 12, color: '#b42318', marginTop: 6 }}>Hidden reason: {r.hiddenReason}</p>}
               </div>
               {r.hidden ? (

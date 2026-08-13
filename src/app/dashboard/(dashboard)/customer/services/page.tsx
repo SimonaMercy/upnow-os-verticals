@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
+/** Why money came back (SP-259) — from GET /bookings/:id. */
+interface RefundInfo { amount: number | string; reasonCode: string | null; reasonNote: string | null; refundedAt: string | null }
 interface QuoteItem { itemName: string; description?: string | null; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
 interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
 interface BookingRow {
@@ -40,6 +42,17 @@ const STATUS_TONES: Record<string, { bg: string; fg: string; label: string }> = 
   cancelled:   { bg: '#fee2e2', fg: '#991b1b', label: 'Cancelled' },
 };
 
+const REFUND_REASON_LABELS: Record<string, string> = {
+  customer_cancelled: 'you cancelled the booking',
+  provider_cancelled: 'the provider cancelled',
+  provider_no_show: 'the provider did not show up',
+  work_not_to_standard: 'the work was not to standard',
+  duplicate_booking: 'it was a duplicate booking',
+  platform_error: 'a platform error',
+  dispute_upheld: 'your dispute was upheld',
+  goodwill: 'a goodwill gesture',
+};
+
 const fmtAed = (n: number | string) => Number(n).toLocaleString('en-AE');
 const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short' }) +
@@ -50,6 +63,7 @@ export default function CustomerServicesPage() {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<number | null>(null);
   const [timeline, setTimeline] = useState<Record<number, TimelineStep[]>>({});
+  const [refunds, setRefunds] = useState<Record<number, RefundInfo | null>>({});
   const [quotes, setQuotes] = useState<Record<number, Quote | null>>({});
   const [approving, setApproving] = useState<number | null>(null);
   const [declineFor, setDeclineFor] = useState<number | null>(null);
@@ -93,6 +107,7 @@ export default function CustomerServicesPage() {
       try {
         const d = await fetch(`/api/bookings/${id}`, { credentials: 'include' }).then((r) => r.json());
         setTimeline((prev) => ({ ...prev, [id]: d.timeline ?? [] }));
+        setRefunds((prev) => ({ ...prev, [id]: d.refund ?? null }));
       } catch { /* detail stays collapsed-empty */ }
     }
     if (row?.pricingMode === 'quote' && quotes[id] === undefined) {
@@ -392,6 +407,15 @@ export default function CustomerServicesPage() {
                     {b.status === 'cancelled' && b.cancellationFee != null && Number(b.cancellationFee) > 0 && (
                       <p className="text-[11px] mt-3" style={{ color: 'var(--color-neutral-400)' }}>
                         Cancellation fee applied: AED {fmtAed(b.cancellationFee)}
+                      </p>
+                    )}
+                    {refunds[b.id] && (
+                      <p className="text-[11px] mt-2" style={{ color: 'var(--color-neutral-500)' }}>
+                        Refunded AED {fmtAed(refunds[b.id]!.amount)}
+                        {refunds[b.id]!.reasonCode
+                          ? ` — ${REFUND_REASON_LABELS[refunds[b.id]!.reasonCode!] ?? refunds[b.id]!.reasonCode}`
+                          : ''}
+                        {refunds[b.id]!.reasonNote ? ` (${refunds[b.id]!.reasonNote})` : ''}.
                       </p>
                     )}
                     {cancellable && (

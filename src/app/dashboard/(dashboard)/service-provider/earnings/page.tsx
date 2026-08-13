@@ -12,6 +12,18 @@ const HAIRLINE = '1px solid #EEF1EE';
 const TINT_GREEN = '#E9F4EE';
 const TINT_AMBER = '#FEF6E7';
 const AMBER = '#C77D0A';
+
+/** Provider-facing labels for escrow refund reasons (SP-259). */
+const REFUND_REASON_LABELS: Record<string, string> = {
+  customer_cancelled: 'Customer cancelled',
+  provider_cancelled: 'Provider cancelled',
+  provider_no_show: 'No-show',
+  work_not_to_standard: 'Work not to standard',
+  duplicate_booking: 'Duplicate booking',
+  platform_error: 'Platform error',
+  dispute_upheld: 'Dispute upheld',
+  goodwill: 'Goodwill refund',
+};
 const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: '#fff', border: BORDER, borderRadius: 14, ...extra });
 const aed = (n: number) => `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -21,14 +33,18 @@ interface EarningsJob {
   status: string;
   disputed: boolean;
   gross: number;
+  /** VAT slice inside the gross (SP-141); 0 for bookings priced before the engine. */
+  vat: number;
   commission: number | null;
   net: number | null;
   earnedAt: string | null;
+  /** Why a refunded/clawed-back job paid nothing (SP-259). */
+  refundReason: string | null;
 }
 interface Earnings {
   currency: string;
   summary: {
-    netEarned: number; commissionPaid: number; grossEarned: number;
+    netEarned: number; commissionPaid: number; vatWithheld: number; grossEarned: number;
     pendingHeld: number; jobsCompleted: number; jobsPending: number;
     disputedHeld: number; jobsDisputed: number;
   };
@@ -103,14 +119,14 @@ export default function ServiceProviderEarningsPage() {
       <div style={{ marginBottom: 4, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: GREEN }}>Earnings</div>
       <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Your payouts</h1>
       <p style={{ color: FAINT, fontSize: 14, marginTop: 4 }}>
-        Funds are held when a job is confirmed and released to you, net of platform commission, once you complete it.
+        Funds are held when a job is confirmed and released to you once you complete it — net of VAT and the platform commission (charged on the VAT-exclusive value).
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5" style={{ marginTop: 18 }}>
         <Tile label="Net earned" value={aed(s.netEarned)} sub={`${s.jobsCompleted} job${s.jobsCompleted === 1 ? '' : 's'} completed`} tint={GREEN} />
-        <Tile label="Commission paid" value={aed(s.commissionPaid)} sub="Platform fee" />
+        <Tile label="Commission paid" value={aed(s.commissionPaid)} sub={s.vatWithheld > 0 ? `Platform fee · + ${aed(s.vatWithheld)} VAT withheld` : 'Platform fee'} />
         <Tile label="Pending (held)" value={aed(s.pendingHeld)} sub={`${s.jobsPending} in progress`} tint={s.pendingHeld > 0 ? AMBER : undefined} />
-        <Tile label="Gross billed" value={aed(s.grossEarned)} sub="Before commission" />
+        <Tile label="Gross billed" value={aed(s.grossEarned)} sub="VAT-inclusive, before commission" />
         {s.disputedHeld > 0 && (
           <Tile
             label="In dispute (on hold)"
@@ -140,6 +156,7 @@ export default function ServiceProviderEarningsPage() {
                   <th style={{ textAlign: 'left', padding: '10px 12px', fontWeight: 600 }}>Booking</th>
                   <th style={{ textAlign: 'left', padding: '10px 12px', fontWeight: 600 }}>Status</th>
                   <th style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 600 }}>Gross</th>
+                  <th style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 600 }}>VAT</th>
                   <th style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 600 }}>Commission</th>
                   <th style={{ textAlign: 'right', padding: '10px 18px', fontWeight: 600 }}>Net</th>
                 </tr>
@@ -149,8 +166,16 @@ export default function ServiceProviderEarningsPage() {
                   <tr key={j.bookingId} style={{ borderTop: i === 0 ? HAIRLINE : '1px solid #F4F6F3', color: INK }}>
                     <td style={{ padding: '12px 18px', fontWeight: 600 }}>{j.serviceName ?? '—'}</td>
                     <td style={{ padding: '12px 12px', color: FAINT }}>BK-{j.bookingId}</td>
-                    <td style={{ padding: '12px 12px' }}>{statusPill(j.status, j.disputed)}</td>
+                    <td style={{ padding: '12px 12px' }}>
+                      {statusPill(j.status, j.disputed)}
+                      {j.refundReason && (
+                        <div style={{ fontSize: 11, color: FAINT, marginTop: 2 }}>
+                          {REFUND_REASON_LABELS[j.refundReason] ?? j.refundReason}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '12px 12px', textAlign: 'right' }}>{aed(j.gross)}</td>
+                    <td style={{ padding: '12px 12px', textAlign: 'right', color: FAINT }}>{j.vat > 0 ? `− ${aed(j.vat)}` : '—'}</td>
                     <td style={{ padding: '12px 12px', textAlign: 'right', color: FAINT }}>{j.commission != null ? `− ${aed(j.commission)}` : '—'}</td>
                     <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: j.net != null ? GREEN : FAINT }}>{j.net != null ? aed(j.net) : '—'}</td>
                   </tr>
