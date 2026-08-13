@@ -406,8 +406,15 @@ function ManagerMultiOverview() {
               needs a replacement cheque from the customer, an overdue one needs
               chasing for presentation. One card could only answer "something is
               wrong with the money here", which is not a job anyone can pick up.
-              A lease with both appears on both — that is two pieces of work. */}
-          <ActionBucket icon={Banknote} color="#dc2626" label="Bounced Cheques" href={`/dashboard/manager/receivables${scopeQ()}`}
+              A lease with both appears on both — that is two pieces of work.
+
+              Both cards head to PAYMENTS, not to a receivables list of their own.
+              A cheque is a row in the money ledger — that ledger is where a
+              bounce is replaced and a presentation is recorded, so it is the
+              screen that CLEARS these rows. The manager Receivables page that
+              used to sit behind these links was a read-only mirror of the
+              landlord's and has been removed. */}
+          <ActionBucket icon={Banknote} color="#dc2626" label="Bounced Cheques" href={`/dashboard/manager/payments${scopeQ()}`}
             loading={actionLoading} bucket={action?.chequesBounced}
             groupBy={buildingOf}
             compact={i => ({
@@ -418,7 +425,7 @@ function ManagerMultiOverview() {
               overdue: true,
               href: leaseHref(i),
             })} />
-          <ActionBucket icon={Banknote} color="#ea580c" label="Overdue Cheques" href={`/dashboard/manager/receivables${scopeQ()}`}
+          <ActionBucket icon={Banknote} color="#ea580c" label="Overdue Cheques" href={`/dashboard/manager/payments${scopeQ()}`}
             loading={actionLoading} bucket={action?.chequesOverdue}
             groupBy={buildingOf}
             compact={i => ({
