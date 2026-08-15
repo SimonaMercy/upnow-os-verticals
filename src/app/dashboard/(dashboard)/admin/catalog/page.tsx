@@ -28,7 +28,11 @@ interface CatCategory {
   commissionBps: number; hasOverride: boolean;
 }
 interface CancelTier { minHoursBefore: number; feePct: number }
-interface CancellationPolicy { reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number; note?: string }
+/** SP-135: platform matrix + who keeps a retained fee + the no-show grace window. */
+interface CancellationPolicy {
+  reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number;
+  noShowGraceMinutes: number; retainedFeeTo: 'provider' | 'platform'; note?: string;
+}
 interface SpLaunch { emirates: string[]; inviteOnly: boolean }
 interface Policies {
   vat_display_mode?: string;
@@ -55,6 +59,8 @@ interface Template {
   name: string; nameAr: string | null; description: string | null;
   priceUnit: PriceUnit; basePrice: number | null; isFromPrice: boolean;
   minPrice: number | null; maxPrice: number | null; minCalloutCharge: number | null;
+  /** SP-135: per-service PARTIAL override of the platform cancellation policy (null = inherit). */
+  cancellationPolicy?: { cancel?: CancelTier[]; noShowFeePct?: number } | null;
   isEmergency: boolean; estimatedDuration: number | null; estimatedDurationMax: number | null;
   sortOrder: number; isActive: boolean; adoptionCount: number;
   imageUrl?: string | null;
@@ -622,6 +628,9 @@ export default function AdminCatalogPage() {
                         {t.isEmergency && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-[#dc2626] text-[#dc2626]">Emergency</span>
                         )}
+                        {t.cancellationPolicy?.cancel && (
+                          <Chip c={AMBER}>Own cancellation terms</Chip>
+                        )}
                         {t.minCalloutCharge != null && t.minCalloutCharge > 0 && (
                           <Chip c={BLUE}>Callout {fmtAED(t.minCalloutCharge)}</Chip>
                         )}
@@ -1039,10 +1048,22 @@ function LaunchCancellationCard({ overview, onConfirm, setOverview }: {
       emirates: prev.emirates.includes(v) ? prev.emirates.filter(e => e !== v) : [...prev.emirates, v],
     }));
 
-  const setTierPct = (kind: 'reschedule' | 'cancel', idx: number, pct: number) =>
+  // Tiers are kept furthest-first; the server validates windows/fees on save (SP-135).
+  const sortTiers = (tiers: CancelTier[]) => [...tiers].sort((a, b) => b.minHoursBefore - a.minHoursBefore);
+  const setTier = (kind: 'reschedule' | 'cancel', idx: number, patch: Partial<CancelTier>) =>
     setCancel(prev => prev
-      ? { ...prev, [kind]: prev[kind].map((t, i) => (i === idx ? { ...t, feePct: pct } : t)) }
+      ? { ...prev, [kind]: prev[kind].map((t, i) => (i === idx ? { ...t, ...patch } : t)) }
       : prev);
+  const commitTierOrder = (kind: 'reschedule' | 'cancel') =>
+    setCancel(prev => (prev ? { ...prev, [kind]: sortTiers(prev[kind]) } : prev));
+  const addTier = (kind: 'reschedule' | 'cancel') =>
+    setCancel(prev => {
+      if (!prev) return prev;
+      const top = prev[kind][0]?.minHoursBefore ?? 0;
+      return { ...prev, [kind]: [{ minHoursBefore: top + 24, feePct: 0 }, ...prev[kind]] };
+    });
+  const removeTier = (kind: 'reschedule' | 'cancel', idx: number) =>
+    setCancel(prev => (prev && prev[kind].length > 1 ? { ...prev, [kind]: prev[kind].filter((_, i) => i !== idx) } : prev));
 
   const save = () => {
     onConfirm(
@@ -1067,20 +1088,37 @@ function LaunchCancellationCard({ overview, onConfirm, setOverview }: {
     const tiers = cancel?.[kind] ?? [];
     return (
       <div>
-        <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold mb-1">{title}</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{title}</p>
+          <button
+            type="button" onClick={() => addTier(kind)} disabled={!overview}
+            className="text-[11px] font-semibold text-[#2e9f82] hover:underline disabled:opacity-40"
+          >+ tier</button>
+        </div>
         {tiers.length === 0 ? (
           <p className="text-[11px] text-[#9b9890]">—</p>
         ) : (
           <ul className="space-y-1">
             {tiers.map((t, i) => (
-              <li key={i} className="flex items-center gap-2 text-[12px] text-[#1a1916]">
-                <span className="flex-1 text-[#6b6860]">{tierLabel(tiers, i)}</span>
+              <li key={i} className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
                 <input
-                  type="number" min={0} max={100} value={t.feePct}
-                  onChange={e => setTierPct(kind, i, Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                  type="number" min={0} max={720} value={t.minHoursBefore} aria-label="Hours before the slot"
+                  onChange={e => setTier(kind, i, { minHoursBefore: Math.max(0, Math.min(720, Math.round(Number(e.target.value) || 0))) })}
+                  onBlur={() => commitTierOrder(kind)}
+                  className={`${inputCls} !w-14 text-right !py-0.5`}
+                />
+                <span className="text-[#9b9890] text-[11px]">h</span>
+                <span className="flex-1 text-[#6b6860] text-[11px] truncate">{tierLabel(tiers, i)}</span>
+                <input
+                  type="number" min={0} max={100} value={t.feePct} aria-label="Fee percent"
+                  onChange={e => setTier(kind, i, { feePct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
                   className={`${inputCls} !w-16 text-right !py-0.5`}
                 />
                 <span className="text-[#9b9890]">%</span>
+                <button
+                  type="button" onClick={() => removeTier(kind, i)} disabled={tiers.length <= 1}
+                  className="text-[#9b9890] hover:text-[#c0392b] disabled:opacity-30 px-1" aria-label="Remove tier"
+                >×</button>
               </li>
             ))}
           </ul>
@@ -1123,7 +1161,7 @@ function LaunchCancellationCard({ overview, onConfirm, setOverview }: {
             {miniTable('reschedule', 'Reschedule fees')}
             {miniTable('cancel', 'Cancellation fees')}
             <div className="flex items-center gap-2 text-[12px] text-[#1a1916]">
-              <span className="flex-1 text-[#6b6860]">No-show fee</span>
+              <span className="flex-1 text-[#6b6860]">Customer no-show fee</span>
               <input
                 type="number" min={0} max={100} value={cancel.noShowFeePct}
                 onChange={e => setCancel(p => (p ? { ...p, noShowFeePct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : p))}
@@ -1131,6 +1169,33 @@ function LaunchCancellationCard({ overview, onConfirm, setOverview }: {
               />
               <span className="text-[#9b9890]">%</span>
             </div>
+            <div className="flex items-center gap-2 text-[12px] text-[#1a1916]">
+              <span className="flex-1 text-[#6b6860]" title="How long past the booked time before either side may record a no-show">No-show grace</span>
+              <input
+                type="number" min={0} max={240} value={cancel.noShowGraceMinutes ?? 30}
+                onChange={e => setCancel(p => (p ? { ...p, noShowGraceMinutes: Math.max(0, Math.min(240, Math.round(Number(e.target.value) || 0))) } : p))}
+                className={`${inputCls} !w-16 text-right !py-0.5`}
+              />
+              <span className="text-[#9b9890]">min</span>
+            </div>
+            <div className="flex items-center gap-2 text-[12px] text-[#1a1916]">
+              <span className="flex-1 text-[#6b6860]" title="Who keeps a retained cancellation / no-show fee (CEO decision 8 — Urban Company passes it to the partner)">Retained fee goes to</span>
+              <div className="inline-flex rounded-lg border border-[#e8e6e0] overflow-hidden">
+                {(['provider', 'platform'] as const).map(who => {
+                  const on = (cancel.retainedFeeTo ?? 'provider') === who;
+                  return (
+                    <button
+                      key={who} type="button" onClick={() => setCancel(p => (p ? { ...p, retainedFeeTo: who } : p))}
+                      className="px-2.5 py-0.5 text-[11px] font-semibold capitalize"
+                      style={on ? { backgroundColor: GREEN, color: '#fff' } : { backgroundColor: '#fff', color: '#6b6860' }}
+                    >{who}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-[10px] text-[#9b9890]">
+              A service can override any of these on its own row (Services → edit → Cancellation). Bookings keep the terms they were made under.
+            </p>
             {cancel.note && <p className="text-[10px] text-[#9b9890] italic">{cancel.note}</p>}
           </div>
         ) : (
@@ -1258,6 +1323,11 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
   const [maxPrice, setMaxPrice] = useState(tpl?.maxPrice != null ? String(tpl.maxPrice) : '');
   const [minCalloutCharge, setMinCalloutCharge] = useState(tpl?.minCalloutCharge != null ? String(tpl.minCalloutCharge) : '');
   const [isEmergency, setIsEmergency] = useState(tpl?.isEmergency ?? false);
+  // SP-135: cancellation override — null = inherit the platform matrix.
+  const [cancelOverride, setCancelOverride] = useState<{ cancel: CancelTier[]; noShowFeePct: number | null } | null>(() =>
+    tpl?.cancellationPolicy?.cancel
+      ? { cancel: tpl.cancellationPolicy.cancel.slice(), noShowFeePct: tpl.cancellationPolicy.noShowFeePct ?? null }
+      : null);
   const [estMin, setEstMin] = useState(tpl?.estimatedDuration != null ? String(tpl.estimatedDuration) : '');
   const [estMax, setEstMax] = useState(tpl?.estimatedDurationMax != null ? String(tpl.estimatedDurationMax) : '');
   const [variantGroupLabel, setVariantGroupLabel] = useState(tpl?.variantGroupLabel ?? '');
@@ -1301,6 +1371,11 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
     if (nameAr.trim()) payload.nameAr = nameAr.trim(); else if (!isNew) payload.nameAr = null;
     if (isNew) payload.sortOrder = nextSortOrder; // append at the end; reorder by dragging in the list
     if (!isNew) payload.variantGroupLabel = variantGroupLabel.trim() || null;
+    if (!isNew) {
+      payload.cancellationPolicy = cancelOverride
+        ? { cancel: cancelOverride.cancel, ...(cancelOverride.noShowFeePct != null ? { noShowFeePct: cancelOverride.noShowFeePct } : {}) }
+        : null;
+    }
     if (!isNew) {
       payload.quantityLabel = quantityLabel.trim() || null;
       payload.quantityMin = Math.max(1, Number(quantityMin) || 1);
@@ -1488,6 +1563,55 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
                   <AddonsEditor templateId={tpl.id} addons={addons} setAddons={setAddons} onRefetch={onRefetch} />
                 </div>
               </>
+            )}
+          </SectionCard>
+        )}
+
+        {showFull && !isNew && (
+          <SectionCard step="✦" title="Cancellation terms" sub="Overrides the platform matrix for THIS service only. Bookings keep the terms they were made under.">
+            <div className="flex items-center gap-2 text-[12px]">
+              <select
+                className={`${inputCls} !w-auto`}
+                value={cancelOverride ? 'custom' : 'inherit'}
+                onChange={e => setCancelOverride(e.target.value === 'custom'
+                  ? { cancel: [{ minHoursBefore: 24, feePct: 0 }, { minHoursBefore: 2, feePct: 50 }, { minHoursBefore: 0, feePct: 100 }], noShowFeePct: null }
+                  : null)}
+              >
+                <option value="inherit">Inherit platform policy</option>
+                <option value="custom">Custom tiers for this service</option>
+              </select>
+              {cancelOverride && (
+                <button type="button" onClick={() => setCancelOverride(o => o ? { ...o, cancel: [{ minHoursBefore: (o.cancel[0]?.minHoursBefore ?? 0) + 24, feePct: 0 }, ...o.cancel] } : o)}
+                  className="text-[11px] font-semibold text-[#2e9f82] hover:underline">+ tier</button>
+              )}
+            </div>
+            {cancelOverride && (
+              <ul className="space-y-1 mt-2">
+                {cancelOverride.cancel.map((t, i, arr) => (
+                  <li key={i} className="flex items-center gap-1.5 text-[12px] text-[#1a1916]">
+                    <input type="number" min={0} max={720} value={t.minHoursBefore} aria-label="Hours before the slot"
+                      onChange={e => setCancelOverride(o => o ? { ...o, cancel: o.cancel.map((x, j) => j === i ? { ...x, minHoursBefore: Math.max(0, Math.min(720, Math.round(Number(e.target.value) || 0))) } : x) } : o)}
+                      onBlur={() => setCancelOverride(o => o ? { ...o, cancel: [...o.cancel].sort((a, b) => b.minHoursBefore - a.minHoursBefore) } : o)}
+                      className={`${inputCls} !w-14 text-right !py-0.5`} />
+                    <span className="text-[#9b9890] text-[11px]">h</span>
+                    <span className="flex-1 text-[#6b6860] text-[11px] truncate">{tierLabel(arr, i)}</span>
+                    <input type="number" min={0} max={100} value={t.feePct} aria-label="Fee percent"
+                      onChange={e => setCancelOverride(o => o ? { ...o, cancel: o.cancel.map((x, j) => j === i ? { ...x, feePct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : x) } : o)}
+                      className={`${inputCls} !w-16 text-right !py-0.5`} />
+                    <span className="text-[#9b9890]">%</span>
+                    <button type="button" disabled={arr.length <= 1} aria-label="Remove tier"
+                      onClick={() => setCancelOverride(o => o && o.cancel.length > 1 ? { ...o, cancel: o.cancel.filter((_, j) => j !== i) } : o)}
+                      className="text-[#9b9890] hover:text-[#c0392b] disabled:opacity-30 px-1">×</button>
+                  </li>
+                ))}
+                <li className="flex items-center gap-2 text-[12px] text-[#1a1916] pt-1">
+                  <span className="flex-1 text-[#6b6860]">Customer no-show fee (blank = platform)</span>
+                  <input type="number" min={0} max={100} value={cancelOverride.noShowFeePct ?? ''} placeholder="—"
+                    onChange={e => setCancelOverride(o => o ? { ...o, noShowFeePct: e.target.value.trim() === '' ? null : Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : o)}
+                    className={`${inputCls} !w-16 text-right !py-0.5`} />
+                  <span className="text-[#9b9890]">%</span>
+                </li>
+              </ul>
             )}
           </SectionCard>
         )}

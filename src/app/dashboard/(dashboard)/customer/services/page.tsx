@@ -10,10 +10,14 @@ import {
   CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Clock, Loader2,
   MapPin, Plus, Wrench, XCircle,
 } from 'lucide-react';
+import { uploadBookingPhoto } from '@/lib/bookingEvidence';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
 /** Why money came back (SP-259) — from GET /bookings/:id. */
 interface RefundInfo { amount: number | string; reasonCode: string | null; reasonNote: string | null; refundedAt: string | null }
+/** Evidence photos (SP-258) — problem (yours), before/after (the crew's proof). */
+interface EvidencePhoto { id: number; kind: string; caption: string | null; viewUrl: string; createdAt: string }
+interface EvidenceGroups { problem: EvidencePhoto[]; before: EvidencePhoto[]; after: EvidencePhoto[] }
 interface QuoteItem { itemName: string; description?: string | null; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
 interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
 interface BookingRow {
@@ -64,6 +68,9 @@ export default function CustomerServicesPage() {
   const [openId, setOpenId] = useState<number | null>(null);
   const [timeline, setTimeline] = useState<Record<number, TimelineStep[]>>({});
   const [refunds, setRefunds] = useState<Record<number, RefundInfo | null>>({});
+  const [mediaMap, setMediaMap] = useState<Record<number, EvidenceGroups>>({});
+  const [photoBusy, setPhotoBusy] = useState<number | null>(null);
+  const [photoErr, setPhotoErr] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<Record<number, Quote | null>>({});
   const [approving, setApproving] = useState<number | null>(null);
   const [declineFor, setDeclineFor] = useState<number | null>(null);
@@ -108,6 +115,7 @@ export default function CustomerServicesPage() {
         const d = await fetch(`/api/bookings/${id}`, { credentials: 'include' }).then((r) => r.json());
         setTimeline((prev) => ({ ...prev, [id]: d.timeline ?? [] }));
         setRefunds((prev) => ({ ...prev, [id]: d.refund ?? null }));
+        setMediaMap((prev) => ({ ...prev, [id]: d.media ?? { problem: [], before: [], after: [] } }));
       } catch { /* detail stays collapsed-empty */ }
     }
     if (row?.pricingMode === 'quote' && quotes[id] === undefined) {
@@ -158,14 +166,29 @@ export default function CustomerServicesPage() {
     }
   };
 
+  /** SP-135/138: the exact fee/refund the policy snapshot yields right now. */
+  const cancelPreview = async (id: number) => {
+    const res = await fetch(`/api/bookings/${id}/cancel-preview`, { credentials: 'include' });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d?.message ?? 'Could not load the cancellation terms');
+    return d as {
+      paid: boolean; hoursBefore: number; feePct: number; fee: number; refund: number; total: number;
+      policy: { noShowGraceMinutes: number };
+      noShow: { windowOpen: boolean; opensAt: string; customerCanReport: boolean };
+    };
+  };
+
   const cancel = async (b: BookingRow) => {
-    const warn = b.status === 'confirmed'
-      ? 'Cancel this booking? A cancellation fee may apply if your slot is less than 6 hours away.'
-      : 'Cancel this booking?';
-    if (!window.confirm(warn)) return;
     setBusy(b.id);
     setError(null);
     try {
+      const p = await cancelPreview(b.id);
+      const warn = p.paid
+        ? p.fee > 0
+          ? `Cancel this booking? Your slot is ${p.hoursBefore > 0 ? `${Math.max(0, Math.round(p.hoursBefore * 10) / 10)}h away` : 'due'}, so a ${p.feePct}% cancellation fee of AED ${fmtAed(p.fee)} applies — AED ${fmtAed(p.refund)} will be refunded.`
+          : `Cancel this booking? You're outside the fee window — the full AED ${fmtAed(p.total)} will be refunded.`
+        : 'Cancel this booking? Nothing has been charged.';
+      if (!window.confirm(warn)) return;
       const res = await fetch(`/api/bookings/${b.id}/cancel`, {
         method: 'PATCH',
         credentials: 'include',
@@ -175,11 +198,40 @@ export default function CustomerServicesPage() {
       const d = await res.json();
       if (!res.ok) throw new Error(d?.message ?? 'Could not cancel');
       if (d.cancellationFee && Number(d.cancellationFee) > 0) {
-        window.alert(`Cancelled. A cancellation fee of AED ${fmtAed(d.cancellationFee)} applies per the policy.`);
+        window.alert(`Cancelled. A cancellation fee of AED ${fmtAed(d.cancellationFee)} was retained per the policy; the rest is on its way back to you.`);
       }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not cancel');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** SP-138: the professional never came — allowed once slot + grace has passed and the job hasn't started. */
+  const reportNoShow = async (b: BookingRow) => {
+    setBusy(b.id);
+    setError(null);
+    try {
+      const p = await cancelPreview(b.id);
+      if (!p.noShow.customerCanReport) {
+        const at = new Date(p.noShow.opensAt);
+        window.alert(`You can report a no-show ${p.policy.noShowGraceMinutes} minutes after your booked time (from ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).`);
+        return;
+      }
+      if (!window.confirm(`Report that nobody arrived? The booking will be closed and the full amount refunded to you.`)) return;
+      const note = window.prompt('Anything we should know? (optional)') ?? '';
+      const res = await fetch(`/api/bookings/${b.id}/no-show/provider`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(note.trim() ? { note: note.trim() } : {}),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.message ?? 'Could not report the no-show');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not report the no-show');
     } finally {
       setBusy(null);
     }
@@ -287,7 +339,10 @@ export default function CustomerServicesPage() {
           {bookings.map((b) => {
             const tone = STATUS_TONES[b.status] ?? STATUS_TONES.booked;
             const open = openId === b.id;
-            const cancellable = ['booked', 'confirmed'].includes(b.status);
+            const cancellable = ['booked', 'confirmed', 'assigned'].includes(b.status);
+            // The crew is due and hasn't started — the customer may report a no-show once the grace window opens.
+            const slotPassed = new Date(b.scheduledAt).getTime() < Date.now();
+            const canReportNoShow = ['assigned', 'en_route'].includes(b.status) && slotPassed;
             const quote = quotes[b.id];
             return (
               <div key={b.id} className="rounded-2xl border bg-white" style={{ borderColor: 'var(--color-base-200)' }}>
@@ -418,6 +473,54 @@ export default function CustomerServicesPage() {
                         {refunds[b.id]!.reasonNote ? ` (${refunds[b.id]!.reasonNote})` : ''}.
                       </p>
                     )}
+
+                    {/* Evidence photos (SP-258): show what's wrong before the crew
+                        arrives; see their before/after proof before you sign off. */}
+                    {mediaMap[b.id] && (() => {
+                      const m = mediaMap[b.id];
+                      const canAttach = !['completed', 'cancelled', 'dispute'].includes(b.status);
+                      const thumbs = (ps: EvidencePhoto[]) => ps.map((p) => (
+                        <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={p.viewUrl} alt={p.caption ?? 'photo'} className="rounded-lg border object-cover" style={{ width: 60, height: 60, borderColor: 'var(--color-base-200)' }} />
+                        </a>
+                      ));
+                      return (
+                        <div className="mt-4 rounded-xl border p-3.5" style={{ borderColor: 'var(--color-base-200)' }}>
+                          <div className="text-xs font-semibold" style={{ color: 'var(--color-neutral-700)' }}>Photos</div>
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            {thumbs(m.problem)}
+                            {canAttach && (
+                              <label className="rounded-lg border border-dashed grid place-items-center cursor-pointer" style={{ width: 60, height: 60, color: 'var(--color-neutral-400)', borderColor: 'var(--color-base-300)', fontSize: 20 }}>
+                                {photoBusy === b.id ? '…' : '+'}
+                                <input type="file" accept="image/*" className="hidden" disabled={photoBusy === b.id}
+                                  onChange={async (e) => {
+                                    const f = e.target.files?.[0]; e.currentTarget.value = '';
+                                    if (!f) return;
+                                    setPhotoBusy(b.id); setPhotoErr(null);
+                                    try {
+                                      const saved = await uploadBookingPhoto(b.id, 'problem', f);
+                                      setMediaMap((prev) => ({ ...prev, [b.id]: { ...prev[b.id], problem: [...prev[b.id].problem, saved as EvidencePhoto] } }));
+                                    } catch (err) { setPhotoErr(err instanceof Error ? err.message : 'Upload failed'); }
+                                    finally { setPhotoBusy(null); }
+                                  }} />
+                              </label>
+                            )}
+                            {m.problem.length === 0 && !canAttach && <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>No photos were added.</span>}
+                          </div>
+                          <p className="text-[10.5px] mt-1" style={{ color: 'var(--color-neutral-400)' }}>
+                            {canAttach ? 'Add photos of the problem — the professional sees them before arriving.' : ''}
+                          </p>
+                          {(m.before.length > 0 || m.after.length > 0) && (
+                            <div className="mt-2">
+                              {m.before.length > 0 && (<><div className="text-[10.5px] font-semibold uppercase tracking-wide mt-2" style={{ color: 'var(--color-neutral-400)' }}>Before work</div><div className="flex flex-wrap gap-2 mt-1">{thumbs(m.before)}</div></>)}
+                              {m.after.length > 0 && (<><div className="text-[10.5px] font-semibold uppercase tracking-wide mt-2" style={{ color: 'var(--color-neutral-400)' }}>Finished work</div><div className="flex flex-wrap gap-2 mt-1">{thumbs(m.after)}</div></>)}
+                            </div>
+                          )}
+                          {photoErr && photoBusy === null && <p className="text-[11px] mt-2" style={{ color: '#B42318' }}>{photoErr}</p>}
+                        </div>
+                      );
+                    })()}
                     {cancellable && (
                       <button
                         type="button"
@@ -427,6 +530,17 @@ export default function CustomerServicesPage() {
                         style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-error)' }}
                       >
                         {busy === b.id ? 'Cancelling…' : 'Cancel booking'}
+                      </button>
+                    )}
+                    {canReportNoShow && (
+                      <button
+                        type="button"
+                        disabled={busy === b.id}
+                        onClick={() => reportNoShow(b)}
+                        className="mt-4 ml-2 text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                        style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-error)' }}
+                      >
+                        {busy === b.id ? 'Sending…' : 'Nobody arrived'}
                       </button>
                     )}
                     {b.status === 'completed' && (

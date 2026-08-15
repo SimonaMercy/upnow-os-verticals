@@ -29,6 +29,8 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '@/lib/api';
 export interface JobReadyStatus {
   jobReady: boolean;
   jobReadyAt: string | null;
+  /** SP-254: 'solo' = individual (person = provider = the one technician); 'company' = crew. */
+  supplyType?: 'solo' | 'company';
   cards: {
     coverage: { complete: boolean; zoneCount: number };
     team: {
@@ -48,7 +50,7 @@ export interface JobReadyStatus {
   };
 }
 interface CoverageOption { communityId: number; nameEn: string; nameAr: string | null; emirate?: string; selected: boolean }
-interface Tech { id: number; name: string; status: string; isLeadCapable: boolean; photoUrl: string | null; skills: string[]; serviceSkillIds: number[] }
+interface Tech { id: number; name: string; status: string; isLeadCapable: boolean; photoUrl: string | null; skills: string[]; serviceSkillIds: number[]; /** SP-254: the solo operator themself */ isSelf?: boolean }
 interface SpService { id: number; name: string; category: string }
 interface Vehicle { id: number; vehicleType: string; label: string | null; categories: string[] | null; isActive: boolean }
 interface HoursRow { weekday: number; opensAt: string; closesAt: string }
@@ -676,19 +678,33 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
 
   if (!techs) return <CardSkeleton back={back} title="Your team" />;
 
+  // SP-254: an individual IS the technician — one row (theirs), no crew tools.
+  const solo = status.supplyType === 'solo';
+
   return (
     <div className="mx-auto max-w-2xl">
-      <CardHeader title="Your team" sub="Jobs go to skilled, free, lead-capable crews" onBack={back}
+      <CardHeader title={solo ? 'Your skills' : 'Your team'} sub={solo ? 'You are the technician — tell us what you do' : 'Jobs go to skilled, free, lead-capable crews'} onBack={back}
         right={<span className="mt-2 hidden items-center gap-1 text-[12px] sm:flex" style={{ color: FAINT }}><Check size={12} /> Saves as you go</span>} />
 
       <div className="mb-4 rounded-[14px] border p-4" style={{ background: '#FEF9EC', borderColor: '#F2E3B8' }}>
         <p className="text-[13px] leading-relaxed" style={{ color: '#7C5A10' }}>
-          Each service you list needs <b>at least one lead-capable technician</b>{' '}skilled in that exact service —
-          a technician skilled in Regular Cleaning doesn&apos;t cover Deep Cleaning unless they&apos;re picked for both.
+          {solo ? (
+            <>You&apos;re registered as an <b>individual</b>, so you are your own technician: pick <b>every service you personally do</b> —
+            jobs are only sent to you for services you&apos;ve ticked. Your provider verification covers you; there is no second KYC.</>
+          ) : (
+            <>Each service you list needs <b>at least one lead-capable technician</b>{' '}skilled in that exact service —
+            a technician skilled in Regular Cleaning doesn&apos;t cover Deep Cleaning unless they&apos;re picked for both.</>
+          )}
         </p>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.activeTechnicians} technician{t.activeTechnicians === 1 ? '' : 's'}</span>
-          <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.leadCapable} lead-capable</span>
+          {solo ? (
+            <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>Solo operator · you lead every job</span>
+          ) : (
+            <>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.activeTechnicians} technician{t.activeTechnicians === 1 ? '' : 's'}</span>
+              <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold" style={{ border: '1px solid rgba(0,0,0,.08)', color: INK }}>{t.leadCapable} lead-capable</span>
+            </>
+          )}
           {!hideGapChips && t.uncoveredServices.map((s) => (
             <span key={s.id} className="rounded-full px-3 py-1 text-[12px] font-bold" style={{ background: '#FDF1EF', color: RED, border: '1px solid #F4CFC9' }}>No tech for: {s.name}</span>
           ))}
@@ -708,25 +724,31 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
                   {!needsPhoto && <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-white" style={{ background: GREEN }}><Check size={9} strokeWidth={4} /></span>}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-bold" style={{ color: INK }}>{tech.name}</p>
+                  <p className="text-[15px] font-bold" style={{ color: INK }}>{tech.name}{tech.isSelf ? <span className="ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide" style={{ background: TINT_GREEN, color: GREEN }}>YOU</span> : null}</p>
                   <p className="text-[12.5px]" style={{ color: needsSkill || needsPhoto ? AMBER_TEXT : MUTE }}>
-                    {needsSkill ? 'Pick at least one service so they count'
-                      : needsPhoto ? 'Add photo — required before their first job'
+                    {needsSkill ? (tech.isSelf ? 'Pick at least one service you do' : 'Pick at least one service so they count')
+                      : needsPhoto ? (tech.isSelf ? 'Add your photo — customers see who is coming' : 'Add photo — required before their first job')
                       : 'Photo ✓ · ready for jobs'}
                   </p>
                 </div>
-                <div className="flex flex-col items-center gap-0.5">
-                  <Toggle on={tech.isLeadCapable} onChange={(v) => void patchLead(tech, v)} label={`${tech.name} lead`} />
-                  <span className="text-[9.5px] font-bold tracking-wider" style={{ color: tech.isLeadCapable ? GREEN : '#A6B0A9' }}>LEAD</span>
-                </div>
-                <button
-                  onClick={() => void removeTechnician(tech)}
-                  aria-label={`Remove ${tech.name}`}
-                  title="Remove from team"
-                  className="rounded-[8px] p-1.5 transition-colors hover:bg-black/[.04]"
-                  style={{ color: '#A6B0A9' }}>
-                  <Trash2 size={15} />
-                </button>
+                {tech.isSelf ? (
+                  <span className="text-[9.5px] font-bold tracking-wider" style={{ color: GREEN }}>LEAD</span>
+                ) : (
+                  <>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <Toggle on={tech.isLeadCapable} onChange={(v) => void patchLead(tech, v)} label={`${tech.name} lead`} />
+                      <span className="text-[9.5px] font-bold tracking-wider" style={{ color: tech.isLeadCapable ? GREEN : '#A6B0A9' }}>LEAD</span>
+                    </div>
+                    <button
+                      onClick={() => void removeTechnician(tech)}
+                      aria-label={`Remove ${tech.name}`}
+                      title="Remove from team"
+                      className="rounded-[8px] p-1.5 transition-colors hover:bg-black/[.04]"
+                      style={{ color: '#A6B0A9' }}>
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* skills: category master chip + adopted services as sub-chips */}
@@ -782,8 +804,8 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
 
       {/* Add a crew member — without this the step is impossible to finish on a
           brand-new account, since invited people only become technicians once
-          they accept. */}
-      <div className="mt-3 p-4" style={card({ border: techs.length === 0 ? '1.5px solid #9CCDB4' : CARD_BORDER })}>
+          they accept. A solo operator has no crew to add (SP-254). */}
+      {!solo && <div className="mt-3 p-4" style={card({ border: techs.length === 0 ? '1.5px solid #9CCDB4' : CARD_BORDER })}>
         <div className="flex items-center gap-2">
           <Users size={15} style={{ color: GREEN }} />
           <p className="text-[14px] font-bold" style={{ color: INK }}>
@@ -827,10 +849,12 @@ export function TeamCard({ status, absorb, back, hideGapChips }: CardProps & { h
         {addError && (
           <p className="mt-2 text-[12.5px] font-medium" style={{ color: RED }}>{addError}</p>
         )}
-      </div>
+      </div>}
 
       <p className="mt-3 text-[12.5px]" style={{ color: FAINT }}>
-        Lead techs are sent as the responsible person on a job — your lead count sets how many jobs run at once.
+        {solo
+          ? 'As a solo operator you take one job at a time. Want to run a crew later? Ask UpNow to switch your account to a company profile.'
+          : 'Lead techs are sent as the responsible person on a job — your lead count sets how many jobs run at once.'}
       </p>
     </div>
   );

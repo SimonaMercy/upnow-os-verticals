@@ -211,6 +211,13 @@ export function SpTeamPanel() {
     queryKey: ['sp-team'],
     queryFn: () => apiGet('/team/technicians'),
   });
+  // SP-254: a solo operator (individual) IS the technician — no crew to invite.
+  const { data: jobReady } = useQuery<{ supplyType?: 'solo' | 'company' }>({
+    queryKey: ['sp-job-ready-supply'],
+    queryFn: () => apiGet('/service-provider/job-ready'),
+    staleTime: 60_000,
+  });
+  const solo = jobReady?.supplyType === 'solo';
 
   const { data: invites = [], isLoading: loadingInvites } = useQuery<Invitation[]>({
     queryKey: ['sp-invites'],
@@ -244,8 +251,8 @@ export function SpTeamPanel() {
       {/* Active Technicians */}
       <section className="mb-8">
         <SectionHeader
-          title={`Active Technicians (${technicians.length})`}
-          action={
+          title={solo ? 'You are the technician' : `Active Technicians (${technicians.length})`}
+          action={solo ? undefined : (
             <button
               onClick={() => setShowInviteModal(true)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
@@ -254,8 +261,14 @@ export function SpTeamPanel() {
               <Plus className="w-4 h-4" />
               Invite Technician
             </button>
-          }
+          )}
         />
+        {solo && (
+          <p className="mb-3 text-[12.5px]" style={{ color: 'var(--color-neutral-500)' }}>
+            You&apos;re registered as an individual, so jobs are dispatched to you directly — your provider verification covers you and there is no crew to invite.
+            Want to run a team later? Ask UpNow to switch your account to a company profile.
+          </p>
+        )}
         {loadingTech ? (
           <div className="rounded-2xl p-8 text-center text-sm bg-white" style={{ boxShadow: 'var(--shadow-sm)', color: 'var(--color-neutral-400)' }}>
             Loading…

@@ -171,9 +171,13 @@ interface OperationalProfile {
       emergencyResponse: boolean;
     };
   };
+  /** SP-254: 'solo' = the individual is the provider AND the one technician. */
+  supplyType?: 'solo' | 'company';
   team: {
     id: number;
     name: string;
+    /** SP-254: the solo operator themself. */
+    isSelf?: boolean;
     status: string;
     isLeadCapable: boolean;
     hasPhoto: boolean;
@@ -869,7 +873,9 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
               {/* Team + per-technician skills */}
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                  Team · {op.cards.team.activeTechnicians} active · {op.cards.team.leadCapable} lead-capable
+                  {op.supplyType === 'solo'
+                    ? 'Solo operator · person = provider = technician'
+                    : <>Team · {op.cards.team.activeTechnicians} active · {op.cards.team.leadCapable} lead-capable</>}
                 </p>
                 {op.team.length === 0 ? (
                   <p className="text-xs" style={{ color: '#dc2626' }}>No technicians on the roster.</p>
@@ -879,6 +885,7 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                       <div key={t.id} className="rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-800)' }}>{t.name}</span>
+                          {t.isSelf && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#eef2ff', color: '#4338ca' }} title="Compliance mirrors the provider's verdict — one KYC set">the provider themself</span>}
                           {t.isLeadCapable && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#f0fdf4', color: '#16a34a' }}>Lead</span>}
                           {t.status !== 'active' && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{t.status}</span>}
                           {t.complianceStatus && t.complianceStatus !== 'compliant' && (

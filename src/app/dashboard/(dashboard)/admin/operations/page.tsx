@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { apiGet, apiPatch } from '@/lib/api';
 
 const PRIMARY = '#2e9f82';
@@ -141,7 +142,11 @@ export default function AdminOperationsPage() {
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '8px 4px 48px' }}>
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: PRIMARY }}>Operations</div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Booking dispatch</h1>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Booking dispatch</h1>
+        {/* Breadth view (SP-260): stage-grouped boards across every provider + area. */}
+        <Link href="/dashboard/admin/operations/pipelines" style={{ fontSize: 13, fontWeight: 600, color: PRIMARY }}>Pipeline boards →</Link>
+      </div>
       <p style={{ color: MUTE, fontSize: 14, marginTop: 4 }}>Place the jobs the auto-matcher couldn&apos;t — most time-critical first — and catch anything that&apos;s overdue.</p>
 
       {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
@@ -196,7 +201,13 @@ export default function AdminOperationsPage() {
                 return (
                   <tr key={b.id} style={{ borderTop: i === 0 ? BORDER : '1px solid #f6f6f4', color: INK }}>
                     <td style={{ padding: '11px 18px' }}>
-                      <span style={{ fontWeight: 600 }}>{b.serviceName ?? 'Service'}</span> <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span>
+                      {/* Drill-down (SP-257): the job's full story — trail, money, people. */}
+                      <Link href={`/dashboard/admin/operations/${b.id}`} style={{ fontWeight: 600, color: INK, textDecoration: 'none' }}
+                        onMouseEnter={(e) => { (e.target as HTMLElement).style.color = PRIMARY; }}
+                        onMouseLeave={(e) => { (e.target as HTMLElement).style.color = INK; }}>
+                        {b.serviceName ?? 'Service'}
+                      </Link>{' '}
+                      <span style={{ color: FAINT, fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>BK-{b.id}</span>
                       {b.addressText && <div style={{ color: FAINT, fontSize: 11.5, marginTop: 2 }}>{b.emirate ? `${b.emirate} · ` : ''}{b.addressText}</div>}
                     </td>
                     <td style={{ padding: '11px 18px', color: MUTE, whiteSpace: 'nowrap' }}>

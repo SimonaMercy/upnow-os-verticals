@@ -17,7 +17,8 @@ const AMBER = '#C77D0A';
 const REFUND_REASON_LABELS: Record<string, string> = {
   customer_cancelled: 'Customer cancelled',
   provider_cancelled: 'Provider cancelled',
-  provider_no_show: 'No-show',
+  provider_no_show: 'No-show (you)',
+  customer_no_show: 'Customer no-show',
   work_not_to_standard: 'Work not to standard',
   duplicate_booking: 'Duplicate booking',
   platform_error: 'Platform error',
@@ -31,6 +32,8 @@ interface EarningsJob {
   bookingId: number;
   serviceName: string | null;
   status: string;
+  /** 'job' = completed work · 'cancellation_fee' = a retained fee on a cancelled / no-show booking (SP-138). */
+  kind?: 'job' | 'cancellation_fee';
   disputed: boolean;
   gross: number;
   /** VAT slice inside the gross (SP-141); 0 for bookings priced before the engine. */
@@ -83,14 +86,17 @@ function statusPill(status: string, disputed = false) {
       </span>
     );
   }
-  const released = status === 'released';
+  // A cancellation / no-show fee is money earned without a completed job (SP-138):
+  // partially_released = fee kept, rest refunded; released on a cancelled booking = the whole amount kept.
+  const released = status === 'released' || status === 'partially_released';
+  const refunded = status === 'refunded';
   return (
     <span style={{
       fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px',
-      color: released ? GREEN : AMBER,
-      background: released ? TINT_GREEN : TINT_AMBER,
+      color: released ? GREEN : refunded ? FAINT : AMBER,
+      background: released ? TINT_GREEN : refunded ? '#F3F4F6' : TINT_AMBER,
     }}>
-      {released ? 'Paid out' : 'Held'}
+      {status === 'partially_released' ? 'Fee paid out' : released ? 'Paid out' : refunded ? 'Refunded' : 'Held'}
     </span>
   );
 }
@@ -164,7 +170,14 @@ export default function ServiceProviderEarningsPage() {
               <tbody>
                 {data.jobs.map((j, i) => (
                   <tr key={j.bookingId} style={{ borderTop: i === 0 ? HAIRLINE : '1px solid #F4F6F3', color: INK }}>
-                    <td style={{ padding: '12px 18px', fontWeight: 600 }}>{j.serviceName ?? '—'}</td>
+                    <td style={{ padding: '12px 18px', fontWeight: 600 }}>
+                      {j.serviceName ?? '—'}
+                      {j.kind === 'cancellation_fee' && (
+                        <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: AMBER, background: TINT_AMBER, borderRadius: 999, padding: '2px 8px' }}>
+                          {j.refundReason === 'customer_no_show' ? 'No-show fee' : 'Cancellation fee'}
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: '12px 12px', color: FAINT }}>BK-{j.bookingId}</td>
                     <td style={{ padding: '12px 12px' }}>
                       {statusPill(j.status, j.disputed)}

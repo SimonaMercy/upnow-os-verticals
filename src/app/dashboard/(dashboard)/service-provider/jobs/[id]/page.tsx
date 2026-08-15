@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { uploadBookingPhoto, EMPTY_EVIDENCE, type EvidenceGroups, type EvidenceKind, type EvidencePhoto } from '@/lib/bookingEvidence';
 
 /* Tokens shared with the SP dashboard (design 2a). */
 const GREEN = '#0B7A4E';
@@ -28,7 +29,7 @@ interface Technician { id: number; name: string; jobStatus: string }
 interface TeamMember { id: number; name: string; isLeadCapable: boolean }
 interface QuoteItem { itemName: string; quantity: number | string; unitPrice: number | string; lineTotal: number | string }
 interface Quote { id: number; status: string; totalAmount: number | string; laborAmount?: number | string | null; materialsAmount?: number | string | null; summary?: string | null; validUntil?: string | null; rejectionReason?: string | null; items: QuoteItem[] }
-interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null; accepted?: boolean }
+interface JobDetail { booking: Booking; technician: Technician | null; team: TeamMember[]; quote: Quote | null; accepted?: boolean; media?: EvidenceGroups }
 interface Dispute {
   id: number; status: string; title: string; description: string | null;
   resolutionSummary: string | null; providerResponse: string | null; bookingId: number;
@@ -56,6 +57,35 @@ const fmtWhen = (iso: string) =>
 
 const emptyRow = () => ({ itemName: '', quantity: '1', unitPrice: '', itemType: 'labor' as 'labor' | 'materials' });
 
+/** One evidence gallery row: thumbnails + (optionally) an add tile (SP-258). */
+function EvidenceBlock({ title, photos, onUpload, busy }: {
+  title: string; photos: EvidencePhoto[]; onUpload?: (f: File) => void; busy?: boolean;
+}) {
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: FAINT }}>
+        {title}{photos.length > 0 ? ` · ${photos.length}` : ''}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+        {photos.map((p) => (
+          <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer" title={p.caption ?? title}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.viewUrl} alt={p.caption ?? title} style={{ width: 74, height: 74, objectFit: 'cover', borderRadius: 10, border: BORDER, display: 'block' }} />
+          </a>
+        ))}
+        {photos.length === 0 && !onUpload && <span style={{ fontSize: 12.5, color: FAINT }}>None yet</span>}
+        {onUpload && (
+          <label style={{ width: 74, height: 74, borderRadius: 10, border: '1.5px dashed #C9D2CB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: FAINT, cursor: busy ? 'default' : 'pointer', background: '#FAFBFA' }}>
+            {busy ? '…' : '+'}
+            <input type="file" accept="image/*" style={{ display: 'none' }} disabled={busy}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = ''; }} />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ProviderJobPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -69,6 +99,9 @@ export default function ProviderJobPage() {
   const [respondText, setRespondText] = useState('');
   const [declineOpen, setDeclineOpen] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
+  const [media, setMedia] = useState<EvidenceGroups>(EMPTY_EVIDENCE);
+  const [mediaBusy, setMediaBusy] = useState<EvidenceKind | null>(null);
+  const [mediaErr, setMediaErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -77,6 +110,7 @@ export default function ProviderJobPage() {
         apiGet<Dispute[]>('/disputes/provider').catch(() => [] as Dispute[]),
       ]);
       setData(job);
+      setMedia(job.media ?? EMPTY_EVIDENCE);
       const d = disputes.find((x) => x.bookingId === Number(id)) ?? null;
       setDispute(d);
       setRespondText(d?.providerResponse ?? '');
@@ -85,6 +119,21 @@ export default function ProviderJobPage() {
     finally { setLoading(false); }
   }, [id]);
   useEffect(() => { load(); }, [load]);
+
+  // Evidence photos (SP-258): before = condition on arrival, after = proof of
+  // the finished work ('after' stays open on a completed job so proof can land
+  // with completion; the completion gate reads it server-side).
+  const addPhoto = async (kind: EvidenceKind, file: File) => {
+    setMediaBusy(kind); setMediaErr(null);
+    try {
+      const saved = await uploadBookingPhoto(Number(id), kind, file);
+      setMedia((m) => ({ ...m, [kind]: [...m[kind], saved] }));
+    } catch (e) {
+      setMediaErr(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setMediaBusy(null);
+    }
+  };
 
   const submitResponse = async () => {
     if (!dispute || !respondText.trim()) return;
@@ -104,6 +153,18 @@ export default function ProviderJobPage() {
     setBusy(true);
     try { await apiPatch(`/bookings/${id}/status`, { status: to }); await load(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not update status'); }
+    finally { setBusy(false); }
+  };
+  /**
+   * SP-138: the customer wasn't there. Only once EN ROUTE and past the
+   * slot + grace (the server enforces both and says how long to wait).
+   */
+  const customerNoShow = async () => {
+    if (!window.confirm('Record a customer no-show? The booking will be closed under the no-show policy and the fee released to you per the platform terms.')) return;
+    const note = window.prompt('What happened? (optional — goes on the job trail)') ?? '';
+    setBusy(true);
+    try { await apiPost(`/bookings/${id}/no-show/customer`, note.trim() ? { note: note.trim() } : {}); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not record the no-show'); }
     finally { setBusy(false); }
   };
   const accept = async () => {
@@ -234,6 +295,20 @@ export default function ProviderJobPage() {
         </div>
       </div>
 
+      {/* Evidence photos (SP-258): the customer's problem photos brief the crew;
+          before/after is this provider's proof of work — dispute armour. */}
+      <div style={card({ marginTop: 14, padding: '16px 18px' })}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>Evidence photos</div>
+        <EvidenceBlock title="Problem — from the customer" photos={media.problem} />
+        <EvidenceBlock title="Before work" photos={media.before}
+          onUpload={['assigned', 'en_route', 'in_progress'].includes(b.status) ? (f) => void addPhoto('before', f) : undefined}
+          busy={mediaBusy === 'before'} />
+        <EvidenceBlock title="Proof of completion" photos={media.after}
+          onUpload={['assigned', 'en_route', 'in_progress', 'completed'].includes(b.status) ? (f) => void addPhoto('after', f) : undefined}
+          busy={mediaBusy === 'after'} />
+        {mediaErr && <p style={{ fontSize: 12.5, color: '#B42318', marginTop: 8 }}>{mediaErr}</p>}
+      </div>
+
       {/* Quote entry / status (quote services only) */}
       {isQuote && (
         <div style={card({ marginTop: 14, padding: '16px 18px' })}>
@@ -356,10 +431,18 @@ export default function ProviderJobPage() {
             {!accepted && <p style={{ fontSize: 12.5, color: FAINT, marginTop: 8 }}>Accept to confirm you&apos;ll take this job — the customer is told you&apos;re confirmed. Can&apos;t make it? Decline and we&apos;ll reassign it.</p>}
           </div>
         ) : next ? (
-          <button disabled={busy} onClick={() => advance(next.to)}
-            style={{ marginTop: 10, width: '100%', background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
-            {busy ? 'Updating…' : next.label}
-          </button>
+          <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button disabled={busy} onClick={() => advance(next.to)}
+              style={{ flex: 1, minWidth: 160, background: GREEN, color: '#fff', border: 'none', borderRadius: 11, padding: '12px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+              {busy ? 'Updating…' : next.label}
+            </button>
+            {b.status === 'en_route' && new Date(b.scheduledAt).getTime() < Date.now() && (
+              <button disabled={busy} onClick={() => void customerNoShow()} title="Nobody at the address — closes the job under the no-show policy"
+                style={{ background: '#fff', color: '#B42318', border: '1px solid #FECDCA', borderRadius: 11, padding: '12px 18px', fontSize: 15, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
+                Customer not there
+              </button>
+            )}
+          </div>
         ) : (
           <p style={{ fontSize: 14, color: GREEN, marginTop: 8, fontWeight: 600 }}>✓ Job {b.status}.</p>
         )}

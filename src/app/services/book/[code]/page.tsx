@@ -37,10 +37,12 @@ interface Svc {
   addons: SvcAddon[];
   packages: Pkg[];
   imageUrl?: string | null;
+  /** SP-135: this service's RESOLVED terms (platform matrix ⊕ its own override) — what the booking is snapshotted under. */
+  cancellationPolicy?: CancellationPolicy | null;
 }
 interface Cat { id: number; code: string; name: string; services: Svc[] }
 interface CancelTier { minHoursBefore: number; feePct: number }
-interface CancellationPolicy { reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number; note?: string }
+interface CancellationPolicy { reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number; noShowGraceMinutes?: number; source?: 'platform' | 'service'; note?: string }
 
 const HOUR_OPTIONS = [2, 3, 4, 6, 8];
 const SLOT_HOURS = Array.from({ length: 13 }, (_, i) => 8 + i); // 08:00–20:00
@@ -184,6 +186,8 @@ export default function BookServicePage() {
           const found = c.services.find((s) => s.code === code);
           if (found) {
             setSvc(found); setCatName(c.name); setCatCode(c.code);
+            // The service's own resolved terms win over the platform matrix (SP-135).
+            if (found.cancellationPolicy) setCancelPolicy(found.cancellationPolicy);
             if (found.quantityLabel) setQty(found.quantityMin || 1);
             return;
           }

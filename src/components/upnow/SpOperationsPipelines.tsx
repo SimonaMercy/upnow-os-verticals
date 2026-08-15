@@ -60,6 +60,9 @@ export interface SpBooking {
   quote?: { status?: string | null } | null;
   /** Status of the booking's escrow row ('held' | 'released' | 'refunded' | …). */
   escrowStatus?: string | null;
+  /** Admin payload only (SP-260) — whose job this is, across all providers. */
+  serviceProviderId?: number | null;
+  providerName?: string | null;
 }
 
 interface Props {
@@ -67,6 +70,13 @@ interface Props {
   bookingsPath?: string;
   /** Deep-link to a booking's job detail page. */
   bookingHref?: (id: number) => string;
+  /**
+   * Admin breadth view (SP-260): same pipelines and stage names the provider
+   * sees — the shared stage model the ticket demands — plus provider and
+   * area (emirate) filters and an area-allocation strip. Cards carry the
+   * provider's name so every row says whose job it is.
+   */
+  adminLens?: boolean;
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
@@ -199,7 +209,9 @@ function toCard(b: SpBooking, tab: TabKey, href: string | null, nowMs: number): 
   return {
     key: `b-${b.id}`,
     name: b.customer?.name ?? b.customerName ?? '—',
-    sub: where ? `${service} · ${where}` : service,
+    // providerName only exists on the admin payload — provider-side cards keep
+    // their exact current text.
+    sub: [service, where, b.providerName].filter(Boolean).join(' · '),
     ref: `BK-${b.id}`,
     amountAed: amount != null ? Number(amount) : null,
     when: fmtWhen(b.scheduledAt ?? b.scheduledDate),
@@ -213,6 +225,7 @@ function toCard(b: SpBooking, tab: TabKey, href: string | null, nowMs: number): 
 export default function SpOperationsPipelines({
   bookingsPath = '/bookings',
   bookingHref = (id: number) => `/dashboard/service-provider/jobs/${id}`,
+  adminLens = false,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -225,6 +238,8 @@ export default function SpOperationsPipelines({
   });
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('all');
+  const [filterProvider, setFilterProvider] = useState('all');
+  const [filterEmirate, setFilterEmirate] = useState('all');
   const [view, setView] = useState<'kanban' | 'list' | 'grid'>(() => {
     const v = sp.get('view'); return v === 'list' || v === 'grid' || v === 'kanban' ? v : 'kanban';
   });
@@ -256,6 +271,21 @@ export default function SpOperationsPipelines({
     return [...s].sort();
   }, [bookings]);
 
+  // Admin lens (SP-260): who and where — the breadth axes the flat table lacked.
+  const providerNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const b of bookings) if (b.providerName) s.add(b.providerName);
+    return [...s].sort();
+  }, [bookings]);
+  const emirateCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of bookings) {
+      if (norm(b.status) === 'cancelled' || !b.emirate) continue;
+      m.set(b.emirate, (m.get(b.emirate) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, z) => z[1] - a[1]);
+  }, [bookings]);
+
   const matchSearch = (hay: (string | null | undefined)[]) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -269,12 +299,14 @@ export default function SpOperationsPipelines({
       if (!t) continue;
       const cat = b.service?.category ?? b.category ?? null;
       if (filterCat !== 'all' && cat !== filterCat) continue;
-      if (!matchSearch([b.customer?.name, b.customerName, b.service?.name, b.serviceName, b.emirate, b.areaName, `BK-${b.id}`])) continue;
+      if (filterProvider !== 'all' && b.providerName !== filterProvider) continue;
+      if (filterEmirate !== 'all' && b.emirate !== filterEmirate) continue;
+      if (!matchSearch([b.customer?.name, b.customerName, b.service?.name, b.serviceName, b.emirate, b.areaName, b.providerName, `BK-${b.id}`])) continue;
       out[t].push(toCard(b, t, bookingHref(b.id), nowMs));
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookings, search, filterCat, bookingHref, nowMs]);
+  }, [bookings, search, filterCat, filterProvider, filterEmirate, bookingHref, nowMs]);
 
   const activeCards = cardsByTab[tab];
   const stages = STAGES_FOR_TAB[tab];
@@ -344,7 +376,7 @@ export default function SpOperationsPipelines({
     </div>
   );
 
-  const hasFilters = filterCat !== 'all' || search !== '';
+  const hasFilters = filterCat !== 'all' || search !== '' || filterProvider !== 'all' || filterEmirate !== 'all';
 
   return (
     <div className="opsp-page">
@@ -381,10 +413,30 @@ export default function SpOperationsPipelines({
           })}
         </div>
 
+        {/* Area allocation strip (SP-260): "what is happening in Marina today"
+            — per-emirate counts doubling as filter shortcuts. Admin lens only. */}
+        {adminLens && emirateCounts.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0 0' }}>
+            {emirateCounts.map(([em, n]) => (
+              <button key={em} type="button"
+                onClick={() => setFilterEmirate(filterEmirate === em ? 'all' : em)}
+                style={{
+                  border: '1px solid', borderColor: filterEmirate === em ? 'var(--ink, #1a1916)' : '#e8e8e4',
+                  background: filterEmirate === em ? 'var(--ink, #1a1916)' : '#fff',
+                  color: filterEmirate === em ? '#fff' : 'var(--mute, #5f5f5a)',
+                  borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', textTransform: 'capitalize',
+                }}>
+                {em.replace(/_/g, ' ')} · {n}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="filters">
           <div className="search">
             <span className="ic"><Search size={15} /></span>
-            <input placeholder="Search customer, service, booking…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input placeholder={adminLens ? 'Search customer, provider, service, booking…' : 'Search customer, service, booking…'} value={search} onChange={e => setSearch(e.target.value)} />
             {search && <button type="button" className="clear" onClick={() => setSearch('')}><X size={14} /></button>}
           </div>
           <div className="sel-wrap">
@@ -393,8 +445,24 @@ export default function SpOperationsPipelines({
               {categories.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+          {adminLens && (
+            <div className="sel-wrap">
+              <select className="sel" value={filterProvider} onChange={e => setFilterProvider(e.target.value)}>
+                <option value="all">All providers</option>
+                {providerNames.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+          {adminLens && (
+            <div className="sel-wrap">
+              <select className="sel" value={filterEmirate} onChange={e => setFilterEmirate(e.target.value)}>
+                <option value="all">All areas</option>
+                {emirateCounts.map(([em]) => <option key={em} value={em}>{em.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+          )}
           {hasFilters && (
-            <button type="button" className="reset" onClick={() => { setFilterCat('all'); setSearch(''); }}>
+            <button type="button" className="reset" onClick={() => { setFilterCat('all'); setSearch(''); setFilterProvider('all'); setFilterEmirate('all'); }}>
               <X size={12} /> Reset
             </button>
           )}
