@@ -113,6 +113,18 @@ export function middleware(req: NextRequest) {
       }
     }
 
+    // Technician portal is for the person doing the work (SP-127) — a provider
+    // owner or anyone else who lands here is sent to their own home.
+    if (pathname.startsWith('/dashboard/technician')) {
+      const role = readRole(token);
+      if (role !== 'technician') {
+        const url = req.nextUrl.clone();
+        url.pathname = homeForRole(role);
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+    }
+
     return NextResponse.next();
   }
 

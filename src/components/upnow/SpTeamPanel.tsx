@@ -15,20 +15,30 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock,
+  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** SP-127: whether the roster member can actually use the app. */
+type LoginState = 'none' | 'invited' | 'ready' | 'signed_in';
+
 interface TechnicianMember {
   id: number;
   userId: number;
   specialization: string | null;
   status: string;
+  isSelf: boolean;
+  isLeadCapable: boolean;
+  loginState: LoginState;
+  pendingInviteId: number | null;
+  pendingInviteEmail: string | null;
+  lastLoginAt: string | null;
   createdAt: string;
-  user: { id: number; name: string; email: string; phone: string | null };
+  /** email is null for login-less roster entries (placeholder addresses are never returned). */
+  user: { id: number; name: string; email: string | null; phone: string | null };
 }
 
 interface Invitation {
@@ -180,6 +190,133 @@ function InviteTechnicianModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── Invite an existing roster member to the app (SP-127) ────────────────────
+
+const rosterInviteSchema = z.object({
+  email: z.string().email('Valid email required'),
+  phone: z.string().optional(),
+});
+type RosterInviteForm = z.infer<typeof rosterInviteSchema>;
+
+function InviteRosterMemberModal({ tech, onClose }: { tech: TechnicianMember; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { register, handleSubmit, formState: { errors } } = useForm<RosterInviteForm>({
+    resolver: zodResolver(rosterInviteSchema),
+    defaultValues: { email: tech.pendingInviteEmail ?? tech.user.email ?? '', phone: tech.user.phone ?? '' },
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: RosterInviteForm) =>
+      apiPost(`/invitations/technicians/${tech.id}`, { email: data.email, phone: data.phone || undefined }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sp-invites'] });
+      qc.invalidateQueries({ queryKey: ['sp-team'] });
+      onClose();
+    },
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.4)' }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl p-6"
+        style={{ background: 'var(--color-base-100)', border: '1px solid var(--color-base-200)' }}
+      >
+        <h2 className="text-lg font-bold mb-1">Invite {tech.user.name} to the app</h2>
+        <p className="text-xs mb-4" style={{ color: 'var(--color-neutral-500)' }}>
+          They&apos;ll get an email link to set up their own login. Their roster entry, skills and job history stay exactly as they are.
+        </p>
+
+        {mutation.error && (
+          <div
+            className="rounded-xl p-3 mb-4 text-sm"
+            style={{ background: 'color-mix(in srgb, var(--color-error) 10%, white)', color: 'var(--color-error)' }}
+          >
+            {(mutation.error as Error).message}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-4">
+          <div>
+            <label htmlFor="ri-email" className="block text-xs font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>
+              Their email address *
+            </label>
+            <input
+              id="ri-email"
+              {...register('email')}
+              type="email"
+              className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+              style={{
+                border: `1px solid ${errors.email ? 'var(--color-error)' : 'var(--color-base-200)'}`,
+                background: 'var(--color-base-100)',
+              }}
+              placeholder="jane@example.com"
+            />
+            {errors.email && (
+              <p className="text-xs mt-1" style={{ color: 'var(--color-error)' }}>{errors.email.message}</p>
+            )}
+          </div>
+          <div>
+            <label htmlFor="ri-phone" className="block text-xs font-medium mb-1" style={{ color: 'var(--color-neutral-600)' }}>
+              Phone (optional)
+            </label>
+            <input
+              id="ri-phone"
+              {...register('phone')}
+              className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
+              style={{ border: '1px solid var(--color-base-200)', background: 'var(--color-base-100)' }}
+              placeholder="+971 50 000 0000"
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+              style={{ border: '1px solid var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+              style={{ background: 'var(--color-primary)', opacity: mutation.isPending ? 0.7 : 1 }}
+            >
+              {mutation.isPending ? 'Sending…' : tech.loginState === 'invited' ? 'Resend Invite' : 'Send Invite'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Login state (SP-127) ────────────────────────────────────────────────────
+
+function LoginStateChip({ tech }: { tech: TechnicianMember }) {
+  if (tech.isSelf) return null;
+  const map: Record<LoginState, { label: string; bg: string; text: string }> = {
+    none:      { label: 'No app login', bg: 'color-mix(in srgb, var(--color-neutral-400) 15%, white)', text: 'var(--color-neutral-500)' },
+    invited:   { label: 'Invite pending', bg: 'color-mix(in srgb, #d97706 12%, white)', text: '#d97706' },
+    ready:     { label: 'Can sign in', bg: 'color-mix(in srgb, var(--color-primary) 12%, white)', text: 'var(--color-primary)' },
+    signed_in: { label: 'App user', bg: 'color-mix(in srgb, var(--color-primary) 12%, white)', text: 'var(--color-primary)' },
+  };
+  const s = map[tech.loginState];
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold"
+      style={{ background: s.bg, color: s.text }}
+      title={tech.lastLoginAt ? `Last signed in ${new Date(tech.lastLoginAt).toLocaleDateString()}` : undefined}
+    >
+      <LogIn className="w-3 h-3" />{s.label}
+    </span>
+  );
+}
+
 // ─── Status chip ─────────────────────────────────────────────────────────────
 
 function StatusChip({ status }: { status: string }) {
@@ -205,6 +342,7 @@ function StatusChip({ status }: { status: string }) {
 
 export function SpTeamPanel() {
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [rosterInvite, setRosterInvite] = useState<TechnicianMember | null>(null);
   const qc = useQueryClient();
 
   const { data: technicians = [], isLoading: loadingTech } = useQuery<TechnicianMember[]>({
@@ -247,11 +385,14 @@ export function SpTeamPanel() {
       {showInviteModal && (
         <InviteTechnicianModal onClose={() => setShowInviteModal(false)} />
       )}
+      {rosterInvite && (
+        <InviteRosterMemberModal tech={rosterInvite} onClose={() => setRosterInvite(null)} />
+      )}
 
       {/* Active Technicians */}
       <section className="mb-8">
         <SectionHeader
-          title={solo ? 'You are the technician' : `Active Technicians (${technicians.length})`}
+          title={solo ? 'You are the technician' : `Technicians (${technicians.length})`}
           action={solo ? undefined : (
             <button
               onClick={() => setShowInviteModal(true)}
@@ -301,11 +442,24 @@ export function SpTeamPanel() {
                   {tech.user.name.slice(0, 1).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{tech.user.name}</p>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-                      <Mail className="w-3 h-3" />{tech.user.email}
-                    </span>
+                  <p className="text-sm font-semibold truncate">
+                    {tech.user.name}
+                    {tech.isSelf && <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--color-neutral-500)' }}>(you)</span>}
+                  </p>
+                  <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                    {tech.user.email ? (
+                      <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+                        <Mail className="w-3 h-3" />{tech.user.email}
+                      </span>
+                    ) : tech.pendingInviteEmail ? (
+                      <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+                        <Mail className="w-3 h-3" />{tech.pendingInviteEmail} · invite sent
+                      </span>
+                    ) : (
+                      <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>
+                        Roster entry — no email on file
+                      </span>
+                    )}
                     {tech.user.phone && (
                       <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
                         <Phone className="w-3 h-3" />{tech.user.phone}
@@ -318,7 +472,19 @@ export function SpTeamPanel() {
                     {tech.specialization}
                   </span>
                 )}
+                <LoginStateChip tech={tech} />
                 <StatusChip status={tech.status} />
+                {!tech.isSelf && tech.loginState !== 'signed_in' && (
+                  <button
+                    onClick={() => setRosterInvite(tech)}
+                    title={tech.loginState === 'invited' ? 'Resend the app invite' : 'Invite to the app'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-base-200"
+                    style={{ color: 'var(--color-primary)', border: '1px solid var(--color-base-200)' }}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {tech.loginState === 'invited' ? 'Resend' : 'Invite to app'}
+                  </button>
+                )}
               </div>
             ))}
           </div>
