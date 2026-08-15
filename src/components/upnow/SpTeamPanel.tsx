@@ -15,7 +15,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn,
+  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn, ShieldCheck,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
@@ -32,6 +32,8 @@ interface TechnicianMember {
   status: string;
   isSelf: boolean;
   isLeadCapable: boolean;
+  /** SP-129: UpNow's verdict on the person — dispatch needs `compliant` once Gate 1 is on. */
+  complianceStatus: 'pending_review' | 'compliant' | 'action_required' | 'expired' | 'paused';
   loginState: LoginState;
   pendingInviteId: number | null;
   pendingInviteEmail: string | null;
@@ -295,6 +297,25 @@ function InviteRosterMemberModal({ tech, onClose }: { tech: TechnicianMember; on
   );
 }
 
+// ─── Verification (SP-129) ───────────────────────────────────────────────────
+
+function VerificationChip({ status }: { status: TechnicianMember['complianceStatus'] }) {
+  const map: Record<TechnicianMember['complianceStatus'], { label: string; bg: string; text: string }> = {
+    compliant:       { label: 'Verified', bg: 'color-mix(in srgb, var(--color-primary) 12%, white)', text: 'var(--color-primary)' },
+    pending_review:  { label: 'Pending verification', bg: 'color-mix(in srgb, #d97706 12%, white)', text: '#d97706' },
+    action_required: { label: 'Action required', bg: 'color-mix(in srgb, var(--color-error) 12%, white)', text: 'var(--color-error)' },
+    expired:         { label: 'Document expired', bg: 'color-mix(in srgb, var(--color-neutral-400) 15%, white)', text: 'var(--color-neutral-500)' },
+    paused:          { label: 'Verification paused', bg: 'color-mix(in srgb, #d97706 12%, white)', text: '#d97706' },
+  };
+  const s = map[status] ?? map.pending_review;
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{ background: s.bg, color: s.text }}
+      title={status === 'compliant' ? 'UpNow has verified this technician' : 'Not yet cleared for dispatch by UpNow'}>
+      <ShieldCheck className="w-3 h-3" />{s.label}
+    </span>
+  );
+}
+
 // ─── Login state (SP-127) ────────────────────────────────────────────────────
 
 function LoginStateChip({ tech }: { tech: TechnicianMember }) {
@@ -472,6 +493,7 @@ export function SpTeamPanel() {
                     {tech.specialization}
                   </span>
                 )}
+                <VerificationChip status={tech.complianceStatus} />
                 <LoginStateChip tech={tech} />
                 <StatusChip status={tech.status} />
                 {!tech.isSelf && tech.loginState !== 'signed_in' && (

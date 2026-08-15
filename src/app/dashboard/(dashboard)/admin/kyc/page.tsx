@@ -1701,9 +1701,24 @@ interface ManagerRow {
   landlordCount: number; landlords: ManagerLandlord[];
   uploadedDocs: ManagerDoc[];
 }
+/** SP-129/212 · GET /admin/kyc/technicians row — the technician half of Gate 1. */
 interface TechnicianRow {
-  id: number | null; name: string; email: string | null; status: string;
-  spName: string; createdAt: string;
+  id: number; userId: number; name: string; email: string | null; phone: string | null; status: string;
+  isLeadCapable: boolean;
+  /** SP-254 solo self-row: verdict lives on the PROVIDER — read-only here. */
+  isSelf: boolean;
+  complianceStatus: ComplianceStatus; compliancePausedAt: string | null;
+  complianceNotes: string | null; complianceReviewedAt: string | null;
+  complianceReviewedBy: { id: number; name: string } | null;
+  assignable: boolean; documentCount: number; lastLoginAt: string | null; createdAt: string;
+  provider: { id: number; name: string; entityType: string; complianceStatus: ComplianceStatus };
+}
+interface TechnicianDetail {
+  technician: TechnicianRow;
+  checklist: ChecklistItem[];
+  uploadedDocs: UploadedDoc[];
+  completionScore: number;
+  assignability: { assignable: boolean; reason: string | null };
 }
 
 function permLabel(k: string) {
@@ -1723,10 +1738,12 @@ function accountBadge(status: string) {
 
 /** Queue card for managers/technicians — mirrors KycCard's style. */
 function TeamCard({
-  name, email, sub, status, date, selected, onClick,
+  name, email, sub, status, date, selected, onClick, badge,
 }: {
   name: string; email?: string | null; sub: string; status: string;
   date: string; selected: boolean; onClick: () => void;
+  /** Replaces the account-status chip (technicians show their compliance verdict). */
+  badge?: React.ReactNode;
 }) {
   return (
     <button onClick={onClick}
@@ -1738,7 +1755,7 @@ function TeamCard({
       }}>
       <div className="flex items-start justify-between gap-2 mb-1">
         <span className="text-sm font-semibold truncate" style={{ color: "var(--color-neutral-900)" }}>{name}</span>
-        {accountBadge(status)}
+        {badge ?? accountBadge(status)}
       </div>
       {email && <p className="text-xs truncate mb-1" style={{ color: "var(--color-neutral-400)" }}>{email}</p>}
       <p className="text-xs" style={{ color: "var(--color-primary)" }}>{sub}</p>
@@ -1848,32 +1865,233 @@ function ManagerContentPanel({ m }: { m: ManagerRow }) {
   );
 }
 
-/** Column-3 detail for a selected technician. */
-function TechnicianContentPanel({ t }: { t: TechnicianRow }) {
+/**
+ * Column-3 detail for a selected technician (SP-129/212) — the review surface:
+ * documents with Approve/Reject (same control as RP/SP/customer), the
+ * Emirates ID + visa checklist, and the verdict bar. A solo operator's
+ * self-row is read-only: the person is vetted as the PROVIDER (SP-254).
+ */
+function TechnicianContentPanel({
+  t, onStatusChange,
+}: {
+  t: TechnicianRow;
+  onStatusChange: (id: number, patch: Partial<TechnicianRow>) => void;
+}) {
+  const [detail, setDetail] = useState<TechnicianDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [acting, setActing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true); setDetail(null); setNotes("");
+    apiGet<TechnicianDetail>(`/admin/kyc/technicians/${t.id}`)
+      .then((d) => { if (alive) { setDetail(d); setNotes(d.technician.complianceNotes ?? ""); } })
+      .catch(() => { /* panel shows the row we already have */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [t.id]);
+
+  const row = detail?.technician ?? t;
+  const docs = detail?.uploadedDocs ?? null;
+  const checklist = detail?.checklist ?? [];
+  const requiredMissing = checklist.filter((c) => c.required && !c.uploaded);
+  const docsVerified = (docs ?? []).filter((d) => ["processed", "complete", "approved"].includes(String(d.status).toLowerCase())).length;
+
+  function onDocUpdate(docId: number, patch: Partial<UploadedDoc>) {
+    setDetail((prev) => prev
+      ? { ...prev, uploadedDocs: prev.uploadedDocs.map((d) => d.id === docId ? { ...d, ...patch } : d) }
+      : prev);
+  }
+
+  async function act(status: ComplianceStatus) {
+    setActing(true);
+    try {
+      const d = await apiPatch<TechnicianDetail>(`/admin/kyc/technicians/${t.id}/compliance`, {
+        complianceStatus: status,
+        ...(notes.trim() ? { complianceNotes: notes.trim() } : {}),
+      });
+      setDetail(d);
+      onStatusChange(t.id, {
+        complianceStatus: d.technician.complianceStatus,
+        assignable: d.technician.assignable,
+        complianceReviewedAt: d.technician.complianceReviewedAt,
+        complianceReviewedBy: d.technician.complianceReviewedBy,
+        complianceNotes: d.technician.complianceNotes,
+      });
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setActing(false);
+    }
+  }
+
+  const overviewRows: Array<{ label: string; value: string }> = [
+    { label: "Provider", value: `${row.provider.name}${row.provider.entityType === "individual" ? " (solo)" : ""}` },
+    { label: "Provider verdict", value: row.provider.complianceStatus.replace(/_/g, " ") },
+    { label: "Lead capable", value: row.isLeadCapable ? "Yes" : "No" },
+    { label: "Account", value: row.status },
+    { label: "App login", value: row.email ? (row.lastLoginAt ? `Signed in ${new Date(row.lastLoginAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}` : "Never signed in") : "No login (roster entry)" },
+    { label: "Member since", value: new Date(row.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
+    ...(row.complianceReviewedAt ? [{ label: "Last verdict", value: `${row.complianceReviewedBy?.name ?? "Admin"} · ${new Date(row.complianceReviewedAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}` }] : []),
+  ];
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4">
+        {/* Header */}
         <div className="mb-3 pb-3 border-b" style={{ borderColor: "var(--color-base-100)" }}>
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
-            <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{t.name}</h2>
-            {accountBadge(t.status)}
+            <h2 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>{row.name}</h2>
+            <ComplianceBadge s={row.complianceStatus} />
+            {row.isSelf && (
+              <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ backgroundColor: "#eef2ff", color: "#4338ca" }}>Solo operator</span>
+            )}
           </div>
-          {t.email && <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{t.email}</p>}
+          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>
+            {row.email ?? "No app login yet"}{row.phone ? ` · ${row.phone}` : ""}
+          </p>
+          <p className="text-xs mt-1 font-medium" style={{ color: row.assignable ? "#15803d" : "#b45309" }}>
+            {row.assignable ? "Cleared for dispatch" : (detail?.assignability.reason ?? "Not assignable until verified")}
+          </p>
         </div>
-        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>Account details</p>
-        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
-          {[
-            { label: "Role", value: "Technician" },
-            { label: "Service provider", value: t.spName },
-            { label: "Status", value: t.status },
-            { label: "Member since", value: new Date(t.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) },
-          ].map(({ label, value }) => (
-            <div key={label} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
-              <span className="text-xs" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
-              <span className="text-xs font-semibold capitalize" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+
+        {/* Overview */}
+        <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          <div className="grid grid-cols-2 gap-x-4">
+            {overviewRows.map(({ label, value }) => (
+              <div key={label} className="flex items-center justify-between gap-2 py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+                <span className="text-xs shrink-0" style={{ color: "var(--color-neutral-400)" }}>{label}</span>
+                <span className="text-xs font-semibold text-right capitalize truncate" style={{ color: "var(--color-neutral-800)" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Checklist */}
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--color-neutral-400)" }}>
+          KYC checklist{detail ? ` · ${detail.completionScore}%` : ""}
+        </p>
+        <div className="rounded-xl p-3 mb-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {loading && !detail ? (
+            <p className="text-xs py-2 text-center" style={{ color: "var(--color-neutral-400)" }}>Loading…</p>
+          ) : checklist.length === 0 ? (
+            <p className="text-xs py-2 text-center" style={{ color: "var(--color-neutral-400)" }}>No checklist for this owner type.</p>
+          ) : checklist.map((c) => (
+            <div key={c.key} className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: "var(--color-base-100)" }}>
+              <span className="text-xs" style={{ color: "var(--color-neutral-700)" }}>
+                {c.displayName}{c.required && <span style={{ color: "#dc2626" }}> *</span>}
+              </span>
+              <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 capitalize"
+                style={c.uploaded
+                  ? { backgroundColor: "#dcfce7", color: "#15803d" }
+                  : { backgroundColor: c.required ? "#fee2e2" : "#f3f4f6", color: c.required ? "#dc2626" : "#6b7280" }}>
+                {c.uploaded ? String(c.status ?? "uploaded").toLowerCase() : "missing"}
+              </span>
             </div>
           ))}
         </div>
+
+        {/* Documents */}
+        <div className="flex items-center gap-1.5 mb-2">
+          <FileText size={12} style={{ color: "var(--color-primary)" }} />
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-neutral-500)" }}>
+            Documents{docs ? ` (${docs.length}, ${docsVerified} verified)` : ""}
+          </span>
+        </div>
+        <div className="rounded-xl p-3" style={{ backgroundColor: "#fff", border: "1px solid var(--color-base-200)" }}>
+          {loading && !detail ? (
+            <p className="text-xs py-3 text-center" style={{ color: "var(--color-neutral-400)" }}>Loading documents…</p>
+          ) : !docs || docs.length === 0 ? (
+            <p className="text-xs py-3 text-center" style={{ color: "var(--color-neutral-400)" }}>
+              No documents uploaded yet — the technician (or their provider) uploads Emirates ID + visa from the app.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {docs.map((doc) => {
+                const ok = ["processed", "complete", "approved"].includes(String(doc.status).toLowerCase());
+                const exp = doc.expiryDate ? new Date(doc.expiryDate) : null;
+                const expired = exp ? exp < new Date() : false;
+                const soon = exp && !expired ? (exp.getTime() - Date.now()) < 30 * 864e5 : false;
+                const expColor = expired ? "#dc2626" : soon ? "#b45309" : "var(--color-neutral-500)";
+                return (
+                  <div key={doc.id} className="rounded-lg p-2.5" style={{ backgroundColor: "var(--color-base-50, #fafafa)", border: "1px solid var(--color-base-100)" }}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <FileText size={12} style={{ color: "var(--color-primary)" }} />
+                        <span className="text-xs font-semibold truncate capitalize" style={{ color: "var(--color-neutral-800)" }}>
+                          {doc.documentKey.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium capitalize"
+                          style={{ backgroundColor: ok ? "#dcfce7" : "#fef3c7", color: ok ? "#15803d" : "#b45309" }}>
+                          {String(doc.status).toLowerCase()}
+                        </span>
+                        {doc.fileUrl && (
+                          <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, " ") })} className="flex items-center gap-0.5 text-[11px] cursor-pointer" style={{ color: "var(--color-primary)" }}>
+                            <ExternalLink size={11} /> View
+                          </button>
+                        )}
+                        <DocReviewActions doc={doc} onUpdate={onDocUpdate} />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 pl-[18px]">
+                      {doc.expiryDate && <span className="text-[11px] font-medium" style={{ color: expColor }}>Expires: {new Date(doc.expiryDate).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}{expired ? " (expired)" : soon ? " (soon)" : ""}</span>}
+                      <span className="text-[11px]" style={{ color: "var(--color-neutral-400)" }}>Uploaded: {new Date(doc.createdAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}</span>
+                      {doc.notes && <span className="text-[11px] w-full" style={{ color: "var(--color-neutral-500)" }}>Note: {doc.notes}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sticky verdict bar */}
+      <div className="shrink-0 border-t px-4 py-3 space-y-2" style={{ borderColor: "var(--color-base-200)", backgroundColor: "#fff" }}>
+        {row.isSelf ? (
+          <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>
+            Solo operator — this person is vetted as the <b>provider</b>; their technician verdict mirrors it. Review them under the Service Providers tab.
+          </p>
+        ) : (
+          <>
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Notes (optional — shown to the technician and provider on action required)"
+              className="w-full px-3 py-1.5 rounded-lg text-xs border outline-none"
+              style={{ borderColor: "var(--color-base-200)", color: "var(--color-neutral-800)" }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const blockers = [
+                    ...requiredMissing.map((c) => `✗ ${c.displayName} not uploaded`),
+                    ...((docs ?? []).length > 0 && docsVerified === 0 ? ["⚑ No document has been verified yet"] : []),
+                  ];
+                  if (blockers.length > 0 && !window.confirm(`${blockers.length} open item${blockers.length === 1 ? "" : "s"}:\n\n${blockers.join("\n")}\n\nMark compliant anyway?`)) return;
+                  void act("compliant");
+                }}
+                disabled={acting || loading}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+                style={{ backgroundColor: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}>
+                <CheckCircle2 size={13} /> Mark Compliant
+              </button>
+              <button onClick={() => void act("action_required")} disabled={acting || loading}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+                style={{ backgroundColor: "#fef2f2", color: "#dc2626", border: "1px solid #fecaca" }}>
+                <AlertCircle size={13} /> Mark Action Required
+              </button>
+              <button onClick={() => void act("expired")} disabled={acting || loading}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-50"
+                style={{ backgroundColor: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb" }}>
+                <XCircle size={13} /> Mark Expired
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1971,8 +2189,10 @@ export default function AdminKycPage() {
         // Team tabs (managers / technicians) — same split-panel pattern as the others
         apiGet<ManagerRow[]>("/admin/team/managers")
           .then(d => { const a = Array.isArray(d) ? d : []; setManagers(a); setTotals(p => ({ ...p, managers: a.length })); }).catch(() => {}),
-        apiGet<TechnicianRow[]>("/admin/team/technicians")
-          .then(d => { const a = Array.isArray(d) ? d : []; setTechnicians(a); setTotals(p => ({ ...p, technicians: a.length })); }).catch(() => {}),
+        // SP-129/212: the review queue (compliance, provider, doc counts) —
+        // pending_review first. Cap 200; the console lists a pilot-sized roster.
+        apiGet<{ data: TechnicianRow[]; total: number }>("/admin/kyc/technicians?limit=200")
+          .then(d => { const a = Array.isArray(d?.data) ? d.data : []; setTechnicians(a); setTotals(p => ({ ...p, technicians: d?.total ?? a.length })); }).catch(() => {}),
       ]);
     } finally {
       setLoading(false);
@@ -2069,6 +2289,9 @@ export default function AdminKycPage() {
   function handleRpStatusChange(id: number, status: ComplianceStatus) {
     setRps((prev) => prev.map((r) => r.id === id ? { ...r, complianceStatus: status } : r));
   }
+  function handleTechnicianChange(id: number, patch: Partial<TechnicianRow>) {
+    setTechnicians((prev) => prev.map((t) => t.id === id ? { ...t, ...patch } : t));
+  }
   function handleSpStatusChange(id: number, status: ComplianceStatus) {
     setSps((prev) => prev.map((s) => s.id === id ? { ...s, complianceStatus: status } : s));
     setSpDetail((prev) => prev && prev.profile.id === id
@@ -2096,6 +2319,7 @@ export default function AdminKycPage() {
 
   const filteredRps     = rps.filter((r)  => statusFilter === "all" || r.complianceStatus === statusFilter);
   const filteredSps     = sps.filter((sp) => statusFilter === "all" || sp.complianceStatus === statusFilter);
+  const filteredTechnicians = technicians.filter((t) => statusFilter === "all" || t.complianceStatus === statusFilter);
   const filteredTenants = tenants;
 
   const selectedRp     = selectedId !== null && tab === "rental"  ? rps.find((r)  => r.id === selectedId) ?? null : null;
@@ -2162,8 +2386,8 @@ export default function AdminKycPage() {
       {/* ── Filters + split panel ─────────────────────────── */}
       <div className="flex flex-col flex-1 min-h-0 mt-2">
 
-        {/* Status chips — compliance filter applies to RP / SP only */}
-        {(tab === "rental" || tab === "service") && (
+        {/* Status chips — compliance filter for RP / SP / technicians */}
+        {(tab === "rental" || tab === "service" || tab === "technicians") && (
           <div className="flex flex-wrap gap-2 mb-2 flex-shrink-0">
             {([
               { id: "all"             as StatusFilter, label: "All" },
@@ -2243,12 +2467,14 @@ export default function AdminKycPage() {
                     onClick={() => setSelectedId(m.id)}
                   />
                 ))}
-                {tab === "technicians" && technicians.map((t, i) => (
-                  <TeamCard key={t.id ?? i}
-                    name={t.name} email={t.email}
-                    sub={t.spName} status={t.status} date={t.createdAt}
+                {tab === "technicians" && filteredTechnicians.map((t) => (
+                  <TeamCard key={t.id}
+                    name={t.name} email={t.email ?? undefined}
+                    sub={`${t.provider.name}${t.isSelf ? " · solo" : ""}${t.documentCount ? ` · ${t.documentCount} doc${t.documentCount === 1 ? "" : "s"}` : " · no docs"}`}
+                    status={t.status} date={t.createdAt}
+                    badge={<ComplianceBadge s={t.complianceStatus} />}
                     selected={selectedId === t.id}
-                    onClick={() => t.id != null && setSelectedId(t.id)}
+                    onClick={() => setSelectedId(t.id)}
                   />
                 ))}
 
@@ -2300,7 +2526,7 @@ export default function AdminKycPage() {
               ) : selectedManager ? (
                 <ManagerContentPanel m={selectedManager} />
               ) : selectedTechnician ? (
-                <TechnicianContentPanel t={selectedTechnician} />
+                <TechnicianContentPanel t={selectedTechnician} onStatusChange={handleTechnicianChange} />
               ) : null}
             </div>
           </div>

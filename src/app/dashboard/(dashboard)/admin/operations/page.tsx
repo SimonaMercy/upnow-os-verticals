@@ -25,7 +25,14 @@ interface Booking {
   stageSince?: string | null;
   escrowStatus?: string | null;
 }
-interface Provider { id: number; businessName: string; compliant: boolean; jobReady: boolean; technicians: { id: number; name: string }[] }
+interface ProviderTechnician {
+  id: number; name: string;
+  /** SP-254 solo self-row (the owner). */
+  isSelf?: boolean;
+  /** SP-129: technician half of Gate 1 — unverified people are flagged (and refused server-side once the gate is on). */
+  complianceStatus?: string; assignable?: boolean;
+}
+interface Provider { id: number; businessName: string; compliant: boolean; jobReady: boolean; solo?: boolean; technicians: ProviderTechnician[] }
 
 const HOUR = 3_600_000;
 const TONE = {
@@ -249,22 +256,44 @@ export default function AdminOperationsPage() {
             <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>{isCallout ? `BK-${assignId} — the provider assesses the job and sends the customer a quote. A technician is chosen later, at quote approval.` : `BK-${assignId} — pick a provider and one of their technicians.`}</p>
 
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: MUTE, marginTop: 16 }}>Provider</label>
-            <select value={spId} onChange={(e) => { setSpId(Number(e.target.value)); setTechId(''); }} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff' }}>
+            <select value={spId} onChange={(e) => {
+              const id = Number(e.target.value);
+              setSpId(id);
+              // SP-254: a solo operator IS the technician — one pick, not two.
+              const p = providers.find((x) => x.id === id);
+              const self = p?.solo ? (p.technicians.find((t) => t.isSelf) ?? p.technicians[0]) : undefined;
+              setTechId(self ? self.id : '');
+            }} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff' }}>
               <option value="" disabled>Select a provider…</option>
               {/* A callout needs no technician, so tech-less providers are eligible; the paid path still requires one. */}
               {providers.filter((p) => isCallout || p.technicians.length > 0).map((p) => (
-                <option key={p.id} value={p.id}>{p.businessName}{p.jobReady ? '' : ' · not job-ready'}{p.compliant ? '' : ' · non-compliant'}</option>
+                <option key={p.id} value={p.id}>{p.businessName}{p.solo ? ' · solo' : ''}{p.jobReady ? '' : ' · not job-ready'}{p.compliant ? '' : ' · non-compliant'}</option>
               ))}
             </select>
 
-            {!isCallout && (
+            {!isCallout && chosenProvider?.solo ? (
+              <p style={{ fontSize: 12, color: MUTE, background: '#f5f5f4', borderRadius: 8, padding: '8px 10px', marginTop: 14 }}>
+                Solo operator — the job goes to <b style={{ color: INK }}>{chosenProvider.technicians.find((t) => t.id === techId)?.name ?? 'the operator'}</b> themselves; there is no crew to pick from.
+                {(() => { const t = chosenProvider.technicians.find((x) => x.id === techId); return t && t.assignable === false ? ` Not verified (${(t.complianceStatus ?? 'pending review').replace(/_/g, ' ')}).` : ''; })()}
+              </p>
+            ) : !isCallout && (
               <>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: MUTE, marginTop: 14 }}>Technician</label>
                 <select value={techId} onChange={(e) => setTechId(Number(e.target.value))} disabled={!chosenProvider} style={{ width: '100%', marginTop: 6, border: BORDER, borderRadius: 9, padding: '9px 11px', fontSize: 14, color: INK, background: '#fff', opacity: chosenProvider ? 1 : 0.5 }}>
                   <option value="" disabled>{chosenProvider ? 'Select a technician…' : 'Pick a provider first'}</option>
-                  {chosenProvider?.technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {chosenProvider?.technicians.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}{t.assignable === false ? ` · not verified (${(t.complianceStatus ?? 'pending review').replace(/_/g, ' ')})` : t.assignable === true ? ' · verified' : ''}
+                    </option>
+                  ))}
                 </select>
               </>
+            )}
+
+            {!isCallout && chosenProvider && techId !== '' && chosenProvider.technicians.find((t) => t.id === techId)?.assignable === false && (
+              <p style={{ fontSize: 12, color: '#92400e', background: '#fef6e7', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
+                This technician has not been verified by UpNow (compliance: {(chosenProvider.technicians.find((t) => t.id === techId)?.complianceStatus ?? 'pending_review').replace(/_/g, ' ')}). Once Gate 1 is enforced the API will refuse this assignment — verify them under KYC → Technicians first.
+              </p>
             )}
 
             {chosenProvider && (!chosenProvider.jobReady || !chosenProvider.compliant) && (
