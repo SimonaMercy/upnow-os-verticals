@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Building2, RefreshCw, Wrench,
   CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
@@ -10,7 +10,7 @@ import {
   Star, Mail, Phone, ShieldCheck, Layers, Zap, Store, Users,
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { BackLink } from '@/components/dashboard/DashboardWidgets';
 import { openDocViewer } from '@/lib/docViewer';
@@ -117,6 +117,18 @@ interface SpContextService {
   listingStatus: string;
   isAvailable: boolean;
 }
+/** SP-248 — one listing's capability checklist as the drawer reads it. */
+interface CapabilityRow {
+  requirementId: number; key: string; label: string; description: string | null; requirementType: string;
+  isMandatory: boolean; evidenceRequired: boolean; declared: boolean; declaredAt: string | null; note: string | null;
+  verifiedAt: string | null; verifiedByName: string | null;
+}
+interface CapabilitySummary {
+  total: number; mandatory: number; declared: number; declaredMandatory: number; verified: number; verifiedMandatory: number;
+  declarationComplete: boolean; verificationComplete: boolean;
+}
+interface ListingChecklist { serviceCatalogId: number; templateId: number | null; serviceName: string; summary: CapabilitySummary; rows: CapabilityRow[] }
+
 interface SpContext {
   profile: {
     id: number;
@@ -696,13 +708,40 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
   const [busy, setBusy] = useState<Set<number>>(new Set());
   const [bulking, setBulking] = useState(false);
 
+  // SP-248: per-listing capability checklists (declared by the provider,
+  // verified here). Loaded alongside the context; failures don't block the drawer.
+  const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
+  const [openChecklist, setOpenChecklist] = useState<number | null>(null);
+  const [verifying, setVerifying] = useState<Set<number>>(new Set());
+
+  const loadChecklists = useCallback((signal?: AbortSignal) =>
+    apiGet<ListingChecklist[]>(`/admin/kyc/service-providers/${providerId}/capabilities`, { signal })
+      .then((rows) => { if (!signal?.aborted) setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))); })
+      .catch(() => { /* checklist is advisory — the drawer still works without it */ }),
+  [providerId]);
+
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true); setErr(null);
+    void loadChecklists(signal);
     return apiGet<SpContext>(`/admin/kyc/service-providers/${providerId}`, { signal })
       .then((r) => { if (!signal?.aborted) setCtx(r); })
       .catch((e) => { if (!signal?.aborted) setErr((e as Error).message); })
       .finally(() => { if (!signal?.aborted) setLoading(false); });
-  }, [providerId]);
+  }, [providerId, loadChecklists]);
+
+  async function verifyLines(listingId: number, requirementIds: number[], verified: boolean) {
+    if (!requirementIds.length) return;
+    setActErr(null);
+    setVerifying((v) => new Set(v).add(listingId));
+    try {
+      const updated = await apiPost<ListingChecklist>(`/admin/service-listings/${listingId}/capabilities/verify`, { requirementIds, verified });
+      setChecklists((prev) => ({ ...prev, [listingId]: updated }));
+    } catch (e) {
+      setActErr((e as Error).message);
+    } finally {
+      setVerifying((v) => { const n = new Set(v); n.delete(listingId); return n; });
+    }
+  }
 
   useEffect(() => {
     setCtx(null); setActErr(null); setBusy(new Set());
@@ -988,7 +1027,8 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                   {g.items.map((sv) => {
                     const isBusy = busy.has(sv.id) || bulking;
                     return (
-                      <div key={sv.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
+                      <React.Fragment key={sv.id}>
+                      <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
                         <Wrench size={12} className="shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-800)' }}>
@@ -1003,6 +1043,22 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                             No qualified lead
                           </span>
                         )}
+                        {(() => {
+                          const cl = checklists[sv.id];
+                          if (!cl || cl.summary.total === 0) return null;
+                          const sm = cl.summary;
+                          const tone = sm.verificationComplete
+                            ? { bg: '#f0fdf4', fg: '#16a34a' }
+                            : sm.declarationComplete ? { bg: '#eef2ff', fg: '#4338ca' } : { bg: '#fef9eb', fg: '#b45309' };
+                          return (
+                            <button type="button" onClick={() => setOpenChecklist((o) => (o === sv.id ? null : sv.id))}
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                              title={sm.declarationComplete ? 'Provider declared every mandatory tool/material — verify below' : 'Provider has NOT declared every mandatory tool/material'}
+                              style={{ backgroundColor: tone.bg, color: tone.fg }}>
+                              Tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.verifiedMandatory} verified
+                            </button>
+                          );
+                        })()}
                         <StatusBadge s={sv.listingStatus} />
                         <div className="flex items-center gap-1 shrink-0">
                           {sv.listingStatus !== 'approved' && (
@@ -1023,6 +1079,49 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                           )}
                         </div>
                       </div>
+                      {openChecklist === sv.id && checklists[sv.id] && (() => {
+                        const cl = checklists[sv.id];
+                        const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
+                        const isV = verifying.has(sv.id);
+                        return (
+                          <div className="rounded-lg px-2.5 py-2 mt-1 mb-1" style={{ backgroundColor: '#fafaf7', border: '1px dashed var(--color-base-200)' }}>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>What this service needs · provider's declaration</p>
+                              <button type="button" disabled={isV || declaredUnverified.length === 0}
+                                onClick={() => void verifyLines(sv.id, declaredUnverified, true)}
+                                className="text-[10.5px] font-semibold px-2 py-0.5 rounded-md disabled:opacity-40"
+                                style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
+                                {isV ? 'Verifying…' : `Verify all declared (${declaredUnverified.length})`}
+                              </button>
+                            </div>
+                            <ul className="space-y-1">
+                              {cl.rows.map((r) => (
+                                <li key={r.requirementId} className="flex items-start gap-2 text-[11.5px]">
+                                  <span className="mt-[3px] inline-block w-3 h-3 rounded-sm shrink-0" title={r.declared ? 'Provider says they have this' : 'Not declared'}
+                                    style={{ backgroundColor: r.declared ? '#16a34a' : '#fff', border: r.declared ? '1px solid #16a34a' : '1px solid #d1d5db' }} />
+                                  <span className="flex-1 min-w-0" style={{ color: r.declared ? 'var(--color-neutral-800)' : 'var(--color-neutral-400)' }}>
+                                    {r.label}
+                                    {r.isMandatory ? '' : <span className="ml-1 text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>(optional)</span>}
+                                    <span className="ml-1 text-[10px] uppercase" style={{ color: 'var(--color-neutral-400)' }}>{r.requirementType}</span>
+                                    {r.note && <span className="block text-[10.5px] italic" style={{ color: 'var(--color-neutral-500)' }}>“{r.note}”</span>}
+                                    {!r.declared && r.isMandatory && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>Mandatory — not declared</span>}
+                                  </span>
+                                  {r.declared && (
+                                    <button type="button" disabled={isV}
+                                      onClick={() => void verifyLines(sv.id, [r.requirementId], !r.verifiedAt)}
+                                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 disabled:opacity-40"
+                                      title={r.verifiedAt ? `Verified by ${r.verifiedByName ?? 'admin'} — click to withdraw` : 'Mark as verified'}
+                                      style={r.verifiedAt ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fff', color: 'var(--color-neutral-500)', border: '1px solid var(--color-base-200)' }}>
+                                      {r.verifiedAt ? '✓ Verified' : 'Verify'}
+                                    </button>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })()}
+                      </React.Fragment>
                     );
                   })}
                 </div>

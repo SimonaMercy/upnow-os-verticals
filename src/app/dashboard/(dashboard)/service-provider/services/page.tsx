@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Schibsted_Grotesk } from 'next/font/google';
 import { Briefcase, LayoutGrid, Loader2, Plus, Rows3, ShieldCheck, Trash2 } from 'lucide-react';
-import { apiGet, apiPatch, apiDelete } from '@/lib/api';
+import { apiGet, apiPatch, apiDelete, apiPut } from '@/lib/api';
 
 const grotesk = Schibsted_Grotesk({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] });
 
@@ -44,6 +44,17 @@ interface SpService {
   isFromPrice?: boolean | null;
   listingStatus?: string | null;
   isAvailable?: boolean | null;
+}
+
+/** SP-248 — the tools/materials checklist for one of my listings. */
+interface CapabilityRow {
+  requirementId: number; label: string; description: string | null; requirementType: string; isMandatory: boolean;
+  declared: boolean; note: string | null; verifiedAt: string | null;
+}
+interface ListingChecklist {
+  serviceCatalogId: number;
+  summary: { total: number; mandatory: number; declared: number; declaredMandatory: number; verified: number; verifiedMandatory: number; declarationComplete: boolean; verificationComplete: boolean };
+  rows: CapabilityRow[];
 }
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
@@ -97,12 +108,40 @@ export default function SpMyServicesPage() {
     try { window.localStorage.setItem(VIEW_STORAGE_KEY, v); } catch { /* ignore */ }
   };
 
+  // SP-248: what each service needs + what I've declared. Advisory — the page
+  // still works if this fails to load.
+  const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
+  const [openChecklist, setOpenChecklist] = useState<number | null>(null);
+  const [declaring, setDeclaring] = useState<number | null>(null);
+  const loadChecklists = () =>
+    apiGet<ListingChecklist[]>('/service-provider/capabilities')
+      .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))))
+      .catch(() => {});
+
   const load = () =>
-    apiGet<SpService[] | { data?: SpService[] }>('/service-provider/services')
-      .then((d) => setServices(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
-      .catch(() => setServices([]));
+    Promise.all([
+      apiGet<SpService[] | { data?: SpService[] }>('/service-provider/services')
+        .then((d) => setServices(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
+        .catch(() => setServices([])),
+      loadChecklists(),
+    ]);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
+
+  const declare = async (listingId: number, requirementId: number, declared: boolean, note?: string | null) => {
+    setDeclaring(listingId);
+    setError(null);
+    try {
+      const updated = await apiPut<ListingChecklist>(`/service-provider/capabilities/${listingId}`, {
+        items: [{ requirementId, declared, ...(note !== undefined ? { note } : {}) }],
+      });
+      setChecklists((prev) => ({ ...prev, [listingId]: updated }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save your declaration');
+    } finally {
+      setDeclaring(null);
+    }
+  };
 
   // Group by main category, ordered canonically; unknown categories last (A–Z).
   const groups = useMemo(() => {
@@ -171,6 +210,56 @@ export default function SpMyServicesPage() {
       <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: tone.bg, color: tone.fg, whiteSpace: 'nowrap' }}>
         {tone.label}
       </span>
+    );
+  };
+
+  /** SP-248 chip: "Tools 4/6" — amber until every mandatory item is declared, green when verified. */
+  const ToolsChip = ({ s }: { s: SpService }) => {
+    const cl = checklists[s.id];
+    if (!cl || cl.summary.total === 0) return null;
+    const sm = cl.summary;
+    const tone = sm.verificationComplete ? { bg: TINT_GREEN, fg: GREEN } : sm.declarationComplete ? { bg: '#EEF2FF', fg: '#4338CA' } : { bg: '#FEF6E7', fg: '#92400E' };
+    const open = openChecklist === s.id;
+    return (
+      <button type="button" onClick={() => setOpenChecklist(open ? null : s.id)}
+        title={sm.declarationComplete ? (sm.verificationComplete ? 'UpNow verified your tools & materials for this service' : 'Declared — awaiting UpNow verification') : 'Tell us which tools & materials you have for this service'}
+        style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, background: tone.bg, color: tone.fg, border: 'none', cursor: 'pointer' }}>
+        Tools {sm.declaredMandatory}/{sm.mandatory}{sm.verificationComplete ? ' ✓' : ''} {open ? '▴' : '▾'}
+      </button>
+    );
+  };
+
+  const Checklist = ({ s }: { s: SpService }) => {
+    const cl = checklists[s.id];
+    if (openChecklist !== s.id || !cl) return null;
+    const busyHere = declaring === s.id;
+    return (
+      <div style={{ padding: '10px 16px 14px', background: '#FBFCFA', borderTop: HAIRLINE }}>
+        <p style={{ fontSize: 12, color: MUTE, marginBottom: 8 }}>
+          What this service needs. Tick what you have — UpNow checks it when reviewing the service.
+          {!cl.summary.declarationComplete && <span style={{ color: '#92400E', fontWeight: 600 }}> {cl.summary.mandatory - cl.summary.declaredMandatory} mandatory item{cl.summary.mandatory - cl.summary.declaredMandatory === 1 ? '' : 's'} still unticked.</span>}
+        </p>
+        <ul style={{ display: 'grid', gap: 6, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {cl.rows.map((r) => (
+            <li key={r.requirementId} className="flex items-start gap-2" style={{ fontSize: 13, color: INK }}>
+              <input type="checkbox" checked={r.declared} disabled={busyHere}
+                onChange={(e) => void declare(s.id, r.requirementId, e.target.checked)}
+                style={{ marginTop: 3, accentColor: GREEN }} aria-label={r.label} />
+              <span style={{ flex: 1 }}>
+                {r.label}
+                {!r.isMandatory && <span style={{ fontSize: 11, color: FAINT }}> (optional)</span>}
+                {r.verifiedAt && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN, marginLeft: 6 }}>✓ verified</span>}
+                {r.description && <span style={{ display: 'block', fontSize: 11.5, color: FAINT }}>{r.description}</span>}
+                {r.declared && (
+                  <input defaultValue={r.note ?? ''} placeholder="Note (brand / model — optional)" disabled={busyHere}
+                    onBlur={(e) => { if ((e.target.value.trim() || null) !== (r.note ?? null)) void declare(s.id, r.requirementId, true, e.target.value.trim() || null); }}
+                    style={{ display: 'block', marginTop: 3, width: '100%', fontSize: 11.5, padding: '3px 6px', border: HAIRLINE, borderRadius: 6, color: MUTE }} />
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     );
   };
 
@@ -283,14 +372,18 @@ export default function SpMyServicesPage() {
                     {view === 'row' ? (
                       <div style={{ ...cardStyle(), overflow: 'hidden' }}>
                         {items.map((s, i) => (
-                          <div key={s.id} className="flex items-center gap-4 flex-wrap" style={{ padding: '13px 16px', borderTop: i ? HAIRLINE : undefined }}>
-                            <div className="flex-1" style={{ minWidth: 160, fontSize: 14, fontWeight: 600, color: INK }}>
-                              {s.name ?? '—'}
+                          <div key={s.id} style={{ borderTop: i ? HAIRLINE : undefined }}>
+                            <div className="flex items-center gap-4 flex-wrap" style={{ padding: '13px 16px' }}>
+                              <div className="flex-1" style={{ minWidth: 160, fontSize: 14, fontWeight: 600, color: INK }}>
+                                {s.name ?? '—'}
+                              </div>
+                              <ToolsChip s={s} />
+                              <Price s={s} />
+                              <StatusPill s={s} />
+                              <AvailabilitySwitch s={s} />
+                              <DeleteButton s={s} />
                             </div>
-                            <Price s={s} />
-                            <StatusPill s={s} />
-                            <AvailabilitySwitch s={s} />
-                            <DeleteButton s={s} />
+                            <Checklist s={s} />
                           </div>
                         ))}
                       </div>
@@ -303,6 +396,8 @@ export default function SpMyServicesPage() {
                               <StatusPill s={s} />
                             </div>
                             <Price s={s} />
+                            <div><ToolsChip s={s} /></div>
+                            <Checklist s={s} />
                             <div className="flex items-center justify-between" style={{ marginTop: 'auto', paddingTop: 2 }}>
                               <div className="flex items-center gap-2">
                                 <AvailabilitySwitch s={s} />

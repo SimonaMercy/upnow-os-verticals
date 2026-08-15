@@ -1305,6 +1305,110 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved, onRefetch }: {
   );
 }
 
+/* ═════════════════════════ Capability requirements (SP-248) ═════════════════════════ */
+
+interface CapabilityRequirement {
+  id: number; templateId: number; key: string; label: string; description: string | null;
+  requirementType: 'equipment' | 'material' | 'certification' | 'consumable';
+  isMandatory: boolean; evidenceRequired: boolean; sortOrder: number; isActive: boolean;
+}
+const REQ_TYPES: { v: CapabilityRequirement['requirementType']; label: string }[] = [
+  { v: 'equipment', label: 'Equipment' }, { v: 'material', label: 'Material' }, { v: 'consumable', label: 'Consumable' }, { v: 'certification', label: 'Certification' },
+];
+
+/**
+ * What a service NEEDS to be delivered — tools, materials, certifications.
+ * Providers declare against this list on My Services; admins verify it in the
+ * approval drawer. Self-managing so it can sit inside the service editor.
+ */
+function RequirementsEditor({ templateId }: { templateId: number }) {
+  const [rows, setRows] = useState<CapabilityRequirement[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newType, setNewType] = useState<CapabilityRequirement['requirementType']>('equipment');
+  const [newMandatory, setNewMandatory] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const load = () => apiGet<CapabilityRequirement[]>(`/admin/catalog/templates/${templateId}/requirements`).then(setRows).catch(e => setError(e instanceof Error ? e.message : 'Could not load requirements'));
+  useEffect(() => { void load(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId]);
+
+  const wrap = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    try { await fn(); await load(); } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong'); } finally { setBusy(false); }
+  };
+  const add = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    void wrap(async () => {
+      await apiPost(`/admin/catalog/templates/${templateId}/requirements`, { label, requirementType: newType, isMandatory: newMandatory });
+      setNewLabel('');
+    });
+  };
+  const patch = (id: number, body: Partial<CapabilityRequirement>) => void wrap(() => apiPatch(`/admin/catalog/requirements/${id}`, body));
+  const remove = (r: CapabilityRequirement) => {
+    if (!confirm(`Remove "${r.label}" from this service's checklist? (It is only deactivated if providers have already declared against it.)`)) return;
+    void wrap(() => apiDelete(`/admin/catalog/requirements/${r.id}`));
+  };
+
+  const visible = (rows ?? []).filter(r => showInactive || r.isActive);
+  const inactiveCount = (rows ?? []).filter(r => !r.isActive).length;
+  return (
+    <SectionCard step="✦" title="What this service needs" sub="Tools, materials and certifications the provider must have. Providers tick these on My Services; you verify them at approval.">
+      {rows === null ? (
+        <p className="text-[11px] text-[#9b9890]">Loading…</p>
+      ) : (
+        <>
+          {visible.length === 0 && <p className="text-[11px] text-[#9b9890]">No requirements yet — add the first one below.</p>}
+          <ul className="space-y-1">
+            {visible.map(r => (
+              <li key={r.id} className="flex items-center gap-1.5 text-[12px] text-[#1a1916]" style={{ opacity: r.isActive ? 1 : 0.5 }}>
+                <input value={r.label} disabled={busy} aria-label="Requirement label"
+                  onChange={e => setRows(prev => prev ? prev.map(x => x.id === r.id ? { ...x, label: e.target.value } : x) : prev)}
+                  onBlur={e => { if (e.target.value.trim() && e.target.value.trim() !== r.label) patch(r.id, { label: e.target.value.trim() }); }}
+                  className={`${inputCls} flex-1 !py-0.5`} />
+                <select value={r.requirementType} disabled={busy} onChange={e => patch(r.id, { requirementType: e.target.value as CapabilityRequirement['requirementType'] })}
+                  className={`${inputCls} !w-auto !py-0.5`}>
+                  {REQ_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
+                </select>
+                <button type="button" disabled={busy} onClick={() => patch(r.id, { isMandatory: !r.isMandatory })}
+                  className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  title={r.isMandatory ? 'Mandatory — click to make optional' : 'Optional — click to make mandatory'}
+                  style={r.isMandatory ? { backgroundColor: '#fef2f2', color: '#b91c1c' } : { backgroundColor: '#f4f3ef', color: '#6b6860' }}>
+                  {r.isMandatory ? 'Mandatory' : 'Optional'}
+                </button>
+                {r.isActive ? (
+                  <button type="button" disabled={busy} onClick={() => remove(r)} className="text-[#9b9890] hover:text-[#c0392b] px-1" aria-label="Remove requirement">×</button>
+                ) : (
+                  <button type="button" disabled={busy} onClick={() => patch(r.id, { isActive: true })} className="text-[10px] font-semibold text-[#2e9f82]">restore</button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-center gap-1.5 mt-2 text-[12px]">
+            <input value={newLabel} disabled={busy} placeholder="Add a requirement, e.g. Vacuum cleaner"
+              onChange={e => setNewLabel(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+              className={`${inputCls} flex-1 !py-0.5`} />
+            <select value={newType} disabled={busy} onChange={e => setNewType(e.target.value as CapabilityRequirement['requirementType'])} className={`${inputCls} !w-auto !py-0.5`}>
+              {REQ_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
+            </select>
+            <label className="flex items-center gap-1 text-[11px] text-[#6b6860]"><input type="checkbox" checked={newMandatory} onChange={e => setNewMandatory(e.target.checked)} /> mandatory</label>
+            <button type="button" disabled={busy || !newLabel.trim()} onClick={add}
+              className="rounded-lg bg-[#2e9f82] px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-40">Add</button>
+          </div>
+          {inactiveCount > 0 && (
+            <button type="button" onClick={() => setShowInactive(v => !v)} className="mt-1.5 text-[10.5px] text-[#9b9890] hover:underline">
+              {showInactive ? 'Hide' : 'Show'} {inactiveCount} retired
+            </button>
+          )}
+          {error && <p className="mt-1 text-[11px] text-[#b91c1c]">{error}</p>}
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 /* ═════════════════════════ Service modal ═════════════════════════ */
 
 function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder, onClose, onSaved, onRefetch }: {
@@ -1566,6 +1670,8 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
             )}
           </SectionCard>
         )}
+
+        {showFull && !isNew && tpl && <RequirementsEditor templateId={tpl.id} />}
 
         {showFull && !isNew && (
           <SectionCard step="✦" title="Cancellation terms" sub="Overrides the platform matrix for THIS service only. Bookings keep the terms they were made under.">
