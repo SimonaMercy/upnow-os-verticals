@@ -150,6 +150,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
     { label: 'My Jobs',          href: '/dashboard/technician/jobs',           icon: CalendarCheck },
     { label: 'Schedule',         href: '/dashboard/technician/schedule',       icon: CalendarCheck },
+    // SP-131: the technician's own KYC (Emirates ID + visa) — the inputs to their Gate 1 verdict.
+    { label: 'My Documents',     href: '/dashboard/technician/documents',      icon: FileText },
     { divider: true },
     { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings, soon: true },
   ],
@@ -745,7 +747,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           ) : (
           <div className="flex items-center gap-3">
             {/* KYC warning badge — only for roles that actually undergo KYC.
-                Managers & technicians are invited sub-accounts and never do KYC. */}
+                Managers are invited sub-accounts and never do KYC; technicians DO
+                (SP-131) but their state lives on technicians.compliance_status,
+                surfaced on their own home screen — not on users.kyc_status. */}
             {['rental_provider', 'service_provider'].includes(role) && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
               <Link
                 href={`${dashboardPath(role)}/documents`}

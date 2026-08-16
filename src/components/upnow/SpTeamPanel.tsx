@@ -15,10 +15,11 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn, ShieldCheck,
+  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn, ShieldCheck, FileText, X,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
+import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -297,6 +298,48 @@ function InviteRosterMemberModal({ tech, onClose }: { tech: TechnicianMember; on
   );
 }
 
+// ─── Technician documents drawer (SP-131) ────────────────────────────────────
+
+/**
+ * The provider uploads a roster technician's Emirates ID + visa on their
+ * behalf (login-less crew) or checks what a signed-in technician has filed.
+ * View-only — no download; UpNow's review sits on the admin console.
+ */
+function TechnicianDocumentsDrawer({ tech, onClose }: { tech: TechnicianMember; onClose: () => void }) {
+  const qc = useQueryClient();
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end"
+      style={{ background: 'rgba(0,0,0,0.4)' }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="h-full w-full max-w-lg overflow-y-auto p-6" style={{ background: 'var(--color-base-100)' }}>
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <div>
+            <h2 className="text-lg font-bold">{tech.user.name} — documents</h2>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
+              Emirates ID and residence visa with expiry dates. UpNow reviews them; a verified technician can be dispatched once Gate 1 is on.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-base-200" title="Close">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <VerificationChip status={tech.complianceStatus} />
+          {tech.isSelf && <span className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>This is you — verified as the provider.</span>}
+        </div>
+        <KycDocumentsPanel
+          profileApiPath={`/service-provider/technicians/${tech.id}/documents`}
+          ownerType="technician"
+          compact
+          onAfterUpload={() => qc.invalidateQueries({ queryKey: ['sp-team'] })}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── Verification (SP-129) ───────────────────────────────────────────────────
 
 function VerificationChip({ status }: { status: TechnicianMember['complianceStatus'] }) {
@@ -364,6 +407,7 @@ function StatusChip({ status }: { status: string }) {
 export function SpTeamPanel() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [rosterInvite, setRosterInvite] = useState<TechnicianMember | null>(null);
+  const [docsFor, setDocsFor] = useState<TechnicianMember | null>(null);
   const qc = useQueryClient();
 
   const { data: technicians = [], isLoading: loadingTech } = useQuery<TechnicianMember[]>({
@@ -408,6 +452,9 @@ export function SpTeamPanel() {
       )}
       {rosterInvite && (
         <InviteRosterMemberModal tech={rosterInvite} onClose={() => setRosterInvite(null)} />
+      )}
+      {docsFor && (
+        <TechnicianDocumentsDrawer tech={docsFor} onClose={() => setDocsFor(null)} />
       )}
 
       {/* Active Technicians */}
@@ -496,6 +543,17 @@ export function SpTeamPanel() {
                 <VerificationChip status={tech.complianceStatus} />
                 <LoginStateChip tech={tech} />
                 <StatusChip status={tech.status} />
+                {!tech.isSelf && (
+                  <button
+                    onClick={() => setDocsFor(tech)}
+                    title="Emirates ID + visa"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-base-200"
+                    style={{ color: 'var(--color-neutral-700)', border: '1px solid var(--color-base-200)' }}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Documents
+                  </button>
+                )}
                 {!tech.isSelf && tech.loginState !== 'signed_in' && (
                   <button
                     onClick={() => setRosterInvite(tech)}

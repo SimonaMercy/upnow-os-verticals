@@ -7,6 +7,7 @@
  * jobs yet. Jobs / schedule / earnings arrive with SP-95 / SP-103 / SP-182.
  */
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/lib/api';
@@ -29,6 +30,8 @@ interface TechnicianMe {
   skills: string[];
   services: Array<{ id: number; name: string; category: string }>;
   memberSince: string;
+  /** SP-131 */
+  kyc?: { requiredMissing: string[]; rejected: number; expired: number; expiringSoon: number; complete: boolean };
 }
 
 const COMPLIANCE_LABEL: Record<TechnicianMe['complianceStatus'], string> = {
@@ -86,6 +89,28 @@ export default function TechnicianOverview() {
         </div>
       )}
       {me && <VerificationBanner me={me} />}
+
+      {/* SP-131 · the one thing a new technician must do: put their EID + visa on file. */}
+      {me?.kyc && (!me.kyc.complete || me.kyc.rejected > 0 || me.kyc.expired > 0 || me.kyc.expiringSoon > 0) && (
+        <Link
+          href="/dashboard/technician/documents"
+          className="block rounded-2xl px-5 py-4 mb-6 bg-white transition-shadow hover:shadow-md"
+          style={{ boxShadow: 'var(--shadow-sm)', border: '1px solid color-mix(in srgb, #d97706 35%, white)' }}
+        >
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>
+            {!me.kyc.complete
+              ? `Upload your ${me.kyc.requiredMissing.map((k) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())).join(' and ')} →`
+              : me.kyc.rejected > 0
+                ? `${me.kyc.rejected} document${me.kyc.rejected === 1 ? ' was' : 's were'} rejected — re-upload →`
+                : me.kyc.expired > 0
+                  ? `${me.kyc.expired} document${me.kyc.expired === 1 ? ' has' : 's have'} expired — replace →`
+                  : `${me.kyc.expiringSoon} document${me.kyc.expiringSoon === 1 ? ' expires' : 's expire'} within 30 days →`}
+          </p>
+          <p className="text-[12.5px] mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
+            UpNow reviews your Emirates ID and residence visa before jobs can be assigned to you.
+          </p>
+        </Link>
+      )}
 
       {/* Stats — job counters light up with SP-95; the account facts are live now. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

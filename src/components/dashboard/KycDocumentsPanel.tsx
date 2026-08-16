@@ -82,7 +82,7 @@ export interface KycDocumentsPanelProps {
   /** GET endpoint returning { profile, checklist } */
   profileApiPath: string;
   /** Used in /documents/upload-url and /documents POST calls */
-  ownerType: "rental_provider" | "service_provider" | "customer";
+  ownerType: "rental_provider" | "service_provider" | "customer" | "technician";
   /**
    * When provided, overrides the server-computed checklist with the client-side
    * requirements for this entity type. Use this when the entity type is selected
