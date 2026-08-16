@@ -13,7 +13,7 @@
  */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,7 +28,6 @@ import {
   Building2,
   Layers,
   MapPin,
-  UserCheck,
   Users,
   Clock,
   Info,
@@ -85,7 +84,7 @@ const STEPS = [
     label: "Business & documents",
     subtitle: "Tell us about your business",
     icon: Building2,
-    description: "Your trading name, legal entity type, owner — and your company documents, each with its expiry date.",
+    description: "",
   },
   {
     id: 2,
@@ -107,13 +106,6 @@ const STEPS = [
     subtitle: "Capacity & contact",
     icon: Users,
     description: "Help us size the work we send you — team, vehicles, and who answers customer queries. You'll fine-tune this after approval.",
-  },
-  {
-    id: 5,
-    label: "Owner details",
-    subtitle: "Personal information",
-    icon: UserCheck,
-    description: "Your Emirates ID, nationality, and date of birth. This helps us verify your identity for KYC.",
   },
   {
     id: 6,
@@ -174,17 +166,23 @@ const otpSchema = z.object({
 });
 type OtpValues = z.infer<typeof otpSchema>;
 
-const businessSchema = z.object({
-  entityType: z.enum(["individual", "company"]),
-  businessName: z.string().min(2, "Business name must be at least 2 characters").max(150),
-  ownerName: z.string().min(2, "Owner name must be at least 2 characters").max(150),
-  tradeLicenseNumber: z.string().max(60).optional(),
-  vatTrn: z
-    .string()
-    .max(20)
-    .optional()
-    .refine((v) => !v || /^\d{15}$/.test(v.trim()), "VAT TRN is a 15-digit number"),
-});
+const businessSchema = z
+  .object({
+    entityType: z.enum(["individual", "company"]),
+    businessName: z.string().max(150),
+    ownerName: z.string().min(2, "Name must be at least 2 characters").max(150),
+    tradeLicenseNumber: z.string().max(60).optional(),
+    vatTrn: z
+      .string()
+      .max(20)
+      .optional()
+      .refine((v) => !v || /^\d{15}$/.test(v.trim()), "VAT TRN is a 15-digit number"),
+  })
+  // A company needs a business / trading name; a solo trades under their own name.
+  .refine((v) => v.entityType === "individual" || v.businessName.trim().length >= 2, {
+    path: ["businessName"],
+    message: "Business name must be at least 2 characters",
+  });
 type BusinessValues = z.infer<typeof businessSchema>;
 
 const categoriesSchema = z.object({
@@ -605,15 +603,18 @@ function PhoneStep({ onDone }: { onDone: () => void }) {
 
 // ─── Step 1 · Business basics ─────────────────────────────────────────────────
 
-function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
+function BusinessBasicsStep({ onDone, onAccountTypeChange }: { onDone: () => void; onAccountTypeChange?: (t: string) => void }) {
+  // Owner details save fn, registered by the embedded fields (state, not a ref —
+  // it is read inside the submit handler).
+  const [ownerSave, setOwnerSave] = useState<OwnerDetailsSave | null>(null);
+  const onOwnerReady = useCallback((fn: OwnerDetailsSave) => setOwnerSave(() => fn), []);
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
-  // After the basics save, the SAME step asks for the entity's documents
-  // (per-doc expiry captured by KycDocumentsPanel). Returning users with
-  // confirmed basics land straight on the documents half.
-  const [docsMode, setDocsMode] = useState(false);
+  // Entity type, details and DOCUMENTS live on ONE screen (CEO, 16 Aug). The
+  // document list follows the SAVED entity type (the server builds it), so the
+  // panel appears once the details are saved and re-keys if the type changes.
   const [savedEntityType, setSavedEntityType] = useState<string | null>(null);
-  const [savedSummary, setSavedSummary] = useState<{ businessName: string; ownerName: string } | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
   const {
     register,
@@ -645,27 +646,73 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         });
         if (profile.accountTypeConfirmedAt && profile.businessName) {
           setSavedEntityType(profile.entityType ?? "company");
-          setSavedSummary({ businessName: profile.businessName ?? "", ownerName: profile.ownerName ?? "" });
-          setDocsMode(true);
         }
       })
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
   }, [reset]);
 
+  useEffect(() => { if (entityTypeValue) onAccountTypeChange?.(entityTypeValue); }, [entityTypeValue, onAccountTypeChange]);
+
+  const persistBasics = async (vals: BusinessValues) => {
+    const solo = vals.entityType === "individual";
+    await apiPatch("/profiles/service-provider/me", {
+      entityType: vals.entityType,
+      // A solo trades under their own name — no separate business name is asked.
+      businessName: solo ? vals.ownerName : vals.businessName,
+      ownerName: vals.ownerName,
+      tradeLicenseNumber: solo ? undefined : vals.tradeLicenseNumber?.trim() || undefined,
+      vatTrn: solo ? undefined : vals.vatTrn?.trim() || undefined,
+    });
+    setSavedEntityType(vals.entityType);
+  };
+
+  // ── Auto-save (CEO, 16 Aug): fields persist as you type — no Save button.
+  // Debounced; a full save once the form is valid, otherwise at least the
+  // account type (so the document list follows the picker immediately).
+  const allValues = useWatch({ control });
+  const allValuesJson = JSON.stringify(allValues);
+  const [saving, setSaving] = useState(false);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedJson = useRef<string>("");
+  useEffect(() => {
+    if (!initialLoaded) return;
+    if (allValuesJson === lastSavedJson.current) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    // Account type: save at once — the document list depends on it.
+    const immediate = !!entityTypeValue && !!savedEntityType && entityTypeValue !== savedEntityType;
+    autosaveTimer.current = setTimeout(() => {
+      void (async () => {
+        const values = JSON.parse(allValuesJson) as Partial<BusinessValues>;
+        const parsed = businessSchema.safeParse(values);
+        try {
+          setSaving(true);
+          if (parsed.success) {
+            await persistBasics(parsed.data);
+            if (ownerSave) await ownerSave();
+            lastSavedJson.current = allValuesJson;
+            setJustSaved(true);
+          } else if (values.entityType && values.entityType !== savedEntityType) {
+            await apiPatch("/profiles/service-provider/me", { entityType: values.entityType });
+            setSavedEntityType(values.entityType);
+          }
+        } catch {
+          /* silent — the Continue button surfaces errors */
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }, immediate ? 0 : 600);
+    return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
+  }, [allValuesJson, initialLoaded, ownerSave, savedEntityType, entityTypeValue]);
+
+  // Continue = make sure everything is saved, then advance.
   const onSubmit = async (vals: BusinessValues) => {
     setServerError(null);
     try {
-      await apiPatch("/profiles/service-provider/me", {
-        entityType: vals.entityType,
-        businessName: vals.businessName,
-        ownerName: vals.ownerName,
-        tradeLicenseNumber: vals.tradeLicenseNumber?.trim() || undefined,
-        vatTrn: vals.vatTrn?.trim() || undefined,
-      });
-      setSavedEntityType(vals.entityType);
-      setSavedSummary({ businessName: vals.businessName, ownerName: vals.ownerName });
-      setDocsMode(true);
+      await persistBasics(vals);
+      if (ownerSave) await ownerSave();
+      onDone();
     } catch (e: unknown) {
       setServerError(e instanceof Error ? e.message : "Something went wrong");
     }
@@ -688,58 +735,6 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
     );
   }
 
-  if (docsMode) {
-    return (
-      <div className="space-y-6">
-        {/* saved basics summary — one step, two halves */}
-        <div
-          className="flex flex-wrap items-center gap-3 rounded-2xl border px-5 py-4"
-          style={{ borderColor: "var(--color-base-200)", background: "color-mix(in srgb, var(--color-primary) 4%, white)" }}
-        >
-          <Check className="h-4 w-4 flex-shrink-0" style={{ color: "var(--color-primary)" }} />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>
-              {savedSummary?.businessName}
-              <span className="ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize" style={{ background: "var(--color-base-200)", color: "var(--color-neutral-600)" }}>
-                {savedEntityType === "individual" ? "Solo trader" : "Company"}
-              </span>
-            </p>
-            <p className="text-xs" style={{ color: "var(--color-neutral-500)" }}>{savedSummary?.ownerName}</p>
-          </div>
-          <button type="button" onClick={() => setDocsMode(false)} className="text-sm font-semibold underline underline-offset-2" style={{ color: "var(--color-primary)" }}>
-            Edit
-          </button>
-        </div>
-
-        <div>
-          <h3 className="text-base font-semibold" style={{ color: "var(--color-neutral-900)" }}>
-            {savedEntityType === "individual" ? "Your documents" : "Company documents"}
-          </h3>
-          <p className="mt-1 text-sm" style={{ color: "var(--color-neutral-500)" }}>
-            Photograph or upload each one — and set its expiry date so we can remind you before it lapses.
-          </p>
-        </div>
-
-        <KycDocumentsPanel
-          key={savedEntityType ?? "company"}
-          profileApiPath="/profiles/service-provider/me"
-          ownerType="service_provider"
-          onAllRequiredUploaded={onDone}
-          continueLabel="Continue"
-        />
-
-        <button
-          type="button"
-          onClick={onDone}
-          className="text-sm underline underline-offset-2"
-          style={{ color: "var(--color-neutral-400)" }}
-        >
-          Skip documents for now &mdash; I&apos;ll add them later
-        </button>
-      </div>
-    );
-  }
-
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       {/* Entity type picker */}
@@ -750,18 +745,18 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
         >
           Entity type <span style={{ color: "var(--color-error)" }}>*</span>
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="flex flex-wrap gap-2">
           {(
             [
               {
                 value: "company",
                 title: "Company",
-                desc: "Registered UAE entity with a trade licence — full access to every service category. Includes sole-establishment professional licences.",
+                desc: "",
               },
               {
                 value: "individual",
-                title: "Solo trader / Freelancer",
-                desc: "Freelance permit or eTrader licence holder, operating in your own name.",
+                title: "Solo / Freelancer",
+                desc: "",
               },
             ] as const
           ).map((opt) => (
@@ -769,7 +764,7 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
               key={opt.value}
               type="button"
               onClick={() => setValue("entityType", opt.value)}
-              className="rounded-2xl border-2 p-5 text-left transition-all"
+              className="rounded-xl border-2 px-4 py-2.5 text-left transition-all min-w-[160px]"
               style={{
                 borderColor:
                   entityTypeValue === opt.value
@@ -781,7 +776,7 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
                     : "white",
               }}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between gap-3">
                 <span
                   className="text-sm font-bold"
                   style={{
@@ -810,12 +805,14 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
                   )}
                 </div>
               </div>
-              <p
-                className="text-xs leading-relaxed"
-                style={{ color: "var(--color-neutral-500)" }}
-              >
-                {opt.desc}
-              </p>
+              {opt.desc && (
+                <p
+                  className="text-xs leading-relaxed"
+                  style={{ color: "var(--color-neutral-500)" }}
+                >
+                  {opt.desc}
+                </p>
+              )}
             </button>
           ))}
         </div>
@@ -825,101 +822,95 @@ function BusinessBasicsStep({ onDone }: { onDone: () => void }) {
             {errors.entityType.message}
           </p>
         )}
+      </div>
 
-        {/* Consequence panel — the fork is a legal split, not a label. UAE law
-            reserves manual home services for licensed companies (FDL 9/2022;
-            freelance permits cover professional/digital work only), so the
-            individual path signposts instead of failing at review time. */}
-        {entityTypeValue === "individual" ? (
-          <div
-            className="flex gap-3 rounded-2xl px-4 py-3.5 mt-1"
-            style={{
-              background: "#fffbeb",
-              border: "1px solid #fde68a",
-            }}
-          >
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
-            <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
-              <p className="font-semibold mb-1">Good to know about licensing</p>
-              <p>
-                Hands-on home services in the UAE are licensed trades. You can
-                register now — upload your permit or licence with your documents
-                and our team verifies it within 48 hours before your listings go
-                live. If you hold a sole-establishment professional licence (e.g.
-                Technical Services), selecting <b>Company</b> also works. Not
-                licensed yet? Register anyway and we&apos;ll guide you, or join a
-                licensed company as a technician.
-              </p>
+      <hr style={{ border: 0, borderTop: "1px solid var(--color-base-200)" }} />
+
+      {entityTypeValue === "individual" ? (
+        <>
+          {/* Solo / Freelancer (CEO, 16 Aug): just the person — full name, Emirates ID
+              number, nationality. No business name, trade licence, VAT or "signatory". */}
+          <Input
+            label="Full legal name *"
+            placeholder="As on your Emirates ID"
+            autoComplete="name"
+            {...register("ownerName")}
+            error={errors.ownerName?.message}
+          />
+          <OwnerDetailsFields onReady={onOwnerReady} variant="solo" />
+        </>
+      ) : (
+        <>
+          <Input
+            label="Business / trading name *"
+            placeholder="e.g. Al Noor Technical Services"
+            autoComplete="organization"
+            {...register("businessName")}
+            error={errors.businessName?.message}
+          />
+
+          <Input
+            label="Owner / authorised signatory name *"
+            placeholder="Full legal name"
+            autoComplete="name"
+            {...register("ownerName")}
+            error={errors.ownerName?.message}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Trade licence number"
+              placeholder="e.g. CN-1234567"
+              {...register("tradeLicenseNumber")}
+              error={errors.tradeLicenseNumber?.message}
+            />
+            <Input
+              label="VAT registration (TRN)"
+              placeholder="15-digit TRN (if VAT-registered)"
+              inputMode="numeric"
+              {...register("vatTrn")}
+              error={errors.vatTrn?.message}
+            />
+          </div>
+        </>
+      )}
+
+
+      {/* ── Documents — same screen, list built for the SAVED entity type ── */}
+      <div className="pt-2" style={{ borderTop: "1px solid var(--color-base-200)" }}>
+        <h3 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>
+          {(savedEntityType ?? entityTypeValue) === "individual" ? "Your documents" : "Company documents"}
+        </h3>
+        {savedEntityType ? (
+          <>
+            <div className="mt-2">
+              {/* compact = one dense row per document (same mode as SP Settings) */}
+              <KycDocumentsPanel
+                compact
+                refreshToken={savedEntityType}
+                profileApiPath="/profiles/service-provider/me"
+                ownerType="service_provider"
+              />
             </div>
-          </div>
+          </>
         ) : (
-          <div
-            className="flex gap-3 rounded-2xl px-4 py-3.5 mt-1"
-            style={{
-              background: "color-mix(in srgb, var(--color-primary) 5%, white)",
-              border: "1px solid color-mix(in srgb, var(--color-primary) 15%, white)",
-            }}
-          >
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "var(--color-primary)" }} />
-            <p className="text-xs leading-relaxed" style={{ color: "var(--color-neutral-600)" }}>
-              You&apos;ll upload your trade licence in the Documents step. Your licence
-              activities must cover the service categories you select — we check this
-              during review.
-            </p>
-          </div>
+          <p className="mt-2 text-xs" style={{ color: "var(--color-neutral-400)" }}>
+            Fill in your details above — the document list appears once they are saved.
+          </p>
         )}
       </div>
-
-      <Input
-        label="Business / trading name *"
-        placeholder="e.g. Al Noor Technical Services"
-        autoComplete="organization"
-        {...register("businessName")}
-        error={errors.businessName?.message}
-      />
-
-      <Input
-        label="Owner / authorised signatory name *"
-        placeholder="Full legal name"
-        autoComplete="name"
-        {...register("ownerName")}
-        error={errors.ownerName?.message}
-      />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Input
-          label="Trade licence number"
-          placeholder="e.g. CN-1234567"
-          {...register("tradeLicenseNumber")}
-          error={errors.tradeLicenseNumber?.message}
-        />
-        <Input
-          label="VAT registration (TRN)"
-          placeholder="15-digit TRN (if VAT-registered)"
-          inputMode="numeric"
-          {...register("vatTrn")}
-          error={errors.vatTrn?.message}
-        />
-      </div>
-      <p className="-mt-3 text-xs" style={{ color: "var(--color-neutral-400)" }}>
-        The number printed on your trade licence, and your VAT TRN if registered. You&apos;ll upload the licence document in the next step.
-      </p>
 
       {serverError && <ErrorBanner message={serverError} />}
 
-      <Button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full sm:w-auto"
-      >
-        {isSubmitting ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <>
-            Save &amp; continue <ChevronRight className="w-4 h-4 ml-1" />
-          </>
-        )}
-      </Button>
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
+          {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continue <ChevronRight className="w-4 h-4 ml-1" /></>}
+        </Button>
+        <span className="flex items-center gap-1 text-xs" style={{ color: saving ? "var(--color-neutral-400)" : "var(--color-primary)" }}>
+          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : justSaved ? <Check className="w-3.5 h-3.5" /> : null}
+          {saving ? "Saving…" : justSaved ? "Saved" : ""}
+        </span>
+      </div>
     </form>
   );
 }
@@ -943,7 +934,6 @@ interface SpCatalogCategory {
 function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
-  const [entityType, setEntityType] = useState<string>("company");
   // Live taxonomy from the admin-configured catalog (active categories only);
   // the hardcoded list is only the fallback if the endpoint is down.
   const [categoryOptions, setCategoryOptions] =
@@ -978,7 +968,6 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
     apiGet<{ profile: SpProfile }>("/profiles/service-provider/me")
       .then(({ profile }) => {
         reset({ serviceCategories: profile.serviceCategories ?? [] });
-        setEntityType(profile.entityType ?? "company");
       })
       .catch(() => {})
       .finally(() => setInitialLoaded(true));
@@ -1011,10 +1000,6 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialLoaded, selectedKey]);
 
-  // Eligibility (CEO, Jul 8): individuals may register and select any category;
-  // the licence/permit check happens at document review (GATE 1) before
-  // listings go live — the notice below sets that expectation.
-  const isIndividual = entityType === "individual";
 
   const toggleTemplate = async (categoryCode: string, tpl: SpCatalogTemplate) => {
     setSavingTemplateIds((prev) => new Set(prev).add(tpl.id));
@@ -1098,40 +1083,15 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      {isIndividual && (
-        <div
-          className="flex gap-3 rounded-2xl px-4 py-3.5"
-          style={{ background: "#fffbeb", border: "1px solid #fde68a" }}
-        >
-          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
-          <div className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
-            <p className="font-semibold mb-1">
-              Licensed trades — we verify your permit at review
-            </p>
-            <p>
-              These are hands-on, on-site trades. You can register and pick your
-              services now — upload your licence or permit in <b>Business &amp;
-              documents</b>, and our team verifies that it covers the selected
-              categories within 48 hours, before your listings go live. If you hold
-              a sole-establishment professional licence, selecting <b>Company</b>{" "}on
-              the previous step also works. Not licensed yet? Contact us — we&apos;ll
-              guide you.
-            </p>
-          </div>
-        </div>
-      )}
       <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
-        Pick a category, then choose exactly which services under it you offer —
-        each category is marked complete once at least one service is picked. For
-        each category, tick the tools &amp; materials you have and add a photo of
-        each — once per category, it counts for every service in it. UpNow checks
-        them when reviewing your services.
+        Pick your categories, then the services under each. Tools &amp; materials are
+        declared once per category.
       </p>
       <Controller
         control={control}
         name="serviceCategories"
         render={({ field }) => (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-3">
             {categoryOptions.map((cat) => {
               const selected = field.value.includes(cat.value);
               const templates = templatesByCategory[cat.value] ?? [];
@@ -1210,12 +1170,13 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
 
                   {selected && templates.length > 0 && (
                     <div
-                      className="px-4 pb-3 pt-1 space-y-1.5"
+                      className="px-4 pb-3 pt-1"
                       style={{ borderTop: "1px solid var(--color-base-100)" }}
                     >
                       <p className="text-[11px] pt-2" style={{ color: "var(--color-neutral-400)" }}>
-                        Which {cat.label.toLowerCase()} services do you offer?
+                        Which of these do you offer?
                       </p>
+                      <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3" style={{ marginTop: 6 }}>
                       {templates.map((tpl) => {
                         const adopted = !!tpl.adoptedServiceId;
                         const saving = savingTemplateIds.has(tpl.id);
@@ -1257,6 +1218,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                           </button>
                         );
                       })}
+                      </div>
                     </div>
                   )}
 
@@ -1271,7 +1233,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                           compact
                           checklist={cl}
                           busy={declaringCategoryId === catId}
-                          intro={`Tools & materials for ${cat.label} — tick what you have and add a photo of each. Declared once, it counts for every ${cat.label.toLowerCase()} service you offer.`}
+                          intro="Tools & materials — tick what you have, add a photo of each."
                           onDeclare={(requirementId, declared, note) => void declareTool(catId, requirementId, declared, note)}
                           onUploadPhoto={async (requirementId, file) => putCategoryChecklists(await uploadCapabilityPhotoMine(requirementId, file, selectedIds))}
                           onRemovePhoto={async (requirementId) => putCategoryChecklists(await removeCapabilityPhotoMine(requirementId, selectedIds))}
@@ -1646,7 +1608,13 @@ function StrengthStep({ onDone }: { onDone: () => void }) {
 
 // ─── Step 5 · Owner details (skippable) ──────────────────────────────────────
 
-function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
+/**
+ * Owner details (Emirates ID number, nationality, date of birth) — since 16 Aug
+ * embedded inside Step 1 "Business & documents" rather than a step of its own.
+ * Keeps its own form; the parent calls `save()` as part of its Save & continue.
+ */
+type OwnerDetailsSave = () => Promise<void>;
+function OwnerDetailsFields({ onReady, variant = "owner" }: { onReady: (save: OwnerDetailsSave) => void; variant?: "owner" | "solo" }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
   const [dobOpen, setDobOpen] = useState(false);
@@ -1663,7 +1631,7 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
     control,
     setValue,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<OwnerDetailsValues>({
     resolver: zodResolver(ownerDetailsSchema),
     defaultValues: {
@@ -1709,40 +1677,52 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
       .finally(() => setInitialLoaded(true));
   }, [reset]);
 
-  const onSubmit = async (vals: OwnerDetailsValues) => {
+  const persist = async (vals: OwnerDetailsValues) => {
     setServerError(null);
-    try {
-      await apiPatch("/profiles/service-provider/me", {
-        emiratesIdNumber: vals.emiratesIdNumber || null,
-        nationality: vals.nationality || null,
-        dateOfBirth: vals.dateOfBirth || null,
-      });
-      onDone();
-    } catch (e: unknown) {
-      setServerError(e instanceof Error ? e.message : "Something went wrong");
-    }
+    await apiPatch("/profiles/service-provider/me", {
+      emiratesIdNumber: vals.emiratesIdNumber || null,
+      nationality: vals.nationality || null,
+      dateOfBirth: vals.dateOfBirth || null,
+    });
   };
+  // The parent's Save & continue saves these too (all optional — never blocks).
+  const save = useCallback<OwnerDetailsSave>(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        void handleSubmit(
+          async (vals) => {
+            try { await persist(vals); resolve(); } catch (e) { setServerError(e instanceof Error ? e.message : "Something went wrong"); reject(e); }
+          },
+          () => resolve(),
+        )();
+      }),
+    [handleSubmit],
+  );
+  useEffect(() => { onReady(save); }, [onReady, save]);
+  // Auto-save these fields too (debounced) — they live in their own form.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const sub = watch(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { void save().catch(() => {}); }, 700);
+    });
+    return () => { sub.unsubscribe(); if (timer) clearTimeout(timer); };
+  }, [watch, save]);
 
   const filteredNats = NATIONALITIES.filter((n) =>
     n.toLowerCase().includes(natSearch.toLowerCase()),
   ).slice(0, 30);
 
-  if (!initialLoaded) {
-    return (
-      <div className="flex items-center gap-3 py-8">
-        <Loader2
-          className="w-5 h-5 animate-spin"
-          style={{ color: "var(--color-primary)" }}
-        />
-        <span className="text-sm" style={{ color: "var(--color-neutral-500)" }}>
-          Loading&hellip;
-        </span>
-      </div>
-    );
-  }
+  if (!initialLoaded) return null;
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <div className="space-y-6">
+      {variant === "owner" && (
+        <div>
+          <h3 className="text-sm font-semibold" style={{ color: "var(--color-neutral-900)" }}>Owner details</h3>
+          <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>Emirates ID, nationality and date of birth of the owner / authorised signatory — optional, helps KYC.</p>
+        </div>
+      )}
       <Input
         label="Emirates ID number"
         placeholder="784-1990-1234567-8"
@@ -1827,7 +1807,8 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
         />
       </div>
 
-      {/* ── Date of birth ────────────────────────────────────────── */}
+      {/* ── Date of birth (owner variant only — a solo is asked name, EID, nationality) ── */}
+      {variant === "owner" && (
       <div className="flex flex-col gap-2">
         <label
           className="text-sm font-medium"
@@ -1887,23 +1868,10 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
         </div>
         <input type="hidden" {...register("dateOfBirth")} />
       </div>
+      )}
 
       {serverError && <ErrorBanner message={serverError} />}
-
-      <Button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full sm:w-auto"
-      >
-        {isSubmitting ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <>
-            Save &amp; continue <ChevronRight className="w-4 h-4 ml-1" />
-          </>
-        )}
-      </Button>
-    </form>
+    </div>
   );
 }
 
@@ -2025,6 +1993,8 @@ export default function ServiceProviderOnboardingPage() {
     return () => publishSpOnboardingReady(true);
   }, []);
   const [complianceStatus, setComplianceStatus] = useState<string | null>(null);
+  // Account type drives solo-vs-company copy in the header (SP-270 makes this a flow config).
+  const [accountType, setAccountType] = useState<string | null>(null);
   const [complianceNotes, setComplianceNotes] = useState<string | null>(null);
   // Admin sent the application back (action_required / expired): the SP is
   // rolled back into the wizard to fix the flagged gaps. advance()/skip walk
@@ -2053,15 +2023,15 @@ export default function ServiceProviderOnboardingPage() {
         const p = data.profile;
         if (p?.complianceNotes) setComplianceNotes(p.complianceNotes);
         if (p?.accountTypeConfirmedAt && p?.businessName) done.add(1);
+        if (p?.entityType) setAccountType(p.entityType);
         // Step 2 — at least one service category selected
         if (p?.serviceCategories && p.serviceCategories.length > 0) done.add(2);
         // Step 3 — at least one emirate selected
         if (p?.emiratesServed && p.emiratesServed.length > 0) done.add(3);
         // Step 4 — strength signals (bands + customer-queries contact)
         if (p?.teamSizeBand && p?.fleetSizeBand && p?.opsContactName) done.add(4);
-        // Step 5 — owner details (optional step, skip if no data but also don't block)
-        // We consider it done if at least one field is filled
-        if (p?.emiratesIdNumber || p?.nationality || p?.dateOfBirth) done.add(5);
+        // (Owner details — Emirates ID, nationality, DOB — live inside Step 1
+        // since 16 Aug; optional, no completion gate of their own.)
 
       } catch {
         // profile not created yet — steps 1–4 stay incomplete
@@ -2421,29 +2391,30 @@ export default function ServiceProviderOnboardingPage() {
                     className="text-xl font-bold"
                     style={{ color: "var(--color-neutral-900)" }}
                   >
-                    {currentStep.subtitle}
+                    {currentStep.id === 1 && accountType === "individual" ? "Tell us about you" : currentStep.subtitle}
                   </h2>
                 </div>
-                <p
-                  className="text-sm leading-relaxed pl-[52px]"
-                  style={{ color: "var(--color-neutral-500)" }}
-                >
-                  {currentStep.description}
-                </p>
+                {currentStep.description && (
+                  <p
+                    className="text-sm leading-relaxed pl-[52px]"
+                    style={{ color: "var(--color-neutral-500)" }}
+                  >
+                    {currentStep.description}
+                  </p>
+                )}
               </div>
 
               {/* Form */}
               <div className="max-w-lg">
                 {step === 0 && <PhoneStep onDone={() => advance(0)} />}
                 {step === 1 && (
-                  <BusinessBasicsStep onDone={() => advance(1)} />
+                  <BusinessBasicsStep onDone={() => advance(1)} onAccountTypeChange={setAccountType} />
                 )}
                 {step === 2 && (
                   <ServiceCategoriesStep onDone={() => advance(2)} />
                 )}
                 {step === 3 && <ServiceAreaStep onDone={() => advance(3)} />}
                 {step === 4 && <StrengthStep onDone={() => advance(4)} />}
-                {step === 5 && <OwnerDetailsStep onDone={() => advance(5)} />}
                 {step === 6 && <OpsConfigStep which="coverage" onDone={() => advance(6)} />}
                 {step === 7 && <OpsConfigStep which="team" onDone={() => advance(7)} />}
                 {step === 8 && <OpsConfigStep which="fleet" onDone={() => advance(8)} />}

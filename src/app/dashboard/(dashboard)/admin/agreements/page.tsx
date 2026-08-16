@@ -55,6 +55,8 @@ const AUDIENCES: { key: AgreementAudience; label: string; hint: string }[] = [
 ];
 /** Human label for an audience key — the raw key ('landlord') must never surface in copy. */
 const audienceLabel = (k: AgreementAudience) => AUDIENCES.find((a) => a.key === k)?.label ?? k;
+/** Singular, lowercase form for sentences: 'Rental providers' → 'rental provider'. */
+const audienceNoun = (k: AgreementAudience) => audienceLabel(k).toLowerCase().replace(/s$/, '');
 const STATUS_STYLE: Record<AdminAgreement['status'], { bg: string; fg: string; label: string }> = {
   current: { bg: '#e8f6f1', fg: '#1d7a5f', label: 'Current' },
   draft: { bg: '#fef6e7', fg: '#92400e', label: 'Draft' },
@@ -93,7 +95,7 @@ export default function AdminAgreementsPage() {
   const publish = async (a: AdminAgreement) => {
     const ok = window.confirm(
       `Publish v${a.version} for ${audienceLabel(a.audience)}?\n\n` +
-        (current ? `v${current.version} becomes superseded and every ${audienceLabel(a.audience).toLowerCase().replace(/s$/, '')} is asked to accept v${a.version} on their next visit. Earlier acceptances stay on record.` : `Every ${audienceLabel(a.audience).toLowerCase().replace(/s$/, '')} will be asked to accept it on their next visit.`) +
+        (current ? `v${current.version} becomes superseded and every ${audienceNoun(a.audience)} is asked to accept v${a.version} on their next visit. Earlier acceptances stay on record.` : `Every ${audienceNoun(a.audience)} will be asked to accept it on their next visit.`) +
         `\n\nA published version is immutable.`,
     );
     if (!ok) return;
@@ -327,7 +329,7 @@ function DraftForm({ audience, existing, onCancel, onSaved }: {
   const input: React.CSSProperties = { width: '100%', fontSize: 13, padding: '8px 10px', border: BORDER, borderRadius: 8, color: INK, background: '#fff' };
   return (
     <div style={card({ padding: 16, marginTop: 12, background: '#fbfbfa' })}>
-      <p style={{ fontSize: 13.5, fontWeight: 700, color: INK, marginBottom: 10 }}>{existing ? `Edit draft v${existing.version}` : `New ${audienceLabel(audience).toLowerCase().replace(/s$/, '')} agreement version`}</p>
+      <p style={{ fontSize: 13.5, fontWeight: 700, color: INK, marginBottom: 10 }}>{existing ? `Edit draft v${existing.version}` : `New ${audienceNoun(audience)} agreement version`}</p>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 160px) minmax(0, 1fr)' }}>
         <label style={{ fontSize: 12, color: MUTE }}>Version<input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0" style={{ ...input, marginTop: 4 }} /></label>
         <label style={{ fontSize: 12, color: MUTE }}>Title<input value={title} onChange={(e) => setTitle(e.target.value)} style={{ ...input, marginTop: 4 }} /></label>

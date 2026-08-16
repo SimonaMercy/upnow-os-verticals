@@ -117,6 +117,12 @@ export interface KycDocumentsPanelProps {
    * tight (e.g. the RP settings page) rather than the guidance-heavy onboarding.
    */
   compact?: boolean;
+  /**
+   * Change this value to refetch the checklist IN PLACE (no skeleton, no
+   * remount) — e.g. after the owner's entity type changed and the server
+   * builds a different document list.
+   */
+  refreshToken?: string | number | null;
   /** Show ONLY documents whose key is in this list (e.g. the POA pack). */
   onlyKeys?: string[];
   /** Hide documents whose key is in this list (e.g. POA docs shown elsewhere). */
@@ -218,6 +224,7 @@ export function KycDocumentsPanel({
   continueLabel = "Go to my dashboard",
   profileHref,
   compact = false,
+  refreshToken,
   onlyKeys,
   excludeKeys,
   allowDownload = false,
@@ -274,6 +281,13 @@ export function KycDocumentsPanel({
   };
 
   useEffect(() => { load(); }, [profileApiPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Silent refetch when the caller signals the list may have changed (entity type switch).
+  const firstRefresh = useRef(true);
+  useEffect(() => {
+    if (firstRefresh.current) { firstRefresh.current = false; return; }
+    if (refreshToken === undefined) return;
+    load({ silent: true });
+  }, [refreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Browser Back closes the document viewer instead of navigating away; ESC /
   // backdrop / X route through the same path. Active only while it is open.
@@ -508,7 +522,9 @@ export function KycDocumentsPanel({
     }
     if (onlyKeys) base = base.filter((c) => onlyKeys.includes(c.key));
     if (excludeKeys) base = base.filter((c) => !excludeKeys!.includes(c.key));
-    return base;
+    // Required documents first, optional ones after — grouped, stable within
+    // each group (CEO, 16 Aug 2026). Applies to every owner type.
+    return [...base].sort((a, b) => Number(b.required) - Number(a.required));
   })();
 
   const uploadedCount = checklist.filter((c) => c.uploaded).length;

@@ -269,7 +269,7 @@ export function SpCapabilityChecklist({
       }}
     >
       <p style={{ fontSize: 12, color: MUTE, marginBottom: 8 }}>
-        {intro ?? 'What this service needs. Tick what you have and add a photo of each — UpNow checks them when reviewing the service.'}
+        {intro ?? 'Tick what you have and add a photo of each.'}
         {!sm.declarationComplete && (
           <span style={{ color: '#92400E', fontWeight: 600 }}>
             {' '}
@@ -286,7 +286,7 @@ export function SpCapabilityChecklist({
       {photoError && (
         <p style={{ fontSize: 12, color: '#B42318', marginBottom: 8 }}>{photoError}</p>
       )}
-      <ul style={{ display: 'grid', gap: 6, gridTemplateColumns: compact ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+      <ul style={{ display: 'grid', gap: 6, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
         {checklist.rows.map((r) => (
           <li key={r.requirementId} className="flex items-start gap-2" style={{ fontSize: 13, color: INK }}>
             <input
