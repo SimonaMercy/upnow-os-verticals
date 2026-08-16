@@ -18,7 +18,14 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Schibsted_Grotesk } from 'next/font/google';
 import { Briefcase, LayoutGrid, Loader2, Plus, Rows3, ShieldCheck, Trash2 } from 'lucide-react';
-import { apiGet, apiPatch, apiDelete, apiPut } from '@/lib/api';
+import { apiGet, apiPatch, apiDelete } from '@/lib/api';
+import {
+  SpCapabilityChecklist,
+  SpToolsChip,
+  declareCapability,
+  fetchMyChecklists,
+  type ListingChecklist,
+} from '@/components/upnow/SpCapabilityChecklist';
 
 const grotesk = Schibsted_Grotesk({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'] });
 
@@ -44,17 +51,6 @@ interface SpService {
   isFromPrice?: boolean | null;
   listingStatus?: string | null;
   isAvailable?: boolean | null;
-}
-
-/** SP-248 — the tools/materials checklist for one of my listings. */
-interface CapabilityRow {
-  requirementId: number; label: string; description: string | null; requirementType: string; isMandatory: boolean;
-  declared: boolean; note: string | null; verifiedAt: string | null;
-}
-interface ListingChecklist {
-  serviceCatalogId: number;
-  summary: { total: number; mandatory: number; declared: number; declaredMandatory: number; verified: number; verifiedMandatory: number; declarationComplete: boolean; verificationComplete: boolean };
-  rows: CapabilityRow[];
 }
 
 const STATUS_STYLE: Record<string, { bg: string; fg: string; label: string }> = {
@@ -114,7 +110,7 @@ export default function SpMyServicesPage() {
   const [openChecklist, setOpenChecklist] = useState<number | null>(null);
   const [declaring, setDeclaring] = useState<number | null>(null);
   const loadChecklists = () =>
-    apiGet<ListingChecklist[]>('/service-provider/capabilities')
+    fetchMyChecklists()
       .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))))
       .catch(() => {});
 
@@ -132,9 +128,7 @@ export default function SpMyServicesPage() {
     setDeclaring(listingId);
     setError(null);
     try {
-      const updated = await apiPut<ListingChecklist>(`/service-provider/capabilities/${listingId}`, {
-        items: [{ requirementId, declared, ...(note !== undefined ? { note } : {}) }],
-      });
+      const updated = await declareCapability(listingId, requirementId, declared, note);
       setChecklists((prev) => ({ ...prev, [listingId]: updated }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save your declaration');
@@ -213,55 +207,24 @@ export default function SpMyServicesPage() {
     );
   };
 
-  /** SP-248 chip: "Tools 4/6" — amber until every mandatory item is declared, green when verified. */
-  const ToolsChip = ({ s }: { s: SpService }) => {
-    const cl = checklists[s.id];
-    if (!cl || cl.summary.total === 0) return null;
-    const sm = cl.summary;
-    const tone = sm.verificationComplete ? { bg: TINT_GREEN, fg: GREEN } : sm.declarationComplete ? { bg: '#EEF2FF', fg: '#4338CA' } : { bg: '#FEF6E7', fg: '#92400E' };
-    const open = openChecklist === s.id;
-    return (
-      <button type="button" onClick={() => setOpenChecklist(open ? null : s.id)}
-        title={sm.declarationComplete ? (sm.verificationComplete ? 'UpNow verified your tools & materials for this service' : 'Declared — awaiting UpNow verification') : 'Tell us which tools & materials you have for this service'}
-        style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999, background: tone.bg, color: tone.fg, border: 'none', cursor: 'pointer' }}>
-        Tools {sm.declaredMandatory}/{sm.mandatory}{sm.verificationComplete ? ' ✓' : ''} {open ? '▴' : '▾'}
-      </button>
-    );
-  };
+  /** SP-248 chip + checklist — shared with the onboarding wizard (SP-266). */
+  const ToolsChip = ({ s }: { s: SpService }) => (
+    <SpToolsChip
+      checklist={checklists[s.id]}
+      open={openChecklist === s.id}
+      onToggle={() => setOpenChecklist(openChecklist === s.id ? null : s.id)}
+    />
+  );
 
-  const Checklist = ({ s }: { s: SpService }) => {
-    const cl = checklists[s.id];
-    if (openChecklist !== s.id || !cl) return null;
-    const busyHere = declaring === s.id;
-    return (
-      <div style={{ padding: '10px 16px 14px', background: '#FBFCFA', borderTop: HAIRLINE }}>
-        <p style={{ fontSize: 12, color: MUTE, marginBottom: 8 }}>
-          What this service needs. Tick what you have — UpNow checks it when reviewing the service.
-          {!cl.summary.declarationComplete && <span style={{ color: '#92400E', fontWeight: 600 }}> {cl.summary.mandatory - cl.summary.declaredMandatory} mandatory item{cl.summary.mandatory - cl.summary.declaredMandatory === 1 ? '' : 's'} still unticked.</span>}
-        </p>
-        <ul style={{ display: 'grid', gap: 6, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {cl.rows.map((r) => (
-            <li key={r.requirementId} className="flex items-start gap-2" style={{ fontSize: 13, color: INK }}>
-              <input type="checkbox" checked={r.declared} disabled={busyHere}
-                onChange={(e) => void declare(s.id, r.requirementId, e.target.checked)}
-                style={{ marginTop: 3, accentColor: GREEN }} aria-label={r.label} />
-              <span style={{ flex: 1 }}>
-                {r.label}
-                {!r.isMandatory && <span style={{ fontSize: 11, color: FAINT }}> (optional)</span>}
-                {r.verifiedAt && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN, marginLeft: 6 }}>✓ verified</span>}
-                {r.description && <span style={{ display: 'block', fontSize: 11.5, color: FAINT }}>{r.description}</span>}
-                {r.declared && (
-                  <input defaultValue={r.note ?? ''} placeholder="Note (brand / model — optional)" disabled={busyHere}
-                    onBlur={(e) => { if ((e.target.value.trim() || null) !== (r.note ?? null)) void declare(s.id, r.requirementId, true, e.target.value.trim() || null); }}
-                    style={{ display: 'block', marginTop: 3, width: '100%', fontSize: 11.5, padding: '3px 6px', border: HAIRLINE, borderRadius: 6, color: MUTE }} />
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  };
+  const Checklist = ({ s }: { s: SpService }) =>
+    openChecklist === s.id ? (
+      <SpCapabilityChecklist
+        checklist={checklists[s.id]}
+        busy={declaring === s.id}
+        onDeclare={(requirementId, declared, note) => void declare(s.id, requirementId, declared, note)}
+        onChecklistChange={(next) => setChecklists((prev) => ({ ...prev, [s.id]: next }))}
+      />
+    ) : null;
 
   const Price = ({ s }: { s: SpService }) => (
     <span

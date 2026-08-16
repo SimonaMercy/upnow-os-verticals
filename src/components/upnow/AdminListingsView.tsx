@@ -121,6 +121,8 @@ interface SpContextService {
 interface CapabilityRow {
   requirementId: number; key: string; label: string; description: string | null; requirementType: string;
   isMandatory: boolean; evidenceRequired: boolean; declared: boolean; declaredAt: string | null; note: string | null;
+  /** SP-267 — signed view URL of the provider's photo of this tool (null = none). */
+  photoUrl?: string | null; photoUploadedAt?: string | null;
   verifiedAt: string | null; verifiedByName: string | null;
 }
 interface CapabilitySummary {
@@ -1105,7 +1107,15 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                                     <span className="ml-1 text-[10px] uppercase" style={{ color: 'var(--color-neutral-400)' }}>{r.requirementType}</span>
                                     {r.note && <span className="block text-[10.5px] italic" style={{ color: 'var(--color-neutral-500)' }}>“{r.note}”</span>}
                                     {!r.declared && r.isMandatory && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>Mandatory — not declared</span>}
+                                    {r.declared && !r.photoUrl && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>No photo of this tool yet</span>}
                                   </span>
+                                  {r.declared && r.photoUrl && (
+                                    <a href={r.photoUrl} target="_blank" rel="noreferrer" title="Open the provider's photo of this tool" className="shrink-0">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={r.photoUrl} alt={`Photo of ${r.label}`} className="rounded-md object-cover"
+                                        style={{ width: 34, height: 34, border: '1px solid var(--color-base-200)', display: 'block' }} />
+                                    </a>
+                                  )}
                                   {r.declared && (
                                     <button type="button" disabled={isV}
                                       onClick={() => void verifyLines(sv.id, [r.requirementId], !r.verifiedAt)}

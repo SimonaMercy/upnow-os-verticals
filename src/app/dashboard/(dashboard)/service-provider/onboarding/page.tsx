@@ -47,6 +47,14 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import {
+  SpCapabilityChecklist,
+  SpToolsChip,
+  declareCapability,
+  fetchMyChecklist,
+  fetchMyChecklists,
+  type ListingChecklist,
+} from "@/components/upnow/SpCapabilityChecklist";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { KycDocumentsPanel } from "@/components/dashboard/KycDocumentsPanel";
@@ -933,6 +941,13 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [templatesByCategory, setTemplatesByCategory] =
     useState<Record<string, SpCatalogTemplate[]>>({});
   const [savingTemplateIds, setSavingTemplateIds] = useState<Set<number>>(new Set());
+  // SP-266 / SP-267: what each picked service needs — declared right here, with
+  // a photo per tool, keyed by TEMPLATE id (the wizard thinks in templates; the
+  // API in listings). Advisory: the step still submits with gaps.
+  const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
+  const [declaringListingId, setDeclaringListingId] = useState<number | null>(null);
+  const putChecklist = (cl: ListingChecklist) =>
+    setChecklists((prev) => ({ ...prev, [cl.templateId ?? cl.serviceCatalogId]: cl }));
 
   const {
     handleSubmit,
@@ -964,6 +979,10 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
         setTemplatesByCategory(byCategory);
       })
       .catch(() => {}); // keep the static fallback, no sub-services shown
+
+    fetchMyChecklists()
+      .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.templateId ?? r.serviceCatalogId, r]))))
+      .catch(() => {}); // advisory — no checklist, no box
   }, [reset]);
 
   // Eligibility (CEO, Jul 8): individuals may register and select any category;
@@ -983,6 +1002,11 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
             t.id === tpl.id ? { ...t, adoptedServiceId: null } : t,
           ),
         }));
+        setChecklists((prev) => {
+          const next = { ...prev };
+          delete next[tpl.id];
+          return next;
+        });
       } else {
         const created = await apiPost<{ id: number }>("/service-provider/services", {
           templateId: tpl.id,
@@ -993,6 +1017,8 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
             t.id === tpl.id ? { ...t, adoptedServiceId: created.id } : t,
           ),
         }));
+        // SP-266: the checklist appears the moment the service is picked.
+        fetchMyChecklist(created.id).then(putChecklist).catch(() => {});
       }
     } catch (e: unknown) {
       setServerError(e instanceof Error ? e.message : "Couldn't save that service — try again.");
@@ -1004,6 +1030,28 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       });
     }
   };
+
+  const declareTool = async (listingId: number, requirementId: number, declared: boolean, note?: string | null) => {
+    setDeclaringListingId(listingId);
+    setServerError(null);
+    try {
+      putChecklist(await declareCapability(listingId, requirementId, declared, note));
+    } catch (e: unknown) {
+      setServerError(e instanceof Error ? e.message : "Couldn't save your declaration — try again.");
+    } finally {
+      setDeclaringListingId(null);
+    }
+  };
+
+  // Step-level nudge: mandatory tools still unticked / photos still missing
+  // across every picked service (advisory — the step submits regardless).
+  const adoptedChecklists = Object.values(templatesByCategory)
+    .flat()
+    .filter((t) => t.adoptedServiceId)
+    .map((t) => checklists[t.id])
+    .filter((cl): cl is ListingChecklist => !!cl && cl.summary.total > 0);
+  const toolsMissing = adoptedChecklists.reduce((n, cl) => n + (cl.summary.mandatory - cl.summary.declaredMandatory), 0);
+  const photosMissing = adoptedChecklists.reduce((n, cl) => n + cl.summary.photosMissing, 0);
 
   const onSubmit = async (vals: CategoriesValues) => {
     setServerError(null);
@@ -1057,7 +1105,9 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       )}
       <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
         Pick a category, then choose exactly which services under it you offer —
-        each category is marked complete once at least one service is picked.
+        each category is marked complete once at least one service is picked. For
+        each service, tick the tools &amp; materials you have and add a photo of
+        each; UpNow checks them when reviewing your services.
       </p>
       <Controller
         control={control}
@@ -1150,9 +1200,10 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                       {templates.map((tpl) => {
                         const adopted = !!tpl.adoptedServiceId;
                         const saving = savingTemplateIds.has(tpl.id);
+                        const checklist = adopted ? checklists[tpl.id] : undefined;
                         return (
+                          <div key={tpl.id}>
                           <button
-                            key={tpl.id}
                             type="button"
                             disabled={saving}
                             onClick={() => toggleTemplate(cat.value, tpl)}
@@ -1180,12 +1231,28 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                               )}
                             </div>
                             <span
-                              className="text-[13px]"
+                              className="text-[13px] flex-1 min-w-0"
                               style={{ color: adopted ? "var(--color-primary)" : "var(--color-neutral-700)" }}
                             >
                               {tpl.name}
                             </span>
+                            {adopted && <SpToolsChip checklist={checklist} size="sm" />}
                           </button>
+                          {adopted && tpl.adoptedServiceId && (
+                            <div className="pl-2.5 pr-1 pb-1.5" style={{ marginTop: 2 }}>
+                              <SpCapabilityChecklist
+                                compact
+                                checklist={checklist}
+                                busy={declaringListingId === tpl.adoptedServiceId}
+                                intro="Tick the tools & materials you have for this service and add a photo of each."
+                                onDeclare={(requirementId, declared, note) =>
+                                  void declareTool(tpl.adoptedServiceId!, requirementId, declared, note)
+                                }
+                                onChecklistChange={putChecklist}
+                              />
+                            </div>
+                          )}
+                          </div>
                         );
                       })}
                     </div>
@@ -1203,6 +1270,30 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       )}
 
       {serverError && <ErrorBanner message={serverError} />}
+
+      {(toolsMissing > 0 || photosMissing > 0) && (
+        <div
+          className="flex gap-3 rounded-2xl px-4 py-3"
+          style={{ background: "#fffbeb", border: "1px solid #fde68a" }}
+        >
+          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#92400e" }} />
+          <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
+            {toolsMissing > 0 && (
+              <>
+                <b>{toolsMissing}</b> mandatory tool{toolsMissing === 1 ? "" : "s"} still unticked
+              </>
+            )}
+            {toolsMissing > 0 && photosMissing > 0 && " · "}
+            {photosMissing > 0 && (
+              <>
+                <b>{photosMissing}</b> photo{photosMissing === 1 ? "" : "s"} still missing
+              </>
+            )}
+            {" "}across your services. UpNow checks these when reviewing — you can also
+            finish them later under <b>My Services</b>.
+          </p>
+        </div>
+      )}
 
       <Button
         type="submit"
