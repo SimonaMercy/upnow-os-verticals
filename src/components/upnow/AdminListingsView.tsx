@@ -121,6 +121,8 @@ interface SpContextService {
 interface CapabilityRow {
   requirementId: number; key: string; label: string; description: string | null; requirementType: string;
   isMandatory: boolean; evidenceRequired: boolean; declared: boolean; declaredAt: string | null; note: string | null;
+  /** SP-268 — authored on the category (shared) or this one template (extra). */
+  scope?: 'category' | 'template';
   /** SP-267 — signed view URL of the provider's photo of this tool (null = none). */
   photoUrl?: string | null; photoUploadedAt?: string | null;
   verifiedAt: string | null; verifiedByName: string | null;
@@ -128,8 +130,12 @@ interface CapabilityRow {
 interface CapabilitySummary {
   total: number; mandatory: number; declared: number; declaredMandatory: number; verified: number; verifiedMandatory: number;
   declarationComplete: boolean; verificationComplete: boolean;
+  /** SP-267 — declared lines with / without a photo. */
+  withPhoto: number; photosMissing: number;
 }
 interface ListingChecklist { serviceCatalogId: number; templateId: number | null; serviceName: string; summary: CapabilitySummary; rows: CapabilityRow[] }
+/** SP-268 — the provider's tools per CATEGORY (declared once; verified once). */
+interface CategoryChecklist { categoryId: number; categoryCode: string; categoryName: string; listingCount: number; summary: CapabilitySummary; rows: CapabilityRow[] }
 
 interface SpContext {
   profile: {
@@ -713,14 +719,36 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
   // SP-248: per-listing capability checklists (declared by the provider,
   // verified here). Loaded alongside the context; failures don't block the drawer.
   const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
+  // SP-268: the tools live on the CATEGORY (declared once, verified once) — a listing only carries its own extras.
+  const [catChecklists, setCatChecklists] = useState<Record<string, CategoryChecklist>>({});
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [openChecklist, setOpenChecklist] = useState<number | null>(null);
   const [verifying, setVerifying] = useState<Set<number>>(new Set());
+  const [verifyingCat, setVerifyingCat] = useState<string | null>(null);
 
   const loadChecklists = useCallback((signal?: AbortSignal) =>
-    apiGet<ListingChecklist[]>(`/admin/kyc/service-providers/${providerId}/capabilities`, { signal })
-      .then((rows) => { if (!signal?.aborted) setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))); })
-      .catch(() => { /* checklist is advisory — the drawer still works without it */ }),
+    Promise.all([
+      apiGet<ListingChecklist[]>(`/admin/kyc/service-providers/${providerId}/capabilities`, { signal })
+        .then((rows) => { if (!signal?.aborted) setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))); }),
+      apiGet<CategoryChecklist[]>(`/admin/kyc/service-providers/${providerId}/capabilities/categories`, { signal })
+        .then((rows) => { if (!signal?.aborted) setCatChecklists(Object.fromEntries(rows.map((r) => [r.categoryCode, r]))); }),
+    ]).catch(() => { /* checklist is advisory — the drawer still works without it */ }),
   [providerId]);
+
+  /** SP-268 — verify at the PROVIDER level: counts for every service in the category. */
+  async function verifyCategoryLines(code: string, requirementIds: number[], verified: boolean) {
+    if (!requirementIds.length) return;
+    setActErr(null);
+    setVerifyingCat(code);
+    try {
+      await apiPost(`/admin/kyc/service-providers/${providerId}/capabilities/verify`, { requirementIds, verified });
+      await loadChecklists();
+    } catch (e) {
+      setActErr((e as Error).message);
+    } finally {
+      setVerifyingCat(null);
+    }
+  }
 
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true); setErr(null);
@@ -736,8 +764,8 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
     setActErr(null);
     setVerifying((v) => new Set(v).add(listingId));
     try {
-      const updated = await apiPost<ListingChecklist>(`/admin/service-listings/${listingId}/capabilities/verify`, { requirementIds, verified });
-      setChecklists((prev) => ({ ...prev, [listingId]: updated }));
+      await apiPost<ListingChecklist>(`/admin/service-listings/${listingId}/capabilities/verify`, { requirementIds, verified });
+      await loadChecklists(); // provider-level rows — every sibling listing + the category block move together
     } catch (e) {
       setActErr((e as Error).message);
     } finally {
@@ -1024,7 +1052,72 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                 <div className="flex items-center gap-1.5 mb-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>{serviceCategoryLabel(g.category)}</span>
                   <span className="text-[10px] px-1.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>{g.items.length}</span>
+                  {(() => {
+                    const cl = catChecklists[g.category];
+                    if (!cl || cl.summary.total === 0) return null;
+                    const sm = cl.summary;
+                    const tone = sm.verificationComplete ? { bg: '#f0fdf4', fg: '#16a34a' } : sm.declarationComplete ? { bg: '#eef2ff', fg: '#4338ca' } : { bg: '#fef9eb', fg: '#b45309' };
+                    return (
+                      <button type="button" onClick={() => setOpenCategory((o) => (o === g.category ? null : g.category))}
+                        className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
+                        title="Tools & materials for this category — declared once by the provider, verified once here, counts for every service in it"
+                        style={{ backgroundColor: tone.bg, color: tone.fg }}>
+                        Tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.withPhoto} photo{sm.withPhoto === 1 ? '' : 's'} · {sm.verifiedMandatory} verified {openCategory === g.category ? '▴' : '▾'}
+                      </button>
+                    );
+                  })()}
                 </div>
+                {openCategory === g.category && catChecklists[g.category] && (() => {
+                  const cl = catChecklists[g.category];
+                  const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
+                  const isV = verifyingCat === g.category;
+                  return (
+                    <div className="rounded-lg px-2.5 py-2 mb-2" style={{ backgroundColor: '#fafaf7', border: '1px dashed var(--color-base-200)' }}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>
+                          Tools &amp; materials · {serviceCategoryLabel(g.category)} · declared once for all {cl.listingCount} service{cl.listingCount === 1 ? '' : 's'}
+                        </p>
+                        <button type="button" disabled={isV || declaredUnverified.length === 0}
+                          onClick={() => void verifyCategoryLines(g.category, declaredUnverified, true)}
+                          className="text-[10.5px] font-semibold px-2 py-0.5 rounded-md disabled:opacity-40"
+                          style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
+                          {isV ? 'Verifying…' : `Verify all declared (${declaredUnverified.length})`}
+                        </button>
+                      </div>
+                      <ul className="space-y-1">
+                        {cl.rows.map((r) => (
+                          <li key={r.requirementId} className="flex items-start gap-2 text-[11.5px]">
+                            <span className="mt-[3px] inline-block w-3 h-3 rounded-sm shrink-0" title={r.declared ? 'Provider says they have this' : 'Not declared'}
+                              style={{ backgroundColor: r.declared ? '#16a34a' : '#fff', border: r.declared ? '1px solid #16a34a' : '1px solid #d1d5db' }} />
+                            <span className="flex-1 min-w-0" style={{ color: r.declared ? 'var(--color-neutral-800)' : 'var(--color-neutral-400)' }}>
+                              {r.label}
+                              {r.isMandatory ? '' : <span className="ml-1 text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>(optional)</span>}
+                              <span className="ml-1 text-[10px] uppercase" style={{ color: 'var(--color-neutral-400)' }}>{r.requirementType}</span>
+                              {r.note && <span className="block text-[10.5px] italic" style={{ color: 'var(--color-neutral-500)' }}>“{r.note}”</span>}
+                              {!r.declared && r.isMandatory && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>Mandatory — not declared</span>}
+                              {r.declared && !r.photoUrl && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>No photo of this tool yet</span>}
+                            </span>
+                            {r.declared && r.photoUrl && (
+                              <a href={r.photoUrl} target="_blank" rel="noreferrer" title="Open the provider's photo of this tool" className="shrink-0">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={r.photoUrl} alt={`Photo of ${r.label}`} className="rounded-md object-cover" style={{ width: 34, height: 34, border: '1px solid var(--color-base-200)', display: 'block' }} />
+                              </a>
+                            )}
+                            {r.declared && (
+                              <button type="button" disabled={isV}
+                                onClick={() => void verifyCategoryLines(g.category, [r.requirementId], !r.verifiedAt)}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 disabled:opacity-40"
+                                title={r.verifiedAt ? `Verified by ${r.verifiedByName ?? 'admin'} — click to withdraw` : 'Mark as verified (counts for every service in the category)'}
+                                style={r.verifiedAt ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fff', color: 'var(--color-neutral-500)', border: '1px solid var(--color-base-200)' }}>
+                                {r.verifiedAt ? '✓ Verified' : 'Verify'}
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
                 <div className="space-y-1">
                   {g.items.map((sv) => {
                     const isBusy = busy.has(sv.id) || bulking;
@@ -1047,8 +1140,10 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                         )}
                         {(() => {
                           const cl = checklists[sv.id];
-                          if (!cl || cl.summary.total === 0) return null;
-                          const sm = cl.summary;
+                          // SP-268: the category list is on the header — a listing chip only for its own EXTRAS.
+                          const extras = (cl?.rows ?? []).filter((r) => r.scope === 'template');
+                          if (!cl || extras.length === 0) return null;
+                          const sm = { ...cl.summary, mandatory: extras.filter((r) => r.isMandatory).length, declaredMandatory: extras.filter((r) => r.isMandatory && r.declared).length, verifiedMandatory: extras.filter((r) => r.isMandatory && r.declared && r.verifiedAt).length, declarationComplete: extras.filter((r) => r.isMandatory).every((r) => r.declared), verificationComplete: extras.filter((r) => r.isMandatory).every((r) => r.declared && r.verifiedAt) };
                           const tone = sm.verificationComplete
                             ? { bg: '#f0fdf4', fg: '#16a34a' }
                             : sm.declarationComplete ? { bg: '#eef2ff', fg: '#4338ca' } : { bg: '#fef9eb', fg: '#b45309' };
@@ -1057,7 +1152,7 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
                               title={sm.declarationComplete ? 'Provider declared every mandatory tool/material — verify below' : 'Provider has NOT declared every mandatory tool/material'}
                               style={{ backgroundColor: tone.bg, color: tone.fg }}>
-                              Tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.verifiedMandatory} verified
+                              Extra tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.verifiedMandatory} verified
                             </button>
                           );
                         })()}
@@ -1082,13 +1177,13 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
                         </div>
                       </div>
                       {openChecklist === sv.id && checklists[sv.id] && (() => {
-                        const cl = checklists[sv.id];
+                        const cl = { ...checklists[sv.id], rows: checklists[sv.id].rows.filter((r) => r.scope === 'template') };
                         const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
                         const isV = verifying.has(sv.id);
                         return (
                           <div className="rounded-lg px-2.5 py-2 mt-1 mb-1" style={{ backgroundColor: '#fafaf7', border: '1px dashed var(--color-base-200)' }}>
                             <div className="flex items-center justify-between mb-1.5">
-                              <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>What this service needs · provider's declaration</p>
+                              <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>Extra tools only this service needs · provider's declaration</p>
                               <button type="button" disabled={isV || declaredUnverified.length === 0}
                                 onClick={() => void verifyLines(sv.id, declaredUnverified, true)}
                                 className="text-[10.5px] font-semibold px-2 py-0.5 rounded-md disabled:opacity-40"

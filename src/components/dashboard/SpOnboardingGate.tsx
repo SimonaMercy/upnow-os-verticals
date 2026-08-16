@@ -36,6 +36,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/lib/api';
 import { ComplianceBanner } from './ComplianceBanner';
+import {
+  PlatformAgreementPanel,
+  fetchAgreementStatus,
+  type AgreementStatus,
+} from '@/components/upnow/PlatformAgreementPanel';
 
 const ONBOARDING_PATH = '/dashboard/service-provider/onboarding';
 
@@ -78,6 +83,10 @@ export function SpOnboardingGate({ children }: { children: ReactNode }) {
   const [allowed, setAllowed] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  // SP-252: when a NEWER platform agreement is published, every provider is
+  // re-prompted and blocked from the portal until they accept it — the earlier
+  // acceptance stays on record. Loaded alongside the profile peek.
+  const [agreement, setAgreement] = useState<AgreementStatus | null>(null);
 
   // Skip the gate for the onboarding page itself, and for non-SP users (e.g.
   // admins opening SP URLs) — handled by an early render below, so the effect
@@ -103,6 +112,8 @@ export function SpOnboardingGate({ children }: { children: ReactNode }) {
         setStatus(st);
         setNotes(p?.complianceNotes ?? null);
         setAllowed(true);
+        // Best-effort: if the agreement lookup fails the portal is not blocked.
+        fetchAgreementStatus().then((ag) => { if (!cancelled) setAgreement(ag); }).catch(() => {});
       })
       .catch(() => {
         // No profile yet (or transient error) — the wizard is the safe landing.
@@ -117,9 +128,39 @@ export function SpOnboardingGate({ children }: { children: ReactNode }) {
   if (!checked || !allowed) return null;
 
   const showBanner = !!status && status !== 'compliant';
+  const reprompt = !!agreement?.requiresAcceptance && !!agreement.agreement;
   return (
     <>
       {showBanner && <ComplianceBanner status={status} notes={notes} onboardingPath={ONBOARDING_PATH} />}
+      {reprompt && agreement && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Platform agreement update"
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          style={{ background: 'rgba(24, 36, 32, 0.55)', backdropFilter: 'blur(2px)' }}
+        >
+          <div className="w-full" style={{ maxWidth: 640, maxHeight: '90vh', overflowY: 'auto', borderRadius: 18, background: '#F5F7F4', boxShadow: '0 24px 64px rgba(0,0,0,.25)', padding: 18 }}>
+            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: '#4338CA', marginBottom: 6 }}>
+              Platform agreement update
+            </p>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: '#182420', letterSpacing: '-.01em' }}>
+              {agreement.history.length ? 'A new version of the platform agreement needs your acceptance' : 'Please accept the platform agreement to continue'}
+            </h2>
+            <p style={{ fontSize: 13, color: '#55645B', margin: '6px 0 14px', lineHeight: 1.55 }}>
+              {agreement.history.length
+                ? `You accepted v${agreement.history[0].agreementVersion} earlier — that record stays. To keep receiving jobs, read and accept v${agreement.agreement!.version}.`
+                : 'Read the agreement and accept it once. Your acceptance is recorded with the version and time.'}
+            </p>
+            <PlatformAgreementPanel
+              status={agreement}
+              context="reprompt"
+              defaultOpen
+              onAccepted={(_acc, next) => setAgreement(next)}
+            />
+          </div>
+        </div>
+      )}
       {children}
     </>
   );

@@ -176,6 +176,8 @@ interface SpDetail {
   uploadedDocs: UploadedDoc[];
   completionScore: number;
   services?: SpService[];
+  /** SP-252 — standing against the CURRENT provider platform agreement (approval refuses if required && !accepted). */
+  platformAgreement?: { required: boolean; accepted: boolean; version: string | null; acceptedAt: string | null } | null;
 }
 
 type Tab = "rental" | "service" | "tenants" | "managers" | "technicians";
@@ -1280,6 +1282,12 @@ function SpContentPanel({
             { label: "Ops phone",   value: profile.opsContactPhone },
             { label: "WhatsApp",    value: profile.opsContactWhatsapp ? "Yes" : "No" },
             { label: "Job-ready",   value: profile.jobReadyAt ? new Date(profile.jobReadyAt).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE }) : "Not yet" },
+            // SP-252 — approval refuses until the current agreement is accepted (only when one is published).
+            { label: "Platform agreement", value: !detail?.platformAgreement?.required
+                ? "None published"
+                : detail.platformAgreement.accepted
+                  ? `Accepted v${detail.platformAgreement.version} · ${new Date(detail.platformAgreement.acceptedAt!).toLocaleDateString("en-AE", { timeZone: APP_TIME_ZONE })}`
+                  : `v${detail.platformAgreement.version} NOT accepted — approval blocked` },
           ]}>
             <div className="space-y-3">
               <ChipRow label="Languages" items={languages} tone="neutral" />

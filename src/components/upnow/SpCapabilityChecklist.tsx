@@ -1,10 +1,12 @@
 /**
- * SP-248 / SP-266 — the provider-side "tools & materials" declaration for one
- * service listing, shared by My Services (chip + expandable checklist) and the
- * onboarding wizard's "What do you offer?" step (checklist inline under each
- * picked service). One rendering, one behaviour: tick what you have, optional
- * note on ticked rows, every change saved immediately via
- * `PUT /service-provider/capabilities/:serviceCatalogId`.
+ * SP-248 / SP-266 / SP-268 — the provider-side "tools & materials" declaration,
+ * shared by My Services (chip + expandable checklist per listing) and the
+ * onboarding wizard's "What do you offer?" step (ONE checklist per picked
+ * CATEGORY). Since SP-268 the declaration is held once per provider per tool
+ * — a listing checklist and a category checklist read the same rows — so a
+ * tick / photo / verification on one surface shows on every service in the
+ * category. Tick what you have, optional note, photo per ticked tool; every
+ * change saved immediately.
  *
  * Advisory by decision — nothing here blocks a step or an approval; UpNow
  * verifies the declaration at review (admin side lives in AdminListingsView).
@@ -22,6 +24,8 @@ export interface CapabilityRow {
   description: string | null;
   requirementType: string;
   isMandatory: boolean;
+  /** SP-268 — authored on the category (shared) or this one template (extra). */
+  scope?: 'category' | 'template';
   declared: boolean;
   note: string | null;
   /** SP-267 — signed view URL of the provider's photo of this tool (null = none). */
@@ -45,9 +49,38 @@ export interface CapabilitySummary {
 export interface ListingChecklist {
   serviceCatalogId: number;
   templateId?: number | null;
+  categoryId?: number | null;
   serviceName?: string | null;
   summary: CapabilitySummary;
   rows: CapabilityRow[];
+}
+/** SP-268 — the checklist for one CATEGORY the provider offers services in (declared once). */
+export interface CategoryChecklist {
+  categoryId: number;
+  categoryCode: string;
+  categoryName: string;
+  listingCount: number;
+  summary: CapabilitySummary;
+  rows: CapabilityRow[];
+}
+/** Anything with rows + summary renders in the shared checklist. */
+export type AnyChecklist = Pick<ListingChecklist, 'summary' | 'rows'>;
+
+/** Client-side mirror of CapabilitiesService.summarise — used to show a subset (e.g. a listing's EXTRAS only). */
+export function summariseRows(rows: CapabilityRow[]): CapabilitySummary {
+  const mandatory = rows.filter((r) => r.isMandatory);
+  const declared = rows.filter((r) => r.declared);
+  const verified = rows.filter((r) => r.declared && r.verifiedAt != null);
+  const declaredMandatory = mandatory.filter((r) => r.declared).length;
+  const verifiedMandatory = mandatory.filter((r) => r.declared && r.verifiedAt != null).length;
+  const withPhoto = declared.filter((r) => !!r.photoUrl).length;
+  return {
+    total: rows.length, mandatory: mandatory.length, declared: declared.length, declaredMandatory,
+    verified: verified.length, verifiedMandatory,
+    declarationComplete: mandatory.length === 0 || declaredMandatory === mandatory.length,
+    verificationComplete: mandatory.length === 0 || verifiedMandatory === mandatory.length,
+    withPhoto, photosMissing: declared.length - withPhoto,
+  };
 }
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
@@ -92,6 +125,27 @@ export async function uploadCapabilityPhoto(
 export const removeCapabilityPhoto = (serviceCatalogId: number, requirementId: number) =>
   apiDelete<ListingChecklist>(`/service-provider/capabilities/${serviceCatalogId}/photo/${requirementId}`);
 
+/* ── SP-268: provider-level (declare ONCE per category — onboarding) ─────── */
+const idsQs = (categoryIds?: number[]) => (categoryIds?.length ? `?categoryIds=${categoryIds.join(',')}` : '');
+export const fetchMyCategoryChecklists = (categoryIds?: number[]) =>
+  apiGet<CategoryChecklist[]>(`/service-provider/capabilities/categories${idsQs(categoryIds)}`);
+export const declareCapabilityMine = (requirementId: number, declared: boolean, note?: string | null, categoryIds?: number[]) =>
+  apiPut<CategoryChecklist[]>(`/service-provider/capabilities/declare${idsQs(categoryIds)}`, {
+    items: [{ requirementId, declared, ...(note !== undefined ? { note } : {}) }],
+  });
+export async function uploadCapabilityPhotoMine(requirementId: number, file: File, categoryIds?: number[]): Promise<CategoryChecklist[]> {
+  if (file.size > PHOTO_MAX_BYTES) throw new Error('Photo is too large — 10 MB max.');
+  const { uploadUrl, fileUrl } = await apiPost<{ uploadUrl: string; fileUrl: string }>(
+    '/service-provider/capabilities/photo-url',
+    { requirementId, mimeType: file.type, originalName: file.name },
+  );
+  const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+  if (!put.ok) throw new Error('Photo upload failed — please try again.');
+  return apiPost<CategoryChecklist[]>(`/service-provider/capabilities/photo${idsQs(categoryIds)}`, { requirementId, url: fileUrl });
+}
+export const removeCapabilityPhotoMine = (requirementId: number, categoryIds?: number[]) =>
+  apiDelete<CategoryChecklist[]>(`/service-provider/capabilities/photo/${requirementId}${idsQs(categoryIds)}`);
+
 /* ── Tokens (design 2a — same as the SP portal pages) ────────────────────── */
 const GREEN = '#0B7A4E';
 const INK = '#182420';
@@ -115,7 +169,7 @@ export function SpToolsChip({
   onToggle,
   size = 'md',
 }: {
-  checklist: ListingChecklist | undefined;
+  checklist: AnyChecklist | undefined;
   open?: boolean;
   onToggle?: () => void;
   size?: 'sm' | 'md';
@@ -153,15 +207,17 @@ export function SpCapabilityChecklist({
   checklist,
   busy,
   onDeclare,
-  onChecklistChange,
+  onUploadPhoto,
+  onRemovePhoto: onRemovePhotoProp,
   intro,
   compact = false,
 }: {
-  checklist: ListingChecklist | undefined;
+  checklist: AnyChecklist | undefined;
   busy?: boolean;
   onDeclare: (requirementId: number, declared: boolean, note?: string | null) => void;
-  /** SP-267 — receives the refreshed checklist after a photo is added / removed. */
-  onChecklistChange?: (next: ListingChecklist) => void;
+  /** SP-267 — the caller performs the upload (listing-scoped or provider-level) and refreshes its own state. */
+  onUploadPhoto: (requirementId: number, file: File) => Promise<void>;
+  onRemovePhoto: (requirementId: number) => Promise<void>;
   /** Override the lead sentence (onboarding uses a shorter one). */
   intro?: string;
   /** Tighter padding for use inside a card row (onboarding). */
@@ -175,7 +231,6 @@ export function SpCapabilityChecklist({
   if (!checklist || checklist.summary.total === 0) return null;
   const sm = checklist.summary;
   const missing = sm.mandatory - sm.declaredMandatory;
-  const listingId = checklist.serviceCatalogId;
 
   const pickPhoto = (requirementId: number) => fileInputs.current[requirementId]?.click();
   const onFile = async (requirementId: number, file: File | undefined) => {
@@ -183,8 +238,7 @@ export function SpCapabilityChecklist({
     setPhotoBusy(requirementId);
     setPhotoError(null);
     try {
-      const next = await uploadCapabilityPhoto(listingId, requirementId, file);
-      onChecklistChange?.(next);
+      await onUploadPhoto(requirementId, file);
     } catch (e) {
       setPhotoError(e instanceof Error ? e.message : 'Could not upload the photo');
     } finally {
@@ -197,8 +251,7 @@ export function SpCapabilityChecklist({
     setPhotoBusy(requirementId);
     setPhotoError(null);
     try {
-      const next = await removeCapabilityPhoto(listingId, requirementId);
-      onChecklistChange?.(next);
+      await onRemovePhotoProp(requirementId);
     } catch (e) {
       setPhotoError(e instanceof Error ? e.message : 'Could not remove the photo');
     } finally {

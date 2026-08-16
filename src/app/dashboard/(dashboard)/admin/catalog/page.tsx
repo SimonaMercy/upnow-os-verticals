@@ -1291,6 +1291,8 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved, onRefetch }: {
             <span className="text-[12px] text-[#1a1916]">Category is active (visible to providers &amp; customers)</span>
           </div>
         )}
+        {/* SP-268 — the tools & materials list lives on the CATEGORY (shared by every service in it). */}
+        {!isNew && cat && <RequirementsEditor scope={{ kind: 'category', id: cat.id }} />}
         {error && <p className="text-[12px] text-[#b91c1c]">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button disabled={busy} onClick={onClose}
@@ -1308,20 +1310,25 @@ function CategoryModal({ cat, nextSortOrder, onClose, onSaved, onRefetch }: {
 /* ═════════════════════════ Capability requirements (SP-248) ═════════════════════════ */
 
 interface CapabilityRequirement {
-  id: number; templateId: number; key: string; label: string; description: string | null;
+  id: number; categoryId: number | null; templateId: number | null; key: string; label: string; description: string | null;
+  /** SP-268 — authored on the category (shared by every service in it) or on one template (extra). */
+  scope: 'category' | 'template';
   requirementType: 'equipment' | 'material' | 'certification' | 'consumable';
   isMandatory: boolean; evidenceRequired: boolean; sortOrder: number; isActive: boolean;
 }
+type RequirementScope = { kind: 'category'; id: number } | { kind: 'template'; id: number };
 const REQ_TYPES: { v: CapabilityRequirement['requirementType']; label: string }[] = [
   { v: 'equipment', label: 'Equipment' }, { v: 'material', label: 'Material' }, { v: 'consumable', label: 'Consumable' }, { v: 'certification', label: 'Certification' },
 ];
 
 /**
- * What a service NEEDS to be delivered — tools, materials, certifications.
- * Providers declare against this list on My Services; admins verify it in the
- * approval drawer. Self-managing so it can sit inside the service editor.
+ * What a CATEGORY of services needs — tools, materials, certifications —
+ * authored once and shared by every service in it (SP-268); a template can
+ * carry rare EXTRAS of its own. Providers declare once per tool (with a
+ * photo); admins verify that one declaration in the approval drawer.
+ * Self-managing so it can sit inside the category and service editors.
  */
-function RequirementsEditor({ templateId }: { templateId: number }) {
+function RequirementsEditor({ scope }: { scope: RequirementScope }) {
   const [rows, setRows] = useState<CapabilityRequirement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1329,10 +1336,11 @@ function RequirementsEditor({ templateId }: { templateId: number }) {
   const [newType, setNewType] = useState<CapabilityRequirement['requirementType']>('equipment');
   const [newMandatory, setNewMandatory] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
+  const base = scope.kind === 'category' ? `/admin/catalog/categories/${scope.id}/requirements` : `/admin/catalog/templates/${scope.id}/requirements`;
 
-  const load = () => apiGet<CapabilityRequirement[]>(`/admin/catalog/templates/${templateId}/requirements`).then(setRows).catch(e => setError(e instanceof Error ? e.message : 'Could not load requirements'));
+  const load = () => apiGet<CapabilityRequirement[]>(base).then(setRows).catch(e => setError(e instanceof Error ? e.message : 'Could not load requirements'));
   useEffect(() => { void load(); // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId]);
+  }, [scope.kind, scope.id]);
 
   const wrap = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
@@ -1342,25 +1350,46 @@ function RequirementsEditor({ templateId }: { templateId: number }) {
     const label = newLabel.trim();
     if (!label) return;
     void wrap(async () => {
-      await apiPost(`/admin/catalog/templates/${templateId}/requirements`, { label, requirementType: newType, isMandatory: newMandatory });
+      await apiPost(base, { label, requirementType: newType, isMandatory: newMandatory });
       setNewLabel('');
     });
   };
   const patch = (id: number, body: Partial<CapabilityRequirement>) => void wrap(() => apiPatch(`/admin/catalog/requirements/${id}`, body));
   const remove = (r: CapabilityRequirement) => {
-    if (!confirm(`Remove "${r.label}" from this service's checklist? (It is only deactivated if providers have already declared against it.)`)) return;
+    if (!confirm(`Remove "${r.label}" from this ${scope.kind}'s checklist? (It is only deactivated if providers have already declared against it.)`)) return;
     void wrap(() => apiDelete(`/admin/catalog/requirements/${r.id}`));
   };
 
-  const visible = (rows ?? []).filter(r => showInactive || r.isActive);
-  const inactiveCount = (rows ?? []).filter(r => !r.isActive).length;
+  // On a template, the category's rows are INHERITED (read-only here — edit them on the category); only extras are editable.
+  const inherited = scope.kind === 'template' ? (rows ?? []).filter(r => r.scope === 'category') : [];
+  const own = (rows ?? []).filter(r => scope.kind === 'category' ? r.scope === 'category' : r.scope === 'template');
+  const visible = own.filter(r => showInactive || r.isActive);
+  const inactiveCount = own.filter(r => !r.isActive).length;
   return (
-    <SectionCard step="✦" title="What this service needs" sub="Tools, materials and certifications the provider must have. Providers tick these on My Services; you verify them at approval.">
+    <SectionCard
+      step="✦"
+      title={scope.kind === 'category' ? 'Tools & materials every service in this category needs' : 'Extra tools only this service needs'}
+      sub={scope.kind === 'category'
+        ? 'Declared ONCE by the provider (with a photo per tool) and counted for every service in the category; you verify it once at approval.'
+        : 'Rare additions on top of the category list. Most tools belong on the category — edit those from the category.'}
+    >
       {rows === null ? (
         <p className="text-[11px] text-[#9b9890]">Loading…</p>
       ) : (
         <>
-          {visible.length === 0 && <p className="text-[11px] text-[#9b9890]">No requirements yet — add the first one below.</p>}
+          {inherited.length > 0 && (
+            <div className="mb-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: '#f7f7f4', border: '1px dashed #e8e6e0' }}>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-[#9b9890] mb-1">From the category (edit on the category)</p>
+              <ul className="flex flex-wrap gap-1.5">
+                {inherited.map(r => (
+                  <li key={r.id} className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fff', border: '1px solid #e8e6e0', color: '#6b6860' }}>
+                    {r.label}{r.isMandatory ? '' : ' (optional)'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {visible.length === 0 && <p className="text-[11px] text-[#9b9890]">{scope.kind === 'category' ? 'No requirements yet — add the first one below.' : 'No extras — this service uses the category list only.'}</p>}
           <ul className="space-y-1">
             {visible.map(r => (
               <li key={r.id} className="flex items-center gap-1.5 text-[12px] text-[#1a1916]" style={{ opacity: r.isActive ? 1 : 0.5 }}>
@@ -1387,7 +1416,7 @@ function RequirementsEditor({ templateId }: { templateId: number }) {
             ))}
           </ul>
           <div className="flex items-center gap-1.5 mt-2 text-[12px]">
-            <input value={newLabel} disabled={busy} placeholder="Add a requirement, e.g. Vacuum cleaner"
+            <input value={newLabel} disabled={busy} placeholder={scope.kind === 'category' ? 'Add a requirement, e.g. Vacuum cleaner' : 'Add an EXTRA only this service needs'}
               onChange={e => setNewLabel(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
               className={`${inputCls} flex-1 !py-0.5`} />
             <select value={newType} disabled={busy} onChange={e => setNewType(e.target.value as CapabilityRequirement['requirementType'])} className={`${inputCls} !w-auto !py-0.5`}>
@@ -1671,7 +1700,7 @@ function ServiceModal({ tpl, focus, categories, defaultCategoryId, nextSortOrder
           </SectionCard>
         )}
 
-        {showFull && !isNew && tpl && <RequirementsEditor templateId={tpl.id} />}
+        {showFull && !isNew && tpl && <RequirementsEditor scope={{ kind: 'template', id: tpl.id }} />}
 
         {showFull && !isNew && (
           <SectionCard step="✦" title="Cancellation terms" sub="Overrides the platform matrix for THIS service only. Bookings keep the terms they were made under.">

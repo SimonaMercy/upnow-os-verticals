@@ -23,7 +23,15 @@ import {
   SpCapabilityChecklist,
   SpToolsChip,
   declareCapability,
+  declareCapabilityMine,
+  fetchMyCategoryChecklists,
   fetchMyChecklists,
+  removeCapabilityPhoto,
+  removeCapabilityPhotoMine,
+  summariseRows,
+  uploadCapabilityPhoto,
+  uploadCapabilityPhotoMine,
+  type CategoryChecklist,
   type ListingChecklist,
 } from '@/components/upnow/SpCapabilityChecklist';
 
@@ -104,15 +112,24 @@ export default function SpMyServicesPage() {
     try { window.localStorage.setItem(VIEW_STORAGE_KEY, v); } catch { /* ignore */ }
   };
 
-  // SP-248: what each service needs + what I've declared. Advisory — the page
-  // still works if this fails to load.
+  // SP-248 → SP-268: the tools & materials a CATEGORY needs, declared ONCE per
+  // provider — shown on the category header. A listing only carries its own
+  // EXTRAS (rare). Advisory — the page still works if this fails to load.
   const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
+  const [catChecklists, setCatChecklists] = useState<Record<string, CategoryChecklist>>({});
   const [openChecklist, setOpenChecklist] = useState<number | null>(null);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [declaring, setDeclaring] = useState<number | null>(null);
+  const [declaringCat, setDeclaringCat] = useState<string | null>(null);
   const loadChecklists = () =>
-    fetchMyChecklists()
-      .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))))
-      .catch(() => {});
+    Promise.all([
+      fetchMyChecklists()
+        .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))))
+        .catch(() => {}),
+      fetchMyCategoryChecklists()
+        .then((rows) => setCatChecklists(Object.fromEntries(rows.map((r) => [r.categoryCode, r]))))
+        .catch(() => {}),
+    ]);
 
   const load = () =>
     Promise.all([
@@ -128,8 +145,10 @@ export default function SpMyServicesPage() {
     setDeclaring(listingId);
     setError(null);
     try {
-      const updated = await declareCapability(listingId, requirementId, declared, note);
-      setChecklists((prev) => ({ ...prev, [listingId]: updated }));
+      await declareCapability(listingId, requirementId, declared, note);
+      // SP-268: a tool is declared once per provider — the tick shows on every
+      // listing in the category, so refresh them all, not just this one.
+      await loadChecklists();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save your declaration');
     } finally {
@@ -207,24 +226,68 @@ export default function SpMyServicesPage() {
     );
   };
 
-  /** SP-248 chip + checklist — shared with the onboarding wizard (SP-266). */
-  const ToolsChip = ({ s }: { s: SpService }) => (
-    <SpToolsChip
-      checklist={checklists[s.id]}
-      open={openChecklist === s.id}
-      onToggle={() => setOpenChecklist(openChecklist === s.id ? null : s.id)}
-    />
-  );
+  const declareCat = async (code: string, requirementId: number, declared: boolean, note?: string | null) => {
+    setDeclaringCat(code);
+    setError(null);
+    try {
+      await declareCapabilityMine(requirementId, declared, note);
+      await loadChecklists();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save your declaration');
+    } finally {
+      setDeclaringCat(null);
+    }
+  };
 
-  const Checklist = ({ s }: { s: SpService }) =>
-    openChecklist === s.id ? (
+  /** SP-268 — the CATEGORY's tools & materials: chip on the group header, checklist under it. */
+  const CategoryTools = ({ code }: { code: string }) => {
+    const cl = catChecklists[code];
+    if (!cl || cl.summary.total === 0) return null;
+    return (
+      <SpToolsChip checklist={cl} open={openCategory === code} onToggle={() => setOpenCategory(openCategory === code ? null : code)} />
+    );
+  };
+  const CategoryChecklistPanel = ({ code, label }: { code: string; label: string }) =>
+    openCategory === code && catChecklists[code] ? (
+      <div style={{ ...cardStyle(), overflow: 'hidden', marginBottom: 10 }}>
+        <SpCapabilityChecklist
+          checklist={catChecklists[code]}
+          busy={declaringCat === code}
+          intro={`Tools & materials every ${label} service needs. Tick what you have and add a photo of each — declared once, it counts for all ${catChecklists[code].listingCount} of your ${label} services. UpNow verifies them at review.`}
+          onDeclare={(requirementId, declared, note) => void declareCat(code, requirementId, declared, note)}
+          onUploadPhoto={async (requirementId, file) => { await uploadCapabilityPhotoMine(requirementId, file); await loadChecklists(); }}
+          onRemovePhoto={async (requirementId) => { await removeCapabilityPhotoMine(requirementId); await loadChecklists(); }}
+        />
+      </div>
+    ) : null;
+
+  /** A listing's own EXTRAS (template-scoped) — rare; the category list lives on the header. */
+  const extrasOf = (s: SpService) => {
+    const rows = (checklists[s.id]?.rows ?? []).filter((r) => r.scope === 'template');
+    return rows.length ? { rows, summary: summariseRows(rows) } : undefined;
+  };
+  const ToolsChip = ({ s }: { s: SpService }) => {
+    const ex = extrasOf(s);
+    if (!ex) return null;
+    return (
+      <span title="Extra tools only this service needs (on top of the category list)">
+        <SpToolsChip checklist={ex} open={openChecklist === s.id} onToggle={() => setOpenChecklist(openChecklist === s.id ? null : s.id)} />
+      </span>
+    );
+  };
+  const Checklist = ({ s }: { s: SpService }) => {
+    const ex = extrasOf(s);
+    return openChecklist === s.id && ex ? (
       <SpCapabilityChecklist
-        checklist={checklists[s.id]}
+        checklist={ex}
         busy={declaring === s.id}
+        intro="Extra tools only this service needs, on top of the category list."
         onDeclare={(requirementId, declared, note) => void declare(s.id, requirementId, declared, note)}
-        onChecklistChange={(next) => setChecklists((prev) => ({ ...prev, [s.id]: next }))}
+        onUploadPhoto={async (requirementId, file) => { await uploadCapabilityPhoto(s.id, requirementId, file); await loadChecklists(); }}
+        onRemovePhoto={async (requirementId) => { await removeCapabilityPhoto(s.id, requirementId); await loadChecklists(); }}
       />
     ) : null;
+  };
 
   const Price = ({ s }: { s: SpService }) => (
     <span
@@ -324,13 +387,16 @@ export default function SpMyServicesPage() {
                 const availableCount = items.filter((s) => s.isAvailable).length;
                 return (
                   <section key={category}>
-                    <div className="flex items-baseline gap-2" style={{ marginBottom: 11, paddingLeft: 2 }}>
+                    <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 11, paddingLeft: 2 }}>
                       <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.01em', color: INK }}>{catLabel(category)}</h2>
                       <span style={{ fontSize: 12, color: FAINT }}>
                         {items.length} service{items.length === 1 ? '' : 's'}
                         {availableCount > 0 ? ` · ${availableCount} available` : ''}
                       </span>
+                      {/* SP-268 — the tools & materials list lives on the CATEGORY, declared once for all its services */}
+                      <span style={{ marginLeft: 'auto' }}><CategoryTools code={category} /></span>
                     </div>
+                    <CategoryChecklistPanel code={category} label={catLabel(category)} />
 
                     {view === 'row' ? (
                       <div style={{ ...cardStyle(), overflow: 'hidden' }}>

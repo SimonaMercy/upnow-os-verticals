@@ -35,6 +35,7 @@ import {
   PhoneCall,
   Truck,
   ClipboardCheck,
+  FileSignature,
 } from "lucide-react";
 import {
   CoverageCard,
@@ -50,10 +51,11 @@ import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
   SpCapabilityChecklist,
   SpToolsChip,
-  declareCapability,
-  fetchMyChecklist,
-  fetchMyChecklists,
-  type ListingChecklist,
+  declareCapabilityMine,
+  fetchMyCategoryChecklists,
+  removeCapabilityPhotoMine,
+  uploadCapabilityPhotoMine,
+  type CategoryChecklist,
 } from "@/components/upnow/SpCapabilityChecklist";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
@@ -62,6 +64,11 @@ import { publishSpOnboardingReady } from "@/components/dashboard/shellChrome";
 import { DayPicker } from "react-day-picker";
 import { format, parse, isValid, subYears } from "date-fns";
 import "react-day-picker/style.css";
+import {
+  PlatformAgreementPanel,
+  fetchAgreementStatus,
+  type AgreementStatus,
+} from "@/components/upnow/PlatformAgreementPanel";
 
 // ─── Step definitions ─────────────────────────────────────────────────────────
 
@@ -142,6 +149,13 @@ const STEPS = [
     subtitle: "How jobs work",
     icon: ClipboardCheck,
     description: "The ground rules for accepting and running jobs. Agree once to start receiving work.",
+  },
+  {
+    id: 11,
+    label: "Platform agreement",
+    subtitle: "Read & accept",
+    icon: FileSignature,
+    description: "The terms on which you list, accept and deliver jobs through UpNow. Your acceptance is recorded with the version you agreed to.",
   },
 ] as const;
 
@@ -941,13 +955,14 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
   const [templatesByCategory, setTemplatesByCategory] =
     useState<Record<string, SpCatalogTemplate[]>>({});
   const [savingTemplateIds, setSavingTemplateIds] = useState<Set<number>>(new Set());
-  // SP-266 / SP-267: what each picked service needs — declared right here, with
-  // a photo per tool, keyed by TEMPLATE id (the wizard thinks in templates; the
-  // API in listings). Advisory: the step still submits with gaps.
-  const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
-  const [declaringListingId, setDeclaringListingId] = useState<number | null>(null);
-  const putChecklist = (cl: ListingChecklist) =>
-    setChecklists((prev) => ({ ...prev, [cl.templateId ?? cl.serviceCatalogId]: cl }));
+  // SP-266 / SP-267 / SP-268: the tools & materials a CATEGORY needs — declared
+  // ONCE here (with a photo per tool) and counted for every service in it.
+  // Keyed by category id. Advisory: the step still submits with gaps.
+  const [categoryIdByCode, setCategoryIdByCode] = useState<Record<string, number>>({});
+  const [catChecklists, setCatChecklists] = useState<Record<number, CategoryChecklist>>({});
+  const [declaringCategoryId, setDeclaringCategoryId] = useState<number | null>(null);
+  const putCategoryChecklists = (rows: CategoryChecklist[]) =>
+    setCatChecklists((prev) => ({ ...prev, ...Object.fromEntries(rows.map((r) => [r.categoryId, r])) }));
 
   const {
     handleSubmit,
@@ -972,6 +987,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       .then((d) => {
         if (!d.categories?.length) return;
         setCategoryOptions(d.categories.map((c) => ({ value: c.code, label: c.nameEn })));
+        setCategoryIdByCode(Object.fromEntries(d.categories.map((c) => [c.code, c.id])));
         const byCategory: Record<string, SpCatalogTemplate[]> = {};
         for (const cat of d.categories) {
           byCategory[cat.code] = (d.templates ?? []).filter((t) => t.serviceCategoryId === cat.id);
@@ -980,10 +996,20 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       })
       .catch(() => {}); // keep the static fallback, no sub-services shown
 
-    fetchMyChecklists()
-      .then((rows) => setChecklists(Object.fromEntries(rows.map((r) => [r.templateId ?? r.serviceCatalogId, r]))))
-      .catch(() => {}); // advisory — no checklist, no box
   }, [reset]);
+
+  // The category checklists follow the SELECTED categories (not only adopted
+  // services), so the list is visible the moment a category is ticked.
+  const selectedCodes = useWatch({ control, name: "serviceCategories" }) ?? [];
+  const selectedIds = selectedCodes.map((c) => categoryIdByCode[c]).filter((n): n is number => typeof n === "number");
+  const selectedKey = selectedIds.join(",");
+  useEffect(() => {
+    if (!initialLoaded) return;
+    fetchMyCategoryChecklists(selectedIds.length ? selectedIds : undefined)
+      .then(putCategoryChecklists)
+      .catch(() => {}); // advisory — no checklist, no box
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLoaded, selectedKey]);
 
   // Eligibility (CEO, Jul 8): individuals may register and select any category;
   // the licence/permit check happens at document review (GATE 1) before
@@ -1002,11 +1028,6 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
             t.id === tpl.id ? { ...t, adoptedServiceId: null } : t,
           ),
         }));
-        setChecklists((prev) => {
-          const next = { ...prev };
-          delete next[tpl.id];
-          return next;
-        });
       } else {
         const created = await apiPost<{ id: number }>("/service-provider/services", {
           templateId: tpl.id,
@@ -1017,8 +1038,6 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
             t.id === tpl.id ? { ...t, adoptedServiceId: created.id } : t,
           ),
         }));
-        // SP-266: the checklist appears the moment the service is picked.
-        fetchMyChecklist(created.id).then(putChecklist).catch(() => {});
       }
     } catch (e: unknown) {
       setServerError(e instanceof Error ? e.message : "Couldn't save that service — try again.");
@@ -1031,27 +1050,25 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
     }
   };
 
-  const declareTool = async (listingId: number, requirementId: number, declared: boolean, note?: string | null) => {
-    setDeclaringListingId(listingId);
+  const declareTool = async (categoryId: number, requirementId: number, declared: boolean, note?: string | null) => {
+    setDeclaringCategoryId(categoryId);
     setServerError(null);
     try {
-      putChecklist(await declareCapability(listingId, requirementId, declared, note));
+      putCategoryChecklists(await declareCapabilityMine(requirementId, declared, note, selectedIds));
     } catch (e: unknown) {
       setServerError(e instanceof Error ? e.message : "Couldn't save your declaration — try again.");
     } finally {
-      setDeclaringListingId(null);
+      setDeclaringCategoryId(null);
     }
   };
 
   // Step-level nudge: mandatory tools still unticked / photos still missing
-  // across every picked service (advisory — the step submits regardless).
-  const adoptedChecklists = Object.values(templatesByCategory)
-    .flat()
-    .filter((t) => t.adoptedServiceId)
-    .map((t) => checklists[t.id])
-    .filter((cl): cl is ListingChecklist => !!cl && cl.summary.total > 0);
-  const toolsMissing = adoptedChecklists.reduce((n, cl) => n + (cl.summary.mandatory - cl.summary.declaredMandatory), 0);
-  const photosMissing = adoptedChecklists.reduce((n, cl) => n + cl.summary.photosMissing, 0);
+  // across every selected category (advisory — the step submits regardless).
+  const selectedChecklists = selectedIds
+    .map((id) => catChecklists[id])
+    .filter((cl): cl is CategoryChecklist => !!cl && cl.summary.total > 0);
+  const toolsMissing = selectedChecklists.reduce((n, cl) => n + (cl.summary.mandatory - cl.summary.declaredMandatory), 0);
+  const photosMissing = selectedChecklists.reduce((n, cl) => n + cl.summary.photosMissing, 0);
 
   const onSubmit = async (vals: CategoriesValues) => {
     setServerError(null);
@@ -1106,8 +1123,9 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
       <p className="text-xs" style={{ color: "var(--color-neutral-400)" }}>
         Pick a category, then choose exactly which services under it you offer —
         each category is marked complete once at least one service is picked. For
-        each service, tick the tools &amp; materials you have and add a photo of
-        each; UpNow checks them when reviewing your services.
+        each category, tick the tools &amp; materials you have and add a photo of
+        each — once per category, it counts for every service in it. UpNow checks
+        them when reviewing your services.
       </p>
       <Controller
         control={control}
@@ -1171,6 +1189,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                         >
                           {cat.label}
                         </span>
+                        {selected && <SpToolsChip checklist={catChecklists[categoryIdByCode[cat.value]]} size="sm" />}
                         {selected && templates.length > 0 && (
                           adoptedCount > 0 ? (
                             <span
@@ -1200,10 +1219,9 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                       {templates.map((tpl) => {
                         const adopted = !!tpl.adoptedServiceId;
                         const saving = savingTemplateIds.has(tpl.id);
-                        const checklist = adopted ? checklists[tpl.id] : undefined;
                         return (
-                          <div key={tpl.id}>
                           <button
+                            key={tpl.id}
                             type="button"
                             disabled={saving}
                             onClick={() => toggleTemplate(cat.value, tpl)}
@@ -1236,27 +1254,31 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                             >
                               {tpl.name}
                             </span>
-                            {adopted && <SpToolsChip checklist={checklist} size="sm" />}
                           </button>
-                          {adopted && tpl.adoptedServiceId && (
-                            <div className="pl-2.5 pr-1 pb-1.5" style={{ marginTop: 2 }}>
-                              <SpCapabilityChecklist
-                                compact
-                                checklist={checklist}
-                                busy={declaringListingId === tpl.adoptedServiceId}
-                                intro="Tick the tools & materials you have for this service and add a photo of each."
-                                onDeclare={(requirementId, declared, note) =>
-                                  void declareTool(tpl.adoptedServiceId!, requirementId, declared, note)
-                                }
-                                onChecklistChange={putChecklist}
-                              />
-                            </div>
-                          )}
-                          </div>
                         );
                       })}
                     </div>
                   )}
+
+                  {/* SP-268 — ONE tools & materials checklist per category (declared once, counts for every service in it). */}
+                  {selected && categoryIdByCode[cat.value] != null && (() => {
+                    const catId = categoryIdByCode[cat.value];
+                    const cl = catChecklists[catId];
+                    if (!cl || cl.summary.total === 0) return null;
+                    return (
+                      <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--color-base-100)", paddingTop: 8 }}>
+                        <SpCapabilityChecklist
+                          compact
+                          checklist={cl}
+                          busy={declaringCategoryId === catId}
+                          intro={`Tools & materials for ${cat.label} — tick what you have and add a photo of each. Declared once, it counts for every ${cat.label.toLowerCase()} service you offer.`}
+                          onDeclare={(requirementId, declared, note) => void declareTool(catId, requirementId, declared, note)}
+                          onUploadPhoto={async (requirementId, file) => putCategoryChecklists(await uploadCapabilityPhotoMine(requirementId, file, selectedIds))}
+                          onRemovePhoto={async (requirementId) => putCategoryChecklists(await removeCapabilityPhotoMine(requirementId, selectedIds))}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1289,7 +1311,7 @@ function ServiceCategoriesStep({ onDone }: { onDone: () => void }) {
                 <b>{photosMissing}</b> photo{photosMissing === 1 ? "" : "s"} still missing
               </>
             )}
-            {" "}across your services. UpNow checks these when reviewing — you can also
+            {" "}across your categories. UpNow checks these when reviewing — you can also
             finish them later under <b>My Services</b>.
           </p>
         </div>
@@ -1892,6 +1914,60 @@ function OwnerDetailsStep({ onDone }: { onDone: () => void }) {
 /* ── Operational-config steps — reuse the "job-ready" card editors inline ────── */
 type OpsCardKey = "coverage" | "team" | "fleet" | "hours" | "rules";
 
+/* ── Step 11 · Platform agreement (SP-252) ───────────────────────────────── */
+
+function AgreementStep({ onDone }: { onDone: () => void }) {
+  const [status, setStatus] = useState<AgreementStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetchAgreementStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-3 py-8">
+        <Loader2 className="w-5 h-5 animate-spin" style={{ color: "var(--color-primary)" }} />
+        <span className="text-sm" style={{ color: "var(--color-neutral-500)" }}>Loading&hellip;</span>
+      </div>
+    );
+  }
+
+  // Nothing published for providers yet → nothing to accept; the step passes.
+  if (!status?.agreement) {
+    return (
+      <div className="space-y-5">
+        <div className="flex gap-3 rounded-2xl px-4 py-3.5" style={{ background: "#f4faf6", border: "1px solid #cfe9d9" }}>
+          <Info className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#0B7A4E" }} />
+          <p className="text-xs leading-relaxed" style={{ color: "#0B7A4E" }}>
+            There is no platform agreement to accept right now. When UpNow publishes one, you&apos;ll be asked to read and accept it before you can keep receiving jobs.
+          </p>
+        </div>
+        <Button type="button" onClick={onDone} className="w-full sm:w-auto">
+          Continue <ChevronRight className="w-4 h-4 ml-1" />
+        </Button>
+      </div>
+    );
+  }
+
+  const done = !status.requiresAcceptance;
+  return (
+    <div className="space-y-5">
+      <PlatformAgreementPanel
+        status={status}
+        context="onboarding"
+        defaultOpen={!done}
+        onAccepted={(_acc, next) => setStatus(next)}
+      />
+      <Button type="button" disabled={!done} onClick={onDone} className="w-full sm:w-auto">
+        {done ? <>Finish <ChevronRight className="w-4 h-4 ml-1" /></> : "Accept the agreement to finish"}
+      </Button>
+    </div>
+  );
+}
+
 function OpsConfigStep({ which, onDone }: { which: OpsCardKey; onDone: () => void }) {
   const [status, setStatus] = useState<JobReadyStatus | null>(null);
   useEffect(() => {
@@ -1999,6 +2075,16 @@ export default function ServiceProviderOnboardingPage() {
         if (jr.cards.fleet.complete) done.add(8);
         if (jr.cards.hours.complete) done.add(9);
         if (jr.cards.rules.complete) done.add(10);
+      } catch {
+        // job-ready status unavailable — steps stay incomplete
+      }
+
+      // Step 11 — platform agreement (SP-252): complete when there is nothing
+      // to accept (no current version published yet) or the current version
+      // has been accepted. Advisory-free: this one is a real gate.
+      try {
+        const ag = await fetchAgreementStatus();
+        if (!ag.requiresAcceptance) done.add(11);
       } catch {
         // job-ready endpoint not reachable until the profile exists
       }
@@ -2363,6 +2449,7 @@ export default function ServiceProviderOnboardingPage() {
                 {step === 8 && <OpsConfigStep which="fleet" onDone={() => advance(8)} />}
                 {step === 9 && <OpsConfigStep which="hours" onDone={() => advance(9)} />}
                 {step === 10 && <OpsConfigStep which="rules" onDone={() => advance(10)} />}
+                {step === 11 && <AgreementStep onDone={() => advance(11)} />}
               </div>
 
               {/* Skip — available only on optional steps (owner details) or before final docs */}

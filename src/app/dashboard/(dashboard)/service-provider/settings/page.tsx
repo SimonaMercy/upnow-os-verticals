@@ -22,6 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { SpJobReady, SpTeamSkills, catLabel } from '@/components/upnow/SpJobReady';
 import { SpTeamPanel } from '@/components/upnow/SpTeamPanel';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
+import { PlatformAgreementPanel, fetchAgreementStatus, type AgreementStatus } from '@/components/upnow/PlatformAgreementPanel';
 import { apiGet, apiPatch } from '@/lib/api';
 import {
   BadgeCheck, MessageCircle, User, Percent, Users, Bell, AlertCircle, Loader2, Save,
@@ -363,6 +364,9 @@ function ProfileTab() {
                 : pretty(profile?.complianceStatus ?? 'pending_review')}
             />
           </Card>
+
+          {/* SP-252 — the platform agreement: read it again, see when you accepted, the record of every version. */}
+          <PlatformAgreementCard />
         </div>
       </div>
 
@@ -401,6 +405,44 @@ function ProfileTab() {
 }
 
 /* ── Team tab — roster, coverage gaps and skills all in ONE place ─────────── */
+function PlatformAgreementCard() {
+  const [status, setStatus] = useState<AgreementStatus | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    fetchAgreementStatus().then(setStatus).catch(() => setStatus(null)).finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return null;
+  return (
+    <Card
+      title="Platform agreement"
+      description={status?.agreement
+        ? 'The terms you work under on UpNow. Every acceptance is kept on record with the version you agreed to.'
+        : 'No platform agreement has been published yet — you will be asked to accept it here when it is.'}
+    >
+      {status?.agreement ? (
+        <div className="space-y-3">
+          <PlatformAgreementPanel status={status} context="settings" compact onAccepted={(_a, next) => setStatus(next)} />
+          {status.history.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#8a8780] mb-1.5">Your acceptance record</p>
+              <ul className="space-y-1">
+                {status.history.map((h) => (
+                  <li key={h.id} className="flex items-center justify-between gap-3 text-xs text-[#4a4843]">
+                    <span>v{h.agreementVersion} <span className="text-[#8a8780]">· {h.context}</span></span>
+                    <span className="text-[#8a8780]">{new Date(h.acceptedAt).toLocaleString('en-AE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Dubai' })}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-[#8a8780]">Nothing to accept right now.</p>
+      )}
+    </Card>
+  );
+}
+
 function TeamTab() {
   const [peek, setPeek] = useState<JobReadyPeek | null>(null);
 

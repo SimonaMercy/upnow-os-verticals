@@ -9,7 +9,7 @@ import {
   Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge,
+  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature,
   HeartPulse,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
@@ -189,6 +189,12 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
     { divider: true },
+    // Platform-wide surfaces — not tied to either provider business.
+    { section: 'Platform' },
+    // SP-252 — the versioned platform agreement providers accept; publish + acceptance evidence.
+    // It is a platform document (audience-scoped: provider today, others later), so it lives
+    // here rather than under one provider section.
+    { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
     { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
@@ -228,6 +234,12 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
     { divider: true },
+    // Platform-wide surfaces — not tied to either provider business.
+    { section: 'Platform' },
+    // SP-252 — the versioned platform agreement providers accept; publish + acceptance evidence.
+    // It is a platform document (audience-scoped: provider today, others later), so it lives
+    // here rather than under one provider section.
+    { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
     { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
