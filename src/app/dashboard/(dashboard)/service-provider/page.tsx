@@ -24,6 +24,7 @@ import Link from 'next/link';
 import { Schibsted_Grotesk } from 'next/font/google';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardPage, StatCard, SectionHeader, QuickAction } from '@/components/dashboard/DashboardWidgets';
+import { SpReliabilityCard } from '@/components/upnow/SpReliabilityCard';
 import { ProfileCompletionBanner } from '@/components/dashboard/ProfileCompletionBanner';
 import { bookingPipeline, type SpBooking, type SpPipelineTab } from '@/components/upnow/SpOperationsPipelines';
 import { SpLiveOverview } from '@/components/upnow/SpLiveOverview';
@@ -325,6 +326,11 @@ export default function ServiceProviderOverview() {
         }
       />
       <PipelineStrip counts={pipelineCounts} />
+
+      {/* SP-229 · reliability ledger — the same numbers ops sees; observational */}
+      <div className="mt-6 mb-2">
+        <SpReliabilityCard />
+      </div>
 
       {/* Shortcuts to the rest of the portal */}
       <SectionHeader title="Manage" />

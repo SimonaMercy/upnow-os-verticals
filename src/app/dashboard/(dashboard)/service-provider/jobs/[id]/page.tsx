@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
+import { ReschedulePanel } from '@/components/upnow/ReschedulePanel';
+import { DisputeThreadPanel } from '@/components/upnow/DisputeThreadPanel';
 import { uploadBookingPhoto, EMPTY_EVIDENCE, type EvidenceGroups, type EvidenceKind, type EvidencePhoto } from '@/lib/bookingEvidence';
 
 /* Tokens shared with the SP dashboard (design 2a). */
@@ -260,6 +262,8 @@ export default function ProviderJobPage() {
                   {dispute.providerResponse || 'No response was added.'}
                 </p>
               )}
+              {/* SP-265 · UpNow's questions to me + my answers */}
+              <DisputeThreadPanel disputeId={dispute.id} compact />
             </div>
           </div>
         );
@@ -273,6 +277,8 @@ export default function ProviderJobPage() {
           <div><div style={lbl}>Address</div><div style={val}>{b.addressText ?? '—'}</div></div>
           <div><div style={lbl}>Price</div><div style={val}>{b.totalAmount != null ? aed(b.totalAmount) : (isQuote ? 'To be quoted' : '—')}</div></div>
         </div>
+        {/* SP-190 · propose / answer a new time (confirmed | assigned only) */}
+        <ReschedulePanel bookingId={b.id} bookingStatus={b.status} onChanged={load} />
       </div>
 
       {/* Technician */}

@@ -61,7 +61,12 @@ interface PayoutRow {
   requestedAt: string; paidAt: string | null; notes: string | null;
 }
 interface PayoutMe {
-  balance: { currency: string; netEarned: number; paidOut: number; available: number; disputedHeld: number };
+  balance: {
+    currency: string; netEarned: number; paidOut: number; available: number; disputedHeld: number;
+    /** SP-221 · payout schedule split */
+    maturing?: number; maturesAt?: string | null; belowMinimum?: boolean;
+    schedule?: { holdHoursAfterRelease: number; cadence: 'daily' | 'weekly' | 'manual'; payoutWeekday: number; minPayoutAed: number; nextPayoutAt: string | null };
+  };
   bankAccount: BankAccount | null;
   payouts: PayoutRow[];
 }
@@ -243,6 +248,19 @@ function PayoutSection({ pay, onReload }: { pay: PayoutMe; onReload: () => Promi
           {pay.balance.disputedHeld > 0 && (
             <div style={{ fontSize: 12.5, color: '#B42318', marginTop: 6, fontWeight: 600 }}>
               {aed(pay.balance.disputedHeld)} withheld pending dispute resolution
+            </div>
+          )}
+          {/* SP-221 · payout schedule: hold + cadence + minimum */}
+          {(pay.balance.maturing ?? 0) > 0 && (
+            <div style={{ fontSize: 12.5, color: '#92400E', marginTop: 6 }}>
+              {aed(pay.balance.maturing ?? 0)} released, payable {pay.balance.maturesAt ? `from ${new Date(pay.balance.maturesAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' })}` : 'soon'} ({pay.balance.schedule?.holdHoursAfterRelease ?? 48} h hold)
+            </div>
+          )}
+          {pay.balance.schedule && (
+            <div style={{ fontSize: 12, color: FAINT, marginTop: 6 }}>
+              {pay.balance.schedule.cadence === 'manual' ? 'Payouts are run manually by UpNow' : `Payouts run ${pay.balance.schedule.cadence}${pay.balance.schedule.nextPayoutAt ? ` · next ${new Date(pay.balance.schedule.nextPayoutAt).toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Dubai' })}` : ''}`}
+              {pay.balance.schedule.minPayoutAed > 0 ? ` · minimum ${aed(pay.balance.schedule.minPayoutAed)}` : ''}
+              {pay.balance.belowMinimum ? ' — below the minimum, rolls into the next run' : ''}
             </div>
           )}
         </div>

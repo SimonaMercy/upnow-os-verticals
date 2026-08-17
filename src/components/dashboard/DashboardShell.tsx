@@ -157,6 +157,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'My shifts',        href: '/dashboard/technician/schedule',       icon: CalendarCheck },
     // SP-131: the technician's own KYC (Emirates ID + visa) — the inputs to their Gate 1 verdict.
     { label: 'My Documents',     href: '/dashboard/technician/documents',      icon: FileText },
+    // SP-182 · released-escrow earnings on the jobs I did (read-only)
+    { label: 'Earnings',         href: '/dashboard/technician/earnings',       icon: Wallet },
     { divider: true },
     { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings, soon: true },
   ],

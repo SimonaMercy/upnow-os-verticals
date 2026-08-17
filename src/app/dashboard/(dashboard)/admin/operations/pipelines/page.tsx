@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiGet } from '@/lib/api';
 import SpOperationsPipelines from '@/components/upnow/SpOperationsPipelines';
+import { SlaBreachStrip } from '@/components/upnow/SlaBreachStrip';
 
 const PRIMARY = '#2e9f82';
 const INK = '#1a1916';
@@ -59,6 +60,9 @@ export default function AdminPipelinesPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <Link href="/dashboard/admin/operations" style={{ fontSize: 12.5, color: PRIMARY, fontWeight: 600 }}>← Dispatch queue</Link>
         </div>
+
+        {/* SP-253 · needs attention: SLA breaches recorded by the minute cron */}
+        <SlaBreachStrip />
 
         {load.length > 0 && (
           <div style={{ marginTop: 12 }}>

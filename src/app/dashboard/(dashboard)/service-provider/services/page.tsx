@@ -92,6 +92,8 @@ function catLabel(category?: string | null): string {
 
 export default function SpMyServicesPage() {
   const [services, setServices] = useState<SpService[]>([]);
+  // SP-144 · Gate 1 on activation: while enforced and not compliant, the switch cannot be turned ON (server 403s too).
+  const [gate, setGate] = useState<{ enforced: boolean; compliant: boolean; canActivate: boolean; reason: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +138,9 @@ export default function SpMyServicesPage() {
       apiGet<SpService[] | { data?: SpService[] }>('/service-provider/services')
         .then((d) => setServices(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
         .catch(() => setServices([])),
+      apiGet<{ enforced: boolean; compliant: boolean; canActivate: boolean; reason: string | null }>('/service-provider/services/gate')
+        .then(setGate)
+        .catch(() => setGate(null)),
       loadChecklists(),
     ]);
 
@@ -187,22 +192,27 @@ export default function SpMyServicesPage() {
     void run(s.id, () => apiDelete(`/service-provider/services/${s.id}`));
   };
 
-  const AvailabilitySwitch = ({ s }: { s: SpService }) => (
+  const AvailabilitySwitch = ({ s }: { s: SpService }) => {
+    // Turning OFF is always allowed; turning ON is blocked while Gate 1 is enforced and the provider is not compliant.
+    const blockedOn = !s.isAvailable && gate != null && !gate.canActivate;
+    return (
     <button
       type="button"
-      onClick={() => toggle(s)}
-      disabled={busy === s.id}
-      title={s.isAvailable ? 'Available — click to pause' : 'Paused — click to activate'}
+      onClick={() => { if (!blockedOn) toggle(s); }}
+      disabled={busy === s.id || blockedOn}
+      aria-disabled={blockedOn}
+      title={blockedOn ? (gate?.reason ?? 'Verification required before activating') : s.isAvailable ? 'Available — click to pause' : 'Paused — click to activate'}
       aria-pressed={Boolean(s.isAvailable)}
       style={{
         position: 'relative', width: 36, height: 20, borderRadius: 999, flexShrink: 0,
-        border: 0, cursor: 'pointer', transition: 'background .15s',
-        background: s.isAvailable ? GREEN : TRACK,
+        border: 0, cursor: blockedOn ? 'not-allowed' : 'pointer', transition: 'background .15s',
+        background: s.isAvailable ? GREEN : TRACK, opacity: blockedOn ? 0.55 : 1,
       }}
     >
       <span style={{ position: 'absolute', top: 2, left: s.isAvailable ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .15s', boxShadow: '0 1px 2px rgba(20,40,30,.25)' }} />
     </button>
-  );
+    );
+  };
 
   const DeleteButton = ({ s }: { s: SpService }) =>
     (s.listingStatus ?? 'pending').toLowerCase() !== 'approved' ? (
@@ -326,6 +336,11 @@ export default function SpMyServicesPage() {
         {error && (
           <div style={{ borderRadius: 12, padding: '11px 15px', marginBottom: 16, fontSize: 13, background: '#FDECEC', color: '#B42318', border: '1px solid #F5C6C6' }}>
             {error}
+          </div>
+        )}
+        {gate && !gate.canActivate && (
+          <div style={{ borderRadius: 12, padding: '11px 15px', marginBottom: 16, fontSize: 13, background: '#FEF6E7', color: '#92400E', border: '1px solid #F5D9A8' }}>
+            <b>Services can&apos;t be switched on yet.</b> {gate.reason} You can still pause any service.
           </div>
         )}
 

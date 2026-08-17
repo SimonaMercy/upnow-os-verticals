@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { STANDING_UI, type ReliabilityLedger } from '@/components/upnow/SpReliabilityCard';
 import { apiGet, apiPatch } from '@/lib/api';
 
 const PRIMARY = '#2e9f82';
@@ -84,6 +85,8 @@ const fmtWhen = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { day
 export default function AdminOperationsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  // SP-229 · reliability ledgers by provider id (standing / acceptance / on-time / passes) for the shortlist.
+  const [reliability, setReliability] = useState<Record<number, ReliabilityLedger>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assignId, setAssignId] = useState<number | null>(null);
@@ -127,7 +130,21 @@ export default function AdminOperationsPage() {
   // Jobs already placed but stalled past their slot (assigned/en-route/in-progress
   // that never completed) — the other half of "stuck".
   const overdue = bookings.filter((b) => isOverdue(b, now));
+  useEffect(() => {
+    const t = setTimeout(() => {
+      apiGet<ReliabilityLedger[]>('/admin/reliability?days=90')
+        .then((rows) => setReliability(Object.fromEntries(rows.map((r) => [r.serviceProviderId, r]))))
+        .catch(() => setReliability({}));
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+  const relTag = (id: number) => {
+    const r = reliability[id];
+    if (!r || r.standing === 'insufficient_data') return '';
+    return ` · ${STANDING_UI[r.standing].label.toLowerCase()} · accept ${r.offers.acceptancePct ?? '—'}% · on-time ${r.arrivals.onTimePct ?? '—'}%`;
+  };
   const chosenProvider = providers.find((p) => p.id === spId);
+  const chosenRel = spId ? reliability[Number(spId)] : undefined;
   const assignBooking = assignId != null ? bookings.find((b) => b.id === assignId) ?? null : null;
   const isCallout = assignBooking?.status === 'booked';
 
@@ -267,7 +284,7 @@ export default function AdminOperationsPage() {
               <option value="" disabled>Select a provider…</option>
               {/* A callout needs no technician, so tech-less providers are eligible; the paid path still requires one. */}
               {providers.filter((p) => isCallout || p.technicians.length > 0).map((p) => (
-                <option key={p.id} value={p.id}>{p.businessName}{p.solo ? ' · solo' : ''}{p.jobReady ? '' : ' · not job-ready'}{p.compliant ? '' : ' · non-compliant'}</option>
+                <option key={p.id} value={p.id}>{p.businessName}{p.solo ? ' · solo' : ''}{p.jobReady ? '' : ' · not job-ready'}{p.compliant ? '' : ' · non-compliant'}{relTag(p.id)}</option>
               ))}
             </select>
 
@@ -293,6 +310,13 @@ export default function AdminOperationsPage() {
             {!isCallout && chosenProvider && techId !== '' && chosenProvider.technicians.find((t) => t.id === techId)?.assignable === false && (
               <p style={{ fontSize: 12, color: '#92400e', background: '#fef6e7', borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
                 This technician has not been verified by UpNow (compliance: {(chosenProvider.technicians.find((t) => t.id === techId)?.complianceStatus ?? 'pending_review').replace(/_/g, ' ')}). Once Gate 1 is enforced the API will refuse this assignment — verify them under KYC → Technicians first.
+              </p>
+            )}
+
+            {chosenRel && chosenRel.standing !== 'insufficient_data' && (
+              <p style={{ fontSize: 12, color: STANDING_UI[chosenRel.standing].fg, background: STANDING_UI[chosenRel.standing].bg, borderRadius: 8, padding: '8px 10px', marginTop: 12 }}>
+                Reliability (90 d): <b>{STANDING_UI[chosenRel.standing].label}</b> · acceptance {chosenRel.offers.acceptancePct ?? '—'}% · on-time {chosenRel.arrivals.onTimePct ?? '—'}% · passes {chosenRel.passes.used}/{chosenRel.passes.allowance} this month · SLA breaches {chosenRel.sla.total}
+                {chosenRel.flags.length ? ` — ${chosenRel.flags.join('; ')}` : ''}
               </p>
             )}
 

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { uploadBookingPhoto } from '@/lib/bookingEvidence';
 import { TechnicianTrackerMap } from '@/components/upnow/TechnicianTrackerMap';
+import { ReschedulePanel } from '@/components/upnow/ReschedulePanel';
+import { DisputeThreadPanel } from '@/components/upnow/DisputeThreadPanel';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
 /** Why money came back (SP-259) — from GET /bookings/:id. */
@@ -33,6 +35,8 @@ interface BookingRow {
   serviceName?: string | null;
   packageName?: string | null;
   customerSignedOff?: boolean;
+  /** SP-190 · open reschedule proposal, if any. */
+  pendingReschedule?: { id: number; proposedByRole: string; toScheduledAt: string } | null;
   template?: { name?: string | null } | null;
   variant?: { name?: string | null } | null;
 }
@@ -91,11 +95,18 @@ export default function CustomerServicesPage() {
   const [reviewing, setReviewing] = useState(false);
   const [signingOff, setSigningOff] = useState<number | null>(null);
 
+  // SP-265 · my disputes by booking (to show the case thread + reply box on the row)
+  const [disputeByBooking, setDisputeByBooking] = useState<Record<number, { id: number; status: string }>>({});
+  const loadDisputes = () =>
+    fetch('/api/disputes/mine', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ id: number; bookingId: number | null; status: string }>) =>
+        setDisputeByBooking(Object.fromEntries((Array.isArray(rows) ? rows : []).filter((d) => d.bookingId != null).map((d) => [d.bookingId as number, { id: d.id, status: d.status }]))))
+      .catch(() => setDisputeByBooking({}));
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: BookingRow[] | { data?: BookingRow[] }) =>
-        setBookings(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])))
+      .then((d: BookingRow[] | { data?: BookingRow[] }) => { setBookings(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])); void loadDisputes(); })
       .catch(() => setBookings([]));
 
   const loadReviews = () =>
@@ -365,6 +376,11 @@ export default function CustomerServicesPage() {
                   <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ background: tone.bg, color: tone.fg }}>
                     {tone.label}
                   </span>
+                  {b.pendingReschedule && (
+                    <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ background: '#FEF6E7', color: '#92400E' }} title="A new time has been proposed">
+                      New time proposed
+                    </span>
+                  )}
                   {open ? <ChevronUp size={16} style={{ color: 'var(--color-neutral-400)' }} /> : <ChevronDown size={16} style={{ color: 'var(--color-neutral-400)' }} />}
                 </button>
 
@@ -536,6 +552,8 @@ export default function CustomerServicesPage() {
                         </div>
                       );
                     })()}
+                    {/* SP-190 · propose / answer a new time (confirmed | assigned only) */}
+                    <ReschedulePanel bookingId={b.id} bookingStatus={b.status} onChanged={load} />
                     {cancellable && (
                       <button
                         type="button"
@@ -604,6 +622,9 @@ export default function CustomerServicesPage() {
                       <p className="mt-4 text-xs" style={{ color: '#92400e' }}>
                         Issue reported — our team is reviewing it.
                       </p>
+                    )}
+                    {disputeByBooking[b.id] && (
+                      <DisputeThreadPanel disputeId={disputeByBooking[b.id].id} compact />
                     )}
                   </div>
                 )}

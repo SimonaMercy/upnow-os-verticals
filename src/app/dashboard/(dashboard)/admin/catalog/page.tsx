@@ -15,6 +15,7 @@ import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
 import { apiGet, apiPost, apiPatch, apiDelete, apiUpload } from '@/lib/api';
+import { PayoutScheduleCard } from '@/components/upnow/PayoutScheduleCard';
 
 /* ── API types (exact contract) ── */
 type PriceUnit =
@@ -817,6 +818,8 @@ export default function AdminCatalogPage() {
         />
         <VatCard overview={overview} onConfirm={requestConfirm} setOverview={setOverview} />
         <LaunchCancellationCard overview={overview} onConfirm={requestConfirm} setOverview={setOverview} />
+        {/* SP-221 · payout hold / cadence / minimum */}
+        <PayoutScheduleCard onConfirm={requestConfirm} />
       </div>
 
       {/* ── Modals ── */}
