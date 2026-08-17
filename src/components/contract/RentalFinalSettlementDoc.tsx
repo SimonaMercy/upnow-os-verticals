@@ -65,6 +65,25 @@ const fmtDate = (d?: string | null) => {
 const sumNet = (lines: RFSLine[], cats: string[]) =>
   Math.round(lines.filter(l => cats.includes(l.category)).reduce((a, l) => a + (l.net ?? l.amount ?? 0), 0) * 100) / 100;
 
+/**
+ * §4 Property Charges rows. Customer-signed statement → the single rolled-up
+ * "Restoration" figure it was signed on. Not yet signed → one row per
+ * restoration line (repairs / cleaning / keys / any manual line) so the
+ * breakdown is visible; the "(move-out inspection)" suffix is dropped because
+ * the column footer already names the source. Empty → the placeholder row.
+ */
+export function restorationBreakdownRows(
+  restoration: RFSLine[],
+  customerSigned: boolean,
+  total: number,
+): { label: string; amount: number }[] {
+  if (customerSigned || restoration.length === 0) return [{ label: 'Restoration', amount: total }];
+  return restoration.map(l => ({
+    label: (l.label || 'Restoration').replace(/\s*\(move-out inspection\)\s*$/i, '').trim() || 'Restoration',
+    amount: Math.round((l.net ?? l.amount ?? 0) * 100) / 100,
+  }));
+}
+
 const STATUS_TONE: Record<string, string> = {
   Cleared: 'text-[#1a7a5a]', Held: 'text-[#6b6860]', Bounced: 'text-[#b91c1c]',
   Cancelled: 'text-[#9b9890] line-through', 'Not Received': 'text-[#c2410c]', Pending: 'text-[#c2410c]',
@@ -178,10 +197,12 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
   // always accounts for each service category explicitly.
   const utilRowsShown = utilRows;
 
-  // §4 — a single summed "Restoration" line (the individual repair/cleaning/keys
-  // items roll up into one figure).
+  // §4 — itemised while the statement is still open (each repair / cleaning /
+  // keys line as its own row, so the customer sees what the figure is made of);
+  // once the customer has signed, the statement is an issued document and keeps
+  // the single rolled-up "Restoration" figure it was signed on.
   const restorationTotal = sumNet(restoration, ['restoration']);
-  const restorationRows = [{ label: 'Restoration', amount: restorationTotal }];
+  const restorationRows = restorationBreakdownRows(restoration, !!data.tenantSignature, restorationTotal);
   const restorationInspId = restoration.find(l => l.inspectionContractId != null)?.inspectionContractId;
 
   // §5 — the standard additional-charge rows, each summed from its category.

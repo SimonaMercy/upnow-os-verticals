@@ -7,7 +7,7 @@
 'use client';
 
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
-import type { RFSData } from './RentalFinalSettlementDoc';
+import { restorationBreakdownRows, type RFSData } from './RentalFinalSettlementDoc';
 
 const money = (n: number | null | undefined) =>
   (n == null ? 0 : n).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -177,9 +177,10 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
     .map(b => ({ label: b.label, amount: r2(utilities.filter(l => b.kw.some(k => (l.label || '').toLowerCase().includes(k))).reduce((a, l) => a + (l.net ?? l.amount), 0)) }));
   const utilitiesTotal = sumNet(utilities, ['utility']);
 
-  // A single summed "Restoration" line.
+  // Itemised until the customer signs; a signed statement keeps the single
+  // rolled-up "Restoration" figure it was signed on (same rule as the screen doc).
   const restorationTotal = sumNet(restoration, ['restoration']);
-  const restorationRows = [{ label: 'Restoration', amount: restorationTotal }];
+  const restorationRows = restorationBreakdownRows(restoration, !!data.tenantSignature, restorationTotal);
   const hasInspection = restoration.some(l => l.inspectionContractId != null);
 
   const additionalRows = [
