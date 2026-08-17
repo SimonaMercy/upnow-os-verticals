@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/lib/api';
 import { DashboardPage, StatCard, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import {
-  Building2, CalendarCheck, CheckCircle, Clock, ShieldAlert, ShieldCheck, Star, Wrench,
+  Building2, CalendarCheck, Clock, ShieldAlert, ShieldCheck, Star, Wrench,
 } from 'lucide-react';
 
 interface TechnicianMe {
@@ -74,6 +74,27 @@ export default function TechnicianOverview() {
     staleTime: 30_000,
   });
   const name = me?.name ?? user?.name ?? user?.firstName ?? 'there';
+  // SP-103 · next rostered shift (upcoming, not cancelled) — the roster is the provider's; I confirm from My shifts.
+  const { data: shiftsRes } = useQuery<{ shifts: Array<{ id: number; status: string; phase: string; shiftStartAt: string; shiftEndAt: string; zones: Array<{ label: string }> }> }>({
+    queryKey: ['technician-shifts-next'],
+    queryFn: () => apiGet(`/technician/shifts?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 28 * 864e5).toISOString())}`),
+    staleTime: 60_000,
+    enabled: !!me,
+  });
+  const nextShift = shiftsRes?.shifts.find((s) => s.phase !== 'past' && s.status !== 'cancelled') ?? null;
+  const toConfirm = shiftsRes?.shifts.filter((s) => s.phase !== 'past' && s.status === 'assigned').length ?? 0;
+  const shiftConflicts = shiftsRes?.shifts.filter((s) => s.phase !== 'past' && s.status === 'conflict_reported').length ?? 0;
+  const tz = 'Asia/Dubai';
+  const shiftDay = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz });
+  const shiftTime = (iso: string) => new Date(iso).toLocaleTimeString('en-AE', { hour: 'numeric', minute: '2-digit', timeZone: tz });
+  const nextShiftValue = !nextShift ? '—' : nextShift.phase === 'live' ? 'Now' : shiftDay(nextShift.shiftStartAt);
+  const nextShiftTrend = !nextShift
+    ? 'No shifts rostered'
+    : [
+        nextShift.phase === 'live' ? `until ${shiftTime(nextShift.shiftEndAt)}` : `${shiftTime(nextShift.shiftStartAt)}–${shiftTime(nextShift.shiftEndAt)}`,
+        nextShift.zones.length ? nextShift.zones.map((z) => z.label).join(', ') : null,
+        shiftConflicts ? `${shiftConflicts} conflict${shiftConflicts === 1 ? '' : 's'}` : toConfirm ? `${toConfirm} to confirm` : null,
+      ].filter(Boolean).join(' · ');
 
   return (
     <DashboardPage
@@ -115,7 +136,9 @@ export default function TechnicianOverview() {
       {/* Stats — job counters light up with SP-95; the account facts are live now. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Assigned Jobs"   value="0" icon={CalendarCheck} trend="No active jobs" />
-        <StatCard label="Completed Today" value="0" icon={CheckCircle}   trend="—" color="gold" />
+        <Link href="/dashboard/technician/schedule" className="block">
+          <StatCard label="Next shift" value={nextShiftValue} icon={CalendarCheck} trend={nextShiftTrend} color={shiftConflicts ? 'error' : nextShift ? 'gold' : 'neutral'} />
+        </Link>
         <StatCard
           label="Verification"
           value={isLoading ? '…' : me ? COMPLIANCE_LABEL[me.complianceStatus] : '—'}

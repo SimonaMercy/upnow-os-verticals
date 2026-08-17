@@ -10,12 +10,13 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn, ShieldCheck, FileText, X,
+  Users, Plus, Mail, Phone, Trash2, RefreshCw, Clock, Send, LogIn, ShieldCheck, FileText, X, CalendarCheck,
 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
@@ -461,15 +462,28 @@ export function SpTeamPanel() {
       <section className="mb-8">
         <SectionHeader
           title={solo ? 'You are the technician' : `Technicians (${technicians.length})`}
-          action={solo ? undefined : (
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <Plus className="w-4 h-4" />
-              Invite Technician
-            </button>
+          action={(
+            <div className="flex items-center gap-2">
+              {/* SP-103 · shifts / zones / conflicts live on the Roster page */}
+              <Link
+                href="/dashboard/service-provider/schedule"
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-colors hover:bg-neutral-50"
+                style={{ border: '1px solid var(--color-neutral-200)', color: 'var(--color-neutral-800)' }}
+              >
+                <CalendarCheck className="w-4 h-4" />
+                Roster &amp; shifts
+              </Link>
+              {!solo && (
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  <Plus className="w-4 h-4" />
+                  Invite Technician
+                </button>
+              )}
+            </div>
           )}
         />
         {solo && (

@@ -122,6 +122,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs'] },
     // SP-86 · where every technician is right now (presence + last fix + live job)
     { label: 'Live map',         href: '/dashboard/service-provider/live',       icon: MapPin },
+    // SP-103 · who works when and where: shifts per technician, zones, conflicts
+    { label: 'Roster',           href: '/dashboard/service-provider/schedule',   icon: CalendarCheck },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',    icon: Star },
     { divider: true },
@@ -151,7 +153,8 @@ const NAV: Record<UserRole, NavItem[]> = {
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
     { label: 'My Jobs',          href: '/dashboard/technician/jobs',           icon: CalendarCheck },
-    { label: 'Schedule',         href: '/dashboard/technician/schedule',       icon: CalendarCheck },
+    // SP-103 · the shifts my provider rostered me on (zones, conflicts, confirm)
+    { label: 'My shifts',        href: '/dashboard/technician/schedule',       icon: CalendarCheck },
     // SP-131: the technician's own KYC (Emirates ID + visa) — the inputs to their Gate 1 verdict.
     { label: 'My Documents',     href: '/dashboard/technician/documents',      icon: FileText },
     { divider: true },
