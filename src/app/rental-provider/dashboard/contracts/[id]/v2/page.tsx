@@ -81,6 +81,8 @@ interface ContractDoc {
   ownerType: string;
   ownerId: number;
   category: string;
+  /** Where the RP filed it (documents.section) — kyc | tenancy | null. */
+  section?: string | null;
   documentKey: string;
   displayName: string | null;
   fileUrl: string;
@@ -89,6 +91,10 @@ interface ContractDoc {
   expiryDate: string | null;
   isVisibleToTenant: boolean;
 }
+
+/** Identity of a stored documents row (its upsert key): an upload posted under
+ *  the SAME owner + key overwrites that row in place instead of adding one. */
+type DocReplaceTarget = Pick<ContractDoc, 'ownerType' | 'ownerId' | 'documentKey'>;
 
 interface ContractPayment {
   id: number;
@@ -2614,7 +2620,9 @@ function DetailsDrawer({
   /** PATCH /api/contracts/:id/confirm-pdc — confirm post-dated cheques received. */
   onConfirmPdc: () => Promise<void>;
   /** upload-url → PUT → POST /api/documents — attach a contract document. */
-  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string) => Promise<void>;
+  /** `replaceOf` = the stored row to overwrite in place (binder "Replace");
+   *  omitted → a fresh timestamped row is added beside whatever is on file. */
+  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string, replaceOf?: DocReplaceTarget) => Promise<void>;
   /** POST /api/documents/request — request a document from the tenant. */
   onRequestDoc: (label: string, notes: string) => Promise<void>;
   /** Running tenancy notes log (newest first). */
@@ -3283,6 +3291,16 @@ function DetailsDrawer({
   // choice from being overwritten when they then switch document type.
   const [upSection, setUpSection] = useState<DocSection>('tenancy');
   const [upSectionTouched, setUpSectionTouched] = useState(false);
+  // The stored document a binder "Replace" is superseding. Every upload used to
+  // mint a fresh `${key}_${Date.now()}` row, so "Replace" on the Payment
+  // Confirmation stacked a second (then third) file beside the one it was
+  // meant to supersede — the slot flipped to "3 files · uploaded" and the
+  // button to "Add". Carrying the row's own owner + key through to the POST
+  // makes the backend's same-key upsert overwrite THAT row in place, keeping
+  // its id (payments.document_id and audit rows point at it). Only honoured
+  // while the picked type is still the slot the button was on — switching type
+  // is a new document, not a replacement.
+  const [upReplaceOf, setUpReplaceOf] = useState<{ slotKey: string; doc: ContractDoc } | null>(null);
   // Full mapped pack for the unit's category — KYC + commercial / industrial /
   // residential section (company promotions applied). Shown on new contracts;
   // renewals show only the re-verification slots (renewalDocs).
@@ -3315,8 +3333,9 @@ function DetailsDrawer({
   }, [renewalDocs, fullPackDocs]);
   const uploadBoxRef = useRef<HTMLDivElement>(null);
   /** Checklist "Upload" / "Replace" → open the upload form with the slot's
-   *  type preselected and pop the file picker. */
-  const prefillUpload = (d: DocReq) => {
+   *  type preselected and pop the file picker. `replacing` = the stored row a
+   *  binder "Replace" supersedes (see upReplaceOf); omitted for a plain upload. */
+  const prefillUpload = (d: DocReq, replacing?: ContractDoc) => {
     setShowUpload(true);
     // Only preselect a type the picker actually knows — an unknown legacy key
     // would slip past submitUpload's lookup. Blank → the user picks the type.
@@ -3324,12 +3343,24 @@ function DetailsDrawer({
     setUpType(known?.value ?? '');
     setUpTypeQuery(known?.label ?? '');
     setUpTypeMenuOpen(false);
+    // A negative id is a cheque image synthesised from lead_cheques (contract
+    // detail payload) — no documents row exists to overwrite, so it can only
+    // be added beside. Only a real, type-known slot can be replaced in place.
+    const target = replacing && replacing.id > 0 && known ? replacing : null;
+    setUpReplaceOf(target ? { slotKey: known!.value, doc: target } : null);
     // Filing from a checklist row starts from that document's default section,
-    // and the RP can still change it before saving.
-    setUpSection(known?.section ?? sectionForDocKey(d.key) ?? sectionForCategory(d.category));
+    // and the RP can still change it before saving. A replacement starts from
+    // where the row is ALREADY filed — swapping the file is not a re-filing.
+    const filedUnder = (target?.section === 'kyc' || target?.section === 'tenancy') ? target.section : null;
+    setUpSection(filedUnder ?? known?.section ?? sectionForDocKey(d.key) ?? sectionForCategory(d.category));
     setUpSectionTouched(false);
     // Filling a named checklist slot — the slot's own wording is the right name.
-    setUpName('');
+    // A replacement keeps the name the row already carries (e.g. "Cheque 1")
+    // unless it was just the slot label, which the type supplies anyway.
+    setUpName(target?.displayName && normDocName(target.displayName) !== normDocName(d.label) ? target.displayName : '');
+    // Same for visibility: the backend resets it on re-upload, so carry the
+    // row's current setting into the form instead of silently going internal.
+    setUpVisible(!!target?.isVisibleToTenant);
     setUpExpiry('');
     setUpErr(null);
     requestAnimationFrame(() => {
@@ -3339,6 +3370,9 @@ function DetailsDrawer({
   };
   const upSelected = DOC_TYPES.find(t => t.value === upType);
   const upShowExpiry = upSelected?.needsExpiry ?? false;
+  /** The row this submit will overwrite — null once the type is changed away
+   *  from the slot the Replace button was on (same rule submitUpload applies). */
+  const upReplacing = upReplaceOf && upReplaceOf.slotKey === upType ? upReplaceOf.doc : null;
   // Types matching what has been typed. An empty query lists everything, so
   // opening the box still works as a plain browse.
   const upTypeMatches = useMemo(() => {
@@ -3357,15 +3391,17 @@ function DetailsDrawer({
   const submitUpload = async () => {
     if (!upFile || !upType) return;
     const meta = DOC_TYPES.find(t => t.value === upType)!;
+    const replacing = upReplacing;
     setUpBusy(true); setUpErr(null);
     try {
       await onUploadDoc(
         upFile,
         { key: meta.value, label: upName.trim() || meta.label, category: meta.category, section: upSection },
         upVisible, upExpiry,
+        replacing ? { ownerType: replacing.ownerType, ownerId: replacing.ownerId, documentKey: replacing.documentKey } : undefined,
       );
       setShowUpload(false); setUpFile(null); setUpType(''); setUpTypeQuery(''); setUpVisible(false); setUpExpiry('');
-      setUpSection('tenancy'); setUpSectionTouched(false); setUpName('');
+      setUpSection('tenancy'); setUpSectionTouched(false); setUpName(''); setUpReplaceOf(null);
       if (docFileRef.current) docFileRef.current.value = '';
     } catch (e) {
       setUpErr(e instanceof Error ? e.message : 'Upload failed');
@@ -4376,7 +4412,9 @@ function DetailsDrawer({
                     {['move_in_report', 'move_out_report', 'deposit_settlement'].includes(s.key) && (
                       <DownloadDocButton documentId={doc.id} label="PDF" className="mini-btn view" />
                     )}
-                    <button type="button" className="mini-btn view" title={`Upload a newer ${s.label}`} onClick={() => prefillUpload(req)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
+                    {/* One file on the slot → Replace overwrites THAT row in place
+                        (same id). Several → Add puts another beside them. */}
+                    <button type="button" className="mini-btn view" title={multi ? `Add another ${s.label}` : `Replace the ${s.label} on file`} onClick={() => prefillUpload(req, multi ? undefined : doc)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
                   </div>
                 </div>
               );
@@ -4391,7 +4429,7 @@ function DetailsDrawer({
                     <Link href={`${contractBase}/documents`} target="_blank" rel="noopener noreferrer" className="mini-btn view">
                       <ExternalLink size={12} /> View all
                     </Link>
-                    <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); }}>
+                    <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); setUpReplaceOf(null); }}>
                       <UploadCloud size={12} /> Upload
                     </button>
                     <button type="button" className="mini-btn view" onClick={openBlankRequest}>
@@ -4502,8 +4540,12 @@ function DetailsDrawer({
                       <div ref={uploadBoxRef} style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 560, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '16px 18px 12px', borderBottom: '1px solid #f0eee9' }}>
                           <div>
-                            <p className="subhead" style={{ margin: 0 }}>Upload a document</p>
-                            <p className="note" style={{ margin: "2px 0 0" }}>{contract.ref} · {contract.tenant.name ?? "the customer"}</p>
+                            <p className="subhead" style={{ margin: 0 }}>{upReplacing ? `Replace ${upReplacing.displayName || upSelected?.label || 'document'}` : 'Upload a document'}</p>
+                            <p className="note" style={{ margin: "2px 0 0" }}>
+                              {upReplacing
+                                ? 'The new file takes the place of the one on file — one document, not two.'
+                                : <>{contract.ref} · {contract.tenant.name ?? "the customer"}</>}
+                            </p>
                           </div>
                           <button type="button" className="mini-btn view" onClick={() => { setShowUpload(false); setUpErr(null); }}><X size={12} /></button>
                         </div>
@@ -4649,7 +4691,7 @@ function DetailsDrawer({
                           {upErr && <p className="note" style={{ color: 'var(--brick)', margin: '0 0 8px' }}>{upErr}</p>}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <button className="btn btn-jade btn-sm" disabled={upBusy || !upFile || !upType || (upShowExpiry && !upExpiry)} onClick={() => void submitUpload()}>
-                              <UploadCloud size={14} /> {upBusy ? 'Uploading…' : 'Upload'}
+                              <UploadCloud size={14} /> {upBusy ? 'Uploading…' : upReplacing ? 'Replace' : 'Upload'}
                             </button>
                             <button className="btn btn-ghost btn-sm" disabled={upBusy} onClick={() => { setShowUpload(false); setUpErr(null); }}>Cancel</button>
                             {/* Says in one line what the two choices above add up to. */}
@@ -6852,14 +6894,19 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     meta: { key: string; label: string; category: string; section: DocSection },
     visibleToTenant: boolean,
     expiryDate: string,
+    replaceOf?: DocReplaceTarget,
   ) => {
     const asKyc = meta.section === 'kyc';
-    if (asKyc && !contract.tenant.id) {
+    if (asKyc && !replaceOf && !contract.tenant.id) {
       throw new Error('This contract has no linked customer, so the document cannot be filed as customer KYC.');
     }
-    const ownerType = asKyc ? 'customer' : 'tenancy_contract';
-    const ownerId = asKyc ? contract.tenant.id! : contract.id;
-    const docKey = `${meta.key}_${Date.now()}`;
+    // A replacement is posted under the row it supersedes — its OWN owner and
+    // key — so POST /documents' same-key upsert overwrites that row (id kept:
+    // payments.document_id / audit rows still point at it) instead of adding a
+    // fresh `${key}_${Date.now()}` row beside it. Anything else is a new file.
+    const ownerType = replaceOf?.ownerType ?? (asKyc ? 'customer' : 'tenancy_contract');
+    const ownerId = replaceOf?.ownerId ?? (asKyc ? contract.tenant.id! : contract.id);
+    const docKey = replaceOf?.documentKey ?? `${meta.key}_${Date.now()}`;
     const urlRes = await fetch('/api/documents/upload-url', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ownerType, ownerId, documentKey: docKey, mimeType: file.type || 'application/octet-stream', originalName: file.name }),
