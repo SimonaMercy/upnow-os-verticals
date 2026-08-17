@@ -11,6 +11,7 @@ import {
   MapPin, Plus, Wrench, XCircle,
 } from 'lucide-react';
 import { uploadBookingPhoto } from '@/lib/bookingEvidence';
+import { TechnicianTrackerMap } from '@/components/upnow/TechnicianTrackerMap';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
 /** Why money came back (SP-259) — from GET /bookings/:id. */
@@ -373,6 +374,20 @@ export default function CustomerServicesPage() {
                       <p className="text-xs mt-3 inline-flex items-center gap-1.5" style={{ color: 'var(--color-neutral-500)' }}>
                         <MapPin size={12} /> {b.addressText}
                       </p>
+                    )}
+                    {/* SP-86 · live tracker while the technician is on the way / on site */}
+                    {['en_route', 'in_progress'].includes(b.status) && (
+                      <div className="mt-3">
+                        <TechnicianTrackerMap
+                          bookingId={b.id}
+                          onStatusChange={() => {
+                            void load();
+                            void fetch(`/api/bookings/${b.id}`, { credentials: 'include' }).then((r) => r.json())
+                              .then((d) => { setTimeline((prev) => ({ ...prev, [b.id]: d.timeline ?? [] })); setMediaMap((prev) => ({ ...prev, [b.id]: d.media ?? { problem: [], before: [], after: [] } })); })
+                              .catch(() => {});
+                          }}
+                        />
+                      </div>
                     )}
                     <div className="mt-4 space-y-2.5">
                       {(timeline[b.id] ?? []).map((s) => (

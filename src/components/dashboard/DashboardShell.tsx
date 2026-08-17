@@ -10,7 +10,7 @@ import {
   ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
   TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble,
   Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature,
-  HeartPulse,
+  HeartPulse, MapPin,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
@@ -120,6 +120,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     // (the job detail) is reached by opening a card.
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs'] },
+    // SP-86 · where every technician is right now (presence + last fix + live job)
+    { label: 'Live map',         href: '/dashboard/service-provider/live',       icon: MapPin },
     { label: 'My Services',      href: '/dashboard/service-provider/services',   icon: Briefcase },
     { label: 'Reviews',          href: '/dashboard/service-provider/reviews',    icon: Star },
     { divider: true },
