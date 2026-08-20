@@ -109,6 +109,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
     { label: 'Restoration List', href: '/rental-provider/dashboard/restoration-list', icon: Receipt },
+    // What the managers are doing — the visual overview built on the activity
+    // log. Sits directly above Settings, where the team is administered.
+    // LANDLORD-ONLY: the manager rail has no counterpart, and the API refuses a
+    // manager outright (see ReportsController's team-overview routes).
+    { label: 'Team',             href: '/rental-provider/dashboard/team',           icon: Users },
     { divider: true },
     { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
   ],

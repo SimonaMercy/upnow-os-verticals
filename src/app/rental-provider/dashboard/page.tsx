@@ -1728,6 +1728,14 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           <span className="text-[11px] text-[var(--neutral-400)]">
             {totalManagers === 0 ? 'nobody has access to this portfolio' : `${totalManagers} with access · what they are doing today`}
           </span>
+          {/* The Team page is the full picture — status, trend, breakdown,
+              per-person figures over a period. Landlord-only, like this
+              section's data; the manager portal has no counterpart. */}
+          {!manager && (
+            <Link href="/rental-provider/dashboard/team" className="ml-auto text-[11px] font-semibold text-[var(--primary-dark)] hover:underline inline-flex items-center gap-1">
+              Team page <ArrowUpRight size={11} />
+            </Link>
+          )}
         </div>
         <ManagerTimePerDay data={timePerDay} />
         <LiveActivity feed={feed} error={feedErr} onRetry={fetchFeed} contractBase={contractBase} leadsBase={leadsBase} />
