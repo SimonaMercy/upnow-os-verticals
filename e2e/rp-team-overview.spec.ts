@@ -24,14 +24,21 @@ interface Person {
     avgResponseHours: number | null; onTimePct: number | null; slaPct: number | null;
     pages: number;
     activeDays: number; workingDays: number; idleDays: number; minutes: number;
-    idle: { totalMinutes: number; pct: number | null; longestMinutes: number };
+    idle: {
+      totalMinutes: number; pct: number | null; longestMinutes: number;
+      workedMinutes: number; spanMinutes: number;
+    };
   };
   spark: number[];
 }
 interface Payload {
   window: { from: string; to: string; days: number; workingDays: number; hourly: boolean; countingFrom: string | null; prevComparable: boolean };
   prev: { from: string; to: string };
-  targets: { onTimeHours: number; slaHours: number };
+  targets: {
+    onTimeHours: number; slaHours: number;
+    officeOpen: string; officeClose: string;
+    officeBreakMinutes: number; expectedDayMinutes: number;
+  };
   teamSize: number; ownerUserId: number; activeNow: number;
   status: Record<'active' | 'idle' | 'today' | 'offline', number>;
   kpis: {
@@ -187,10 +194,15 @@ test.describe('RP Team page (SCRUM-792)', () => {
       expect(st.open).toBeGreaterThanOrEqual(0);
       if (st.openPeople) for (const n of Object.values(st.openPeople)) expect(n).toBeLessThanOrEqual(st.open);
     }
-    // The board's registration lane and the live registration row are the same
-    // leases — counting both would show that backlog twice.
+    /* The board's registration lane CONTAINS the live registration row — they
+     * are the same backlog, and counting both would show it twice. Not equal,
+     * though: the row applies the owner's rule that a room has no registration
+     * of its own, and the Operations board does not, so a lease on a room sits
+     * in the lane while the row leaves it out. The Open column here mirrors the
+     * board on purpose (it is the figure the board shows), so the lane is the
+     * larger of the two. */
     expect(d.steps.find((x) => x.key === 'registration_issued')!.open)
-      .toBe(d.steps.find((x) => x.key === 'registration_pending')!.total);
+      .toBeGreaterThanOrEqual(d.steps.find((x) => x.key === 'registration_pending')!.total);
     for (const st of d.steps) {
       // No single person can have more than the whole. The parts CAN add to
       // more than the whole — a record two managers both touched is one record
@@ -291,7 +303,10 @@ test.describe('RP Team page (SCRUM-792)', () => {
       ((await (await page.request.get(
         `/api/reports/team-overview/feed?from=${from}&to=${to}&kind=${kind}&limit=40`)).json()) as {
           rows: Array<{ label: string; subject: string | null; repeats: number }> }).rows
-        .filter((r) => r.label.includes('Verified the document'));
+        // A folded run spanning two actions of one step takes the STEP's name —
+        // uploading a pack and verifying it is one task called "KYC" — so match
+        // the step as well as the individual actions it was assembled from.
+        .filter((r) => r.label === 'KYC' || /\bdocument\b/i.test(r.label));
 
     const tasks = await feed('task', '2026-08-10', '2026-08-10');
     const acts = await feed('change', '2026-08-10', '2026-08-10');
@@ -318,6 +333,86 @@ test.describe('RP Team page (SCRUM-792)', () => {
     }
     expect([...seen.entries()].filter(([, n]) => n > 1)).toEqual([]);
   });
+
+  test('every step in the Tasks tab reconciles with Activity by step, per person', async ({ page }) => {
+    /* The two cards read different sources — the table counts DATABASE columns,
+     * the tab reads the activity log — and the page is only trustworthy if they
+     * land on the same number. They differ by exactly one thing, which the card
+     * now says out loud: a step the CUSTOMER performed is a completed step no
+     * member of the team did, so it cannot appear in a feed of team activity.
+     *
+     * The rule that makes the rest agree: a record two people worked is ONE
+     * task on ONE of them — the person the table credits — so the columns add
+     * up to the whole instead of over it. */
+    await signIn(page, 'kbaalfalasi@gmail.com');
+    const from = '2026-08-01', to = '2026-08-20';
+    const ov = (await (await page.request.get(
+      `/api/reports/team-overview?from=${from}&to=${to}`)).json()) as Payload;
+    const listed = ov.steps.filter((s) => !s.live);
+
+    const tasks = async (person?: number) => {
+      const seen = new Set<string>();
+      let before: string | null = null;
+      for (let i = 0; i < 12; i++) {
+        const q = `from=${from}&to=${to}&kind=task&limit=100`
+          + (person ? `&person=${person}` : '') + (before ? `&before=${before}` : '');
+        const d = (await (await page.request.get(
+          `/api/reports/team-overview/feed?${q}`)).json()) as {
+            rows: Array<{ id: string }>; nextBefore: string | null; hasMore: boolean };
+        for (const r of d.rows) seen.add(r.id);
+        if (!d.hasMore || !d.nextBefore) break;
+        before = d.nextBefore;
+      }
+      return seen.size;
+    };
+
+    // Steps the team cannot perform — the customer signs those themselves.
+    const outside = listed.reduce((a, s) => a
+      + Math.max(0, s.total - (Object.values(s.people ?? {}).reduce((x, y) => x + y, 0) + (s.owner ?? 0))), 0);
+    const total = listed.reduce((a, s) => a + s.total, 0);
+    expect(await tasks()).toBe(total - outside);
+
+    // And every column adds up on its own, landlord included.
+    for (const p of ov.team) {
+      expect(await tasks(p.userId),
+        `${p.name}: the Tasks tab and the table disagree`)
+        .toBe(listed.reduce((a, s) => a + (s.people?.[String(p.userId)] ?? 0), 0));
+    }
+    expect(await tasks(ov.ownerUserId),
+      'Rental Provider: the Tasks tab and the table disagree')
+      .toBe(listed.reduce((a, s) => a + (s.owner ?? 0), 0));
+  });
+
+  test('idle and time on the platform SPLIT the day — they never overlap', async ({ page }) => {
+    /* Both are read from the same stream of gaps, so charging the first half
+     * hour of a break to each in turn made them add to more than the day: one
+     * manager showed 66 h on the platform AND 125 h idle inside a 148 h month,
+     * and 85% idle while being the most active person on the team. A break now
+     * counts as work up to the cap and as idle beyond it, nothing twice. */
+    await signIn(page, 'kbaalfalasi@gmail.com');
+    const d = (await (await page.request.get(
+      '/api/reports/team-overview?from=2026-08-01&to=2026-08-20')).json()) as Payload;
+    const T = d.targets;
+    for (const p of d.team) {
+      const i = p.period.idle;
+      // The office day, not each person's own stretch: working days × the hours
+      // expected of one. Everybody on the team is measured against the same day.
+      expect(i.spanMinutes, `${p.name}: office hours over the window`)
+        .toBe(p.period.workingDays * T.expectedDayMinutes);
+      expect(i.workedMinutes + i.totalMinutes,
+        `${p.name}: worked ${i.workedMinutes} + idle ${i.totalMinutes} != ${i.spanMinutes}`)
+        .toBe(i.spanMinutes);
+      expect(i.totalMinutes).toBeLessThanOrEqual(i.spanMinutes);
+      if (i.pct != null) expect(i.pct).toBeLessThanOrEqual(100);
+      // A day with nothing recorded is a whole day idle — the reading the old
+      // first-to-last basis could not produce at all (no events, no span).
+      expect(i.totalMinutes, `${p.name}: ${p.period.idleDays} empty days`)
+        .toBeGreaterThanOrEqual(p.period.idleDays * T.expectedDayMinutes);
+      // A break is a gap INSIDE a day, so it cannot exceed one.
+      expect(i.longestMinutes).toBeLessThanOrEqual(24 * 60);
+    }
+  });
+
 
   test("the feed includes the landlord's own work, not just the roster's", async ({ page }) => {
     // "Activity by step" counts what the landlord did themselves, so a feed
@@ -439,8 +534,8 @@ test.describe('RP Team page (SCRUM-792)', () => {
     await expect(page.getByText(/Steps that can be done from a desk/)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Time', exact: true })).toBeVisible();
     // ONE date filter drives the page — a daterangepicker-style panel with a
-    // preset rail and two months. Today is the default, so the trend is hourly.
-    await expect(page.getByText('Hour by hour, today')).toBeVisible({ timeout: 20_000 });
+    // preset rail and two months. TODAY is the default, so the trend is hourly.
+    await expect(page.getByText(/hour by hour, today/i)).toBeVisible({ timeout: 20_000 });
     // The rail is exactly four periods, all running up to today; going back is
     // the calendars' job.
     await openRangeOnce(page);

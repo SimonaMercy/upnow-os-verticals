@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { tenantDisplayName } from '@/lib/tenantName';
 import {
   Deal,
   contractStatusToPipeline,
@@ -31,7 +32,10 @@ interface ApiLeadShape {
     status: string;
     desiredMoveIn?: string | null;
   }>;
-  convertedTenant?: { id: number; user?: { name?: string; email?: string; phone?: string } } | null;
+  convertedTenant?: {
+    id: number; user?: { name?: string; email?: string; phone?: string };
+    entityType?: string | null; companyName?: string | null;
+  } | null;
   unit?: {
     id: number; unitNumber: string; unitName: string | null;
     rentalPrice: number | null;
@@ -74,7 +78,12 @@ function mapLead(l: ApiLeadShape): Deal {
     id: `lead-${l.id}`,
     kind: 'lead',
     pipelineStage: leadStageToPipeline(l.stage),
-    customerName: l.convertedTenant?.user?.name ?? l.customerName,
+    // The company is the customer; the person on the user record signs for it.
+    customerName: tenantDisplayName({
+      name: l.convertedTenant?.user?.name ?? l.customerName,
+      entityType: l.convertedTenant?.entityType,
+      companyName: l.convertedTenant?.companyName,
+    }) ?? l.customerName,
     customerPhone: l.leadPhone ?? l.convertedTenant?.user?.phone ?? null,
     customerEmail: l.leadEmail ?? l.convertedTenant?.user?.email ?? null,
     unitLabel: unitLabel(l.unit ?? null),

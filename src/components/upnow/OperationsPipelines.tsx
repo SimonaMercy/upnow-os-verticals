@@ -42,7 +42,12 @@ interface OpsLead {
   leadEmail: string | null;
   createdAt: string;
   updatedAt: string;
-  convertedTenant?: { id?: number | null; user?: { name?: string | null; email?: string | null } | null } | null;
+  convertedTenant?: {
+    id?: number | null; user?: { name?: string | null; email?: string | null } | null;
+    /** A company lease is held by the ENTITY — the person named on the user
+     *  record is only its signatory. Carried so the card can say which. */
+    entityType?: string | null; companyName?: string | null;
+  } | null;
   unit?: {
     id?: number | null; unitNumber?: string | null; unitName?: string | null; rentalPrice?: number | null;
     property?: { id?: number | null; buildingName?: string | null; rentalProviderId?: number | null } | null;
@@ -298,7 +303,16 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
   const rentFils = l.paymentPlan?.rentFils ?? (l.unit?.rentalPrice != null ? Number(l.unit.rentalPrice) * 100 : null);
   return {
     key: `l-${l.id}`,
-    name: l.convertedTenant?.user?.name ?? l.customerName ?? '—',
+    /* The party, not the signatory. Converting a lead attaches the customer
+     * record, and reading the person's name off it put the man who signs for
+     * API Energy on the board where the company belongs — the same rule the
+     * contract cards on this very board already follow. `customerName` is
+     * written with the company name at conversion, so it agrees. */
+    name: tenantDisplayName({
+      name: l.convertedTenant?.user?.name ?? l.customerName,
+      entityType: l.convertedTenant?.entityType,
+      companyName: l.convertedTenant?.companyName,
+    }) ?? l.customerName ?? '—',
     sub: `${unitLabel(l.unit)} · ${l.unit?.property?.buildingName ?? '—'}`,
     ref: null,
     rentAed: rentFils != null ? Math.round(rentFils / 100) : null,
@@ -391,7 +405,8 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const passL = (l: OpsLead) =>
       (filterAsset === 'all' || l.unit?.property?.buildingName === filterAsset)
       && (l.createdAt ?? '').slice(0, 4) === filterYear
-      && matchSearch([l.customerName, l.convertedTenant?.user?.name, l.leadEmail, l.unit?.unitNumber, l.unit?.property?.buildingName]);
+      && matchSearch([l.customerName, l.convertedTenant?.companyName, l.convertedTenant?.user?.name,
+                      l.leadEmail, l.unit?.unitNumber, l.unit?.property?.buildingName]);
 
     const leadCards = leads.filter(l => LEAD_MATCH.has(l.stage) && passL(l))
       .map(l => leadToCard(l, leadHref ? leadHref(l.id) : null, nowMs))

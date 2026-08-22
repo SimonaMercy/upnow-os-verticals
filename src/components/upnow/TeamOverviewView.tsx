@@ -47,7 +47,12 @@ interface Person {
     avgResponseHours: number | null; onTimePct: number | null; slaPct: number | null;
     pages: number;
     activeDays: number; workingDays: number; idleDays: number; minutes: number;
-    idle: { totalMinutes: number; pct: number | null; longestMinutes: number };
+    idle: {
+      totalMinutes: number; pct: number | null; longestMinutes: number;
+      /** The other half of the same span — on-platform minutes over the days
+       *  idle is measured on. worked + idle = span, so the two never overlap. */
+      workedMinutes: number; spanMinutes: number;
+    };
   };
   spark: number[];
   sparkPages: number[];
@@ -88,7 +93,11 @@ interface Payload {
     prevComparable: boolean;
   };
   prev: { from: string; to: string };
-  targets: { onTimeHours: number; slaHours: number; idleGapMinutes: number; idleCapMinutes: number; activeNowMinutes: number };
+  targets: {
+    onTimeHours: number; slaHours: number; idleCapMinutes: number; activeNowMinutes: number;
+    /** The office day idle is measured against — Fridays off. */
+    officeOpen: string; officeClose: string; officeBreakMinutes: number; expectedDayMinutes: number;
+  };
   teamSize: number; ownerUserId: number; activeNow: number;
   status: Record<Status, number>;
   kpis: {
@@ -482,7 +491,10 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
   endpoint: string; manageHref: string; reportsHref: string; operationsHref: string;
 }) {
   /** ONE filter for the whole page: a from–to range. The presets are shortcuts
-   *  that write into it, not a second control with its own state. */
+   *  that write into it, not a second control with its own state.
+   *
+   *  Opens on TODAY — the page is read to see what the team is doing now, and
+   *  the month is one click away on the rail. */
   const [range, setRange] = useState<{ from: string; to: string }>(() => {
     const [f, t] = rangeOf('today');
     return { from: f, to: t };
@@ -804,15 +816,21 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
               </table>
             </Card>
 
-            <Card title="Idle time" sub={`${P.word[0].toUpperCase()}${P.word.slice(1)} · working days, Fridays off`} action={
-              <Hint text={`Idle = a gap of more than ${T.idleGapMinutes} minutes between two things a person did on the platform on the same working day, measured between their first and last recorded step of the day. Idle % is that against the day's span. Phone calls and off-platform work are invisible here, so read it as a floor on activity, not a verdict. Idle days = working days with nothing recorded at all.`} />}>
-              <table className="w-full text-[13px]">
+            <Card title="Idle time"
+              sub={`${P.word[0].toUpperCase()}${P.word.slice(1)} · ${T.officeOpen}–${T.officeClose}, Fridays off`} action={
+              <Hint text={`Measured against the OFFICE DAY: ${T.officeOpen} to ${T.officeClose} less a ${T.officeBreakMinutes}-minute break, so ${Math.round(T.expectedDayMinutes / 60)} hours are expected of every working day and Fridays expect nothing. Idle is that day less the time on the platform in it — a break counts as work up to ${T.idleCapMinutes} minutes, since a short pause is still working. A late start, an early finish and a day with nothing recorded all count, and work done outside office hours counts for you. Capped at the day both ways: a long Tuesday cannot pay for an empty Wednesday. Phone calls and off-platform work are invisible here, so read it as a floor on activity, not a verdict. Longest = the longest single break inside a day. Idle days = working days with nothing recorded at all.`} />}>
+              {/* Three columns on fixed widths, like the Time card above it. Five
+                  did not fit the card and spilled out of it — and one of the
+                  five was on-platform time, which that card already shows. The
+                  split is carried in the idle cell instead: the share, and the
+                  span it is a share OF, so what is left is on the platform. */}
+              <table className="w-full text-[13px] table-fixed">
+                <colgroup><col style={{ width: '46%' }} /><col style={{ width: '30%' }} /><col style={{ width: '24%' }} /></colgroup>
                 <thead>
                   <tr className="text-[10.5px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-400)] border-b border-[var(--base-200)]">
                     <th className="text-left font-bold pr-2 py-2">Team member</th>
-                    <th className="text-right font-bold px-2 py-2 whitespace-nowrap">Total idle</th>
-                    <th className="text-right font-bold px-2 py-2 whitespace-nowrap">Idle %</th>
-                    <th className="text-right font-bold pl-2 py-2 whitespace-nowrap">Longest</th>
+                    <th className="text-right font-bold px-2 py-2 leading-tight">Total idle</th>
+                    <th className="text-right font-bold pl-2 py-2 leading-tight">Longest break</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -827,8 +845,12 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
                           </div>
                         </div>
                       </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[var(--neutral-900)] font-semibold whitespace-nowrap">{fmtMin(p.period.idle.totalMinutes)}</td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[var(--neutral-700)]">{pctStr(p.period.idle.pct)}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums whitespace-nowrap">
+                        <div className="font-semibold text-[var(--neutral-900)]">{fmtMin(p.period.idle.totalMinutes)}</div>
+                        <div className="text-[11px] text-[var(--neutral-400)]">
+                          {p.period.idle.pct != null ? `${pctStr(p.period.idle.pct)} of ${fmtMin(p.period.idle.spanMinutes)}` : '—'}
+                        </div>
+                      </td>
                       <td className="pl-2 py-2.5 text-right tabular-nums text-[var(--neutral-700)] whitespace-nowrap">{fmtMin(p.period.idle.longestMinutes)}</td>
                     </tr>
                   ))}
@@ -1129,6 +1151,32 @@ function StepDonut({ steps, team, person, where, ownerUserId, onDrill }: {
           {`${listed.filter((s) => s.side !== 'manager').map((s) => s.label).join(' · ')} — gates the team chases but cannot perform: the customer and the landlord sign these themselves.`}
         </p>
       )}
+      {person === 'all' && (() => {
+        /* The team's own tally and the step total are not the same number, and
+         * the difference is not a fault: a customer signing their lease is a
+         * completed step nobody on the team performed, so it can never appear
+         * in "Live team activity" beside it. Said here once, in figures, so the
+         * two cards stop looking like they disagree. */
+        const outside = listed
+          .map((st) => ({ st, n: st.total - (Object.values(st.people ?? {}).reduce((a, b) => a + b, 0) + (st.owner ?? 0)) }))
+          .filter((x) => x.n > 0);
+        const n = outside.reduce((a, x) => a + x.n, 0);
+        if (!n) return null;
+        return (
+          <p className="mt-1 text-[11px] text-[var(--neutral-400)] leading-relaxed">
+            {nfmt(sum.done - n)} of these {nfmt(sum.done)} were done by the team.
+            The other {nfmt(n)} the customer did themselves ({outside.map((x, i) => (
+              <span key={x.st.key}>
+                {i ? ', ' : ''}
+                <button type="button" onClick={() => onDrill({ key: x.st.key, label: x.st.label, mode: 'done', person: null })}
+                  className="font-semibold text-[var(--neutral-600)] underline decoration-dotted underline-offset-2 hover:text-[var(--primary-dark)]">
+                  {nfmt(x.n)} {x.st.label.toLowerCase()}
+                </button>
+              </span>
+            ))}), which is why Live team activity shows {nfmt(sum.done - n)}.
+          </p>
+        );
+      })()}
       {person !== 'all' && (() => {
         // One person's column can never add up to the team's total, and leaving
         // the reader to work out why invites the conclusion that figures are
@@ -1168,7 +1216,7 @@ function StepDonut({ steps, team, person, where, ownerUserId, onDrill }: {
               </>
             )}
             {elsewhere > 0 && `${nfmt(elsewhere)} recorded to someone else`}
-            {'. '}A record two people both worked counts for each of them, so the parts can add to more than the whole.
+            {'.'}
           </p>
         );
       })()}
@@ -1186,6 +1234,8 @@ interface DrillRecord {
   /** Whose act it was — what tells a customer's signature from the landlord's
    *  once both sit under one heading. */
   side?: 'manager' | 'customer' | 'landlord' | null;
+  /** Whose column the step is counted in — not always the person in `by`. */
+  creditedTo?: string | null;
   /** Where the lease is on the Operations board right now (null = not on the board). */
   stage: string | null;
 }
@@ -1215,6 +1265,13 @@ function StepDrill({ endpoint, from, to, person, personName, drill, periodWord, 
   }, [endpoint, from, to, person, drill]);
   const title = `${drill.label}${drill.mode === 'breached' ? ' — SLA breached' : drill.mode === 'open' ? ' — open tasks' : ''}`;
   const scope = [personName, drill.mode === 'open' ? 'waiting right now' : periodWord].filter(Boolean).join(' · ');
+  /** Records by whose act it was, biggest first — only meaningful when the list
+   *  mixes sides, which is exactly what a merged row does. */
+  const sideSplit = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const r of data?.records ?? []) { const k = r.side ?? 'team'; c.set(k, (c.get(k) ?? 0) + 1); }
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+  }, [data]);
   return (
     <div onClick={dismiss} className={`slideover-scrim${closing ? ' closing' : ''}`}
       style={{ position: 'fixed', inset: 0, background: 'rgba(20,30,25,.46)', display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end', zIndex: 50 }}>
@@ -1225,6 +1282,22 @@ function StepDrill({ endpoint, from, to, person, personName, drill, periodWord, 
           <div className="min-w-0">
             <h2 className="text-[16px] font-bold text-[var(--neutral-900)] leading-tight">{title}</h2>
             <p className="text-[12px] text-[var(--neutral-400)]">{scope}{data ? ` · ${data.records.length} record${data.records.length === 1 ? '' : 's'} · SLA ${fmtResp(data.slaHours)}` : ''}{data?.inferred ? ' · whose queue is inferred, not who did it' : ''}</p>
+            {/* A merged row holds two parties' work — Contract Signature is the
+                landlord's and the customer's under one heading. Say the split
+                out loud rather than leaving it to be counted down the list. */}
+            {sideSplit.length > 1 && (
+              <p className="mt-1 flex items-center gap-2 flex-wrap">
+                {sideSplit.map(([side, n]) => (
+                  <span key={side} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    style={side === 'landlord' ? { background: '#eef0fa', color: '#3a4a7f' }
+                      : side === 'customer' ? { background: '#fdf6ea', color: '#8a6410' }
+                        : { background: '#ecfdf5', color: '#166534' }}>
+                    {nfmt(n)} {side === 'landlord' ? 'landlord' : side === 'customer' ? 'customer' : 'team'}
+                    {n === 1 ? ' signature' : ' signatures'}
+                  </span>
+                ))}
+              </p>
+            )}
           </div>
         </header>
         <div className="flex-1 overflow-auto px-6 py-4">
@@ -1260,8 +1333,17 @@ function StepDrill({ endpoint, from, to, person, personName, drill, periodWord, 
                         // Whose act, and which step — the two things a row loses
                         // when several counters are shown under one heading.
                         const party = r.side === 'customer' ? 'Customer' : r.side === 'landlord' ? 'Landlord' : null;
-                        const bits = [drill.key === 'all' ? r.step : null, party].filter(Boolean);
-                        return bits.length ? <div className="text-[11.5px] text-[var(--neutral-400)]">{bits.join(' · ')}</div> : null;
+                        return (party || (drill.key === 'all' && r.step)) ? (
+                          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {party && (
+                              <span className="inline-flex rounded px-1.5 py-px text-[10px] font-bold uppercase tracking-wide"
+                                style={r.side === 'landlord' ? { background: '#eef0fa', color: '#3a4a7f' } : { background: '#fdf6ea', color: '#8a6410' }}>
+                                {party}
+                              </span>
+                            )}
+                            {drill.key === 'all' && r.step && <span className="text-[11.5px] text-[var(--neutral-400)]">{r.step}</span>}
+                          </div>
+                        ) : null;
                       })()}
                     </td>
                     <td className="px-3 py-2.5 text-[var(--neutral-700)] whitespace-nowrap">{r.stage ?? <span className="text-[var(--neutral-400)]">{r.kind === 'contract' ? 'Not on the board' : '—'}</span>}</td>
@@ -1271,7 +1353,18 @@ function StepDrill({ endpoint, from, to, person, personName, drill, periodWord, 
                         : (r.at ? `${fmtDay(r.at)}, ${fmtTime(r.at)}` : '—')}
                     </td>
                     <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap font-semibold ${r.waitHours == null ? 'text-[var(--neutral-400)]' : r.breached ? 'text-rose-700' : 'text-emerald-700'}`}>{fmtResp(r.waitHours)}</td>
-                    <td className="px-3 py-2.5 text-[var(--neutral-700)]">{r.by ?? <span className="text-[var(--neutral-400)]">—</span>}</td>
+                    <td className="px-3 py-2.5 text-[var(--neutral-700)]">
+                      {/* Two people can sit on one row: the step is counted
+                          against whoever's login captured it, while the paper
+                          was signed by somebody else (a POA holder, the
+                          customer). Showing one alone reads as a contradiction. */}
+                      {r.creditedTo && r.by && r.creditedTo !== r.by ? (
+                        <>
+                          <div>{r.creditedTo}</div>
+                          <div className="text-[11.5px] text-[var(--neutral-500)] leading-snug">signed by {r.by}</div>
+                        </>
+                      ) : (r.creditedTo ?? r.by ?? <span className="text-[var(--neutral-400)]">—</span>)}
+                    </td>
                     <td className="pl-3 py-2.5 text-right whitespace-nowrap">
                       {r.href && <Link href={r.href} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--primary-dark)] hover:underline">Open <ExternalLink size={11} /></Link>}
                     </td>
