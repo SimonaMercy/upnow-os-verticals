@@ -134,6 +134,7 @@ const typeLabel = (t: string) => TYPE_LABELS[t] ?? t.replace(/_/g, ' ').replace(
 // reason is on the amount, so a struck-through figure is never a mystery.
 const EXCLUDED_WHY: Record<string, string> = {
   cancelled:        'Cancelled — voided, never collected, so not in any subtotal',
+  swapped:          'Replaced — the customer swapped this cheque; the money came in on the replacement row, which IS counted',
   'bounce-replaced': 'Bounced and made good — the replacement cheque carries this money instead',
   // Cash Management reports the same cheque as "bounced, still owed" beside its
   // total rather than inside it; this page now agrees with it.
@@ -205,7 +206,7 @@ interface PaymentRow {
   // answer — a ledger that hides rows is not one — but the category subtotals
   // honour it, so they agree with Payment Grouping and Fee & VAT.
   countsTowardTotals?: boolean;
-  excludedReason?: 'cancelled' | 'bounce-replaced' | 'bounced-owed' | null;
+  excludedReason?: 'cancelled' | 'swapped' | 'bounce-replaced' | 'bounced-owed' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;

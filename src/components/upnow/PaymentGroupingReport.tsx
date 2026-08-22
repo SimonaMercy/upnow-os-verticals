@@ -46,7 +46,7 @@ interface PaymentRow {
   // Management and Fee & VAT apply. A statement must not total a cheque that was
   // voided, nor a bounce whose replacement is already in the list.
   countsTowardTotals?: boolean;
-  excludedReason?: 'cancelled' | 'bounce-replaced' | null;
+  excludedReason?: 'cancelled' | 'swapped' | 'bounce-replaced' | null;
   // Rent VAT the contract holds as a RATE with no row of its own, apportioned to
   // this cheque (fils). Reconstructed server-side by `shared/rent-vat-basis.ts`,
   // so this report and Fee & VAT declare the same output VAT.
@@ -619,14 +619,17 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           </p>
           <p className="text-xs text-[#6b6860] mt-1">
             A cancelled cheque was voided and never collected. A bounced cheque
-            that was made good is already represented by its replacement, which
-            IS counted — including both would state the same money twice.
+            that was made good, and a cheque the customer swapped, are already
+            represented by their replacement, which IS counted — including both
+            would state the same money twice.
           </p>
           <ul className="mt-2 text-xs text-[#6b6860] space-y-0.5">
             {excludedRows.map(d => (
               <li key={d.id}>
                 {d.contractRef ?? '—'} · {d.building ?? '—'} {d.unit ?? ''} · {itemLabel(itemKeyOf(d))} · {fmtAed(Number(d.amount) || 0)}
-                {' · '}{d.excludedReason === 'cancelled' ? 'cancelled' : 'bounced, replaced'}
+                {' · '}{d.excludedReason === 'cancelled' ? 'cancelled'
+                  : d.excludedReason === 'swapped' ? 'swapped by the customer, replaced'
+                  : 'bounced, replaced'}
               </li>
             ))}
           </ul>

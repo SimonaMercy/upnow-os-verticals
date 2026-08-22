@@ -73,6 +73,14 @@ export interface ReceiptPayment {
   chequeStatus: string | null;
   paymentMethod?: string | null;
   transactionDate: string | null;
+  /** The cheque this row was recorded against — one that bounced, or one the
+   *  customer swapped (migration 0184 / 0245). A customer handed a SECOND
+   *  receipt for an instalment they thought they had already paid needs the
+   *  receipt itself to say why, or it reads as being billed twice. */
+  replacesPaymentId?: number | null;
+  /** Why a cancelled cheque was cancelled (0245) — 'replaced' says the customer
+   *  swapped it, which is what makes the two receipts one story. */
+  cancellationReason?: string | null;
 }
 
 export interface ReceiptContract {
@@ -157,7 +165,7 @@ interface Props {
   contract: ReceiptContract;
   selectedId?: number | null;
   selectedIdx?: number;
-  kind?: 'deposit' | 'contract' | 'rental' | 'management' | 'vat' | 'all' | null;
+  kind?: 'deposit' | 'contract' | 'rental' | 'management' | 'vat' | 'charges' | 'replacements' | 'all' | null;
 }
 
 // ─── Model helpers ──────────────────────────────────────────────────────────
@@ -218,6 +226,32 @@ const FEE_TYPES = new Set(['admin_fee', 'ejari_fee', 'commission']);
 function isFee(p: ReceiptPayment): boolean {
   return FEE_TYPES.has((p.paymentType ?? '').toLowerCase());
 }
+/**
+ * What the customer is charged when a cheque FAILS — the bank returning it, the
+ * customer swapping it before it is banked, or deferring it.
+ *
+ * These are not management fees. An administration fee is what the landlord
+ * charges to set a tenancy up; a bounce penalty is what it charges because
+ * something went wrong, and putting the two on one "Management Fee" page tells
+ * the customer they were billed for administration when they were billed for a
+ * returned cheque. They print on their own page, named for the cheque that
+ * caused them.
+ *
+ * Before this they printed NOWHERE. A `cheque_replacement_fee` row is filed by
+ * the API under `fees` (it is in FEE_PAYMENT_TYPES), but every builder here read
+ * `isFee`, which listed three types and not these — so contract 178's AED 500
+ * fee was issued a real gapless number, RCP-2-2026-00384, that appeared on no
+ * document anybody could hand over.
+ */
+const CHEQUE_CHARGE_TYPES = new Set(['bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee']);
+function isChequeCharge(p: ReceiptPayment): boolean {
+  return CHEQUE_CHARGE_TYPES.has((p.paymentType ?? '').toLowerCase());
+}
+const CHEQUE_CHARGE_LABEL: Record<string, string> = {
+  bounced_cheque_fee: 'Bounced Cheque Charge',
+  cheque_replacement_fee: 'Cheque Replacement Charge',
+  cheque_deferral_fee: 'Cheque Deferral Charge',
+};
 /** VAT collected as its own cheque (Rental VAT / Fees VAT), payment_type 'vat'. */
 const isVat = isVatCheque;
 /** Government / other pass-through charges printed under the receipt's Government
@@ -241,7 +275,11 @@ function isGovernment(p: ReceiptPayment): boolean {
 }
 function isRental(p: ReceiptPayment): boolean {
   const t = (p.paymentType ?? '').toLowerCase();
-  return t !== 'security_deposit' && !GOVT_TYPES.has(t) && !FEE_TYPES.has(t);
+  // Cheque charges are excluded explicitly. This function decides by exclusion,
+  // so any type it has not been told about falls through to RENT — which would
+  // have printed a bounce penalty as rental income had one of these rows ever
+  // been filed under `payments` instead of `fees`.
+  return t !== 'security_deposit' && !GOVT_TYPES.has(t) && !FEE_TYPES.has(t) && !CHEQUE_CHARGE_TYPES.has(t);
 }
 const FEE_LABEL: Record<string, string> = {
   admin_fee: 'Administration Fee', ejari_fee: 'Contract Registration Fee', commission: 'Commission',
@@ -268,7 +306,7 @@ interface LineItem {
   receiptVoided?: boolean;
 }
 interface Receipt {
-  kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management' | 'vat';
+  kind: 'deposit' | 'rent' | 'fee' | 'contract' | 'rental' | 'management' | 'vat' | 'charges' | 'replacements';
   title: string;
   receiptNo: string;
   /** receiptNo is the payment-plan number (PP-*) rather than a receipt number
@@ -289,7 +327,7 @@ interface Receipt {
  * receipt number anywhere to tell them apart. The base stays the real plan ref, so
  * a suffixed reference still reconciles straight back to the plan.
  */
-const SEG_SUFFIX = { rental: 'R', deposit: 'D', management: 'M', vat: 'T', contract: 'C' } as const;
+const SEG_SUFFIX = { rental: 'R', deposit: 'D', management: 'M', vat: 'T', contract: 'C', charges: 'H', replacements: 'P' } as const;
 function planSegRef(contract: ReceiptContract, seg: keyof typeof SEG_SUFFIX): string | null {
   const plan = contract.paymentRefs?.planRefNo;
   return plan ? `${plan}/${SEG_SUFFIX[seg]}` : null;
@@ -323,6 +361,98 @@ function depositRefNo(contract: ReceiptContract, sel: ReceiptPayment): { no: str
   return seg ? { no: seg, plan: true } : null;
 }
 
+/**
+ * "Replaces cheque #000023, swapped" — the sentence that stops a second receipt
+ * for the same instalment reading as a second bill.
+ *
+ * When a cheque fails, the customer pays that instalment again by another means
+ * and receives a receipt for it. Without this line they hold two receipts of the
+ * same amount for the same month and no way to tell they are one payment. The
+ * cheque it names is looked up among the contract's own rows, so the number
+ * printed is the one on the paper they handed over.
+ */
+function replacesCaption(row: ReceiptPayment, contract: ReceiptContract): string | null {
+  if (row.replacesPaymentId == null) return null;
+  const target = [...(contract.payments ?? []), ...(contract.fees ?? [])]
+    .find(p => p.id === row.replacesPaymentId);
+  if (!target) return 'Replaces an earlier cheque';
+  const what = target.chequeNumber ? `cheque #${target.chequeNumber}` : `payment #${target.id}`;
+  const how = (target.chequeStatus ?? '').toLowerCase() === 'bounced'
+    ? 'returned unpaid'
+    : (target.cancellationReason ?? '').toLowerCase() === 'replaced'
+      ? 'swapped before it was banked'
+      : 'no longer in the schedule';
+  return `Replaces ${what} — ${how}`;
+}
+
+/**
+ * The money paid to make good a cheque that failed — its own receipt.
+ *
+ * When a cheque bounces or the customer swaps it, the instalment is paid again
+ * by another means. That is NEW money on a NEW date by a NEW method, and it
+ * takes its own receipt: adding it to the Rent Income page would re-issue a
+ * document the customer already holds, with a different total and no way for
+ * them to see what moved. A separate receipt says exactly one thing — "we
+ * received this, against that cheque" — which is what they need to file.
+ *
+ * Each line names the cheque it replaced, so the pair reads as one story from
+ * either end.
+ */
+function buildReplacementReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]): Receipt | null {
+  const rows = rentals.filter(p => p.replacesPaymentId != null);
+  if (!rows.length) return null;
+  const lines: LineItem[] = rows.map(p => {
+    const gross = p.amount || 0;
+    const vat = p.vatAmount || 0;
+    return {
+      desc: replacesCaption(p, contract) ?? 'Replacement payment',
+      net: Math.max(0, round2(gross - vat)), vat, total: gross,
+      date: p.transactionDate ?? null,
+      method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
+      receiptNo: contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null,
+      receiptVoided: !!contract.paymentRefs?.voidedPaymentIds?.has(p.id),
+    };
+  });
+  const seg = planSegRef(contract, 'replacements');
+  return {
+    kind: 'replacements', title: 'REPLACEMENT PAYMENTS RECEIPT',
+    receiptNo: seg ?? `RCP-${contract.ref}-REP`, numberIsPlanRef: !!seg,
+    date: lines[0]?.date ?? null, lines,
+  };
+}
+
+/**
+ * The charges raised because a cheque failed, as their own receipt.
+ *
+ * One page for the lease, a line per charge, each naming the cheque it was
+ * raised for. Nothing is invented: a charge appears here only if it exists as a
+ * row, and only cleared rows carry an issued receipt number.
+ */
+function buildChequeChargeReceipt(contract: ReceiptContract): Receipt | null {
+  const rows = [...(contract.payments ?? []), ...(contract.fees ?? [])].filter(isChequeCharge);
+  if (!rows.length) return null;
+  const lines: LineItem[] = rows.map(r => {
+    const gross = r.amount || 0;
+    const vat = r.vatAmount || 0;
+    const against = replacesCaption(r, contract);
+    return {
+      desc: [r.description || CHEQUE_CHARGE_LABEL[(r.paymentType ?? '').toLowerCase()] || 'Cheque charge',
+        against].filter(Boolean).join(' · '),
+      net: round2(gross - vat), vat, total: gross,
+      date: r.transactionDate ?? null,
+      method: methodLabel(r, contract), reference: r.chequeNumber ?? null,
+      receiptNo: contract.paymentRefs?.receiptByPaymentId?.[r.id] ?? null,
+      receiptVoided: contract.paymentRefs?.voidedPaymentIds?.has(r.id) ?? false,
+    };
+  });
+  const seg = planSegRef(contract, 'charges');
+  return {
+    kind: 'charges', title: 'CHEQUE CHARGES RECEIPT',
+    receiptNo: seg ?? `RCP-${contract.ref}-CHG`, numberIsPlanRef: !!seg,
+    date: lines[0]?.date ?? null, lines,
+  };
+}
+
 function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rentals: ReceiptPayment[]): Receipt {
   const type = (sel.paymentType ?? '').toLowerCase();
   const gross = sel.amount || 0;
@@ -348,6 +478,18 @@ function buildSingleReceipt(sel: ReceiptPayment, contract: ReceiptContract, rent
     return { kind: 'fee', title: 'FEE RECEIPT',
       receiptNo: realNo ?? `RCP-${contract.ref}-${code}`, date: sel.transactionDate, single: sel,
       lines: [{ desc: sel.description || FEE_LABEL[type] || 'Fee', net, vat, total: gross, date: sel.transactionDate ?? null, ...meta }] };
+  }
+  if (isChequeCharge(sel)) {
+    // Its own title, not "FEE RECEIPT" — the customer is being charged because a
+    // cheque failed, and the document should say so rather than reading like
+    // another administration fee.
+    const against = replacesCaption(sel, contract);
+    return { kind: 'charges', title: 'CHEQUE CHARGE RECEIPT',
+      receiptNo: realNo ?? `RCP-${contract.ref}-CHG`, date: sel.transactionDate, single: sel,
+      lines: [{
+        desc: [sel.description || CHEQUE_CHARGE_LABEL[type] || 'Cheque charge', against].filter(Boolean).join(' · '),
+        net, vat, total: gross, date: sel.transactionDate ?? null, ...meta,
+      }] };
   }
   if (isGovernment(sel)) {
     // A pure VAT cheque — or an "Other" charge whose label declares it tax at the
@@ -452,16 +594,46 @@ function buildRentalReceipt(contract: ReceiptContract, rentals: ReceiptPayment[]
   // that bundle here so the Rent receipt shows pure rent (the fees live on the
   // Management Fee receipt instead).
   const { legacyBundle } = feeLinesOf(contract, rentals);
-  const lines: LineItem[] = rentals.map((p, i) => {
+  // THE RENT RECEIPT IS THE SCHEDULE, and only the schedule. The instalments the
+  // lease was agreed at, each at its own value, numbered 1..N.
+  //
+  // A REPLACEMENT IS NOT AN INSTALMENT. When a cheque fails the customer pays
+  // that instalment again, so the lease carries more rent rows than it has
+  // instalments. Listing them here printed "Installment 5 of 4" and totalled one
+  // instalment twice — AED 61,875 on a lease of four 12,375 cheques, on a
+  // document headed "AMOUNT RECEIVED" and handed to the customer.
+  //
+  // They are not merely re-labelled here, they are REMOVED: a receipt already
+  // issued for a lease must not change because something happened afterwards.
+  // The replacement is new money and takes a new receipt of its own
+  // (buildReplacementReceipt), which is where it belongs — a customer given a
+  // corrected copy of a document they already hold cannot tell what changed,
+  // whereas a second document is unambiguous.
+  const scheduled = rentals.filter(p => p.replacesPaymentId == null);
+  const lines: LineItem[] = scheduled.map((p, i) => {
     const gross = p.amount || 0;
     const vat = p.vatAmount || 0;
     let net = Math.max(0, round2(gross - vat));
     if (i === 0 && legacyBundle > 0) net = Math.max(0, round2(net - legacyBundle));
-    return { desc: `Rent — Installment ${i + 1} of ${n}`, net, vat, total: round2(net + vat), date: p.transactionDate ?? null,
+    // The instalment keeps its agreed value whatever became of the cheque —
+    // this page states what the tenancy was agreed at. What became of it is
+    // said in a note, which changes no figure: a receipt that reads "paid by
+    // cheque 000023" without qualification, when that cheque was handed back,
+    // would be untrue.
+    const status = (p.chequeStatus ?? '').toLowerCase();
+    const failed = status === 'bounced' ? 'this cheque was returned unpaid — see the Replacements receipt'
+      : status === 'cancelled' && (p.cancellationReason ?? '').toLowerCase() === 'replaced'
+        ? 'this cheque was swapped — see the Replacements receipt'
+      : status === 'cancelled' ? 'this cheque was cancelled' : null;
+    return {
+      desc: `Rent — Installment ${i + 1} of ${n}${failed ? ` (${failed})` : ''}`,
+      net, vat, total: round2(net + vat),
+      date: p.transactionDate ?? null,
       method: methodLabel(p, contract), reference: p.chequeNumber ?? null,
       receiptNo: contract.paymentRefs?.receiptByPaymentId?.[p.id] ?? null,
       receiptVoided: !!contract.paymentRefs?.voidedPaymentIds?.has(p.id) };
   });
+  if (!lines.length) return null;
   // Aggregate statement → reference the payment plan (each cleared cheque carries
   // its own gapless receipt number on its line); never a fake "-RENT" number.
   return { kind: 'rental', title: 'RENT INCOME RECEIPT',
@@ -598,12 +770,17 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   const payments = contract.payments ?? [];
   // Fee rows live in their own array — include them so a per-fee receipt
   // (?pid=<feeRowId>) resolves to the right admin/ejari/commission line.
-  const all = [...payments, ...((contract.fees ?? []).filter(isFee))];
+  // Cheque charges live in `fees` too and are NOT `isFee` — including them is
+  // what lets `?pid=<chargeRowId>` resolve to its own receipt instead of falling
+  // through to whatever payment happens to sit at that index.
+  const all = [...payments, ...((contract.fees ?? []).filter(f => isFee(f) || isChequeCharge(f)))];
   const rentals = payments.filter(isRental);
   if (kind === 'contract') return buildContractReceipt(contract, payments);
   if (kind === 'rental') return buildRentalReceipt(contract, rentals);
   if (kind === 'management') return buildManagementReceipt(contract, rentals);
   if (kind === 'vat') return buildVatReceipt(contract);
+  if (kind === 'charges') return buildChequeChargeReceipt(contract);
+  if (kind === 'replacements') return buildReplacementReceipt(contract, rentals);
   if (kind === 'deposit') {
     const dep = resolveDeposit(contract);
     return dep ? buildSingleReceipt(dep, contract, rentals) : null;
@@ -625,10 +802,15 @@ function buildAllReceipts(contract: ReceiptContract): Receipt[] {
   const out: Receipt[] = [];
   const rent = buildRentalReceipt(contract, rentals);
   if (rent) out.push(rent);
+  // Directly after the schedule it corrects, and before the charge it caused.
+  const repl = buildReplacementReceipt(contract, rentals);
+  if (repl) out.push(repl);
   const dep = resolveDeposit(contract);
   if (dep) { const d = buildSingleReceipt(dep, contract, rentals); if (d) out.push(d); }
   const mgmt = buildManagementReceipt(contract, rentals);
   if (mgmt) out.push(mgmt);
+  const charges = buildChequeChargeReceipt(contract);
+  if (charges) out.push(charges);
   const vat = buildVatReceipt(contract);
   if (vat) out.push(vat);
   return out;
@@ -879,6 +1061,8 @@ function EmptyDoc({ kind }: { kind: Props['kind'] }) {
         <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
           {kind === 'deposit' ? 'No security deposit is recorded for this contract.'
             : kind === 'management' ? 'No management fees (Contract Registration, admin or commission) are recorded for this contract.'
+            : kind === 'charges' ? 'No cheque charges are recorded for this contract — no cheque has bounced, been swapped or been deferred.'
+            : kind === 'replacements' ? 'No replacement payments are recorded for this contract — every cheque on the schedule stands as it was issued.'
             : kind === 'rental' ? 'No rent payments are recorded for this contract yet.'
             : 'No payments are available to receipt for this contract yet.'}
         </Text>
@@ -974,6 +1158,8 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
   // it's hidden for a contract whose only Third Party line is the Ejari 172.50.
   const hasEjariGov = (contract.fees ?? []).some(f => (f.paymentType ?? '').toLowerCase() === 'ejari_fee' && (f.amount || 0) > 0);
   const hasVat = payments.some(isGovernment) || hasEjariGov;
+  const hasCharges = [...payments, ...(contract.fees ?? [])].some(isChequeCharge);
+  const hasReplacements = payments.some(p => isRental(p) && p.replacesPaymentId != null);
   const tab = (active: boolean): React.CSSProperties => ({ margin: '0 3px', color: active ? NAVY : '#9ca3af', fontWeight: active ? 700 : 400, textDecoration: 'none', fontSize: 12 });
 
   return (
@@ -985,7 +1171,7 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
           </p>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>
             {combined
-              ? [isRenewalContract(contract) ? 'Rental income' : 'Rental income · security deposit', 'management fee', hasVat ? 'third party' : null].filter(Boolean).join(' · ') + ' — one file'
+              ? [isRenewalContract(contract) ? 'Rental income' : 'Rental income · security deposit', hasReplacements ? 'replacements' : null, 'management fee', hasCharges ? 'cheque charges' : null, hasVat ? 'third party' : null].filter(Boolean).join(' · ') + ' — one file'
               : 'System-generated payment receipt'}
           </p>
         </div>
@@ -994,7 +1180,9 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
             <a href="?kind=all" style={tab(combined)}>All</a>
             {hasRental && <a href="?kind=rental" style={tab(!combined && receipt?.kind === 'rental')}>Rental Income</a>}
             {hasDeposit && <a href="?kind=deposit" style={tab(!combined && receipt?.kind === 'deposit')}>Security Deposit</a>}
+            {hasReplacements && <a href="?kind=replacements" style={tab(!combined && receipt?.kind === 'replacements')}>Replacements</a>}
             {hasManagement && <a href="?kind=management" style={tab(!combined && receipt?.kind === 'management')}>Management Fee</a>}
+            {hasCharges && <a href="?kind=charges" style={tab(!combined && receipt?.kind === 'charges')}>Cheque Charges</a>}
             {hasVat && <a href="?kind=vat" style={tab(!combined && receipt?.kind === 'vat')}>Third Party</a>}
           </span>
           <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>

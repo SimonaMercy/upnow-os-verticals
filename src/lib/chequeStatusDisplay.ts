@@ -32,14 +32,37 @@
  * a plain `bounced` row with money outstanding, and the payment table spells the
  * shortfall out next to the description ("Part-replaced — X of Y · Z still
  * owed"), which is more use than a chip could be.
+ *
+ * ── A cancelled cheque says WHY (migration 0245) ────────────────────────────
+ *
+ * "Cancelled" was doing three jobs at once, and a manager could not tell them
+ * apart on the row:
+ *
+ *   Replaced                    the customer SWAPPED it — the rent was collected
+ *                               on another row, which is linked to this one
+ *   Cancelled · Returned        the paper went back and nothing replaced it
+ *   Cancelled · Lease cancelled the tenancy was cancelled, voiding the schedule
+ *   Cancelled                   cancelled before 0245; nobody recorded a reason
+ *
+ * A swapped cheque reads "Replaced" and never "Cleared": the bank never saw it,
+ * however completely the money that replaced it has since cleared. It keeps the
+ * muted cancelled palette rather than the bounce's red, because nothing went
+ * wrong — the customer paid, just by another route.
+ *
+ * None of this moves a figure. Cancelled cheques are excluded from every total
+ * either way; this only says what became of one.
  */
 
 export type ChequeTone = 'cleared' | 'pending' | 'bounced' | 'cancelled';
 
 export interface ChequeStatusRow {
   chequeStatus?: string | null;
-  /** Server-derived: 'cleared' | 'replaced' on a bounce covered in full. */
+  /** Server-derived: 'cleared' | 'replaced' on a bounce covered in full, and
+   *  'replaced' on a cancelled cheque the customer swapped. */
   effectiveStatus?: string | null;
+  /** Why a cancelled cheque was cancelled (`payments.cancellation_reason`):
+   *  'replaced' | 'returned_to_customer' | 'lease_cancelled'. */
+  cancellationReason?: string | null;
 }
 
 export interface ChequeStatusDisplay {
@@ -47,10 +70,11 @@ export interface ChequeStatusDisplay {
   label: string;
   /** Which palette to use — maps to `.cstat.<tone>` on the RP contract page. */
   tone: ChequeTone;
-  /** True when this is a bounce that has been made good; the status control is
-   *  withheld on those rows, since flipping one without first voiding its
-   *  replacement would count the rent twice. */
-  settledBounce: boolean;
+  /** True when the row's status is decided by a replacement link — a bounce that
+   *  has been made good, or a cheque the customer swapped. The status control is
+   *  withheld on those rows: flipping one without first voiding its replacement
+   *  would count the rent twice. */
+  statusLocked: boolean;
 }
 
 const TITLE: Record<string, string> = {
@@ -60,22 +84,43 @@ const TITLE: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+/** How each cancellation reads. A reason we do not recognise falls through to
+ *  the plain word rather than being printed raw at the customer. */
+const CANCELLED_LABEL: Record<string, string> = {
+  replaced: 'Replaced',
+  returned_to_customer: 'Cancelled · Returned',
+  lease_cancelled: 'Cancelled · Lease cancelled',
+};
+
 export function chequeStatusDisplay(p: ChequeStatusRow): ChequeStatusDisplay {
   const stored = String(p.chequeStatus ?? 'pending').toLowerCase();
   const effective = p.effectiveStatus == null ? null : String(p.effectiveStatus).toLowerCase();
+  const reason = p.cancellationReason == null ? null : String(p.cancellationReason).toLowerCase();
 
-  // `effectiveStatus` only ever diverges on a bounce covered in full, and it
-  // says whether the replacement is banked ('cleared') or still pending
+  if (stored === 'cancelled') {
+    // A swapped cheque is locked the moment money points at it, for the same
+    // reason a settled bounce is: un-cancelling it while its replacement stands
+    // would leave the same rent counted on two rows.
+    const swapped = reason === 'replaced';
+    return {
+      label: (reason && CANCELLED_LABEL[reason]) ?? TITLE.cancelled,
+      tone: 'cancelled',
+      statusLocked: swapped && effective === 'replaced',
+    };
+  }
+
+  // `effectiveStatus` otherwise only diverges on a bounce covered in full, and
+  // it says whether the replacement is banked ('cleared') or still pending
   // ('replaced'). Either way the row stays red and stays named as a bounce.
   if (effective && effective !== stored) {
     return {
       label: effective === 'cleared' ? 'Bounced · Replaced' : 'Bounced · Replacement pending',
       tone: 'bounced',
-      settledBounce: true,
+      statusLocked: true,
     };
   }
 
   const tone: ChequeTone =
-    stored === 'cleared' || stored === 'bounced' || stored === 'cancelled' ? stored : 'pending';
-  return { label: TITLE[tone] ?? TITLE.pending, tone, settledBounce: false };
+    stored === 'cleared' || stored === 'bounced' ? stored : 'pending';
+  return { label: TITLE[tone] ?? TITLE.pending, tone, statusLocked: false };
 }

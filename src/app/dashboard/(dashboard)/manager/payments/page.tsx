@@ -168,7 +168,7 @@ interface PaymentRow {
   // — a ledger that hides rows is not one — but the subtotals honour it, so a
   // manager and their landlord read the identical figures.
   countsTowardTotals?: boolean;
-  excludedReason?: 'cancelled' | 'bounce-replaced' | 'bounced-owed' | null;
+  excludedReason?: 'cancelled' | 'swapped' | 'bounce-replaced' | 'bounced-owed' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;

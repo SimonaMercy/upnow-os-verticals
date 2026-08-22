@@ -114,10 +114,16 @@ interface ContractPayment {
    *  link is what takes the bounce off the dashboards — until it exists, the
    *  landlord keeps being chased for rent the customer has already made good. */
   replacesPaymentId?: number | null;
+  /** WHY a cancelled cheque was cancelled (`payments.cancellation_reason`):
+   *  'replaced' — the customer swapped it and the money is on a linked row;
+   *  'returned_to_customer' / 'lease_cancelled' — genuine voids, nothing came in
+   *  its place and nothing may be linked to it. */
+  cancellationReason?: string | null;
   /** What this row should READ as. Same as chequeStatus except on a bounce that
-   *  has since been covered: 'cleared' once the replacement money is banked,
-   *  'replaced' while that cheque is still pending. Server-derived so every
-   *  surface agrees; `chequeStatus` remains the stored truth. */
+   *  has since been covered ('cleared' once the replacement money is banked,
+   *  'replaced' while that cheque is still pending) and on a cheque the customer
+   *  swapped, which reads 'replaced' and never 'cleared'. Server-derived so
+   *  every surface agrees; `chequeStatus` remains the stored truth. */
   effectiveStatus?: string | null;
 }
 
@@ -830,7 +836,7 @@ interface StepHandlers {
   onApproveDocWithExpiry: (docId: number, expiryDate: string) => Promise<void>;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
-  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string; documentId?: number | null }) => Promise<void>;
+  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string; documentId?: number | null; cancellationReason?: string | null }) => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -2241,6 +2247,27 @@ const RULE_FEE_DEFS: { pt: string; label: string; feeK: string; pctK: string; mo
   { pt: 'contract_name_change_fee', label: 'Contract name change', feeK: 'contractNameChangeFee', pctK: 'contractNameChangePct' },
   { pt: 'unit_transfer_fee', label: 'Unit transfer', feeK: 'unitTransferFee', pctK: 'unitTransferPct' },
 ];
+
+/**
+ * WHY a cheque was cancelled (migration 0245) — the words a manager picks from,
+ * and the words the schedule reads back. Only `replaced` means the money was
+ * collected somewhere else, and only it may carry a link to the payment that
+ * took its place; the other two are genuine voids.
+ */
+type CancelReason = 'replaced' | 'returned_to_customer' | 'lease_cancelled';
+const CANCEL_REASONS: { key: CancelReason; label: string; hint: string }[] = [
+  { key: 'replaced', label: 'Replaced — the customer swapped it',
+    hint: 'The rent is still being collected, on another row. Record that payment next and link it here.' },
+  { key: 'returned_to_customer', label: 'Returned to the customer',
+    hint: 'The cheque went back and nothing came in its place.' },
+  { key: 'lease_cancelled', label: 'The lease was cancelled',
+    hint: 'The tenancy itself was cancelled, voiding the whole schedule.' },
+];
+const CANCEL_REASON_WORD: Record<string, string> = {
+  replaced: 'swapped by the customer',
+  returned_to_customer: 'returned to the customer',
+  lease_cancelled: 'voided with the lease',
+};
 const RULE_FEE_LABELS: Record<string, string> = Object.fromEntries(RULE_FEE_DEFS.map(d => [d.pt, d.label]));
 /** Charges the tenancy INCURS along the way — a bounced cheque, a late renewal, a
  *  replacement access card. Real money, and they belong in the ledger; but they are
@@ -2535,6 +2562,47 @@ function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amou
 /** Inline gapless receipt number shown under a payment/deposit/fee row. Struck
  *  through and tagged "VOID" when the receipt was soft-voided (its cheque was
  *  reverted from cleared) — the number is retained for the gapless series. */
+/**
+ * "Download the receipt for THIS row and send it to the customer."
+ *
+ * The receipt for a single payment has always existed — `/print/receipt?pid=`
+ * renders it — but the only way to reach one was through the combined Receipts
+ * document in the binder and then hunting for the right page. When a cheque
+ * bounces or is swapped, the manager is on this row, in this conversation, and
+ * needs exactly two files: the receipt for the money that replaced it, and the
+ * receipt for the charge. So the link sits where the work happens — beside the
+ * status control that just changed.
+ *
+ * Offered ONLY once the row has an issued receipt number. A receipt is proof
+ * money arrived; rendering one for a pending cheque would hand the customer a
+ * document saying they had paid something they have not. A voided number says so
+ * on its face rather than being hidden, because a customer holding the voided
+ * copy needs to be able to tell it apart from the live one.
+ */
+function ReceiptDownload({ refs, id, base }: { refs: PaymentRefs; id: number; base: string }) {
+  const ref = refs.receiptByPaymentId?.[id];
+  if (!ref) return null;
+  const isVoid = !!refs.voidedPaymentIds?.has(id);
+  return (
+    <a
+      className="mini-btn view"
+      href={`${base}?pid=${id}`}
+      target="_blank"
+      rel="noreferrer"
+      // Icon only: the status cell already carries a dropdown and an Edit
+      // button, and a third labelled control wrapped the row. The number lives
+      // in the tooltip and is printed under the description besides.
+      aria-label={isVoid ? `Receipt ${ref} — voided` : `Download receipt ${ref}`}
+      title={isVoid
+        ? `Receipt ${ref} — VOIDED (the cheque was reverted). Open it to see the void notice.`
+        : `Open receipt ${ref} to download and send to the customer`}
+      style={{ padding: '3px 6px', ...(isVoid ? { color: 'var(--brick)' } : null) }}
+    >
+      <Download size={13} />
+    </a>
+  );
+}
+
 function ReceiptRefTag({ refs, id, kind = 'payment' }: { refs: PaymentRefs; id: number; kind?: 'payment' | 'deposit' }) {
   // A register-booked deposit is numbered against security_deposits.id, a payment
   // against payments.id — two separate id spaces, never interchangeable.
@@ -2594,14 +2662,21 @@ function DetailsDrawer({
   onRecordPayment: (body: {
     description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
     chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
-    /** The bounced cheque on this contract that this payment makes good. */
+    /** The cheque on this contract that this payment makes good — one that
+     *  bounced, or one the customer swapped (cancelled, reason 'replaced'). */
     replacesPaymentId?: number | null;
+    /** Raise the bounce / replacement charge in the same action, linked to the
+     *  same cheque. Omitted or 0 raises nothing. */
+    replacementFee?: number;
   }) => Promise<void>;
   /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / VAT / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
     documentId?: number | null; replacesPaymentId?: number | null;
+    /** Why a cheque is being cancelled — required when moving it into
+     *  `cancelled` (migration 0245). */
+    cancellationReason?: string | null;
   }) => Promise<void>;
   /** DELETE /api/contracts/:id/payments/:paymentId — remove a fee / payment line. */
   onDeletePayment: (paymentId: number) => Promise<void>;
@@ -2655,6 +2730,9 @@ function DetailsDrawer({
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
     // '' = an ordinary cheque; an id = this one makes good that bounced cheque.
     replacesPaymentId: '' as number | '',
+    /** The bounce / replacement charge to raise alongside a linked replacement.
+     *  Prefilled from the RP's rule when the link is chosen; '' raises nothing. */
+    replacementFee: '',
   });
   // Which payment types this popup may offer. The popup is opened from a SEGMENT
   // rail ("Add" on Rental Income), so it only ever writes into that segment —
@@ -2742,8 +2820,11 @@ function DetailsDrawer({
         chequeNumber: rec.chequeNumber.trim() || undefined,
         transactionDate: rec.transactionDate || undefined,
         replacesPaymentId: rec.replacesPaymentId === '' ? undefined : rec.replacesPaymentId,
+        // Only meaningful on a linked replacement; the API ignores it otherwise.
+        replacementFee: rec.replacesPaymentId === '' || !Number(rec.replacementFee)
+          ? undefined : Number(rec.replacementFee),
       });
-      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '' });
+      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' });
       setShowRec(false);
     } catch (e) {
       setRecErr(e instanceof Error ? e.message : 'Failed to record payment');
@@ -2751,10 +2832,35 @@ function DetailsDrawer({
       setRecBusy(false);
     }
   };
-  const changeStatus = async (paymentId: number, status: string) => {
+  const changeStatus = async (paymentId: number, status: string, cancellationReason?: string) => {
     setStatusBusy(paymentId);
-    try { await onUpdatePayment(paymentId, { chequeStatus: status }); }
+    try {
+      await onUpdatePayment(paymentId, {
+        chequeStatus: status,
+        ...(status === 'cancelled' ? { cancellationReason } : {}),
+      });
+    }
     finally { setStatusBusy(null); }
+  };
+  // Cancelling asks WHY before it is applied (migration 0245). "Cancelled" had
+  // come to mean three unrelated things — the customer swapped the cheque, the
+  // paper went back, or the lease itself was cancelled — and only the first
+  // leaves money collected on another row. Asking at the moment somebody knows
+  // the answer is the only point at which it is cheap to record; a month later
+  // nobody remembers, which is how the existing rows ended up needing a
+  // migration to work it out from the notes people typed.
+  const [cancelId, setCancelId] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState<CancelReason>('replaced');
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const startCancel = (p: ContractPayment) => {
+    setCancelId(p.id);
+    setCancelReason((p.cancellationReason as CancelReason) ?? 'replaced');
+  };
+  const confirmCancel = async () => {
+    if (cancelId == null) return;
+    setCancelBusy(true);
+    try { await changeStatus(cancelId, 'cancelled', cancelReason); setCancelId(null); }
+    finally { setCancelBusy(false); }
   };
   // ── Deposit editor — only the home/oldest lease that OWNS the record; renewals carry it read-only ──
   const [depEditing, setDepEditing] = useState(false);
@@ -3083,7 +3189,7 @@ function DetailsDrawer({
   // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
   // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
   const openRecordFor = (paymentType: string) => {
-    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '', replacesPaymentId: '' }));
+    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' }));
     setRecTypes([paymentType]);
     setShowAddFee(false); setRecErr(null); setShowRec(true);
   };
@@ -3093,8 +3199,11 @@ function DetailsDrawer({
   // full face value (a part-payment leaves the balance owed, so the API rejects
   // it and the bounce stays open).
   const openReplacementFor = (p: ContractPayment) => {
+    const swapped = isSwapped(p);
     setRec({
-      description: `Payment against bounced cheque${p.chequeNumber ? ` No. ${p.chequeNumber}` : ''}`,
+      description: swapped
+        ? `Replacement for cheque${p.chequeNumber ? ` No. ${p.chequeNumber}` : ''}`
+        : `Payment against bounced cheque${p.chequeNumber ? ` No. ${p.chequeNumber}` : ''}`,
       // Pre-fill what is still SHORT, not the face value — on a bounce already
       // part-paid, the face value would over-collect.
       amount: String(shortfallOf(p)),
@@ -3103,33 +3212,52 @@ function DetailsDrawer({
       chequeNumber: '',
       transactionDate: '',
       replacesPaymentId: p.id,
+      // A swapped cheque carries the replacement fee, a bounced one the bounce
+      // fee — two different rules in Settings → Rules. Prefilled, and the
+      // manager can change it or clear it before saving.
+      replacementFee: feeAutoAmount(swapped ? 'cheque_replacement_fee' : 'bounced_cheque_fee'),
     });
     setRecTypes([p.paymentType ?? 'rental_income']);
     setShowAddFee(false); setRecErr(null); setShowRec(true);
   };
-  // The bounce → replacement links, both directions, so each row can say which
-  // cheques settled it / which one it goes against. A cancelled replacement
-  // doesn't count — that cheque was voided, so the bounce is owed again.
+  // The cheque → replacement links, both directions, so each row can say which
+  // payments settled it / which one it goes against. A cancelled replacement
+  // doesn't count — that cheque was voided, so the original is owed again.
   //
-  // A bounce may be settled by SEVERAL payments (10,000 + 7,500 against a 17,500
-  // cheque), so it is the SUM that matters: the bounce stays open for whatever is
-  // still short. Mirrors cheque-replacement.ts on the backend.
+  // A cheque may be settled by SEVERAL payments (10,000 + 7,500 against a 17,500
+  // cheque), so it is the SUM that matters: it stays open for whatever is still
+  // short. Mirrors cheque-replacement.ts on the backend, INCLUDING the rule that
+  // a fee raised against a cheque is not money that covers it — the replacement
+  // fee points at the same cheque so the ledger can say what it is for, and
+  // counting it would mark the cheque paid on money that was never rent.
+  const FEE_NOT_COVERAGE = new Set(['bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee']);
   const replacementsOf = new Map<number, ContractPayment[]>();
+  const chargesOf = new Map<number, ContractPayment[]>();
   const replacedRow = new Map<number, ContractPayment>();
   for (const r of payments) {
     if (r.replacesPaymentId == null) continue;
-    if ((r.chequeStatus ?? '').toLowerCase() === 'cancelled') continue;
-    replacementsOf.set(r.replacesPaymentId, [...(replacementsOf.get(r.replacesPaymentId) ?? []), r]);
     const target = payments.find(t => t.id === r.replacesPaymentId);
     if (target) replacedRow.set(r.id, target);
+    if (FEE_NOT_COVERAGE.has((r.paymentType ?? '').toLowerCase())) {
+      chargesOf.set(r.replacesPaymentId, [...(chargesOf.get(r.replacesPaymentId) ?? []), r]);
+      continue;
+    }
+    if ((r.chequeStatus ?? '').toLowerCase() === 'cancelled') continue;
+    replacementsOf.set(r.replacesPaymentId, [...(replacementsOf.get(r.replacesPaymentId) ?? []), r]);
   }
-  /** Money recorded against a bounced cheque so far. */
+  /** Money recorded against a cheque so far. */
   const coveredOf = (id: number) => (replacementsOf.get(id) ?? []).reduce((s, r) => s + (r.amount || 0), 0);
-  /** What is still owed on a bounced cheque (0 = fully made good). */
+  /** What is still owed on a cheque (0 = fully made good). */
   const shortfallOf = (p: ContractPayment) => Math.max(0, (p.amount || 0) - coveredOf(p.id));
-  /** Bounced cheques still short of being made good. */
+  /** A cheque the customer SWAPPED rather than one that was simply voided — the
+   *  only cancellation that may carry a replacement (migration 0245). */
+  const isSwapped = (p: ContractPayment) =>
+    (p.chequeStatus ?? '').toLowerCase() === 'cancelled'
+    && (p.cancellationReason ?? '').toLowerCase() === 'replaced';
+  /** Cheques that failed and are still short of being made good — a bounce, or a
+   *  cheque marked as swapped whose replacement has not been recorded yet. */
   const unreplacedBounced = payments.filter(
-    p => (p.chequeStatus ?? '').toLowerCase() === 'bounced' && shortfallOf(p) > 1,
+    p => ((p.chequeStatus ?? '').toLowerCase() === 'bounced' || isSwapped(p)) && shortfallOf(p) > 1,
   );
   /**
    * The bounces an EXISTING row may be pointed at, and what each still needs.
@@ -3146,7 +3274,11 @@ function DetailsDrawer({
     const myAmount = me?.amount || 0;
     const myDate = me?.transactionDate ? new Date(me.transactionDate.slice(0, 10)).getTime() : null;
     return payments
-      .filter(b => (b.chequeStatus ?? '').toLowerCase() === 'bounced' && b.id !== rowId)
+      // A bounce, or a cheque the customer swapped. The other two cancellation
+      // reasons are genuine voids and the API refuses them, so they are never
+      // offered here either.
+      .filter(b => ((b.chequeStatus ?? '').toLowerCase() === 'bounced' || isSwapped(b)) && b.id !== rowId)
+      .filter(b => !FEE_NOT_COVERAGE.has((b.paymentType ?? '').toLowerCase()))
       .map(b => {
         const mine = (replacementsOf.get(b.id) ?? []).find(r => r.id === rowId)?.amount ?? 0;
         return { row: b, owed: Math.max(0, (b.amount || 0) - (coveredOf(b.id) - mine)) };
@@ -3161,11 +3293,20 @@ function DetailsDrawer({
       .filter(o => {
         if (o.owed <= 1) return false;
         if (myAmount > o.owed + 1) return false;
-        const bounceDate = o.row.transactionDate ? new Date(o.row.transactionDate.slice(0, 10)).getTime() : null;
-        if (myDate != null && bounceDate != null && myDate < bounceDate - 30 * 86_400_000) return false;
+        const failedDate = o.row.transactionDate ? new Date(o.row.transactionDate.slice(0, 10)).getTime() : null;
+        if (myDate != null && failedDate != null && myDate < failedDate - 30 * 86_400_000) return false;
         return true;
       });
   };
+  // What the charge on the record-payment popup is CALLED and what it prefills
+  // to, both decided by the row the payment is being linked to: a cheque that
+  // bounced carries the bounce fee, one the customer swapped carries the
+  // replacement fee. Two rules, two lines on the customer's statement.
+  const recChargeTarget = rec.replacesPaymentId === ''
+    ? null : payments.find(b => b.id === rec.replacesPaymentId) ?? null;
+  const recChargeIsSwap = recChargeTarget != null && isSwapped(recChargeTarget);
+  const recChargeLabel = recChargeIsSwap ? 'Cheque replacement fee' : 'Bounced cheque fee';
+  const recChargeAuto = feeAutoAmount(recChargeIsSwap ? 'cheque_replacement_fee' : 'bounced_cheque_fee');
   const openFeeFor = (paymentType: string) => {
     const auto = feeAutoAmount(paymentType);
     setFeeAdd({ ...emptyFeeForm, paymentType, ...(auto ? { amount: auto } : {}) });
@@ -3587,13 +3728,37 @@ function DetailsDrawer({
                                       .join(' + ')}`}
                               </span>
                             )}
+                            {/* The charge that came with the swap. It is linked
+                                to this cheque so the ledger says what it was
+                                for, and it is deliberately NOT counted as money
+                                replacing the cheque — it is a fee, not rent. */}
+                            {(chargesOf.get(p.id)?.length ?? 0) > 0 && (
+                              <span className="note" style={{ display: 'block', fontSize: 11 }}>
+                                Charge raised: {chargesOf.get(p.id)!.map(f => fmtAed(f.amount)).join(' + ')}
+                              </span>
+                            )}
+                            {/* Why it was cancelled — the answer to "cancelled
+                                against what?". A swapped cheque says so even
+                                before its replacement has been recorded, so a
+                                half-finished swap is visible rather than
+                                looking like an ordinary void. */}
+                            {(p.chequeStatus ?? '').toLowerCase() === 'cancelled' && p.cancellationReason && (
+                              <span className="note" style={{ display: 'block', fontSize: 11 }}>
+                                Cancelled — {CANCEL_REASON_WORD[p.cancellationReason] ?? p.cancellationReason}
+                                {isSwapped(p) && (replacementsOf.get(p.id)?.length ?? 0) === 0
+                                  ? ' · the payment that replaced it has not been recorded yet'
+                                  : ''}
+                              </span>
+                            )}
                             {/* Spelled out only when the pair could NOT be shown
                                 together — the bounce sits in another section, or
                                 was filtered out of this table. Under its own
                                 bounce the indent already says it. */}
                             {parent == null && replacedRow.get(p.id) && (
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>
-                                Replaces bounced {replacedRow.get(p.id)!.chequeNumber
+                                {FEE_NOT_COVERAGE.has((p.paymentType ?? '').toLowerCase()) ? 'Charged against' : 'Replaces'}
+                                {' '}{isSwapped(replacedRow.get(p.id)!) ? 'swapped' : 'bounced'}{' '}
+                                {replacedRow.get(p.id)!.chequeNumber
                                   ? `cheque ${replacedRow.get(p.id)!.chequeNumber}`
                                   : `payment #${replacedRow.get(p.id)!.id}`}
                               </span>
@@ -3626,7 +3791,7 @@ function DetailsDrawer({
                                   status without first voiding its replacement
                                   would leave the rent counted twice. The stored
                                   status is unchanged underneath. */}
-                              {chequeStatusDisplay(p).settledBounce ? (
+                              {chequeStatusDisplay(p).statusLocked ? (
                                 <span className={'cstat ' + chequeStatusDisplay(p).tone}>
                                   {chequeStatusDisplay(p).label}
                                 </span>
@@ -3636,18 +3801,29 @@ function DetailsDrawer({
                                   style={{ cursor: 'pointer' }}
                                   value={p.chequeStatus ?? 'pending'}
                                   disabled={statusBusy === p.id}
-                                  onChange={e => void changeStatus(p.id, e.target.value)}
+                                  onChange={e => {
+                                    // Cancelling is the one status that needs a
+                                    // reason, so it opens the picker below
+                                    // rather than applying straight away.
+                                    if (e.target.value === 'cancelled') startCancel(p);
+                                    else void changeStatus(p.id, e.target.value);
+                                  }}
                                 >
                                   <option value="pending">Pending</option>
                                   <option value="cleared">Cleared</option>
                                   <option value="bounced">Bounced</option>
-                                  <option value="cancelled">Cancelled</option>
+                                  <option value="cancelled">Cancelled…</option>
                                 </select>
                               ) : (
                                 <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
                                   {p.chequeStatus ?? 'pending'}
                                 </span>
                               )}
+                              {/* Right beside the status that produced it: the
+                                  moment a cheque clears it has a receipt, and
+                                  the manager can send it without leaving the
+                                  row. */}
+                              <ReceiptDownload refs={paymentRefs} id={p.id} base={receiptBase} />
                               {perms.collections && p.chequeStatus !== 'cleared' && (
                                 <button
                                   type="button"
@@ -3661,7 +3837,7 @@ function DetailsDrawer({
                               {/* The one action a bounced cheque actually needs.
                                   Recording the new cheque here links the pair, so
                                   the lease stops showing as in arrears. */}
-                              {perms.collections && (p.chequeStatus ?? '') === 'bounced' && shortfallOf(p) > 1 && (
+                              {perms.collections && ((p.chequeStatus ?? '') === 'bounced' || isSwapped(p)) && shortfallOf(p) > 1 && (
                                 <button
                                   type="button"
                                   className="mini-btn view"
@@ -3679,27 +3855,59 @@ function DetailsDrawer({
                                   was banked before anyone connected it), and the
                                   only route for a bounce cleared in two
                                   instalments: link each payment in turn. */}
-                              {perms.collections && (p.chequeStatus ?? '') !== 'bounced'
+                              {perms.collections && (p.chequeStatus ?? '') !== 'bounced' && !isSwapped(p)
                                 && (linkTargetsFor(p.id).length > 0 || p.replacesPaymentId != null) && (
                                 <button
                                   type="button"
                                   className="mini-btn view"
                                   title={p.replacesPaymentId != null
-                                    ? 'Change or remove which bounced cheque this payment goes against'
-                                    : 'Record that this payment goes against a bounced cheque'}
+                                    ? 'Change or remove which cheque this payment goes against'
+                                    : 'Record that this payment goes against a bounced or swapped cheque'}
                                   onClick={() => linkingId === p.id ? setLinkingId(null) : startLink(p)}
                                 >
-                                  <Link2 size={12} /> {p.replacesPaymentId != null ? 'Linked' : 'Link to bounce'}
+                                  <Link2 size={12} /> {p.replacesPaymentId != null ? 'Linked' : 'Link to cheque'}
                                 </button>
                               )}
                             </div>
                           </td>
                         </tr>
+                        {cancelId === p.id && (
+                          <tr>
+                            <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
+                              <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
+                                <p className="subhead">Why is this cheque being cancelled?</p>
+                                <div className="field" style={{ margin: 0 }}>
+                                  <select
+                                    className="input"
+                                    value={cancelReason}
+                                    onChange={e => setCancelReason(e.target.value as CancelReason)}
+                                  >
+                                    {CANCEL_REASONS.map(r => (
+                                      <option key={r.key} value={r.key}>{r.label}</option>
+                                    ))}
+                                  </select>
+                                  <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+                                    {CANCEL_REASONS.find(r => r.key === cancelReason)?.hint}
+                                  </span>
+                                </div>
+                                <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 8 }}>
+                                  A cancelled cheque is left out of every total whichever reason you pick — this records what became of it.
+                                </span>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                  <button className="btn btn-jade btn-sm" disabled={cancelBusy} onClick={() => void confirmCancel()}>
+                                    <Check size={14} /> {cancelBusy ? 'Saving…' : 'Cancel this cheque'}
+                                  </button>
+                                  <button className="btn btn-ghost btn-sm" disabled={cancelBusy} onClick={() => setCancelId(null)}>Keep it</button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                         {linkingId === p.id && (
                           <tr>
                             <td colSpan={7} style={{ background: 'var(--jade-tint)' }}>
                               <div style={{ padding: 12, border: '1px solid #cfe9df', borderRadius: 12 }}>
-                                <p className="subhead">Which bounced cheque does this payment go against?</p>
+                                <p className="subhead">Which cheque does this payment go against?</p>
                                 <div className="field" style={{ margin: 0 }}>
                                   <select
                                     className="input"
@@ -3714,7 +3922,7 @@ function DetailsDrawer({
                                     ))}
                                   </select>
                                   <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
-                                    Several payments can go against one bounced cheque — link each as it arrives, and the bounce stops being chased once they add up to it. Amounts, references and receipts are untouched.
+                                    A cheque that bounced, or one the customer swapped. Several payments can go against one — link each as it arrives, and it stops being chased once they add up to it. Amounts, references and receipts are untouched.
                                   </span>
                                 </div>
                                 {linkErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{linkErr}</p>}
@@ -3871,6 +4079,10 @@ function DetailsDrawer({
                                     {f.chequeStatus ?? 'pending'}
                                   </span>
                                 )}
+                                {/* The replacement fee's own receipt, on the row
+                                    that raised it — the second of the two files a
+                                    manager sends after a cheque fails. */}
+                                <ReceiptDownload refs={paymentRefs} id={f.id} base={receiptBase} />
                                 {/* A cleared fee is received money (and may carry an issued
                                     receipt number) — not editable once cleared.
                                     Fees are never DELETED from a lease: an agreed
@@ -3993,6 +4205,7 @@ function DetailsDrawer({
                                 ) : (
                                   <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{p.chequeStatus ?? 'pending'}</span>
                                 )}
+                                <ReceiptDownload refs={paymentRefs} id={p.id} base={receiptBase} />
                                 {perms.collections && p.chequeStatus !== 'cleared' && (
                                   <button type="button" className="mini-btn view" title="Edit amount / reference / description" onClick={() => editingId === p.id ? setEditingId(null) : startEdit(p)}>
                                     <Pencil size={12} /> Edit
@@ -4179,17 +4392,30 @@ function DetailsDrawer({
                       <div className="field" style={{ margin: 0 }}><label>Date</label>
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
                       </div>
-                      {/* Offered only when there is a bounce left to settle. A
-                          linked cheque takes the bounced one off the "Overdue /
+                      {/* Offered only when there is a failed cheque left to
+                          settle — one that bounced, or one the customer swapped.
+                          A linked payment takes the original off the "Overdue /
                           Bounced" KPI, the manager's action list and the arrears
                           totals — so nobody chases rent that has been made good. */}
                       {(unreplacedBounced.length > 0 || rec.replacesPaymentId !== '') && (
                         <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
-                          <label>Goes against a bounced cheque</label>
+                          <label>Goes against a bounced or swapped cheque</label>
                           <select
                             className="input"
                             value={rec.replacesPaymentId === '' ? '' : String(rec.replacesPaymentId)}
-                            onChange={e => setRec(v => ({ ...v, replacesPaymentId: e.target.value === '' ? '' : Number(e.target.value) }))}
+                            onChange={e => {
+                              const id = e.target.value === '' ? '' : Number(e.target.value);
+                              const target = id === '' ? null : payments.find(b => b.id === id) ?? null;
+                              setRec(v => ({
+                                ...v,
+                                replacesPaymentId: id,
+                                // Follow the row chosen: clearing the link clears
+                                // the charge, and switching between a bounce and a
+                                // swap switches which rule prefills it.
+                                replacementFee: target == null ? ''
+                                  : feeAutoAmount(isSwapped(target) ? 'cheque_replacement_fee' : 'bounced_cheque_fee'),
+                              }));
+                            }}
                           >
                             <option value="">No — this is a new cheque</option>
                             {unreplacedBounced.map(b => (
@@ -4200,9 +4426,32 @@ function DetailsDrawer({
                           </select>
                           {rec.replacesPaymentId !== '' && (
                             <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
-                              The bounced cheque stays in the ledger as history and stops counting as arrears once the amounts recorded against it add up to what it was for — pay it off in one cheque or several.
+                              The original cheque stays in the ledger as history and stops counting as arrears once the amounts recorded against it add up to what it was for — pay it off in one payment or several.
                             </span>
                           )}
+                        </div>
+                      )}
+                      {/* The charge that goes with the swap, raised in the same
+                          action because that is how it happens: the customer
+                          hands over the new money and settles the fee in one
+                          conversation. Prefilled from Settings → Rules and
+                          editable — clear it to nil and no fee is raised. It is
+                          linked to the same cheque so the ledger says what it
+                          was for, and it never counts as money replacing it. */}
+                      {rec.replacesPaymentId !== '' && (
+                        <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+                          <label>{recChargeLabel} (AED)</label>
+                          <input
+                            type="number" min="0" step="0.01" className="input"
+                            value={rec.replacementFee}
+                            placeholder="0.00"
+                            onChange={e => setRec(v => ({ ...v, replacementFee: e.target.value }))}
+                          />
+                          <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+                            {recChargeAuto
+                              ? `Auto-filled from Settings → Rules (${fmtAed(Number(recChargeAuto))}). Editable — clear it to charge nothing.`
+                              : 'No rule is set for this charge in Settings → Rules. Enter an amount to raise one, or leave it empty.'}
+                          </span>
                         </div>
                       )}
                       {recErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{recErr}</p>}
@@ -6766,8 +7015,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const onRecordPayment = async (body: {
     description?: string; amount: number; vatAmount?: number; paymentType?: string; paymentMethod?: string;
     chequeNumber?: string; transactionDate?: string; chequeStatus?: string;
-    /** The bounced cheque on this contract that this payment makes good. */
+    /** The cheque on this contract that this payment makes good — one that
+     *  bounced, or one the customer swapped. */
     replacesPaymentId?: number | null;
+    /** Raise the bounce / replacement charge in the same request. */
+    replacementFee?: number;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments`, {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -6784,6 +7036,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
     documentId?: number | null; replacesPaymentId?: number | null;
+    /** Why a cheque is being cancelled (migration 0245). */
+    cancellationReason?: string | null;
   }) => {
     const res = await fetch(`/api/contracts/${contract.id}/payments/${paymentId}`, {
       method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },

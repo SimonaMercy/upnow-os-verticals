@@ -34,8 +34,14 @@ test('replacements sit under the bounce they settle, not at their own due date',
   await page.waitForTimeout(2500);
 
   // The rent schedule is the first payments table on the record.
+  //
+  // Waiting on the GROUP MARKER, not on a row's description. This used to wait
+  // for the text "Rent cheque", which is contract DATA rather than behaviour —
+  // contract 181's rows are labelled "Instalment N" in the current book, so the
+  // spec failed on a clone refresh while the grouping it tests was working
+  // perfectly. A test of the nesting should key on the nesting.
   const rows = page.locator('table.ptable').first().locator('tbody tr');
-  await expect(rows.filter({ hasText: 'Rent cheque' }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(rows.locator('css=.replarrow').first()).toBeVisible({ timeout: 20_000 });
 
   const classes = await rows.evaluateAll(rs => rs.map(r => (r as HTMLElement).className));
   const kidIdx = classes.map((c, i) => (c.includes('replkid') ? i : -1)).filter(i => i >= 0);
