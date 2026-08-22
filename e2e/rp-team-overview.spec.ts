@@ -414,6 +414,37 @@ test.describe('RP Team page (SCRUM-792)', () => {
   });
 
 
+  test('a drill row names the record it actually happened to, lead or lease', async ({ page }) => {
+    /* One step is worked in more than one place: cheques are approved on a LEAD
+     * before the lease exists, confirmed on a first lease, and confirmed again
+     * on a RENEWAL. The keys behind a counter are namespaced for exactly that
+     * (`l7` vs `c7`) — but the drill described every id with the COUNTER's kind,
+     * so lead 7 was read out of the leases table and a cheque approval on
+     * Shed-8 · API Energy was listed as CID-7 · Villa 6 · Nini Meladze. A real
+     * record, the wrong one, which is the worst way to be wrong. */
+    await signIn(page, 'kbaalfalasi@gmail.com');
+    const d = (await (await page.request.get(
+      '/api/reports/team-overview/step?from=2026-08-01&to=2026-08-31&key=cheques_collected')).json()) as {
+        records: Array<{ ref: string; kind: string; via: string | null; href: string | null }> };
+    expect(d.records.length).toBeGreaterThan(0);
+    for (const r of d.records) {
+      // The label, the kind and the link all have to name the SAME record.
+      if (r.ref.startsWith('Lead #')) {
+        expect(r.kind, `${r.ref} is a lead`).toBe('lead');
+        expect(r.via).toBe('lead');
+        expect(r.href).toContain('/leads/');
+        expect(r.href).toContain(r.ref.replace('Lead #', ''));
+      } else {
+        expect(r.ref, `${r.ref} should be a lease`).toMatch(/^CID-\d+$/);
+        expect(r.kind).toBe('contract');
+        // A first lease and a renewal are different work reaching the same step.
+        expect(['lease', 'renewal']).toContain(r.via);
+        expect(r.href).toContain(r.ref.replace('CID-', ''));
+      }
+    }
+  });
+
+
   test("the feed includes the landlord's own work, not just the roster's", async ({ page }) => {
     // "Activity by step" counts what the landlord did themselves, so a feed
     // reading only the roster showed nothing for a week whose completed tasks

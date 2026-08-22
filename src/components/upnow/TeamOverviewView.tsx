@@ -1236,6 +1236,8 @@ interface DrillRecord {
   side?: 'manager' | 'customer' | 'landlord' | null;
   /** Whose column the step is counted in — not always the person in `by`. */
   creditedTo?: string | null;
+  /** Which flow the record is in — a lead, a first lease, or a renewal. */
+  via?: 'lead' | 'lease' | 'renewal' | null;
   /** Where the lease is on the Operations board right now (null = not on the board). */
   stage: string | null;
 }
@@ -1323,7 +1325,11 @@ function StepDrill({ endpoint, from, to, person, personName, drill, periodWord, 
                     <td className="pr-3 py-2.5">
                       <div className="font-semibold text-[var(--neutral-900)]">
                         {r.ref}{r.title ? <span className="font-normal text-[var(--neutral-700)]"> · {r.title}</span> : null}
-                        {r.kind === 'lead' && <span className="ml-1.5 rounded px-1 py-px text-[9.5px] font-bold uppercase tracking-wide bg-blue-50 text-blue-800 align-middle">lead</span>}
+                        {/* Which flow the step was worked in — the same step is
+                            reached on a lead, on a first lease and again on a
+                            renewal, and the rows are otherwise identical. */}
+                        {r.via === 'lead' && <span className="ml-1.5 rounded px-1 py-px text-[9.5px] font-bold uppercase tracking-wide bg-blue-50 text-blue-800 align-middle">lead</span>}
+                        {r.via === 'renewal' && <span className="ml-1.5 rounded px-1 py-px text-[9.5px] font-bold uppercase tracking-wide bg-violet-50 text-violet-800 align-middle">renewal</span>}
                       </div>
                       {r.person && <div className="text-[11.5px] text-[var(--neutral-500)]">{r.person}</div>}
                     </td>
