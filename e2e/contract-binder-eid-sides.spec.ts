@@ -1,11 +1,11 @@
 /**
  * Contract documents binder — the Emirates ID always reads as a fixed pair.
  *
- * Customer 125 (contract 360) holds all THREE EID shapes at once: the two faces
- * (`emirates_id_front` / `_back`) plus a combined e-copy (`emirates_id`). The pane
- * used to caption one of them a bare "Emirates ID" beside an "Emirates ID — Back",
- * with the third copy silently dropped — so the reviewer could not tell which face
- * they were looking at. It must now read Front, then Back, in that order.
+ * Customer 125 (contract 360) holds the two faces (`emirates_id_front` / `_back`)
+ * plus a spare bare `emirates_id` capture. There is no "combined" shape: a bare
+ * `emirates_id` is a FRONT, exactly as the customer's own profile files it. The
+ * pane reads Front, then Back, always — a face nobody uploaded is an empty
+ * position, never the other face standing in for both.
  *
  * Case 2 hides both the back face and the e-copy, leaving only a front: the Back
  * position must hold a placeholder that points at the customer profile, NOT the
@@ -205,7 +205,11 @@ test('the KYC pane holds every customer-KYC document, and only those', async ({ 
 
   await openBinder(page, 354);
   expect(await leftNavLabels(page)).toEqual([
-    'Emirates ID — Front & Back',
+    // Only a bare `emirates_id` on file — that key IS the front (same rule as the
+    // customer profile), so the BACK holds its own empty position rather than the
+    // one scan being captioned as though it showed both faces.
+    'Emirates ID — Front',
+    'Emirates ID — Back',
     'Passport',
     'UAE Visa / Residency',
     // Supporting docs close the CUSTOMER's pack; this lease is a renewal, so its

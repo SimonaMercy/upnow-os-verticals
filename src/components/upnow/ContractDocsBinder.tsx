@@ -127,26 +127,38 @@ const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant
 // Order of the identity docs that follow the ones the pane places itself (the
 // Emirates ID pair, and a company's licence + MOA).
 const restRank = (d: BinderDoc) => (isPassport(d) ? 0 : isVisa(d) ? 1 : isLicense(d) ? 2 : isMoa(d) ? 3 : 4);
-// A person has ONE Emirates ID (its front — plus a back only if a separate back
-// was uploaded), ONE Passport and ONE Visa. The same identity doc, though, gets
-// uploaded repeatedly — into the per-customer KYC store AND this lease's contract
-// store, and a passport can arrive as both `passport` and `passport_2` (same doc,
-// two captures) — so without collapsing them a tenant looks like they have 2-3× of
-// each. We key each doc by its logical SLOT (type + side) and keep ONE per slot.
-//   • Side matters only for the EID, which has THREE shapes on this platform —
-//     `emirates_id_front`, `emirates_id_back` and a bare `emirates_id` (the ICP
-//     e-copy holding both faces). Each keeps its own slot. An `emirates_id_2` is a
-//     back: the EID is two-sided, so a second capture IS the other face (unlike
-//     `passport_2`, a re-capture of the same photo page).
+// The same identity document gets stored twice — once in the per-customer KYC
+// store and once against this lease — so a true duplicate (SAME key, two owners)
+// collapses to one card. Different keys are different documents and each keeps
+// its own card: `passport` and `passport_2` are two captures the customer's own
+// profile shows as two files, so the binder shows two as well rather than picking
+// one and silently dropping the other.
 //   • Occupant docs keep their occupant number so occupants never merge together.
 const idBaseKey = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
-const isEidBack = (d: BinderDoc) => /(^|_)back(_|$)/.test(idBaseKey(d)) || /_2$/.test(idBaseKey(d));
-const isEidFront = (d: BinderDoc) => /(^|_)front(_|$)/.test(idBaseKey(d));
-// A bare `emirates_id` is the ICP e-copy — ONE file carrying BOTH faces, which is
-// how most imported customers hold their ID. It is not a half-finished front, so
-// it satisfies the pair on its own rather than leaving a "Back missing" slot.
-const isEidCombined = (d: BinderDoc) => isEid(d) && !isEidFront(d) && !isEidBack(d);
-const idType = (d: BinderDoc) => (isEid(d) ? 'eid' : isPassport(d) ? 'passport' : isVisa(d) ? 'visa' : idBaseKey(d));
+// WHICH FACE of the Emirates ID a file holds. Same rule as the customer's own
+// profile page (its `slotsFor`): the bare `emirates_id` key IS the FRONT — that is
+// the key every imported and legacy front sits under — and a second capture
+// (`_back` or `_2`) is the BACK. There is no "combined" shape: the card is
+// two-sided, the profile files it as two slots, so the binder shows the two slots
+// too and a face nobody uploaded reads as missing instead of being hidden behind a
+// "Front & Back" caption on a one-face scan.
+// 🚨 Decided on `idBaseKey`, i.e. AFTER the upload timestamp is stripped. The
+// suffix on `third_party_emirates_id_1786534389079` / `emirates_id_1781161323140`
+// is when the file was uploaded, not which face it shows — reading it as a face
+// captioned somebody's only scan "Back" and left an empty "Front" beside it.
+const eidFace = (d: BinderDoc): 'front' | 'back' => {
+  const k = idBaseKey(d);
+  if (/(^|_)front(_|$)/.test(k)) return 'front';
+  if (/(^|_)back(_|$)/.test(k) || /_2$/.test(k)) return 'back';
+  return 'front';
+};
+const isEidBack = (d: BinderDoc) => isEid(d) && eidFace(d) === 'back';
+const isEidFront = (d: BinderDoc) => isEid(d) && eidFace(d) === 'front';
+/** Does the KEY actually name a face? `emirates_id_front` / `_back` / `_2` do; a
+ *  plain `third_party_emirates_id` does not — it is filed through a picker that
+ *  never asked, so captioning it "Front" would be inventing a fact. It is a front
+ *  for SLOT purposes (see eidFace), captioned plainly. */
+const hasNamedFace = (d: BinderDoc) => /(^|_)(front|back)(_|$)|_2$/.test(idBaseKey(d));
 const personPrefix = (d: BinderDoc) =>
   isOccupant(d) ? `occ${occNum(d)}:`
   : isPoa(d) ? 'poa:'
@@ -154,14 +166,19 @@ const personPrefix = (d: BinderDoc) =>
   : isDependant(d) ? 'dependant:'
   : isPartner(d) ? 'partner:'
   : isThirdParty(d) ? 'thirdparty:' : '';
-// The EID's three shapes each keep their OWN slot — front, back and the combined
-// e-copy are different documents, so dedupe only collapses true duplicates of the
-// same shape (the same scan stored against both the customer and this lease).
-// Which of the three the pane actually shows is decided in idCardsFor, where all
-// three are visible at once; collapsing them here would hide the e-copy and make a
-// face it contains look missing.
-const eidSide = (d: BinderDoc) => (isEidBack(d) ? ':back' : isEidFront(d) ? ':front' : ':both');
-const idSlot = (d: BinderDoc) => `${personPrefix(d)}${idType(d)}${isEid(d) ? eidSide(d) : ''}`;
+// The EID's two faces each keep their OWN slot, so a front and a back never
+// collapse into one card. Everything else is keyed by its own document key: only
+// the SAME key stored against two owners is a duplicate, so a second passport
+// capture stays visible instead of being deduped away.
+// A passport / visa is keyed by TYPE + copy number, so the same document filed
+// under two wordings (`visa` on the lease, `uae_visa` on the customer) is still
+// one card, while a genuine second capture (`passport_2`) keeps its own.
+const idSlot = (d: BinderDoc) =>
+  `${personPrefix(d)}${
+    isEid(d) ? `eid:${eidFace(d)}`
+    : isPassport(d) ? `passport:${copyIndex(d)}`
+    : isVisa(d) ? `visa:${copyIndex(d)}`
+    : idBaseKey(d)}`;
 // Within a slot prefer the canonical customer-KYC copy, then the clean-key one
 // (no upload-timestamp suffix), then the most recent upload.
 const idSourceRank = (d: BinderDoc) => (d.ownerType === 'customer' ? 0 : norm(d.documentKey) === idBaseKey(d) ? 1 : 2);
@@ -176,7 +193,7 @@ const dedupeIdentity = (docs: BinderDoc[]): BinderDoc[] => {
 };
 const MOA_LABEL = 'Memorandum of Association (MOA)';
 const idLabel = (d: BinderDoc) =>
-  isEid(d) ? (isEidBack(d) ? 'Emirates ID — Back' : isEidFront(d) ? 'Emirates ID — Front' : 'Emirates ID — Front & Back')
+  isEid(d) ? `Emirates ID${hasNamedFace(d) ? ` — ${isEidBack(d) ? 'Back' : 'Front'}` : ''}`
   : isPassport(d) ? 'Passport'
   : isVisa(d) ? 'UAE Visa / Residency'
   : isLicense(d) ? 'Trade License'
@@ -247,7 +264,12 @@ const idCardsFor = (
    *  empty slot that says nobody filed it. */
   const slot = (key: string, label: string, match: (d: BinderDoc) => boolean, optional = false) => {
     const filed = docs.filter(match).sort((a, b) => copyIndex(a) - copyIndex(b) || a.id - b.id);
-    if (filed.length) cards.push(...filed.map(card));
+    // Two captures of the same document are two cards, numbered — the customer's
+    // profile lists both files, so neither may go missing here.
+    if (filed.length) cards.push(...filed.map((d, i) => {
+      const c = card(d);
+      return filed.length > 1 ? { ...c, label: `${c.label} — ${i + 1}` } : c;
+    }));
     else if (tenantPack) cards.push({ key: `${prefix}${key}`, label: `${labelPrefix}${label}`, doc: null, optional });
   };
   // The company's own papers, ahead of any person's ID.
@@ -257,24 +279,33 @@ const idCardsFor = (
   }
   // Emirates ID — the signatory's, on a company lease.
   const eidName = `${labelPrefix}${company ? 'Authorised Signatory Emirates ID' : 'Emirates ID'}`;
+  // Two cards, one per face — the same two slots the customer's profile uploads
+  // into, so a face nobody filed reads as an empty placeholder instead of letting
+  // the other face stand in for both.
+  // 🚨 The EMPTY placeholder is for the contract's own customer ONLY (`tenantPack`),
+  // exactly like every other slot here. A third party, a partner or an occupant is
+  // shown what they actually filed: the profile offers no Front/Back upload for
+  // those people, so an empty "Back" would report a gap against a slot that exists
+  // on no screen and that nobody can fill.
   const eids = docs.filter(isEid);
   const front = eids.find(isEidFront) ?? null;
   const back = eids.find(isEidBack) ?? null;
-  const combined = eids.find(isEidCombined) ?? null;
-  const pair = () => {
-    cards.push({ key: `${prefix}eid-front`, label: `${eidName} — Front`, doc: front });
-    cards.push({ key: `${prefix}eid-back`, label: `${eidName} — Back`, doc: back });
-  };
-  if (front && back) pair();
-  else if (combined) cards.push({ key: `${prefix}eid`, label: `${eidName} — Front & Back`, doc: combined });
-  else if (front || back || tenantPack) pair();
+  // …and a person whose only scan never named its face keeps a plain caption.
+  const faceLabel = (d: BinderDoc | null, face: 'Front' | 'Back') =>
+    !tenantPack && d && !hasNamedFace(d) ? eidName : `${eidName} — ${face}`;
+  if (front || tenantPack) cards.push({ key: `${prefix}eid-front`, label: faceLabel(front, 'Front'), doc: front });
+  if (back || tenantPack) cards.push({ key: `${prefix}eid-back`, label: faceLabel(back, 'Back'), doc: back });
   // The rest of the pack. A company's signatory need not hold a passport or visa
   // (the licence identifies the tenant), so those slots are optional there.
   slot('passport', 'Passport', isPassport, company);
   slot('visa', 'UAE Visa / Residency', isVisa, true);
   // Anything else that reached the KYC pane — e.g. a licence or MOA on an
   // individual's lease, or a labour card.
-  const placed = (d: BinderDoc) => isEid(d) || isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d)));
+  // Any FURTHER copy of the Emirates ID (a third capture of a face already shown)
+  // follows as its own card — placing only the two faces here would drop it.
+  const eidShown = new Set([front?.id, back?.id].filter((id): id is number => id != null));
+  const placed = (d: BinderDoc) =>
+    (isEid(d) ? eidShown.has(d.id) : isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d))));
   for (const d of docs.filter(d => !placed(d)).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
     cards.push(card(d));
   }
