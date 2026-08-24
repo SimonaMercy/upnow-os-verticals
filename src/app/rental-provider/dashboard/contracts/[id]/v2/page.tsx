@@ -1343,7 +1343,7 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
                     and `doc` here is the FRESHEST — removing that one would take
                     the good copy and leave the stale one behind. */}
                 {h.perms.deleteDocuments && doc && !multi && (
-                  <DeleteDocumentButton docId={doc.id} label={lbl} onDeleted={h.onDocsChanged} variant="button" />
+                  <DeleteDocumentButton docId={doc.id} label={lbl} onDeleted={h.onDocsChanged} />
                 )}
                 {/* Undated copy: the date input IS the fix, so it sits in the row rather than
                     behind a badge that leaves the RP nothing to press. */}
@@ -4684,7 +4684,7 @@ function DetailsDrawer({
                         single "this one" and a guess removes the wrong document;
                         the reader that lists them individually is where those go. */}
                     {perms.deleteDocuments && !multi && (
-                      <DeleteDocumentButton docId={doc.id} label={s.label} onDeleted={onDocsChanged} variant="button" />
+                      <DeleteDocumentButton docId={doc.id} label={s.label} onDeleted={onDocsChanged} />
                     )}
                   </div>
                 </div>
@@ -4796,7 +4796,7 @@ function DetailsDrawer({
                                         are offered because a document filed against the
                                         WRONG customer cannot be fixed by rejecting it. */}
                                     {perms.deleteDocuments && (
-                                      <DeleteDocumentButton docId={d.id} label={lbl} onDeleted={onDocsChanged} variant="button" />
+                                      <DeleteDocumentButton docId={d.id} label={lbl} onDeleted={onDocsChanged} />
                                     )}
                                   </>
                                 )}
