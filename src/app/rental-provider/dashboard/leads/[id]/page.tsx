@@ -32,6 +32,7 @@ import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/compone
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
 import { putKycSlot } from '@/lib/kycSlotUpload';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, groupRequestNames, parseAdditionalDocs, requestedDocKey, requestedDocKeyCandidates, resolveRequestedDocKey } from '@/lib/requestableDocs';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
@@ -858,6 +859,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
                 onMarkVisited={markVisited}
                 onApproveDocuments={approveDocuments}
+                onDocsChanged={() => void fetchLead()}
                 onSharePlan={sharePlan}
                 onApproveCheques={approveCheques}
                 onConfirmCollected={confirmCollected}
@@ -1227,6 +1229,7 @@ type StageBodyProps = {
   onRejectDoc: (id: number, reason?: string) => void;
   onUploadDoc: (req: { key: string; label: string; category: string }, file: File) => Promise<void>;
   onSaveDocsNote: (items: string[]) => void;
+  onDocsChanged: () => void;
   onIssuePlan: (body: Record<string, unknown>) => Promise<void> | void;
   onRecordCheque: (payload: { chequeSerial: string; bankName: string; amountFils: number; dueDate: string; notes: string }) => Promise<void>;
   onDeleteCheque: (chequeId: number) => Promise<void>;
@@ -1357,7 +1360,7 @@ function StageBody(props: StageBodyProps) {
   const {
     lead, plan, docs, cheques, busy, pendingViewing, latestViewing, annualRentAed,
     feeRules, preferredStartDays, allowedInstallments, rentVatMode,
-    onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected,
+    onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected, onDocsChanged,
     onReopen, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onIssuePlan,
     onRecordCheque, onDeleteCheque, onSetChequeStatus, onTagCheque, onSetPlanItemMethod,
     onOpenLease,
@@ -1432,6 +1435,7 @@ function StageBody(props: StageBodyProps) {
           onVerifyDoc={onVerifyDoc} onSetDocExpiry={onSetDocExpiry} onRejectDoc={onRejectDoc}
           onUploadDoc={onUploadDoc} onSaveDocsNote={onSaveDocsNote}
           onApproveDocuments={onApproveDocuments}
+          onDocsChanged={onDocsChanged}
         />
       );
 
@@ -1554,10 +1558,14 @@ function StageBody(props: StageBodyProps) {
  *  list page's docs panel behaviour into the quest-page design. ────────────── */
 function DocsSection({
   lead, docs, busy, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onApproveDocuments,
+  onDocsChanged,
 }: {
   lead: ApiLead;
   docs: TenantDoc[] | null;
   busy: boolean;
+  /** Refetch after a document is removed — the list must come from the server,
+   *  not from local state, or the page drifts from what was actually deleted. */
+  onDocsChanged: () => void;
   onVerifyDoc: (id: number, expiryDate?: string) => void;
   onSetDocExpiry: (id: number, expiryDate: string) => void;
   onRejectDoc: (id: number, reason?: string) => void;
@@ -1577,6 +1585,8 @@ function DocsSection({
   const [docSearch, setDocSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);   // "View all documents" reader popup
+  // Landlord always; a manager only where that landlord granted it (0247).
+  const canDeleteDocs = useCanDeleteDocuments();
   // Expiry the RP is typing, keyed by document id, until it is saved.
   const [expiryDraft, setExpiryDraft] = useState<Record<number, string>>({});
 
@@ -1948,6 +1958,9 @@ function DocsSection({
           summary={`${allUploaded.length} uploaded · ${lead.customerName ?? 'customer'}`}
           slots={readerSlots}
           onClose={() => setReaderOpen(false)}
+          // toReaderFile above carries the real document id.
+          deletableDocId={canDeleteDocs() ? (f) => (typeof f.id === 'number' ? f.id : null) : undefined}
+          onDeleted={onDocsChanged}
         />
       )}
     </>

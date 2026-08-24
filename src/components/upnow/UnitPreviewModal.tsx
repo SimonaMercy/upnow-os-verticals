@@ -23,7 +23,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  * Documents are view-only here (the header "Edit" opens the unit form for
  * changes), matching the no-download document-viewer principle.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   X, ArrowLeft, ExternalLink, FileText, Eye, AlignLeft, Banknote, Users, History,
@@ -31,6 +31,8 @@ import {
   ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { DeleteDocumentButton } from './DeleteDocumentButton';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { isSubleaseChargeRow } from '@/lib/unitForm';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useSlideOver } from '@/lib/useSlideOver';
@@ -265,6 +267,16 @@ export function UnitPreviewModal({
   // Overlays + UI state
   const [lb, setLb] = useState<number | null>(null);          // lightbox photo index
   const [reader, setReader] = useState<string | null>(null);  // active doc slot key
+  // Landlord always; a manager only where that landlord granted it (0247).
+  const canDeleteDocs = useCanDeleteDocuments();
+  // The documents are fetched inside the mount effect below; a removal re-reads
+  // them from the server rather than pruning local state, so the grid can never
+  // disagree with what was actually deleted.
+  const refreshDocs = useCallback(() => {
+    apiGet<DocRecord[]>(`/documents?ownerType=unit&ownerId=${unit.id}`)
+      .then((d) => setDocs(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [unit.id]);
   const [readerFile, setReaderFile] = useState(0);            // active file in slot
 
   // Swipe-in / swipe-out — same right-to-left full-screen slide as
@@ -842,6 +854,15 @@ export function UnitPreviewModal({
                   {rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImageFile(rActive) ? 'Image' : 'PDF'}` : `${isImageFile(rActive) ? 'Image' : 'PDF'} · Uploaded`) : 'Not uploaded'}
                 </div>
               </div>
+              {/* Per FILE, not per slot: a slot can hold several, and this header
+                  is the only place that names the one on screen. */}
+              {rActive && canDeleteDocs() && (
+                <DeleteDocumentButton
+                  docId={rActive.id}
+                  label={rActive.name || rSlot.label}
+                  onDeleted={() => { setReader(null); refreshDocs(); }}
+                />
+              )}
               <div onClick={() => setReader(null)} style={{ width: 32, height: 32, flex: '0 0 32px', borderRadius: 9, border: `1px solid ${C.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.body, cursor: 'pointer' }}><X size={17} /></div>
             </div>
 

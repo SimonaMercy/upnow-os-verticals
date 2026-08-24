@@ -59,6 +59,7 @@ import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequ
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
+import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { errMessage } from '@/lib/apiError';
 import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
 import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
@@ -795,6 +796,9 @@ interface ActorPerms {
   settleDeposits: boolean;
   /** Record / edit payments, fees, cheque-status, confirm PDC → canManageCollections. */
   collections: boolean;
+  /** Remove a document → canDeleteDocuments. NOT implied by being able to upload
+   *  one: attaching a file and destroying one are different authorities (0247). */
+  deleteDocuments: boolean;
 }
 
 interface StepHandlers {
@@ -867,6 +871,9 @@ interface StepHandlers {
    *  value. The backend already 403s a manager without the flag — this just
    *  hides the button so they never see an action they can't take. */
   perms: ActorPerms;
+  /** Refetch the contract after a document is removed, so the lists come back
+   *  from the server rather than being pruned in local state. */
+  onDocsChanged: () => void;
   /** When true, all workflow rollback / re-do affordances are hidden:
    *  the "Update" / "Re-upload" / "Revert to draft" buttons on completed
    *  steps and the ChkRow undo toggles on the Sign step. Set to true
@@ -1330,6 +1337,13 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
                   <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(allDocs.map(d => ({ fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
                     <ExternalLink size={12} /> {multi ? `View ${allDocs.length}` : 'View'}
                   </button>
+                )}
+                {/* Single copy only. A base holding several (both Emirates ID
+                    sides, or a superseded re-upload) has no unambiguous target,
+                    and `doc` here is the FRESHEST — removing that one would take
+                    the good copy and leave the stale one behind. */}
+                {h.perms.deleteDocuments && doc && !multi && (
+                  <DeleteDocumentButton docId={doc.id} label={lbl} onDeleted={h.onDocsChanged} variant="button" />
                 )}
                 {/* Undated copy: the date input IS the fix, so it sits in the row rather than
                     behind a badge that leaves the RP nothing to press. */}
@@ -2640,8 +2654,10 @@ function DetailsDrawer({
   // onDeletePayment is intentionally not destructured — fee rows are corrected
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
+  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
 }: {
+  /** Refetch after a document is removed — the list must come from the server. */
+  onDocsChanged: () => void;
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
   /** Inline mode (CEO doctrine): render ALL sections stacked in the page flow —
    *  no slide-in drawer, no tabs, nothing hidden behind a click. The property
@@ -4664,6 +4680,12 @@ function DetailsDrawer({
                     {/* One file on the slot → Replace overwrites THAT row in place
                         (same id). Several → Add puts another beside them. */}
                     <button type="button" className="mini-btn view" title={multi ? `Add another ${s.label}` : `Replace the ${s.label} on file`} onClick={() => prefillUpload(req, multi ? undefined : doc)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
+                    {/* Only when the slot holds ONE file. Several copies have no
+                        single "this one" and a guess removes the wrong document;
+                        the reader that lists them individually is where those go. */}
+                    {perms.deleteDocuments && !multi && (
+                      <DeleteDocumentButton docId={doc.id} label={s.label} onDeleted={onDocsChanged} variant="button" />
+                    )}
                   </div>
                 </div>
               );
@@ -4768,6 +4790,13 @@ function DetailsDrawer({
                                         <button type="button" className="mini-btn ok cursor-pointer" onClick={() => onApproveDoc(d.id)}><Check size={12} /> Approve</button>
                                         <button type="button" className="mini-btn view cursor-pointer" onClick={() => onRejectDoc(d.id, lbl)}><X size={12} /> Reject</button>
                                       </>
+                                    )}
+                                    {/* Rejecting sends it back for a re-upload and keeps
+                                        the trail; removing takes it off the record. Both
+                                        are offered because a document filed against the
+                                        WRONG customer cannot be fixed by rejecting it. */}
+                                    {perms.deleteDocuments && (
+                                      <DeleteDocumentButton docId={d.id} label={lbl} onDeleted={onDocsChanged} variant="button" />
                                     )}
                                   </>
                                 )}
@@ -7293,6 +7322,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     // Record/edit payment + clear-cheque: the backend accepts the granular
     // carve-out flags OR the umbrella, so surface the buttons for any of them.
     collections:   mgrCan('canManageCollections') || mgrCan('canRecordPayments') || mgrCan('canClearCheques'),
+    // Deliberately NOT or-ed with anything. Deleting is its own grant, so a
+    // manager who can upload documents does not thereby get the delete control.
+    deleteDocuments: mgrCan('canDeleteDocuments'),
   };
 
   // Landlord-signature identity for the signing block. Three cases, all stamped
@@ -7311,6 +7343,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const stopOf = (n: number) => mode === 'renewal' ? `Renewal · Stop ${n}` : `Stop ${n} of 6`;
   const handlers: StepHandlers = {
     contract, state: derived,
+    onDocsChanged: () => void reload(),
     setState: setLocalState,
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
@@ -8024,6 +8057,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             kycDocs={kycDocs}
             onApproveDoc={onApproveDoc}
             onRejectDoc={onRejectDoc}
+            onDocsChanged={() => void reload()}
             onRecordPayment={onRecordPayment}
             onUpdatePayment={onUpdatePayment}
             onDeletePayment={onDeletePayment}

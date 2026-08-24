@@ -27,6 +27,7 @@ import {
 import { apiDelete } from '@/lib/api';
 import { downloadStoredDoc } from '@/lib/downloadDoc';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { useSlideOver } from '@/lib/useSlideOver';
 import { docBelongsToSlot, type PropertyDocSlot } from '@/lib/propertyDocs';
@@ -107,6 +108,9 @@ interface SlotFile {
   name: string;
   url: string;
   mime: string | null;
+  /** The row's own key, so a Replace keeps the file in the same S3 folder
+   *  (putKycSlot's existingKey rule) rather than moving it under a fresh one. */
+  documentKey?: string | null;
 }
 
 /** A document slot rendered in the grid + reader. */
@@ -467,7 +471,7 @@ export function PropertyDetailsModal({
 
   const slots: DocSlot[] = useMemo(() => {
     const records = docs.filter((d) => d.id != null && docUrl(d));
-    const toFile = (d: DocRecord): SlotFile => ({ id: d.id as number, name: docName(d), url: docUrl(d)!, mime: docMime(d) });
+    const toFile = (d: DocRecord): SlotFile => ({ id: d.id as number, name: docName(d), url: docUrl(d)!, mime: docMime(d), documentKey: (d as { documentKey?: string | null }).documentKey ?? null });
     const matched = new Set<number>();
     const built = slotDefs.map((def) => {
       const files = records.filter((d) => docBelongsToSlot(docKey(d), def)).map(toFile);
@@ -516,12 +520,15 @@ export function PropertyDetailsModal({
     if (!picked.length) return;
     setDocsBusy(true);
     try {
-      await apiDelete(`/documents/${file.id}`);
-      const key = slot.multiple ? `${slot.key}_${Date.now()}_0` : slot.key;
+      // Swap the file on the existing row. This used to delete then re-upload,
+      // which now needs a permission replacing does not — and lost the old copy
+      // first, so a refusal left the slot empty (0247).
       await uploadOwnedDocument({
         ownerType: 'property', ownerId: property.id,
-        documentKey: key, category: slot.category,
+        documentKey: file.documentKey ?? (slot.multiple ? `${slot.key}_${Date.now()}_0` : slot.key),
+        category: slot.category,
         displayName: picked[0].name || slot.label, file: picked[0],
+        replaceDocId: file.id,
       });
       await loadDocs();
     } catch (e) {
@@ -530,6 +537,15 @@ export function PropertyDetailsModal({
       setDocsBusy(false);
     }
   }, [property.id, loadDocs]);
+
+  // Removing is no longer implied by being able to edit: a manager needs the
+  // landlord's `canDeleteDocuments` grant (0247). Replace does NOT go through
+  // here any more — it PATCHes the row in place.
+  const canDeleteDocs = useCanDeleteDocuments();
+  // No landlord id on the Property payload, so the acting landlord comes from
+  // `?rp=` — which the manager portal always carries (the landlord switcher puts
+  // it there). The hook refuses when it is absent rather than guessing.
+  const mayDelete = editable && canDeleteDocs();
 
   const removeFile = useCallback(async (file: SlotFile) => {
     if (!confirm('Remove this document?')) return;
@@ -1033,7 +1049,7 @@ export function PropertyDetailsModal({
                           <Replace size={14} />Replace
                         </button>
                       )}
-                      {editable && (
+                      {mayDelete && (
                         <button type="button" onClick={() => removeFile(rActive)}
                           style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: C.danger, background: '#fff', border: '1px solid #f0d8d3', padding: '7px 11px', borderRadius: 8, cursor: 'pointer' }}>
                           <Trash2 size={13} />{rFiles.length > 1 ? 'Remove file' : 'Remove'}

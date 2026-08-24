@@ -17,6 +17,8 @@ import {
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
+import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 
 const CATEGORIES = ['elevator','cleaning','security','insurance','waste','electricity_water','fire_safety','maintenance','renovation','landscaping','pest_control','government','other'];
 
@@ -147,6 +149,10 @@ function Empty({ icon: Icon, msg }: { icon: React.ComponentType<{ size?: number;
 
 function ContractCard({ base, rp, c, onTasksChanged }: { base: string; rp?: number | null; c: AmcContract; onTasksChanged: () => void }) {
   const [open, setOpen] = useState(false);
+  // `rp` is the landlord this card belongs to, so the grant is checked against
+  // the right one rather than whatever `?rp=` happens to say.
+  const canDeleteDocs = useCanDeleteDocuments();
+  const mayDelete = canDeleteDocs(rp ?? null);
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
@@ -199,10 +205,15 @@ function ContractCard({ base, rp, c, onTasksChanged }: { base: string; rp?: numb
         {c.documents.length > 0 && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {c.documents.map(d => (
-              <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey, documentKey: d.documentKey })}
-                className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-[#f7f6f2] text-[#2e9f82] hover:bg-[#eef0ec] cursor-pointer">
-                <FileText size={11} /> {cap(d.displayName ?? d.documentKey)}
-              </button>
+              <span key={d.id} className="inline-flex items-center gap-0.5">
+                <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey, documentKey: d.documentKey })}
+                  className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-[#f7f6f2] text-[#2e9f82] hover:bg-[#eef0ec] cursor-pointer">
+                  <FileText size={11} /> {cap(d.displayName ?? d.documentKey)}
+                </button>
+                {mayDelete && (
+                  <DeleteDocumentButton docId={d.id} label={cap(d.displayName ?? d.documentKey)} onDeleted={onTasksChanged} />
+                )}
+              </span>
             ))}
             {c.documents.length > 1 && (
               <button onClick={() => openDocsTogether(c.documents)} className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg text-[#6b6860] hover:bg-[#f7f6f2]">

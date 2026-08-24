@@ -5,6 +5,7 @@ import { X, Loader2, Search, MapPin, CheckCircle2, Database, Upload, Trash2, Fil
 import { MapPicker } from './MapPicker';
 import { cn } from '@/lib/utils';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { PROPERTY_DOC_SLOTS, HEAD_LEASE_KEY, MGMT_AGREEMENT_KEY, LEASE_PROOF_KEYS, docBelongsToSlot, isExtraSlotDoc } from '@/lib/propertyDocs';
 import { openDocViewer } from '@/lib/docViewer';
 import { PropertyPhotos } from './PropertyPhotos';
@@ -1701,6 +1702,11 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // `onRemoveExisting` is optional throughout the slot components, so withholding
+  // it here removes every delete control in one place. A manager needs the
+  // landlord's grant (0247); the landlord always has it.
+  const canDeleteDocs = useCanDeleteDocuments();
+
   const removeExisting = async (id: number) => {
     try {
       await apiDelete(`/documents/${id}`);
@@ -1809,7 +1815,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
                   isEdit={isEdit}
                   titleDeed={titleDeed} setTitleDeed={setTitleDeed}
                   drawings={drawings} setDrawings={setDrawings}
-                  existingDocs={existingDocs} onRemoveExisting={removeExisting}
+                  existingDocs={existingDocs} onRemoveExisting={canDeleteDocs() ? removeExisting : undefined}
                   unitCount={unitCount}
                   extraDocs={extraDocs} setExtraDocs={setExtraDocs}
                 />

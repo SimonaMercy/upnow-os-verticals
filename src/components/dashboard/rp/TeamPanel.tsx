@@ -38,6 +38,7 @@ interface ManagerPermissions {
   canEditProperties:    boolean;
   canPublishListings:   boolean;
   canManageDocuments:   boolean;
+  canDeleteDocuments:   boolean;
   // Leads & viewings
   canManageViewings:    boolean;
   canCreateLeads:       boolean;
@@ -114,6 +115,11 @@ export const PERM_GROUPS = [
       { key: 'canEditProperties',    label: 'Edit property & unit details', meta: 'can_edit_properties' },
       { key: 'canPublishListings',   label: 'Publish / unpublish listings', meta: 'can_publish_listings' },
       { key: 'canManageDocuments',   label: 'Upload & manage documents',    meta: 'can_manage_documents' },
+      // Separate from the row above on purpose: attaching a document and
+      // destroying one are different authorities, and the landlord grants the
+      // second deliberately. Applies everywhere documents are listed, not just
+      // properties. Off for every existing manager (migration 0247).
+      { key: 'canDeleteDocuments',   label: 'Delete documents',             meta: 'can_delete_documents' },
     ],
   },
   {
@@ -184,6 +190,7 @@ export const metaDefaults = {
   can_edit_properties:    false,
   can_publish_listings:   false,
   can_manage_documents:   false,
+  can_delete_documents:   false,
   // Leads & viewings
   can_manage_viewings:    true,
   can_create_leads:       false,

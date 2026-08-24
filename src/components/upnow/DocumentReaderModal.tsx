@@ -11,6 +11,7 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { FileText, X, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { DeleteDocumentButton } from './DeleteDocumentButton';
 import { SecureDocCanvas } from './SecureDocCanvas';
 import { currentDocWatermark } from '@/lib/docViewer';
 import { useBackClose } from '@/lib/useSlideOver';
@@ -29,13 +30,29 @@ const C = {
 const isImage = (f: ReaderFile) =>
   (f.mimeType ?? '').startsWith('image/') || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(f.url);
 
-export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose }: {
+export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose, deletableDocId, onDeleted }: {
   title?: string;
   summary?: string | null;
   slots: ReaderSlot[];
   /** Slot to open on first render; defaults to the first slot that has files. */
   initialKey?: string | null;
   onClose: () => void;
+  /**
+   * The document id behind the file being viewed, when the viewer may remove it.
+   *
+   * A callback rather than a boolean, for two reasons. The caller owns the
+   * permission question — the landlord always may, a manager only for a landlord
+   * that granted it — and it owns the ids: `ReaderFile.id` is a real document id
+   * on the KYC and history slots, but nothing in the type says it has to be, so a
+   * caller with synthetic ids returns null and simply gets no delete control
+   * rather than a button pointed at an id that means something else.
+   *
+   * Per FILE, not per slot: a slot can hold both sides of an Emirates ID or a
+   * superseded copy beside the current one, and this pane is the only place that
+   * says which one you are actually looking at.
+   */
+  deletableDocId?: (f: ReaderFile) => number | null;
+  onDeleted?: () => void;
 }) {
   const firstWithFiles = slots.find(s => s.files.length > 0)?.key ?? slots[0]?.key ?? null;
   // Computed once when the reader opens — same identity stamp as openDocViewer.
@@ -54,6 +71,9 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   const rFiles = rSlot?.files ?? [];
   const rf = Math.min(fileIdx, Math.max(0, rFiles.length - 1));
   const rActive = rFiles[rf] ?? null;
+  // null ⇒ no delete control: either the viewer may not delete, or the caller's
+  // file ids are not document ids.
+  const deleteId = rActive && deletableDocId ? deletableDocId(rActive) : null;
 
   // Flattened file sequence across every slot — drives the prev/next arrows so
   // the reader steps through all documents "one after the other" like a gallery.
@@ -127,6 +147,16 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rActive?.name || rSlot?.label || 'Document'}</div>
                 <div style={{ fontSize: 11, color: C.greenT, fontWeight: 600 }}>{rActive ? (rFiles.length > 1 ? `File ${rf + 1} of ${rFiles.length} · ${isImage(rActive) ? 'Image' : 'PDF'}` : `${isImage(rActive) ? 'Image' : 'PDF'} · Uploaded`) : 'Not uploaded'}</div>
               </div>
+              {/* Removing the file you are looking at. Deliberately here rather
+                  than on the sidebar rows: the sidebar names a SLOT, and a slot
+                  can hold several files. */}
+              {rActive && deleteId != null && (
+                <DeleteDocumentButton
+                  docId={deleteId}
+                  label={rActive.name || rSlot?.label || 'this document'}
+                  onDeleted={() => { onDeleted?.(); onClose(); }}
+                />
+              )}
             </div>
 
             {/* cross-document nav */}

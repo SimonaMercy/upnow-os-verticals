@@ -20,6 +20,8 @@ import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/Documen
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
+import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
+import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
@@ -232,6 +234,10 @@ export default function CustomerDetailPage() {
     openKycUpload.current(kycDeepLink);
   }, [kycDeepLink, data]);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  // Who may remove a document here: the landlord always, a manager only for a
+  // landlord that granted it (migration 0247). Resolved per landlord, so a grant
+  // from one never authorises work on another's record.
+  const canDeleteDocs = useCanDeleteDocuments();
   // Single-doc requirements (Passport, Visa, …) upload directly via a file
   // picker — no slot popup; only the two-sided Emirates ID uses the modal.
   const [directBusy, setDirectBusy] = useState<string | null>(null);
@@ -885,6 +891,15 @@ export default function CustomerDetailPage() {
                     <Eye size={13} /> View
                   </button>
                 )}
+                {/* One file in the slot ⇒ Remove is unambiguous. A slot holding
+                    SEVERAL (both Emirates ID sides, or a superseded re-upload
+                    stacked beside the current copy) has no single "this one", so
+                    the delete lives per file in the reader that lists them —
+                    guessing which copy the RP meant is how the wrong document
+                    gets removed. */}
+                {filed.length === 1 && canDeleteDocs(data.rpId ?? null) && (
+                  <DeleteDocumentButton docId={filed[0].id} label={req.label} onDeleted={() => load({ silent: true })} />
+                )}
                 <button type="button" onClick={onUpload} disabled={busy}
                   className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
                   {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
@@ -920,6 +935,9 @@ export default function CustomerDetailPage() {
                   className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                   <Eye size={13} /> View
                 </button>
+              )}
+              {canDeleteDocs(data.rpId ?? null) && (
+                <DeleteDocumentButton docId={d.id} label={docLabel(d, data.documents)} onDeleted={() => load({ silent: true })} />
               )}
             </div>
           );
@@ -1055,6 +1073,9 @@ export default function CustomerDetailPage() {
                           <Eye size={13} /> View
                         </button>
                       )}
+                      {uploaded && canDeleteDocs(data.rpId ?? null) && (
+                        <DeleteDocumentButton docId={existing!.id} label={req.label} onDeleted={() => load({ silent: true })} />
+                      )}
                       <button type="button" onClick={onUpload} disabled={busy}
                         className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
                         {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
@@ -1114,6 +1135,9 @@ export default function CustomerDetailPage() {
                       className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
                       <Eye size={13} /> View
                     </button>
+                  )}
+                  {uploaded && canDeleteDocs(data.rpId ?? null) && (
+                    <DeleteDocumentButton docId={existing!.id} label={req.label} onDeleted={() => load({ silent: true })} />
                   )}
                   <button type="button" onClick={onUpload} disabled={busy}
                     className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
@@ -1225,6 +1249,11 @@ export default function CustomerDetailPage() {
           slots={reader.slots}
           initialKey={reader.initialKey}
           onClose={() => setReader(null)}
+          // Every ReaderFile here is built by toReaderFile, whose id IS the
+          // document id — so the reader is where a slot holding several copies
+          // (both Emirates ID sides, a superseded re-upload) gets one removed.
+          deletableDocId={canDeleteDocs(data.rpId ?? null) ? (f) => (typeof f.id === 'number' ? f.id : null) : undefined}
+          onDeleted={() => load({ silent: true })}
         />
       )}
 

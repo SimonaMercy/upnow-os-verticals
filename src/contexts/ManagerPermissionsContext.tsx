@@ -48,6 +48,9 @@ export interface RpPermissions {
     canViewReports:       boolean;
     // Operations
     canManageDocuments:   boolean;
+    /** Soft-delete a document. NOT implied by canManageDocuments — a manager who
+     *  may attach a file is not thereby allowed to destroy one (migration 0247). */
+    canDeleteDocuments:   boolean;
     canManageMaintenance: boolean;
     // Communication & admin
     canCommunicateTenants:boolean;
