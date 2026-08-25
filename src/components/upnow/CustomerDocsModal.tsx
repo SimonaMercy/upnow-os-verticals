@@ -46,11 +46,13 @@ const groupOf = (d: CustomerDoc): 'kyc' | 'financial' | 'contract' | 'other' => 
   if (d.ownerType === 'tenancy_contract') return 'contract';
   return 'other';
 };
+// Render order. KYC sits at the END — the lease-grouped branch places it there
+// too, so the popup reads the same way whichever grouping it falls into.
 const GROUPS: { key: 'kyc' | 'financial' | 'contract' | 'other'; label: string }[] = [
-  { key: 'kyc',       label: 'Customer KYC' },
   { key: 'financial', label: 'Financial documents' },
   { key: 'contract',  label: 'Contract documents' },
   { key: 'other',     label: 'Other documents' },
+  { key: 'kyc',       label: 'Customer KYC' },
 ];
 
 export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, canDelete, onChanged, rp, onClose }: {
@@ -158,8 +160,24 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
         const items = shown.filter(d => resolveLeaseId(d) === l.id);
         if (items.length) out.push({ key: `lease-${l.id}`, label: leaseLabel(l), items });
       }
-      const general = shown.filter(d => resolveLeaseId(d) === null);
+      // KYC IS ITS OWN SECTION, lease grouping or not.
+      //
+      // The lease branch used to sweep everything without a lease link into one
+      // "Customer & general" bucket — which put the customer's Emirates ID,
+      // passport and visa in with move-in forms, receipts and deposit slips. The
+      // identity pack is the one group a person opens this popup looking for, and
+      // it belongs to the CUSTOMER, not to any single tenancy, so it is never
+      // lease paperwork that failed to find its lease. Split it out first and let
+      // the rest fall through, exactly as the category branch below already does.
+      const unlinked = shown.filter(d => resolveLeaseId(d) === null);
+      const kyc = unlinked.filter(isKycDoc);
+      const general = unlinked.filter(d => !isKycDoc(d));
       if (general.length) out.push({ key: 'general', label: 'Customer & general', items: general });
+      // KYC LAST, in both grouping modes (see GROUPS). It is the one section whose
+      // position should never move: a reader scrolling for this tenancy's paperwork
+      // should not have to scroll PAST the identity pack to reach it, and the pack
+      // is the same set every time — so it reads as a footer, not as a lead.
+      if (kyc.length) out.push({ key: 'kyc', label: 'Customer KYC', items: kyc });
       return out;
     }
     return GROUPS.map(g => ({ key: g.key, label: g.label, items: shown.filter(d => groupOf(d) === g.key) })).filter(g => g.items.length);

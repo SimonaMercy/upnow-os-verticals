@@ -858,6 +858,14 @@ export default function CustomerDetailPage() {
             // showing the still-valid one would hide the reason the row is red.
             const shownExpiry = filed.find(f => isExpired(f.expiryDate))?.expiryDate ?? filed[0]?.expiryDate ?? null;
             const twoSided = req.key === 'emirates_id';
+            // A single-slot requirement holding MORE THAN ONE file is ambiguous.
+            // The Airtable import wrote a second attachment as `passport_2` /
+            // `uae_visa_2` — the second-COPY convention — whether it was a second
+            // copy of the customer's own or a dependant's document, and nothing in
+            // the row says which. Flag it so an admin decides; do not guess, and do
+            // not move it, because the base key is not reliably the customer's own.
+            // The Emirates ID is exempt: two files there is the Front/Back pair.
+            const needsReview = !twoSided && filed.length > 1;
             const busy = directBusy === req.key;
             // Emirates ID (two-sided) and any doc that carries an expiry — trade
             // license, passport, visa — open the slot popup so the RP can record
@@ -867,8 +875,8 @@ export default function CustomerDetailPage() {
               : () => pickDirect(slotsFor(req, docs)[0]);
             return (
               <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${expired ? 'bg-[#fee2e2] text-[#b91c1c]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
-                  {expired ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${expired ? 'bg-[#fee2e2] text-[#b91c1c]' : needsReview ? 'bg-[#fdf3e7] text-[#b07415]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                  {expired ? <AlertTriangle size={16} /> : needsReview ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
@@ -880,6 +888,11 @@ export default function CustomerDetailPage() {
                           ? <span className="text-[#b91c1c]">Expired {fmtDate(shownExpiry)}</span>
                           : <span className="text-[#1a7a5a]">exp {fmtDate(shownExpiry)}</span>)}
                         <span className={expired ? 'text-[#9b9890]' : 'text-[#1a7a5a]'}>{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
+                        {needsReview && (
+                          <span className="text-[#b07415] inline-flex items-center gap-1">
+                            <AlertTriangle size={11} /> one may be an occupant&apos;s — review
+                          </span>
+                        )}
                       </>
                     ) : partial ? (
                       <>
@@ -1112,6 +1125,7 @@ export default function CustomerDetailPage() {
                 })}
               </div>
             ))}
+
           </div>
         )}
       </div>
