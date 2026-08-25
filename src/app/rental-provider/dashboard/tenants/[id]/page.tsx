@@ -360,18 +360,26 @@ export default function CustomerDetailPage() {
   const keyMatcher = (base: string) => (k: string) =>
     new RegExp(`^${base}(_|$)`).test(k);
   const isEidKey = (k: string) => /^emirates_id(_|$)/.test(k);
+  // Customer visas live under `uae_visa` (migration 0194) but a few legacy rows
+  // are still bare `visa`, so the slot has to accept both spellings. It must stay
+  // ANCHORED all the same: an unanchored /visa/ also matches `third_party_visa_*`,
+  // which is ANOTHER PERSON's document filed on this customer as evidence, and
+  // folding it in here both duplicates the row and lets a stranger's expiry drive
+  // this customer's KYC status. Third-party docs belong in the extra-KYC list
+  // below, alongside their passport and Emirates ID.
+  const isVisaKey = (k: string) => /^(uae_)?visa(_|$)/.test(k);
   const KYC_REQS: { key: string; label: string; category: string; required: boolean; match: (k: string) => boolean }[] = isCompany
     ? [
         { key: 'trade_license', label: 'Trade License', category: 'license', required: true, match: keyMatcher('trade_license') },
         { key: 'moa', label: 'Memorandum of Association (MOA)', category: 'compliance', required: false, match: keyMatcher('moa') },
         { key: 'emirates_id', label: 'Authorised Signatory Emirates ID', category: 'identity', required: true, match: isEidKey },
         { key: 'passport', label: 'Passport', category: 'identity', required: false, match: keyMatcher('passport') },
-        { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },
+        { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: isVisaKey },
       ]
     : [
         { key: 'emirates_id', label: 'Emirates ID', category: 'identity', required: true, match: isEidKey },
         { key: 'passport', label: 'Passport', category: 'identity', required: true, match: keyMatcher('passport') },
-        { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: k => /visa/.test(k) },
+        { key: 'visa', label: 'UAE Visa / Residency', category: 'identity', required: false, match: isVisaKey },
       ];
   // Emirates ID counts as complete only with BOTH sides (front + back) — or a
   // single combined scan — matching the Operations KYC gate. A front-only (or
@@ -912,6 +920,18 @@ export default function CustomerDetailPage() {
           {/* KYC docs outside the standard checklist (e.g. labour card) — still listed */}
           {extraKycDocs.map(d => {
           const docExpired = isExpired(d.expiryDate);
+          // These rows carry no checklist requirement, but they are still the
+          // customer's documents and still expire — so they get the same Replace
+          // the checklist slots have, built from the DOCUMENT instead of a `req`.
+          // Its own key is the canonical key: `putKycSlot` only uses that when
+          // CREATING, and an extra row always has a row to PATCH, so the file is
+          // swapped in place (old copy retained) rather than deleted and re-added.
+          const extraLabel = docLabel(d, data.documents);
+          const extraSlot: UploadSlot = { label: extraLabel, canonicalKey: d.documentKey, category: d.category ?? 'other', existing: slotDoc(d) };
+          const onUpload = docNeedsExpiry(d.documentKey)
+            ? () => setUploadDoc({ title: extraLabel, slots: [extraSlot] })
+            : () => pickDirect(extraSlot);
+          const busy = directBusy === d.documentKey;
           return (
             <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
               {/* No file = nothing has been sent. A tick and "Pending review"
@@ -929,6 +949,7 @@ export default function CustomerDetailPage() {
                     : <span className="text-[#1a7a5a]">exp {fmtDate(d.expiryDate)}</span>)}
                   {d.fileUrl && !d.expiryDate && d.status !== 'pending' && <span className="text-[#1a7a5a]">On record</span>}
                 </div>
+                {directErr[d.documentKey] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[d.documentKey]}</p>}
               </div>
               {d.fileUrl && (
                 <button type="button" onClick={() => openKycReader(`extra-${d.id}`)}
@@ -937,8 +958,13 @@ export default function CustomerDetailPage() {
                 </button>
               )}
               {canDeleteDocs(data.rpId ?? null) && (
-                <DeleteDocumentButton docId={d.id} label={docLabel(d, data.documents)} onDeleted={() => load({ silent: true })} />
+                <DeleteDocumentButton docId={d.id} label={extraLabel} onDeleted={() => load({ silent: true })} />
               )}
+              <button type="button" onClick={onUpload} disabled={busy}
+                className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${d.fileUrl ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                {d.fileUrl ? 'Replace' : 'Upload'}
+              </button>
             </div>
           );
           })}

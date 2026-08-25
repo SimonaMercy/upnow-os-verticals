@@ -4995,6 +4995,10 @@ function DetailsDrawer({
                   /* Manager on "All landlords": scope the fetch by THIS contract's
                      landlord instead of the (empty) ?rp= query param. */
                   rp={contract.landlord?.id ?? null}
+                  /* Same delete grant, and the same trash icon, the binder slots
+                     and the KYC list on this page already use. */
+                  canDelete={perms.deleteDocuments}
+                  onChanged={onDocsChanged}
                   onClose={() => setShowDocsHistory(false)}
                 />
               )}
@@ -5004,6 +5008,9 @@ function DetailsDrawer({
                 <CustomerDocsModal
                   tenantName={contract.tenant.name}
                   documents={all}
+                  rp={contract.landlord?.id ?? null}
+                  canDelete={perms.deleteDocuments}
+                  onChanged={onDocsChanged}
                   onClose={() => setShowContractDocs(false)}
                 />
               )}

@@ -13,6 +13,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { docLabel } from '@/lib/docLabel';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
+import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { useBackClose } from '@/lib/useSlideOver';
 
 export type CustomerDoc = {
@@ -52,7 +53,7 @@ const GROUPS: { key: 'kyc' | 'financial' | 'contract' | 'other'; label: string }
   { key: 'other',     label: 'Other documents' },
 ];
 
-export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, rp, onClose }: {
+export function CustomerDocsModal({ tenantId, tenantName, documents, leases, excludeKyc, canDelete, onChanged, rp, onClose }: {
   /** Needed when `documents` isn't preloaded — the modal fetches the customer detail itself. */
   tenantId?: number | null;
   tenantName?: string | null;
@@ -65,6 +66,14 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
   leases?: LeaseMeta[];
   /** Hide KYC docs (e.g. the tenant page already shows them in its own section). */
   excludeKyc?: boolean;
+  /** Show the Remove control on each row — the SAME trash icon every other
+   *  document list uses. Off by default: this modal is also mounted on surfaces
+   *  that only read (platform admin), and a destructive control should be opted
+   *  into by the host that already resolved the actor's delete grant. */
+  canDelete?: boolean;
+  /** Host refetch, so a removal also clears the row from the page BEHIND the
+   *  modal rather than only from the popup. */
+  onChanged?: () => void;
   onClose: () => void;
 }) {
   const [docs, setDocs] = useState<CustomerDoc[] | null>(documents ?? null);
@@ -109,6 +118,18 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [dismiss]);
+
+  // A removal has to leave BOTH lists honest. When this modal fetched its own
+  // docs, clearing them re-runs the effect above and the server answers again —
+  // no local guesswork. When the host passed them in, it owns the data, so drop
+  // the row here (the prop only seeds state, a parent refetch would not reach us)
+  // and let `onChanged` refresh the page behind.
+  const ownsFetch = !documents && tenantId != null;
+  const afterDelete = (id: number) => {
+    onChanged?.();
+    if (ownsFetch) setDocs(null);
+    else setDocs(prev => prev?.filter(x => x.id !== id) ?? prev);
+  };
 
   const shown = (excludeKyc ? (docs ?? []).filter(d => !isKycDoc(d)) : (docs ?? []));
   // Prefer explicitly-passed leases; otherwise the ones fetched alongside docs.
@@ -195,18 +216,23 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                       <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#dbeafe] text-[#1d4ed8]">Pending review</span>
                     ) : null}
                     {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
-                    {d.fileUrl && (
+                    {(d.fileUrl || canDelete) && (
                       <div className="ml-auto flex items-center gap-3 shrink-0">
+                        {d.fileUrl && (
                         <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
+                        )}
                         {/* Contract paperwork (Contract Attachment, Contract Registration/Ejari, …) is the
                             counterparty's own document — offer a clean, watermark-free download alongside
                             the in-app viewer, same as move-in/move-out/settlement artifacts. */}
-                        {groupOf(d) === 'contract' && (
+                        {d.fileUrl && groupOf(d) === 'contract' && (
                           <DownloadDocButton
                             documentId={d.id}
                             label="Download"
                             className="text-xs text-[#6b6860] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
                           />
+                        )}
+                        {canDelete && (
+                          <DeleteDocumentButton docId={d.id} label={docLabel(d, docs ?? [])} onDeleted={() => afterDelete(d.id)} />
                         )}
                       </div>
                     )}
