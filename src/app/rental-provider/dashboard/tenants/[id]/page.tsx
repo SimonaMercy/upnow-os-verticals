@@ -23,6 +23,7 @@ import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
+import { sectionForDocKey } from '@/lib/documentCatalogue';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 type Lease = {
@@ -146,8 +147,20 @@ const isKycDoc = (d: Doc) => {
   // lease, say). Only an undeclared row falls through to the old guess.
   if (d.section === 'kyc') return true;
   if (d.section === 'tenancy') return false;
-  return (d.ownerType ?? 'customer') === 'customer' &&
-    (d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey));
+  // A lease's own paperwork stays with the lease: only the customer's OWN rows
+  // may be guessed into their pack.
+  if ((d.ownerType ?? 'customer') !== 'customer') return false;
+  // THE catalogue default for this document type — the same rule the contract
+  // binder and the upload form use (`resolveDocSection` step 2). Reading it here
+  // is what stops this page inventing its own answer: the guess below accepts
+  // only `identity` / `license`, while CATEGORY_SECTION files `banking`, `legal`
+  // and `compliance` under KYC too. That gap is why a Board Resolution and a
+  // Company Bank Statement sat in "History Documents" instead of the KYC card.
+  const catalogued = sectionForDocKey(d.documentKey);
+  if (catalogued) return catalogued === 'kyc';
+  // Off-catalogue key with no stored answer: keep the historic guess, so the
+  // ~1,200 pre-0204 rows stay exactly where they already render.
+  return d.category === 'identity' || d.category === 'license' || KYC_KEY_RE.test(d.documentKey);
 };
 // Additional-occupant identity docs (occupant 2..N) hang off the customer with
 // `occupant_<n>_*` keys. They get their own section, not the primary KYC card —
@@ -409,7 +422,11 @@ export default function CustomerDetailPage() {
     return { req, docs, filed, satisfied, partialHint };
   });
   const matchedKycIds = new Set(kycChecklist.flatMap(x => x.docs.map(d => d.id)));
-  const extraKycDocs = kycDocs.filter(d => !matchedKycIds.has(d.id)); // KYC docs outside the standard checklist
+  // KYC docs outside the standard checklist. The optional supporting pack (bank
+  // statement, salary certificate, marriage certificate) is KYC too, but it has
+  // its own card further down for individuals — listing it here as well would
+  // render every one of those documents twice.
+  const extraKycDocs = kycDocs.filter(d => !matchedKycIds.has(d.id) && !(showSupporting && isSupportingDoc(d)));
   const kycUploadedCount = kycChecklist.filter(x => x.satisfied).length;
   const kycViewable = kycDocs.filter(d => d.fileUrl);
   // Lease/contract paperwork (non-KYC) — shown contract-wise in "History Documents".

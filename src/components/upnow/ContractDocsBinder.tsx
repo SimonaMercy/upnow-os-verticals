@@ -340,17 +340,33 @@ function SecurePreview({ url, caption, watermark, action }: { url: string; capti
  */
 function RefileButton({ doc, to, onSetSection }: { doc: BinderDoc; to: 'kyc' | 'tenancy'; onSetSection: (doc: BinderDoc, next: 'kyc' | 'tenancy') => Promise<void> }) {
   const [busy, setBusy] = useState(false);
+  // A refused move MUST say so. Without this the handler's rejection became an
+  // unhandled promise rejection: the button flipped back from "Moving…" and
+  // showed nothing, so a 400 read as a click that never registered.
+  const [err, setErr] = useState<string | null>(null);
   return (
-    <button
-      type="button" disabled={busy}
-      title={to === 'kyc'
-        ? "File this against the customer — it will also show on their profile and on their other leases"
-        : 'File this against this lease only — it will leave the customer\'s KYC pack'}
-      onClick={async () => { setBusy(true); try { await onSetSection(doc, to); } finally { setBusy(false); } }}
-      style={{ flex: '0 0 auto', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: busy ? '#9b9890' : '#4a4742', cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
-    >
-      {busy ? 'Moving…' : to === 'kyc' ? '⇄ Move to Customer KYC' : '⇄ Move to Tenancy'}
-    </button>
+    <span style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      {err && (
+        <span title={err} style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {err}
+        </span>
+      )}
+      <button
+        type="button" disabled={busy}
+        title={to === 'kyc'
+          ? "File this against the customer — it will also show on their profile and on their other leases"
+          : 'File this against this lease only — it will leave the customer\'s KYC pack'}
+        onClick={async () => {
+          setBusy(true); setErr(null);
+          try { await onSetSection(doc, to); }
+          catch (e) { setErr(e instanceof Error ? e.message : 'Could not move the document'); }
+          finally { setBusy(false); }
+        }}
+        style={{ flex: '0 0 auto', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: busy ? '#9b9890' : '#4a4742', cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+      >
+        {busy ? 'Moving…' : to === 'kyc' ? '⇄ Move to Customer KYC' : '⇄ Move to Tenancy'}
+      </button>
+    </span>
   );
 }
 
@@ -623,8 +639,17 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   };
 
   // "Move to the other section" on each stored card. Authenticated surfaces only.
+  // Only rows PATCH /documents/:id/section can actually move. It re-owns a
+  // document between a customer and a tenancy and refuses everything else — the
+  // deposit receipts / slips / cheques that also reach this binder (owner_type
+  // `security_deposit`) came back "A security_deposit document cannot be filed
+  // as customer KYC", so offering the button on them was a guaranteed 400.
+  // Negative ids are the synthetic cheque rows fabricated from `lead_cheques`:
+  // they are not documents at all, so there is nothing to PATCH.
+  const REFILABLE_OWNERS = ['customer', 'tenant', 'tenancy_contract'];
+  const canRefile = (d: BinderDoc) => d.id > 0 && (!d.ownerType || REFILABLE_OWNERS.includes(d.ownerType));
   const refile = (d: BinderDoc, to: 'kyc' | 'tenancy') =>
-    onSetSection ? <RefileButton doc={d} to={to} onSetSection={onSetSection} /> : undefined;
+    onSetSection && canRefile(d) ? <RefileButton doc={d} to={to} onSetSection={onSetSection} /> : undefined;
 
   const all = documents.filter(d => !!d.fileUrl);
   const matchDocs = (key: string): BinderDoc[] => {
