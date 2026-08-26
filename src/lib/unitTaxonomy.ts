@@ -11,10 +11,10 @@
 export const RESIDENTIAL_UNIT_TYPES: string[] = [
   'apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse',
   'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home',
-  // Accommodation types are offered under residential + commercial. Both are
-  // listed here so the bed / furnishing fields show, but only LABOUR is exempt:
-  // staff accommodation is a commercial let and appears in COMMERCIAL_UNIT_TYPES
-  // below too, so it resolves to 5% rent VAT.
+  // Accommodation types are offered under residential + commercial. They are
+  // listed here so the bed / furnishing fields show, but they are NOT exempt —
+  // both also appear in COMMERCIAL_UNIT_TYPES below, so they resolve to 5% rent
+  // VAT. Commercial for tax, residential for form fields.
   'labour_accommodation', 'staff_accommodation',
 ];
 
@@ -56,15 +56,15 @@ export function unitHasBathrooms(unitType: string | null | undefined): boolean {
  *  commercial bucket plus workspaces + venues. Mirrors COMMERCIAL_UNIT_TYPES in
  *  the backend `src/shared/enums.ts`.
  *
- *  `staff_accommodation` is here AND in RESIDENTIAL_UNIT_TYPES above, on purpose:
- *  it is let to a business for its workforce, so rent is VATable, but the unit
- *  still has beds and so keeps the residential form fields. Labour accommodation
- *  stays residential for both. */
+ *  The accommodation types are here AND in RESIDENTIAL_UNIT_TYPES above, on
+ *  purpose: an accommodation block is let to a business to house its workforce,
+ *  so the rent is VATable, but the unit still has beds and so keeps the
+ *  residential form fields. Commercial for tax, residential for form fields. */
 export const COMMERCIAL_UNIT_TYPES: string[] = [
   'retail_shop', 'showroom', 'office_fitted', 'office_shell_core', 'restaurant_fnb', 'clinic_medical',
   'coworking_desk', 'private_office', 'meeting_room', 'day_office',
   'event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue',
-  'staff_accommodation',
+  'labour_accommodation', 'staff_accommodation',
 ];
 
 /** Unit types that attract INDUSTRIAL fee/VAT treatment (5% rent VAT). */

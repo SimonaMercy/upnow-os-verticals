@@ -54,6 +54,7 @@ import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { taxPortionOf } from '@/lib/chargeTax';
+import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
 import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequeReplacementGroups';
 import { buildCurrentPlan } from '@/lib/currentPlan';
@@ -467,15 +468,13 @@ const EXPIRY_DOC_KEYS = new Set([
   'trade_license',
 ]);
 
-function spaceCategoryFromUnitType(unitType: string | null): string {
-  if (!unitType) return 'residential';
-  const t = unitType.toLowerCase();
-  if (['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'].includes(t)) return 'industrial';
-  if (['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical',
-       'coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue',
-       'conference_hall','private_dining','outdoor_venue'].includes(t)) return 'commercial';
-  return 'residential';
-}
+/** The fee/VAT category for a unit TYPE. Delegates to lib/unitTaxonomy — this
+ *  used to be a hand-copied list here, which quietly went stale: it never
+ *  learned that accommodation lets are commercial, so the renewal preview
+ *  offered 0% rent VAT on a staff-accommodation unit while the backend stamped
+ *  5%. Three copies of one taxonomy is two too many; keep this a delegation. */
+const spaceCategoryFromUnitType = (unitType: string | null): string =>
+  deriveSpaceCategoryFromUnitType(unitType?.toLowerCase() ?? null);
 
 function deriveState(contract: ContractDetail, signatures: { role: string; method?: string }[], insp: MoveInInsp | null, moveOutInsp: MoveInInsp | null, settlementStatus: DerivedState['settlementStatus']): DerivedState {
   const docs = contract.documents ?? [];

@@ -1,3 +1,5 @@
+import { COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES } from './unitTaxonomy';
+
 export interface DocReq {
   key: string;
   label: string;
@@ -6,12 +8,14 @@ export interface DocReq {
   hint?: string;
 }
 
-export const COMMERCIAL_TYPES = [
-  'retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical',
-  'coworking_desk','private_office','meeting_room','day_office',
-  'event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue',
-];
-export const INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
+/** Re-exported from lib/unitTaxonomy, the single source of truth for the
+ *  residential / commercial / industrial split. These were hand-copied lists
+ *  that drifted: they never learned that accommodation lets are commercial, so
+ *  a staff- or labour-accommodation tenant was offered the residential document
+ *  pack while the backend classed the lease commercial. Kept under their
+ *  original names because the customer Documents page imports them. */
+export const COMMERCIAL_TYPES: string[] = COMMERCIAL_UNIT_TYPES;
+export const INDUSTRIAL_TYPES: string[] = INDUSTRIAL_UNIT_TYPES;
 
 /** Shared identity docs — required for every booking type. Emirates ID is
  *  captured as two separate slots (Front + Back) to avoid the "is this one

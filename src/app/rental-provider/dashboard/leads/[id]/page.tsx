@@ -41,6 +41,7 @@ import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
+import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -112,21 +113,11 @@ interface FeeRuleDto {
 }
 type FeeRulesMap = Record<string, FeeRuleDto[]>;
 
-const COMMERCIAL_UNIT_TYPES = new Set([
-  'retail_shop','showroom','office_fitted','office_shell_core',
-  'restaurant_fnb','clinic_medical','coworking_desk','private_office',
-  'meeting_room','day_office','event_hall','wedding_venue',
-  'conference_hall','private_dining','outdoor_venue',
-]);
-const INDUSTRIAL_UNIT_TYPES = new Set([
-  'warehouse','open_yard','storage_unit','cold_storage','logistics_facility',
-]);
-function unitSpaceCategory(unitType?: string | null): 'residential' | 'commercial' | 'industrial' {
-  if (!unitType) return 'residential';
-  if (INDUSTRIAL_UNIT_TYPES.has(unitType)) return 'industrial';
-  if (COMMERCIAL_UNIT_TYPES.has(unitType)) return 'commercial';
-  return 'residential';
-}
+/** Delegates to lib/unitTaxonomy — this page used to inline its own copy of the
+ *  lists, which went stale (it never learned accommodation lets are commercial),
+ *  so a lead plan quoted 0% VAT on a unit the contract then charged 5% on. */
+const unitSpaceCategory = (unitType?: string | null): 'residential' | 'commercial' | 'industrial' =>
+  deriveSpaceCategoryFromUnitType(unitType);
 function feeToAed(rule: FeeRuleDto, annualRentAed: number): string {
   if (rule.valueType === 'percentage') return String(Math.round(annualRentAed * rule.value / 100));
   return String(rule.value);

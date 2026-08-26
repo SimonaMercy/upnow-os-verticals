@@ -64,6 +64,7 @@ import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
 import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
+import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
 
 /* ─── Brand palette ─────────────────────────────────────────────────── */
 const PALETTE: React.CSSProperties = {
@@ -1705,7 +1706,12 @@ function NotInterestedModal({ viewing, onClose, onSuccess }: { viewing: ApiViewi
 }
 
 /* ─── INLINE KYC + DOCS FORM (new application flow) ────────────────── */
-const COMMERCIAL_UNIT_TYPES = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue','warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
+/** "Not residential" — commercial AND industrial, since this flow only splits
+ *  the checklist two ways. Defers to lib/unitTaxonomy rather than the inlined
+ *  list that used to sit here, which had drifted (it never learned that
+ *  accommodation lets are commercial). */
+const isNonResidentialUnitType = (unitType?: string | null): boolean =>
+  !!unitType && deriveSpaceCategoryFromUnitType(unitType) !== 'residential';
 
 const KYC_INPUT_STYLE: React.CSSProperties = { border: '1px solid var(--mist-strong)', borderRadius: 9, padding: '9px 12px', fontSize: 13, color: 'var(--ink)', background: 'var(--paper)', outline: 'none', width: '100%' };
 const KYC_LABEL_STYLE: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.06em' };
@@ -2231,7 +2237,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const tenantProfileId = resolved.tenantProfileId;
   const viewing = resolved.viewing;
   const unitType = resolved.unit?.unitType ?? null;
-  const isRes = !unitType || !COMMERCIAL_UNIT_TYPES.includes(unitType);
+  const isRes = !isNonResidentialUnitType(unitType);
   const occupantCount = Math.max(viewing?.occupantsAdults ?? 1, 1);
 
   const emailVerified  = user?.emailVerified ?? false;

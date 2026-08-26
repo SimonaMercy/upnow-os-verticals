@@ -17,7 +17,7 @@ import {
 import { jurisdictionForEmirate, type TenancyJurisdiction } from '@/lib/tenancyJurisdiction';
 import { isDubaiContract } from '@/lib/ejariFill';
 import { AjmanContractDoc, isAjmanContract, type AjmanContractFields } from './AjmanContractPdf';
-import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
+import { effectiveSpaceCategory, deriveSpaceCategoryFromUnitType, isLandUnitType } from '@/lib/unitTaxonomy';
 import { useFilledEjari } from './useFilledEjari';
 import { useReactPdfDoc } from './useReactPdfDoc';
 import EjariCanvas from './EjariCanvas';
@@ -478,16 +478,16 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
 // contract it belongs to: lease period, the leased unit (category · type · number)
 // and its location (building · emirate · country). Render-time only — never stored
 // in the saved terms, so it always reflects the live contract.
-const ADDENDUM_LAND_TYPES = ['residential_land','commercial_land','industrial_land','mixed_use_land','agricultural_land','labour_accommodation_land'];
-const ADDENDUM_INDUSTRIAL_TYPES = ['warehouse','open_yard','storage_unit','cold_storage','logistics_facility'];
-const ADDENDUM_COMMERCIAL_TYPES = ['retail_shop','showroom','office_fitted','office_shell_core','restaurant_fnb','clinic_medical','coworking_desk','private_office','meeting_room','day_office','event_hall','wedding_venue','conference_hall','private_dining','outdoor_venue'];
 const prettyType = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+/** Land is checked first — a plot is neither residential nor commercial for this
+ *  wording. Everything else defers to lib/unitTaxonomy rather than the
+ *  hand-copied ADDENDUM_* lists that used to live here, which had drifted out of
+ *  step (they never learned accommodation lets are commercial, so the addendum
+ *  called a staff-accommodation lease "residential" on a printed contract). */
 function addendumCategoryWord(type?: string | null): string {
   const t = (type ?? '').toLowerCase();
-  if (ADDENDUM_LAND_TYPES.includes(t)) return 'land';
-  if (ADDENDUM_INDUSTRIAL_TYPES.includes(t)) return 'industrial';
-  if (ADDENDUM_COMMERCIAL_TYPES.includes(t)) return 'commercial';
-  return 'residential';
+  if (isLandUnitType(t)) return 'land';
+  return deriveSpaceCategoryFromUnitType(t);
 }
 function buildAddendumPreamble(data?: EjariContractData): string | null {
   if (!data) return null;
