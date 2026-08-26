@@ -11,9 +11,10 @@
 export const RESIDENTIAL_UNIT_TYPES: string[] = [
   'apartment', 'villa', 'villa_compound', 'townhouse', 'penthouse',
   'studio', 'duplex_loft', 'room', 'bed_space', 'holiday_home',
-  // Accommodation types are offered under residential + commercial; they are
-  // residential in nature (beds shown, VAT-exempt by default). Kept OUT of the
-  // COMMERCIAL_UNIT_TYPES VAT set below so mixed-use units default to residential.
+  // Accommodation types are offered under residential + commercial. Both are
+  // listed here so the bed / furnishing fields show, but only LABOUR is exempt:
+  // staff accommodation is a commercial let and appears in COMMERCIAL_UNIT_TYPES
+  // below too, so it resolves to 5% rent VAT.
   'labour_accommodation', 'staff_accommodation',
 ];
 
@@ -53,11 +54,17 @@ export function unitHasBathrooms(unitType: string | null | undefined): boolean {
 
 /** Unit types that attract COMMERCIAL fee/VAT treatment (5% rent VAT) — the
  *  commercial bucket plus workspaces + venues. Mirrors COMMERCIAL_UNIT_TYPES in
- *  the backend `src/shared/enums.ts`. */
+ *  the backend `src/shared/enums.ts`.
+ *
+ *  `staff_accommodation` is here AND in RESIDENTIAL_UNIT_TYPES above, on purpose:
+ *  it is let to a business for its workforce, so rent is VATable, but the unit
+ *  still has beds and so keeps the residential form fields. Labour accommodation
+ *  stays residential for both. */
 export const COMMERCIAL_UNIT_TYPES: string[] = [
   'retail_shop', 'showroom', 'office_fitted', 'office_shell_core', 'restaurant_fnb', 'clinic_medical',
   'coworking_desk', 'private_office', 'meeting_room', 'day_office',
   'event_hall', 'wedding_venue', 'conference_hall', 'private_dining', 'outdoor_venue',
+  'staff_accommodation',
 ];
 
 /** Unit types that attract INDUSTRIAL fee/VAT treatment (5% rent VAT). */
