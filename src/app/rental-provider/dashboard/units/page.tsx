@@ -303,6 +303,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
     if (u.availability === 'occupied')    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
     if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
+    // Reserved is the fourth availability state and had no case here, so it fell
+    // through to the LISTING status below and rendered "Expired" — which on a let
+    // unit means de-listed-because-it-was-taken, not a lapsed anything. Listing
+    // status only describes a unit that is on the market; anything else has to be
+    // answered by availability or not at all.
+    if (u.availability === 'reserved')    return { label: 'Reserved',   bg: '#fef3c7', fg: '#92400e' };
     switch (u.listingStatus) {
       case 'published': return { label: 'Published', bg: '#d8f2e8', fg: '#1a7a5a' };
       case 'pending':   return { label: 'Pending',   bg: '#fef3c7', fg: '#92400e' };
@@ -649,10 +655,17 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     const size = u.unitSizeSqft ? `${Number(u.unitSizeSqft).toLocaleString()} sqft`
       : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : null;
     // Annual Rent = the income-counting lease (running today, or the next term
-    // whose cheques are collected), counted only while occupied — an ended /
-    // terminated lease or a draft nobody has paid for must not inflate the figure
-    // (matches the portfolio KPI + Unit Mix). Vacant units show "No lease yet".
-    const annual = u.availability === 'occupied' ? (u.currentLeaseRent ?? null) : null;
+    // whose cheques are collected) — an ended / terminated lease or a draft
+    // nobody has paid for is already excluded by the rule behind
+    // `currentLeaseRent` (LEASE_COUNTS_SQL), which is what the portfolio KPI, the
+    // Unit Mix and the Portfolio report all read. A unit with no such lease shows
+    // "No lease yet".
+    //
+    // NOT re-gated on `availability === 'occupied'`. The flag is a cache of the
+    // lease, written when the cheques are collected; where the two disagree the
+    // lease is the fact, and re-testing the flag here made this page the only
+    // surface showing a paid-for unit as earning nothing.
+    const annual = u.currentLeaseRent ?? null;
     return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id };
   };
 
