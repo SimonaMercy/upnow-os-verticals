@@ -252,8 +252,9 @@ type IdCard = { key: string; label: string; doc: BinderDoc | null; optional?: bo
  *
  * `coreOnly` is the RENEWAL shape (landlord's call, 1 Sep 2026): the customer's
  * core KYC and nothing else — an individual's Emirates ID · Passport · Visa; a
- * company's Trade License · MOA · Authorised Signatory Emirates ID. The
- * signatory's passport / visa slots and every loose extra stay off the pane.
+ * company's Trade License · MOA · Authorised Signatory Emirates ID · Passport ·
+ * Visa. Every loose extra (a labour card, a licence on an individual's lease)
+ * stays off the pane.
  */
 const idCardsFor = (
   docs: BinderDoc[],
@@ -298,12 +299,9 @@ const idCardsFor = (
   if (front || tenantPack) cards.push({ key: `${prefix}eid-front`, label: faceLabel(front, 'Front'), doc: front });
   if (back || tenantPack) cards.push({ key: `${prefix}eid-back`, label: faceLabel(back, 'Back'), doc: back });
   // The rest of the pack. A company's signatory need not hold a passport or visa
-  // (the licence identifies the tenant), so those slots are optional there — and
-  // on a renewal a company's pane stops at the signatory's Emirates ID.
-  if (!(company && coreOnly)) {
-    slot('passport', 'Passport', isPassport, company);
-    slot('visa', 'UAE Visa / Residency', isVisa, true);
-  }
+  // (the licence identifies the tenant), so those slots are optional there.
+  slot('passport', 'Passport', isPassport, company);
+  slot('visa', 'UAE Visa / Residency', isVisa, true);
   // Anything else that reached the KYC pane — e.g. a licence or MOA on an
   // individual's lease, or a labour card. Not on a renewal: its pane is the core
   // pack only (a further copy of a core document still shows, below).
@@ -312,7 +310,7 @@ const idCardsFor = (
   const eidShown = new Set([front?.id, back?.id].filter((id): id is number => id != null));
   const placed = (d: BinderDoc) =>
     (isEid(d) ? eidShown.has(d.id) : isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d))));
-  const coreDoc = (d: BinderDoc) => isEid(d) || (company ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d));
+  const coreDoc = (d: BinderDoc) => isEid(d) || isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d)));
   for (const d of docs.filter(d => !placed(d) && (!coreOnly || coreDoc(d))).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
     cards.push(card(d));
   }
@@ -716,8 +714,8 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // read before the pane moves on to anybody else (landlord's call, 11 Aug 2026).
   // A RENEWAL shows the customer's OWN KYC and nothing more on the left
   // (landlord's call, 1 Sep 2026): an individual's Emirates ID · Passport · Visa,
-  // a company's Trade License · MOA · Authorised Signatory Emirates ID — plus,
-  // for a COMPANY, the third party's papers when any are on file (their EID /
+  // a company's Trade License · MOA · Authorised Signatory Emirates ID · Passport
+  // · Visa — plus, for a COMPANY, the third party's papers when on file (their EID /
   // passport / visa: the person the company acts through is part of who the
   // tenant is, on a renewal as much as on the first lease). The supporting
   // papers, the partner / POA holder / guarantor, the dependants and any loose
@@ -764,7 +762,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // so the papers the pane deliberately leaves out do not creep back in here.
   const usedIds = new Set([...primaryCards, ...supportingCards].map(c => c.doc?.id).filter((id): id is number => id != null));
   const isCoreKyc = (d: BinderDoc) =>
-    (!personPrefix(d) && (isEid(d) || (isCompanyTenant ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d))))
+    (!personPrefix(d) && (isEid(d) || isPassport(d) || isVisa(d) || (isCompanyTenant && (isLicense(d) || isMoa(d)))))
     || (isCompanyTenant && isThirdParty(d));
   const idExtras = primaryPool.filter(d => !usedIds.has(d.id) && (!isRenewal || isCoreKyc(d)));
   // Everyone on the lease besides the customer. The keys call them occupants and

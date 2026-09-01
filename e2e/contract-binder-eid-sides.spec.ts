@@ -236,8 +236,8 @@ test('the KYC pane holds every customer-KYC document, and only those', async ({ 
  * 375 — individual renewal whose customer holds a bank statement and three
  *       dependants' Emirates IDs (all shown on the parent, contract 25).
  * 385 — company renewal whose signatory holds a passport, a visa and a full
- *       third-party pack — the third party's papers stay (a company acts
- *       through that person), the signatory's passport / visa go.
+ *       third-party pack — all of it stays: the signatory's own passport /
+ *       visa, and the third party's papers (a company acts through them).
  */
 test('a renewal shows only the customer\'s core KYC — individual', async ({ page, request }) => {
   await setCookie(page, await loginOtp(request, RP_EMAIL));
@@ -276,9 +276,10 @@ test('a renewal shows only the customer\'s core KYC — company', async ({ page,
     'Memorandum of Association (MOA)',
     'Authorised Signatory Emirates ID — Front',
     'Authorised Signatory Emirates ID — Back',
+    'Passport',
+    'UAE Visa / Residency',
     // A company's THIRD PARTY stays on the renewal — what they filed, no
-    // placeholders (landlord's call, 1 Sep 2026). The signatory's own passport
-    // and visa do not.
+    // placeholders (landlord's call, 1 Sep 2026).
     'Third party — Emirates ID',
     'Third party — Passport',
     'Third party — UAE Visa / Residency',
