@@ -22,6 +22,8 @@ const RP_EMAIL = 'kbaalfalasi@gmail.com';
 const CONTRACT_ID = 360;
 const TENANT_ID = 125;
 const SHOTS = 'e2e/__shots__/binder-eid';
+/** Override to point at a dev server on another port (FE_BASE=http://localhost:3005). */
+const FE = process.env.FE_BASE ?? 'http://localhost:3000';
 
 /** Guarded psql against the local clone ONLY — it aborts on any other database. */
 function sql(statement: string) {
@@ -89,13 +91,15 @@ const setCookie = (page: Page, token: string) =>
 /** The left pane's quick-nav chips, in render order. A chip for a REQUIRED
  *  document that is not on file is prefixed "⚠ " — `leftNavLabels` strips it,
  *  `missingChips` returns exactly those. */
-const rawNav = (page: Page) => page.locator('section').first().locator('button').allInnerTexts();
+// Only the chips in the pane's quick-nav strip — the cards below carry their own
+// "⇄ Move to …" buttons on the authenticated view, which are not navigation.
+const rawNav = (page: Page) => page.locator('section').first().locator('[class*="navChips"] button').allInnerTexts();
 const leftNavLabels = async (page: Page) => (await rawNav(page)).map(l => l.replace(/^⚠\s*/, ''));
 const missingChips = async (page: Page) =>
   (await rawNav(page)).filter(l => l.startsWith('⚠')).map(l => l.replace(/^⚠\s*/, ''));
 
 const openBinder = async (page: Page, contractId: number = CONTRACT_ID) => {
-  await page.goto(`http://localhost:3000/rental-provider/dashboard/contracts/${contractId}/documents`);
+  await page.goto(`${FE}/rental-provider/dashboard/contracts/${contractId}/documents`);
   await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
   await expect(page.getByText('Tenant & KYC')).toBeVisible();
   // Every preview canvas has painted — a card whose file cannot be drawn (the
@@ -196,9 +200,9 @@ test('a company reads Trade License · MOA · Authorised Signatory Emirates ID �
  * dependant documents — the last four used to sit in "Other documents", and the
  * dependant papers were dropped from the binder entirely.
  *
- * Its bank statement and marriage certificate are NOT KYC and must stay on the
- * right — 354 is a renewal, where those slots are dropped and both land under
- * "Other documents"; either way they never join the KYC pane.
+ * Its bank statement and marriage certificate never join the rental pack on the
+ * right — and since 354 is a renewal, the KYC pane is the core pack only, so
+ * they appear nowhere on this binder (they live on the parent lease).
  */
 test('the KYC pane holds every customer-KYC document, and only those', async ({ page, request }) => {
   await setCookie(page, await loginOtp(request, RP_EMAIL));
@@ -212,20 +216,67 @@ test('the KYC pane holds every customer-KYC document, and only those', async ({ 
     'Emirates ID — Back',
     'Passport',
     'UAE Visa / Residency',
-    // Supporting docs close the CUSTOMER's pack; this lease is a renewal, so its
-    // income document is deliberately absent (re-verification stays on the
-    // original lease). The other parties' papers follow.
-    'Bank Statement',
-    'Marriage Certificate',
-    'Undertaking from Guarantor',
-    'Dependant Documents',
-    'Dependant Documents — 2',
-    'Dependant Documents — 3',
+    // 354 is a RENEWAL, so the pane stops at the core pack: the bank statement,
+    // marriage certificate, guarantor undertaking and three dependant papers
+    // were read on the original lease and are not repeated here (1 Sep 2026).
   ]);
   // Nothing about the CUSTOMER is left in the rental pack on the right.
   const right = await page.locator('section').nth(1).locator('button').allInnerTexts();
   expect(right.filter(l => /Dependant|Guarantor|Emirates ID|Passport|Visa|Bank Statement|Marriage/.test(l))).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/05-full-kyc-pack.png` });
+});
+
+/**
+ * A RENEWAL's pane is the customer's core KYC and nothing else (landlord's call,
+ * 1 Sep 2026): an individual's Emirates ID · Passport · Visa; a company's Trade
+ * License · MOA · Authorised Signatory Emirates ID. Supporting papers, the other
+ * parties, the dependants and the signatory's own passport / visa were all read
+ * on the original lease and stay off the renewal.
+ *
+ * 375 — individual renewal whose customer holds a bank statement and three
+ *       dependants' Emirates IDs (all shown on the parent, contract 25).
+ * 385 — company renewal whose signatory holds a passport, a visa and a full
+ *       third-party pack.
+ */
+test('a renewal shows only the customer\'s core KYC — individual', async ({ page, request }) => {
+  await setCookie(page, await loginOtp(request, RP_EMAIL));
+  await openBinder(page, 375);
+  expect(await leftNavLabels(page)).toEqual([
+    'Emirates ID — Front', 'Emirates ID — Back', 'Passport', 'UAE Visa / Residency',
+  ]);
+  // …and the download list mirrors the pane.
+  await page.getByTitle('Combine selected documents into one PDF and download').click();
+  await expect(page.getByText('Pick what to include')).toBeVisible();
+  const offered = (await page.locator('label').allInnerTexts()).join('\n');
+  expect(offered).toMatch(/Emirates ID — Front/);
+  expect(offered).not.toMatch(/Dependant|Bank Statement/);
+  await page.screenshot({ path: `${SHOTS}/07-renewal-individual.png` });
+
+  // The landlord's no-login portal renders the same binder, so the same pane.
+  const token = query(
+    `SELECT token FROM tenant_portal_tokens
+      WHERE tenancy_contract_id = 375 AND revoked = false
+      ORDER BY id DESC LIMIT 1`);
+  expect(token, 'fixture needs a live portal token for 375').toBeTruthy();
+  await page.context().clearCookies();
+  await page.goto(`${FE}/portal/${token}/contract/375`);
+  await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText('Loading…')).toHaveCount(0, { timeout: 30000 });
+  expect(await leftNavLabels(page)).toEqual([
+    'Emirates ID — Front', 'Emirates ID — Back', 'Passport', 'UAE Visa / Residency',
+  ]);
+});
+
+test('a renewal shows only the customer\'s core KYC — company', async ({ page, request }) => {
+  await setCookie(page, await loginOtp(request, RP_EMAIL));
+  await openBinder(page, 385);
+  expect(await leftNavLabels(page)).toEqual([
+    'Trade License',
+    'Memorandum of Association (MOA)',
+    'Authorised Signatory Emirates ID — Front',
+    'Authorised Signatory Emirates ID — Back',
+  ]);
+  await page.screenshot({ path: `${SHOTS}/08-renewal-company.png` });
 });
 
 /**
@@ -238,7 +289,7 @@ test('the KYC pane holds every customer-KYC document, and only those', async ({ 
  */
 test('the manager scope bar does not cover the binder', async ({ page, request }) => {
   await setCookie(page, await loginOtp(request, 'sheco1300@yahoo.com'));
-  await page.goto(`http://localhost:3000/dashboard/manager/contracts/${CONTRACT_ID}/documents?rp=2`);
+  await page.goto(`${FE}/dashboard/manager/contracts/${CONTRACT_ID}/documents?rp=2`);
   await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
   await expect(page.locator('.mgr-scopebar')).toHaveCount(1); // the bar IS on this page
 
@@ -307,7 +358,7 @@ test('the landlord portal shows the same binder sections as the RP view', async 
   expect(token, 'fixture needs a live portal token').toBeTruthy();
 
   await page.context().clearCookies();
-  await page.goto(`http://localhost:3000/portal/${token}/contract/${CONTRACT_ID}`);
+  await page.goto(`${FE}/portal/${token}/contract/${CONTRACT_ID}`);
   await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
   const portal = await page.locator('section').nth(1).locator('button').allInnerTexts();
   expect(portal).toEqual(rp);

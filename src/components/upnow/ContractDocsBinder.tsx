@@ -119,9 +119,6 @@ const supportingSlotOf = (d: BinderDoc): (typeof SUPPORTING_SLOTS)[number] | nul
     || (s.key === 'salary_certificate' && /employment/.test(base))) ?? null;
 };
 const isSupporting = (d: BinderDoc) => supportingSlotOf(d) !== null;
-/** Income re-verification lives on the ORIGINAL lease, so a renewal never asks
- *  for it again — the same rule the rental pack used before these moved. */
-const isIncomeDoc = (d: BinderDoc) => supportingSlotOf(d)?.key === 'salary_certificate';
 const isGuarantor = (d: BinderDoc) => /(^|_)guarantor(_|$)/.test(norm(d.documentKey)) || /\bguarantor\b/i.test(d.displayName || '');
 const occNum = (d: BinderDoc) => { const m = norm(d.documentKey).match(/occupant_?(\d+)/); return m ? Number(m[1]) : 1; };
 // Order of the identity docs that follow the ones the pane places itself (the
@@ -252,11 +249,16 @@ type IdCard = { key: string; label: string; doc: BinderDoc | null; optional?: bo
  * licence + signatory Emirates ID required, MOA / passport / visa optional.
  * Occupants, partners and other people get cards only for what they actually filed,
  * so an occupant with just a passport doesn't sprout empty slots.
+ *
+ * `coreOnly` is the RENEWAL shape (landlord's call, 1 Sep 2026): the customer's
+ * core KYC and nothing else — an individual's Emirates ID · Passport · Visa; a
+ * company's Trade License · MOA · Authorised Signatory Emirates ID. The
+ * signatory's passport / visa slots and every loose extra stay off the pane.
  */
 const idCardsFor = (
   docs: BinderDoc[],
-  { prefix, labelPrefix = '', tenantPack = false, company = false }:
-    { prefix: string; labelPrefix?: string; tenantPack?: boolean; company?: boolean },
+  { prefix, labelPrefix = '', tenantPack = false, company = false, coreOnly = false }:
+    { prefix: string; labelPrefix?: string; tenantPack?: boolean; company?: boolean; coreOnly?: boolean },
 ): IdCard[] => {
   const cards: IdCard[] = [];
   const card = (d: BinderDoc): IdCard => ({ key: `${prefix}d${d.id}`, label: `${labelPrefix}${idLabel(d)}`, doc: d });
@@ -296,17 +298,22 @@ const idCardsFor = (
   if (front || tenantPack) cards.push({ key: `${prefix}eid-front`, label: faceLabel(front, 'Front'), doc: front });
   if (back || tenantPack) cards.push({ key: `${prefix}eid-back`, label: faceLabel(back, 'Back'), doc: back });
   // The rest of the pack. A company's signatory need not hold a passport or visa
-  // (the licence identifies the tenant), so those slots are optional there.
-  slot('passport', 'Passport', isPassport, company);
-  slot('visa', 'UAE Visa / Residency', isVisa, true);
+  // (the licence identifies the tenant), so those slots are optional there — and
+  // on a renewal a company's pane stops at the signatory's Emirates ID.
+  if (!(company && coreOnly)) {
+    slot('passport', 'Passport', isPassport, company);
+    slot('visa', 'UAE Visa / Residency', isVisa, true);
+  }
   // Anything else that reached the KYC pane — e.g. a licence or MOA on an
-  // individual's lease, or a labour card.
+  // individual's lease, or a labour card. Not on a renewal: its pane is the core
+  // pack only (a further copy of a core document still shows, below).
   // Any FURTHER copy of the Emirates ID (a third capture of a face already shown)
   // follows as its own card — placing only the two faces here would drop it.
   const eidShown = new Set([front?.id, back?.id].filter((id): id is number => id != null));
   const placed = (d: BinderDoc) =>
     (isEid(d) ? eidShown.has(d.id) : isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d))));
-  for (const d of docs.filter(d => !placed(d)).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
+  const coreDoc = (d: BinderDoc) => isEid(d) || (company ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d));
+  for (const d of docs.filter(d => !placed(d) && (!coreOnly || coreDoc(d))).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
     cards.push(card(d));
   }
   return cards;
@@ -707,13 +714,20 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // THE CUSTOMER'S OWN PACK comes first and comes whole: their identity, then the
   // papers backing it. Everything belonging to the person the lease is with is
   // read before the pane moves on to anybody else (landlord's call, 11 Aug 2026).
+  // A RENEWAL shows the customer's OWN KYC and nothing more on the left
+  // (landlord's call, 1 Sep 2026): an individual's Emirates ID · Passport · Visa,
+  // a company's Trade License · MOA · Authorised Signatory Emirates ID. The
+  // supporting papers, the other parties (partner / POA holder / guarantor /
+  // third party), the dependants and any loose extras were all read on the
+  // ORIGINAL lease — repeating them here made a renewal's pack longer than the
+  // lease it renews. Everything still exists on the profile and the parent lease.
   const tenantCards: IdCard[] = idCardsFor(
     identity.filter(d => !isPartner(d) && !isThirdParty(d) && !isOtherPerson(d)),
-    { prefix: '', tenantPack: true, company: isCompanyTenant },
+    { prefix: '', tenantPack: true, company: isCompanyTenant, coreOnly: isRenewal },
   );
   // Then the other parties to the tenancy — a partner on a company lease, the
   // power-of-attorney holder, a guarantor, and any loose dependant papers.
-  const otherPeopleCards: IdCard[] = [
+  const otherPeopleCards: IdCard[] = isRenewal ? [] : [
     ...idCardsFor(identity.filter(d => isPartner(d) && !isOtherPerson(d)), { prefix: 'p-', labelPrefix: 'Partner — ' }),
     ...idCardsFor(identity.filter(d => isThirdParty(d) && !isOtherPerson(d)), { prefix: 'tp-', labelPrefix: 'Third party — ' }),
     ...pack(identity.filter(isPoa), 'poa-', poaLabel),
@@ -723,11 +737,11 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const primaryCards: IdCard[] = [...tenantCards, ...otherPeopleCards];
   // The supporting pack, in the order the rental sequence used to list it, and
   // last in the pane: identity says WHO the customer is, these say what backs
-  // them. A renewal drops the income document — re-verification belongs to the
-  // original lease.
-  const supportingCards: IdCard[] = SUPPORTING_SLOTS.flatMap(slot => {
+  // them. A renewal shows none of it — the customer was vetted on the original
+  // lease and the renewal pane is their core KYC only.
+  const supportingCards: IdCard[] = isRenewal ? [] : SUPPORTING_SLOTS.flatMap(slot => {
     const docs = primaryId
-      .filter(d => supportingSlotOf(d)?.key === slot.key && !(isRenewal && isIncomeDoc(d)))
+      .filter(d => supportingSlotOf(d)?.key === slot.key)
       .sort((a, b) => a.id - b.id);
     return docs.map((d, i) => ({
       key: `sup-${d.id}`,
@@ -739,15 +753,20 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // Copies no card took (e.g. a combined e-copy alongside the two faces, or a
   // second capture of the same passport). They stay out of the pane — that
   // duplication is exactly the mess this fixes — but remain downloadable,
-  // unticked, so nothing on file becomes unreachable.
+  // unticked, so nothing on file becomes unreachable. On a renewal only spare
+  // copies of the CORE pack are offered — the download list mirrors the pane,
+  // so the papers the pane deliberately leaves out do not creep back in here.
   const usedIds = new Set([...primaryCards, ...supportingCards].map(c => c.doc?.id).filter((id): id is number => id != null));
-  const idExtras = primaryPool.filter(d => !usedIds.has(d.id));
+  const isCoreKyc = (d: BinderDoc) => !personPrefix(d)
+    && (isEid(d) || (isCompanyTenant ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d)));
+  const idExtras = primaryPool.filter(d => !usedIds.has(d.id) && (!isRenewal || isCoreKyc(d)));
   // Everyone on the lease besides the customer. The keys call them occupants and
   // start at `occupant_2` — occupant 1 IS the customer, whose pack is above — so
   // the pane numbers them 1..N in order and calls them DEPENDANTS, which is what
   // they are to the tenancy and what the landlord asked for (11 Aug 2026). The
   // anchor ids keep the real key number; only the wording is sequential.
-  const occDocs = dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
+  // A renewal lists no dependants (see tenantCards).
+  const occDocs = isRenewal ? [] : dedupeIdentity(all.filter(d => isIdentity(d) && isOccupant(d)));
   const occGroups = Array.from(new Set(occDocs.map(occNum))).sort((a, b) => a - b)
     .map((n, i) => ({
       n,

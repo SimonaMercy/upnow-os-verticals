@@ -24,6 +24,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 const BACKEND = 'http://localhost:3001/api';
 const RP_EMAIL = 'kbaalfalasi@gmail.com';
 const SHOTS = 'e2e/__shots__/binder-sections';
+/** Override to point at a dev server on another port (FE_BASE=http://localhost:3005). */
+const FE = process.env.FE_BASE ?? 'http://localhost:3000';
 /** The contracts named in the ticket's acceptance: 364 is a new lease, the rest
  *  are renewals at three different stages (active / issued / pending). */
 const CONTRACTS = [360, 364, 367, 393, 354];
@@ -46,7 +48,7 @@ const navLabels = async (page: Page, pane: 0 | 1) =>
   (await page.locator('section').nth(pane).locator('button').allInnerTexts()).map(l => l.replace(/^⚠\s*/, '').trim());
 
 const openBinder = async (page: Page, contractId: number) => {
-  await page.goto(`http://localhost:3000/rental-provider/dashboard/contracts/${contractId}/documents`);
+  await page.goto(`${FE}/rental-provider/dashboard/contracts/${contractId}/documents`);
   await expect(page.getByText('All documents')).toBeVisible({ timeout: 30000 });
   await expect(page.getByText('Tenant & KYC')).toBeVisible();
   await expect(page.getByText('Loading…')).toHaveCount(0, { timeout: 30000 });
@@ -123,7 +125,7 @@ test.describe('the upload form asks where the document goes', () => {
    *  own "Upload" buttons, so an unscoped one matches several. */
   const docsHeader = (page: Page) => page.locator('.sech').filter({ hasText: /Documents \(/ });
   const openUpload = async (page: Page, id: number) => {
-    await page.goto(`http://localhost:3000/rental-provider/dashboard/contracts/${id}/v2`);
+    await page.goto(`${FE}/rental-provider/dashboard/contracts/${id}/v2`);
     await expect(docsHeader(page)).toBeVisible({ timeout: 30000 });
     await docsHeader(page).getByRole('button', { name: 'Upload' }).click();
     await expect(page.getByText('Upload a document')).toBeVisible();
@@ -212,7 +214,7 @@ test.describe('the upload form asks where the document goes', () => {
 test.describe('the request picker states the section too', () => {
   test('grouped, and the headings follow the filter', async ({ page, request }) => {
     await setCookie(page, await loginOtp(request, RP_EMAIL));
-    await page.goto('http://localhost:3000/rental-provider/dashboard/contracts/364/v2');
+    await page.goto(`${FE}/rental-provider/dashboard/contracts/364/v2`);
     const docsHeader = page.locator('.sech').filter({ hasText: /Documents \(/ });
     await expect(docsHeader).toBeVisible({ timeout: 30000 });
     await docsHeader.getByRole('button', { name: 'Request' }).click();
@@ -260,7 +262,7 @@ test('a re-filed document moves to the customer and back', async ({ page, reques
 
     // And — the point of the whole change — it is now on the customer's profile,
     // in the KYC section rather than under History Documents.
-    await page.goto('http://localhost:3000/rental-provider/dashboard/tenants/125');
+    await page.goto(`${FE}/rental-provider/dashboard/tenants/125`);
     await expect(page.getByText(/NOC/).first()).toBeVisible({ timeout: 30000 });
     await page.screenshot({ path: `${SHOTS}/refiled-on-profile.png` });
   } finally {
