@@ -716,20 +716,26 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // read before the pane moves on to anybody else (landlord's call, 11 Aug 2026).
   // A RENEWAL shows the customer's OWN KYC and nothing more on the left
   // (landlord's call, 1 Sep 2026): an individual's Emirates ID · Passport · Visa,
-  // a company's Trade License · MOA · Authorised Signatory Emirates ID. The
-  // supporting papers, the other parties (partner / POA holder / guarantor /
-  // third party), the dependants and any loose extras were all read on the
-  // ORIGINAL lease — repeating them here made a renewal's pack longer than the
-  // lease it renews. Everything still exists on the profile and the parent lease.
+  // a company's Trade License · MOA · Authorised Signatory Emirates ID — plus,
+  // for a COMPANY, the third party's papers when any are on file (their EID /
+  // passport / visa: the person the company acts through is part of who the
+  // tenant is, on a renewal as much as on the first lease). The supporting
+  // papers, the partner / POA holder / guarantor, the dependants and any loose
+  // extras were all read on the ORIGINAL lease — repeating them here made a
+  // renewal's pack longer than the lease it renews. Everything still exists on
+  // the profile and the parent lease.
   const tenantCards: IdCard[] = idCardsFor(
     identity.filter(d => !isPartner(d) && !isThirdParty(d) && !isOtherPerson(d)),
     { prefix: '', tenantPack: true, company: isCompanyTenant, coreOnly: isRenewal },
   );
   // Then the other parties to the tenancy — a partner on a company lease, the
-  // power-of-attorney holder, a guarantor, and any loose dependant papers.
-  const otherPeopleCards: IdCard[] = isRenewal ? [] : [
+  // third party, the power-of-attorney holder, a guarantor, and any loose
+  // dependant papers. Cards only for what they filed — never a placeholder.
+  const thirdPartyCards: IdCard[] =
+    idCardsFor(identity.filter(d => isThirdParty(d) && !isOtherPerson(d)), { prefix: 'tp-', labelPrefix: 'Third party — ' });
+  const otherPeopleCards: IdCard[] = isRenewal ? (isCompanyTenant ? thirdPartyCards : []) : [
     ...idCardsFor(identity.filter(d => isPartner(d) && !isOtherPerson(d)), { prefix: 'p-', labelPrefix: 'Partner — ' }),
-    ...idCardsFor(identity.filter(d => isThirdParty(d) && !isOtherPerson(d)), { prefix: 'tp-', labelPrefix: 'Third party — ' }),
+    ...thirdPartyCards,
     ...pack(identity.filter(isPoa), 'poa-', poaLabel),
     ...pack(identity.filter(isGuarantor), 'gua-', packLabel),
     ...pack(identity.filter(isDependant), 'dep-', packLabel),
@@ -757,8 +763,9 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // copies of the CORE pack are offered — the download list mirrors the pane,
   // so the papers the pane deliberately leaves out do not creep back in here.
   const usedIds = new Set([...primaryCards, ...supportingCards].map(c => c.doc?.id).filter((id): id is number => id != null));
-  const isCoreKyc = (d: BinderDoc) => !personPrefix(d)
-    && (isEid(d) || (isCompanyTenant ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d)));
+  const isCoreKyc = (d: BinderDoc) =>
+    (!personPrefix(d) && (isEid(d) || (isCompanyTenant ? isLicense(d) || isMoa(d) : isPassport(d) || isVisa(d))))
+    || (isCompanyTenant && isThirdParty(d));
   const idExtras = primaryPool.filter(d => !usedIds.has(d.id) && (!isRenewal || isCoreKyc(d)));
   // Everyone on the lease besides the customer. The keys call them occupants and
   // start at `occupant_2` — occupant 1 IS the customer, whose pack is above — so
