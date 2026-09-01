@@ -1164,37 +1164,20 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     feeTaxationControls: true,
     controlKey: 'dateRange',
     buildingLeaseFilter: true,
-    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Leases are narrowed to those that can carry output VAT — a lease qualifies if it has a rent VAT rate, raises VAT cheques, or records VAT on any of its rows, so exempt residential rent stays out and appears the moment a standard-rated fee is charged on it. Switch to "Incl. exempt" to see every lease. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Where a contract collects the fees’ tax on its own combined “Fees VAT” cheque, that tax is reported in the Fees VAT column rather than divided between the three fee columns: the split records the tax once, not per fee, so attributing it back would put VAT on fees that are exempt. Older contracts that kept VAT on the fee row itself still show it in that fee’s VAT column. Total VAT is the same either way. Rent VAT is the contract\'s own VAT cheques where it raises them; on older contracts with VAT embedded it is annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), spread across that contract\'s rent cheques so it falls due when the rent does. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the property form.',
+    dataNote: 'Every figure is placed in the period its payment falls due (the cheque date), which is the tax point and the same basis Cash Management uses. A payment with no date falls back to its lease start. Leases are narrowed to those that can carry output VAT — a lease qualifies if it has a rent VAT rate, raises VAT cheques, or records VAT on any of its rows, so exempt residential rent stays out and appears the moment a standard-rated fee is charged on it. Switch to "Incl. exempt" to see every lease. Admin, Contract Registration and commission are the actual fee payment rows recorded on each contract (net + VAT), summed across all cheque statuses — manual overrides are reflected. Where a contract collects the fees’ tax on its own combined “Fees VAT” cheque, that tax is reported in the Fees VAT column rather than divided between the three fee columns: the split records the tax once, not per fee, so attributing it back would put VAT on fees that are exempt. Older contracts that kept VAT on the fee row itself still show it in that fee’s VAT column. Total VAT is the same either way. Rent VAT is the contract\'s own VAT cheques where it raises them, or the charge row that records it ("5% VAT on Rent") — counted once, never both. Only where neither exists is it reconstructed as annual rent × the stored VAT rate (commercial / industrial only; residential is exempt), and it then falls due the way Settings → Rent VAT collection says you collect it: under “one VAT cheque per rent cheque” it is spread across that contract\'s rent cheques, and under “one annual VAT cheque” the whole year lands on the first rent cheque\'s date, as a single supply in a single filing period. "Other charges" are the custom pass-throughs recorded on the contract — a sub-leased building\'s levy and service charges as net, and lines charged as tax at the standard rate ("5% VAT on sub-lease", "5% VAT on Rent") as VAT, read from the charge\'s own label. A levy worded as VAT at another rate ("20% VAT on Sublease") counts as net, not tax. Only issued/active/expired/terminated contracts are counted. Leasing model (direct vs sub-lease) is set per building — change it from the property form.',
+    // Overall view. The Year/Quarter column is gone: with a date range applied
+    // there is one bucket, so it was a column repeating the range back at you.
+    // The fee NET columns went with it — they are charges, not tax, and this is
+    // a VAT report. What is left is the rent, the tax on it, and the total.
     columns: [
-      { key: 'periodLabel', label: 'Period' },
       { key: 'contracts', label: 'Contracts', align: 'right', type: 'number' },
-      { key: 'adminNetFils', label: 'Admin (net)', align: 'right', type: 'aed' },
-      { key: 'adminVatFils', label: 'Admin VAT', align: 'right', type: 'aed' },
-      { key: 'ejariNetFils', label: 'Contract Registration (net)', align: 'right', type: 'aed' },
-      { key: 'ejariVatFils', label: 'Contract Registration VAT', align: 'right', type: 'aed' },
-      { key: 'commissionNetFils', label: 'Commission (net)', align: 'right', type: 'aed' },
-      { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
-      { key: 'feeVatFils', label: 'Fees VAT', align: 'right', type: 'aed' },
-      { key: 'rentNetFils', label: 'Rent (net)', align: 'right', type: 'aed' },
-      { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
-      { key: 'otherNetFils', label: 'Other charges (net)', align: 'right', type: 'aed' },
-      { key: 'otherVatFils', label: 'Other charges VAT', align: 'right', type: 'aed' },
-      { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
+      { key: 'rentNetFils', label: 'Rent (net)', align: 'right', type: 'aed', keep: true },
+      { key: 'rentVatFils', label: 'VAT on rental', align: 'right', type: 'aed', keep: true },
     ],
     totals: [
       { key: 'contracts', label: 'Contracts', type: 'number' },
-      { key: 'adminNetFils', label: 'Admin (net)', type: 'aed' },
-      { key: 'adminVatFils', label: 'Admin VAT', type: 'aed' },
-      { key: 'ejariNetFils', label: 'Contract Registration (net)', type: 'aed' },
-      { key: 'ejariVatFils', label: 'Contract Registration VAT', type: 'aed' },
-      { key: 'commissionNetFils', label: 'Commission (net)', type: 'aed' },
-      { key: 'commissionVatFils', label: 'Commission VAT', type: 'aed' },
-      { key: 'feeVatFils', label: 'Fees VAT', type: 'aed' },
       { key: 'rentNetFils', label: 'Rent (net)', type: 'aed' },
-      { key: 'rentVatFils', label: 'Rent VAT', type: 'aed' },
-      { key: 'otherNetFils', label: 'Other charges (net)', type: 'aed' },
-      { key: 'otherVatFils', label: 'Other charges VAT', type: 'aed' },
-      { key: 'totalVatFils', label: 'Total VAT', type: 'aed' },
+      { key: 'rentVatFils', label: 'VAT on rental', type: 'aed' },
     ],
     // Summary (overall) view: click a period row to see the contracts behind it
     // — the same per-contract lines as the Detailed view, filtered to the period
@@ -1219,25 +1202,27 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 // Fee & VAT — the DETAILED (per-contract) view columns. Every line traces a
 // figure in the per-period summary back to the contract that produced it, so the
 // totals can be audited. Reuses the standard table render (sortable / CSV).
-const FEE_DETAIL_COLUMNS: Column[] = [
-  { key: 'periodLabel', label: 'Period' },
-  { key: 'contractRef', label: 'Contract' },
-  { key: 'buildingName', label: 'Property' },
-  { key: 'unitLabel', label: 'Unit' },
-  { key: 'tenantName', label: 'Customer' },
-  { key: 'startDate', label: 'Start', type: 'date' },
-  { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-  { key: 'adminNetFils', label: 'Admin (net)', align: 'right', type: 'aed' },
-  { key: 'adminVatFils', label: 'Admin VAT', align: 'right', type: 'aed' },
-  { key: 'ejariNetFils', label: 'Contract Registration (net)', align: 'right', type: 'aed' },
-  { key: 'ejariVatFils', label: 'Contract Registration VAT', align: 'right', type: 'aed' },
-  { key: 'commissionNetFils', label: 'Commission (net)', align: 'right', type: 'aed' },
-  { key: 'commissionVatFils', label: 'Commission VAT', align: 'right', type: 'aed' },
-  { key: 'feeVatFils', label: 'Fees VAT', align: 'right', type: 'aed' },
-  { key: 'rentVatFils', label: 'Rent VAT', align: 'right', type: 'aed' },
-  { key: 'otherNetFils', label: 'Other charges (net)', align: 'right', type: 'aed' },
-  { key: 'otherVatFils', label: 'Other charges VAT', align: 'right', type: 'aed' },
-  { key: 'totalVatFils', label: 'Total VAT', align: 'right', type: 'aed' },
+/**
+ * Fee & VAT, Detailed view — one row per contract.
+ *
+ * Trimmed to what a VAT return is actually read off: who, which unit, for how
+ * long, the rent, and the tax on it. The fee NET columns are gone — they are
+ * charges, not tax, and on this RP they filled six columns to say nothing about
+ * VAT. `Property` went with them (the unit already names it) and `Start` became
+ * the whole TERM in one column.
+ *
+ * The fee VAT columns stay in the list rather than being dropped by settings.
+ * A fee taxed nowhere in Settings → Fee Rules is all-zero here and the table's
+ * own dead-column rule removes it — but a legacy contract that DID record VAT on
+ * a fee row still shows, which dropping the column by configuration would have
+ * silently buried. Settings decide whether a column is KEPT when empty (an RP who
+ * charges admin VAT should see the zero), never whether real tax can appear.
+ */
+const feeDetailColumns = (showPeriod: boolean): Column[] => [
+  ...(showPeriod ? [{ key: 'periodLabel', label: 'Period' } as Column] : []),
+  { key: 'leaseLabel', label: 'Lease', type: 'stack' },
+  { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', keep: true },
+  { key: 'rentVatFils', label: 'VAT on rental', align: 'right', type: 'aed', keep: true },
 ];
 
 // Reports whose rows are tenant/financial and so honour the "active tenants
@@ -1792,6 +1777,11 @@ export function ReportDetailView({
   const [granularity, setGranularity] = useState<'year' | 'quarter'>(() => (sp?.get('groupBy') === 'quarter' ? 'quarter' : 'year'));
   // Fee & VAT only: hide exempt leases (the default) or include them.
   const [vatScope, setVatScope] = useState<'applicable' | 'all'>(() => (sp?.get('vatScope') === 'all' ? 'all' : 'applicable'));
+  // Fee & VAT only: which date the range filters on. 'due' (default) is the tax
+  // point and the basis a return is built from; 'start' selects the leases that
+  // BEGAN in the range and shows all the VAT each carries — a cohort view, which
+  // is what "show me the leases that started in May–July" actually asks for.
+  const [feeBasis, setFeeBasis] = useState<'due' | 'start'>(() => (sp?.get('basis') === 'due' ? 'due' : 'start'));
   /** Reconcile, scoped exactly as the page is. It is a sibling endpoint of the
    *  report, so it follows `endpointBase` into the manager portal (where the
    *  slug route gates it on Cash Management / Cheques Management access) and
@@ -1860,6 +1850,7 @@ export function ReportDetailView({
       // Likewise the VAT scope — the backend already defaults to applicable-only,
       // so only the explicit "all" needs sending.
       if (def.feeTaxationControls && vatScope === 'all') extra.set('vatScope', 'all');
+      if (def.feeTaxationControls) extra.set('basis', feeBasis);
       const s = extra.toString();
       if (s) url += (url.includes('?') ? '&' : '?') + s;
     }
@@ -1892,20 +1883,35 @@ export function ReportDetailView({
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope, feeBasis]);
 
   // Keep the chosen filters in the URL. A refresh — or a link pasted to someone
   // else — then lands on the same view instead of resetting to the default. Only
   // narrowed values are written, so a clean report keeps a clean address.
   useEffect(() => {
-    if (!def?.contractStatusFilters || !pathname) return;
+    if ((!def?.contractStatusFilters && !def?.feeTaxationControls) || !pathname) return;
     const qs = new URLSearchParams();
-    if (csMonth !== 'all') qs.set('month', csMonth);
-    if (csStatus !== 'all') qs.set('cstatus', csStatus);
-    if (csStage !== 'all') qs.set('stage', csStage);
-    if (csSignature !== 'all') qs.set('signature', csSignature);
-    if (csCheques !== 'all') qs.set('cheques', csCheques);
-    if (csRegistration !== 'all') qs.set('registration', csRegistration);
+    if (def.contractStatusFilters) {
+      if (csMonth !== 'all') qs.set('month', csMonth);
+      if (csStatus !== 'all') qs.set('cstatus', csStatus);
+      if (csStage !== 'all') qs.set('stage', csStage);
+      if (csSignature !== 'all') qs.set('signature', csSignature);
+      if (csCheques !== 'all') qs.set('cheques', csCheques);
+      if (csRegistration !== 'all') qs.set('registration', csRegistration);
+    }
+    // Fee & VAT. Its filters used to live only in component state, so the address
+    // bar never moved: a filtered view could not be shared, and a refresh threw
+    // the selection away and silently restored the defaults (whole year, cheque
+    // date) — which reads as the filter having been ignored. Only non-default
+    // values are written, so an untouched report keeps a clean address.
+    if (def.feeTaxationControls) {
+      if (from) qs.set('from', from);
+      if (to) qs.set('to', to);
+      if (granularity === 'quarter') qs.set('groupBy', 'quarter');
+      if (vatScope === 'all') qs.set('vatScope', 'all');
+      if (feeBasis === 'due') qs.set('basis', 'due');
+      if (scope === 'all') qs.set('scope', 'all');
+    }
     if (def.controlKey === 'year') qs.set('year', String(year));
     if (selectedBuildings.length) qs.set('buildings', selectedBuildings.join(','));
     if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
@@ -1913,7 +1919,7 @@ export function ReportDetailView({
     const next = qs.toString();
     if (next === (sp?.toString() ?? '')) return;
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
-  }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, selectedBuildings, selectedLeaseTypes]);
+  }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, selectedBuildings, selectedLeaseTypes, from, to, granularity, vatScope, feeBasis, scope]);
 
   const buildingOptions = data?.buildings ?? [];
   // A report may declare which years actually have data (availableYears); when it
@@ -1945,12 +1951,17 @@ export function ReportDetailView({
   // For every other report these collapse to def.columns / data.rows unchanged.
   const feeDetailed = !!def?.feeTaxationControls && feeView === 'detailed';
   const activeColumns = useMemo(() => {
-    const base = feeDetailed ? FEE_DETAIL_COLUMNS : def.columns;
+    // Period earns its place only when a contract can appear more than once:
+    // bucketing quarterly on the CHEQUE date splits one lease across the quarters
+    // its cheques fall in, and without the column those rows are indistinguishable.
+    // On the lease-start basis a contract has exactly one period, so it is noise.
+    const showPeriod = granularity === 'quarter' && feeBasis === 'due';
+    const base = feeDetailed ? feeDetailColumns(showPeriod) : def.columns;
     if (!def?.feeTaxationControls) return base;
     // Period column header follows the chosen granularity.
     const periodLabel = granularity === 'quarter' ? 'Quarter' : 'Year';
     return base.map(c => (c.key === 'periodLabel' ? { ...c, label: periodLabel } : c));
-  }, [def, feeDetailed, granularity]);
+  }, [def, feeDetailed, granularity, feeBasis, data]);
   const activeRows: Record<string, unknown>[] = feeDetailed ? (data?.items ?? []) : (data?.rows ?? []);
   // The drill-down chevron column shows only where rows are actually drillable.
   // Fee & VAT drills from its SUMMARY rows (into data.items); its Detailed rows
@@ -2947,7 +2958,7 @@ export function ReportDetailView({
               <div className={fGroup}>
                 <span className={fLabel}>Group by</span>
                 <select className={fSelect} aria-label="Group by" value={granularity}
-                  onChange={e => { const g = e.target.value as 'year' | 'quarter'; setGranularity(g); if (urlBase) router.replace(`${urlBase}/${slug}?groupBy=${g}`); }}>
+                  onChange={e => setGranularity(e.target.value as 'year' | 'quarter')}>
                   <option value="year">Year</option>
                   <option value="quarter">Quarter</option>
                 </select>
@@ -2958,6 +2969,14 @@ export function ReportDetailView({
                   onChange={e => setVatScope(e.target.value as 'applicable' | 'all')}>
                   <option value="applicable">VAT-applicable only</option>
                   <option value="all">Incl. exempt</option>
+                </select>
+              </div>
+              <div className={fGroup}>
+                <span className={fLabel}>Period follows</span>
+                <select className={fSelect} aria-label="Period follows" value={feeBasis}
+                  onChange={e => setFeeBasis(e.target.value as 'due' | 'start')}>
+                  <option value="start">Lease start date</option>
+                  <option value="due">Cheque date (for filing)</option>
                 </select>
               </div>
             </>
