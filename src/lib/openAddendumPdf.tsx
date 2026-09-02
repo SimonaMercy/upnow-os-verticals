@@ -22,23 +22,27 @@ const PREVIEW_DATA: Omit<EjariContractData, 'createdAt'> = {
   unit: { number: null, name: null, type: null, sizeSqm: null },
 };
 
+async function renderAddendumBlob(terms: AddendumTerms, title?: string): Promise<Blob> {
+  const [{ pdf }, { AddendumDoc }] = await Promise.all([
+    import('@react-pdf/renderer'),
+    import('@/components/contract/EjariContractPdf'),
+  ]);
+  const data: EjariContractData = { ...PREVIEW_DATA, createdAt: new Date().toISOString() };
+  const addendum: EjariAddendum = {
+    id: 0,
+    name: (title && title.trim()) || 'Agreement Addendum',
+    tenantSig: null, tenantSignedAt: null, landlordSig: null, landlordSignedAt: null,
+    terms,
+  };
+  return pdf(<AddendumDoc data={data} addendums={[addendum]} />).toBlob();
+}
+
 export async function openAddendumPdfInNewTab(terms: AddendumTerms, title?: string): Promise<void> {
   // Open the tab synchronously inside the click gesture so popup blockers allow
   // it; we point it at the blob URL once the PDF finishes rendering.
   const tab = typeof window !== 'undefined' ? window.open('', '_blank') : null;
   try {
-    const [{ pdf }, { AddendumDoc }] = await Promise.all([
-      import('@react-pdf/renderer'),
-      import('@/components/contract/EjariContractPdf'),
-    ]);
-    const data: EjariContractData = { ...PREVIEW_DATA, createdAt: new Date().toISOString() };
-    const addendum: EjariAddendum = {
-      id: 0,
-      name: (title && title.trim()) || 'Agreement Addendum',
-      tenantSig: null, tenantSignedAt: null, landlordSig: null, landlordSignedAt: null,
-      terms,
-    };
-    const blob = await pdf(<AddendumDoc data={data} addendums={[addendum]} />).toBlob();
+    const blob = await renderAddendumBlob(terms, title);
     const url = URL.createObjectURL(blob);
     if (tab) tab.location.href = url;
     else window.open(url, '_blank');
@@ -47,5 +51,48 @@ export async function openAddendumPdfInNewTab(terms: AddendumTerms, title?: stri
   } catch (e) {
     tab?.close();
     alert(`Could not generate the addendum preview: ${e instanceof Error ? e.message : 'unknown error'}`);
+  }
+}
+
+/** `My addendum: v2!` → `Addendum-My-addendum-v2.pdf` */
+export function addendumFileName(title?: string): string {
+  const slug = (title || 'Agreement Addendum').trim().replace(/[^\w-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+  return `Addendum-${slug || 'Agreement-Addendum'}.pdf`;
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Render an in-app addendum to a PDF and SAVE it (templates page "Download"). */
+export async function downloadAddendumPdf(terms: AddendumTerms, title?: string): Promise<void> {
+  try {
+    const blob = await renderAddendumBlob(terms, title);
+    saveBlob(blob, addendumFileName(title));
+  } catch (e) {
+    alert(`Could not generate the addendum PDF: ${e instanceof Error ? e.message : 'unknown error'}`);
+  }
+}
+
+/** Download a file-based addendum template by fetching its stored file. A
+ *  cross-origin signed URL ignores the anchor `download` attribute, so we pull
+ *  the bytes and save the blob under our own name; if the bucket blocks the
+ *  fetch (CORS), fall back to opening the file in a new tab. */
+export async function downloadAddendumFile(fileUrl: string, title?: string, mimeType?: string | null): Promise<void> {
+  const ext = mimeType?.includes('word') ? '.docx' : '.pdf';
+  try {
+    const res = await fetch(fileUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    saveBlob(blob, addendumFileName(title).replace(/\.pdf$/, ext));
+  } catch {
+    window.open(fileUrl, '_blank', 'noopener,noreferrer');
   }
 }

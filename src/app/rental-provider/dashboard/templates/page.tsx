@@ -15,7 +15,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
-import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3 } from 'lucide-react';
+import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3, Download } from 'lucide-react';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -24,6 +24,7 @@ import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
 import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
 import MoveTemplatesTab from '@/components/upnow/MoveTemplatesTab';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
+import { downloadAddendumPdf, downloadAddendumFile } from '@/lib/openAddendumPdf';
 
 type TemplatesTab = 'addendum' | 'move';
 
@@ -74,6 +75,7 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<AddendumTemplate | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [editTpl, setEditTpl] = useState<AddendumTemplate | null>(null);
   const [tab, setTab] = useState<TemplatesTab>('addendum');
   const [showMoveEditor, setShowMoveEditor] = useState(false);
@@ -105,6 +107,17 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   }, []);
   const selectTab = (t: TemplatesTab) => { setTab(t); try { window.localStorage.setItem('templatesTab', t); } catch {} };
   const selectAddView = (v: 'grid' | 'row') => { setAddView(v); try { window.localStorage.setItem('addendumTemplatesView', v); } catch {} };
+
+  async function handleDownload(t: AddendumTemplate) {
+    if (downloadingId != null) return;
+    setDownloadingId(t.id);
+    try {
+      if (t.terms) await downloadAddendumPdf(t.terms, t.name);
+      else if (t.fileUrl) await downloadAddendumFile(t.fileUrl, t.name, t.mimeType);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   async function handleDelete(id: number) {
     if (!confirm('Remove this template? Past contracts that use it will keep their copy.')) return;
@@ -229,6 +242,9 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
                   <div className="flex items-center gap-1">
                     {t.terms && <button onClick={() => setPreviewTpl(t)} title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></button>}
                     {t.fileUrl && <a href={t.fileUrl} target="_blank" rel="noopener noreferrer" title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></a>}
+                    <button onClick={() => handleDownload(t)} title="Download PDF" disabled={downloadingId != null} className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-50">
+                      {downloadingId === t.id ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                    </button>
                     {t.terms && <button onClick={() => setEditTpl(t)} title="Edit" className="p-1.5 rounded-lg text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={14} /></button>}
                     <button onClick={() => handleDelete(t.id)} title="Remove" className="p-1.5 rounded-lg text-[#dc2626] hover:bg-red-50"><Trash2 size={14} /></button>
                   </div>
@@ -300,6 +316,10 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
                           <ExternalLink size={12} /> Preview
                         </a>
                       )}
+                      <button onClick={() => handleDownload(t)} disabled={downloadingId != null}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-50">
+                        {downloadingId === t.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Download
+                      </button>
                       <button onClick={() => handleDelete(t.id)}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#dc2626] hover:bg-red-50">
                         <Trash2 size={12} /> Remove
