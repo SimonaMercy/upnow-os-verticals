@@ -64,7 +64,7 @@ import type { DocReq } from '@/lib/docRequirements';
 import { useAuth } from '@/contexts/AuthContext';
 import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
 import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
-import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { deriveSpaceCategoryFromUnitType, effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 
 /* ─── Brand palette ─────────────────────────────────────────────────── */
 const PALETTE: React.CSSProperties = {
@@ -289,7 +289,7 @@ interface ApiContract {
   landlordSignedAt: string | null;
   unit: { id: number | null; number?: string | null; name?: string | null; unitNumber?: string | null; unitName?: string | null; unitType?: string | null; bedrooms?: number | null };
   /** community / emirate arrive as plain name strings on the contract list. */
-  property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null; community?: string | null; emirate?: string | null } | null;
+  property?: { id?: number | null; buildingName?: string | null; fullAddress?: string | null; spaceCategory?: string | null; community?: string | null; emirate?: string | null } | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   /** You declined the renewal to vacate → move-out + deposit settlement wind-down. */
   vacateAtEnd?: boolean;
@@ -3642,10 +3642,18 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
   }
 
   async function onSign(p: SignaturePayload) {
-    const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }) });
+    const res = await fetch(`/api/contracts/tenant/${c!.id}/sign`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo, stampImage: p.stampImage ?? null }) });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Error ${res.status}`); }
     onRefresh();
   }
+
+  // Company stamp (0258): offered on commercial leases — required for a
+  // company customer, optional for an individual. Mirrors the sign endpoint's
+  // rule (companyName covers rows that predate entity_type). The renewal child
+  // carries the same unit/property, so a renewal follows the same gate.
+  const commercialLease = effectiveSpaceCategory(c.unit?.unitType ?? resolved.unit?.unitType, c.property?.spaceCategory) !== 'residential';
+  const companyCustomer = resolved.entityType === 'company' || !!resolved.companyName || !!c.tenantCompanyName;
+  const stamp = commercialLease ? { required: companyCustomer } : null;
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -3686,6 +3694,7 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
           : 'I have reviewed and agree to all terms of this tenancy contract.'}
         submitLabel={renewal ? 'Sign renewal' : 'Sign contract'}
         alreadySigned={false}
+        stamp={stamp}
         onSign={onSign}
       />
     </div>

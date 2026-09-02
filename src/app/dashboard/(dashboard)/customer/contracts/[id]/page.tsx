@@ -31,6 +31,7 @@ import { taxPortionOf } from '@/lib/chargeTax';
 import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 import { useBackClose } from '@/lib/useSlideOver';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
+import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ interface Signature {
   method: string;
   signedAt: string;
   signatureImage?: string | null;
+  stampImage?: string | null;
 }
 
 interface ContractDetail {
@@ -110,9 +112,9 @@ interface ContractDetail {
   customClauses: string[];
   notes: string | null;
   createdAt: string;
-  tenant: { id: number | null; name: string | null; companyName?: string | null; email: string | null; phone: string | null };
+  tenant: { id: number | null; name: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null; email: string | null; phone: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null };
-  property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
+  property: { buildingName: string | null; fullAddress: string | null; spaceCategory?: string | null; community: string | null; emirate: string | null };
   unit: { number: string | null; name: string | null; type: string | null; floor: string | null; bedrooms: number | null; bathrooms: number | null };
   documents: ContractDoc[];
   payments: ContractPayment[];
@@ -337,7 +339,7 @@ export default function TenantContractDetailPage() {
     const res = await fetch(`/api/contracts/tenant/${contract.id}/sign`, {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }),
+      body: JSON.stringify({ signatoryName: p.signatoryName, signatureImage: p.signatureImage, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo, stampImage: p.stampImage ?? null }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { message?: string };
@@ -1133,9 +1135,17 @@ export default function TenantContractDetailPage() {
                       <p className="text-[10px] text-[#9b9890] uppercase font-semibold mb-2">Your Signature</p>
                       {tenantSig ? (
                         <div className="space-y-1.5">
-                          {tenantSig.signatureImage && (
-                            <img src={tenantSig.signatureImage} alt="Your signature"
-                              className="h-14 object-contain border border-[#f0ede8] rounded-lg p-1 bg-white" />
+                          {(tenantSig.signatureImage || tenantSig.stampImage) && (
+                            <div className="flex items-center gap-2">
+                              {tenantSig.signatureImage && (
+                                <img src={tenantSig.signatureImage} alt="Your signature"
+                                  className="h-14 object-contain border border-[#f0ede8] rounded-lg p-1 bg-white" />
+                              )}
+                              {tenantSig.stampImage && (
+                                <img src={tenantSig.stampImage} alt="Company stamp"
+                                  className="h-14 object-contain border border-[#f0ede8] rounded-lg p-1 bg-white" />
+                              )}
+                            </div>
                           )}
                           <p className="text-xs font-semibold text-[#1a1916]">{tenantSig.signatoryName}</p>
                           <p className="text-[10px] text-[#9b9890]">{fmtDate(tenantSig.signedAt)}</p>
@@ -1206,6 +1216,12 @@ export default function TenantContractDetailPage() {
                 termsText={`I have read and agree to all terms of tenancy contract ${contract.ref} for ${contract.unit.number ? `Unit ${contract.unit.number}, ` : ''}${contract.property.buildingName}.`}
                 submitLabel="Sign contract"
                 alreadySigned={false}
+                // Company stamp (0258): offered on commercial leases — required
+                // for a company customer, optional for an individual. Mirrors
+                // the sign endpoint's rule (companyName covers rows that
+                // predate entity_type).
+                stamp={effectiveSpaceCategory(contract.unit.type, contract.property.spaceCategory) !== 'residential'
+                  ? { required: contract.tenant.entityType === 'company' || !!contract.tenant.companyName } : null}
                 onSign={submitSignature}
               />
             </div>

@@ -12,6 +12,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, CheckCircle2, PenLine, ShieldCheck, AlertTriangle, FileText, Stamp, ExternalLink } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
+import { effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 import { collectClientMeta, collectGeo } from '@/lib/signEvidence';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
@@ -45,7 +46,7 @@ const ContractButtons = dynamic(() => import('@/components/contract/ContractButt
 });
 
 interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string; section?: string | null }
-interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; signedAt: string; method?: string }
+interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; stampImage?: string | null; signedAt: string; method?: string }
 interface Detail {
   contract: EjariContractData & { id: number; status: string | null; contractType?: string | null };
   documents: Doc[];
@@ -95,7 +96,7 @@ const API = (token: string, path: string) => `/api/portal/${token}${path}`;
 function toEjari(c: Detail['contract'], signatures: Sig[]): EjariContractData {
   return {
     ...c,
-    signatures: (signatures ?? []).map(s => ({ role: s.role as 'landlord' | 'tenant', signatureImage: s.signatureImage ?? null, signedAt: s.signedAt, method: s.method })),
+    signatures: (signatures ?? []).map(s => ({ role: s.role as 'landlord' | 'tenant', signatureImage: s.signatureImage ?? null, stampImage: s.stampImage ?? null, signedAt: s.signedAt, method: s.method })),
   };
 }
 
@@ -283,7 +284,14 @@ export default function ContractReviewPage() {
             {d.tenantSigned ? (
               <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this contract.</p>
             ) : (
-              <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''} onSigned={load} />
+              // Company stamp (0258): offered on commercial leases — required
+              // for a company customer, optional for an individual. Mirrors
+              // the sign endpoint's rule (companyName covers old company rows
+              // that predate entity_type).
+              <SignBox token={token} contractId={id} kind="contract" defaultName={d.contract.tenant?.name ?? ''}
+                stamp={effectiveSpaceCategory(d.contract.unit?.type, d.contract.property?.spaceCategory) !== 'residential'
+                  ? { required: d.contract.tenant?.entityType === 'company' || !!d.contract.tenant?.companyName } : null}
+                onSigned={load} />
             )}
           </Card>
         )}
@@ -469,8 +477,10 @@ function DocRow({ title, icon: Icon, href, download }: {
   );
 }
 
-function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector = false }: {
+function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector = false, stamp = null }: {
   token: string; contractId: number; kind: 'contract' | 'move_in' | 'move_out'; defaultName: string; onSigned: () => void; asInspector?: boolean;
+  /** Company-stamp section (contract signing on commercial leases only). */
+  stamp?: { required: boolean } | null;
 }) {
   const isContract = kind === 'contract';
   const moveLabel = kind === 'move_out' ? 'move-out' : 'move-in';
@@ -486,7 +496,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
       : asInspector ? `/contracts/${contractId}/inspection/counter-sign`
       : `/contracts/${contractId}/inspection/sign`;
     const body = isContract
-      ? { signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo }
+      ? { signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo, stampImage: p.stampImage ?? null }
       : { type: kind === 'move_out' ? 'move_out' : 'move_in', signatureImage: p.signatureImage, signatoryName: p.signatoryName, consent: p.consent, clientMeta: p.clientMeta, geo: p.geo };
     const res = await fetch(API(token, url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || 'Could not sign'); }
@@ -502,6 +512,7 @@ function SignBox({ token, contractId, kind, defaultName, onSigned, asInspector =
       termsText={termsText}
       submitLabel={submitLabel}
       alreadySigned={false}
+      stamp={isContract ? stamp : null}
       onSign={onSign}
     />
   );

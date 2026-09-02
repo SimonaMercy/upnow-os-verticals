@@ -346,12 +346,14 @@ const RowHalf = ({ en, ar, value, last }: { en: string; ar: string; value?: stri
   </View>
 );
 
-const SigBox = ({ en, ar, img, date }: { en: string; ar: string; img?: string | null; date?: string }) => (
+const SigBox = ({ en, ar, img, stamp, date }: { en: string; ar: string; img?: string | null; stamp?: string | null; date?: string }) => (
   <View style={{ flex: 1, padding: 6 }}>
-    <View style={{ height: 40, justifyContent: 'flex-end' }}>
+    <View style={{ height: 40, flexDirection: 'row', alignItems: 'flex-end' }}>
       {img
-        ? <Image src={img} style={{ maxHeight: 32, maxWidth: 140, objectFit: 'contain' }} />
+        ? <Image src={img} style={{ maxHeight: 32, maxWidth: stamp ? 100 : 140, objectFit: 'contain' }} />
         : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
+      {/* Company stamp given with the customer's signature (commercial leases, 0258). */}
+      {stamp && <Image src={stamp} style={{ maxHeight: 38, maxWidth: 56, objectFit: 'contain', marginLeft: 6 }} />}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: RULE, paddingTop: 3 }}>
       <Text style={{ fontSize: 7.5 }}>{en} <Text style={st.ar}>{ar}</Text></Text>
@@ -464,7 +466,7 @@ export function AjmanContractDoc({
       <Bar en="Signatures" ar="التوقيعات" />
       <View style={{ ...st.table, flexDirection: 'row' }}>
         <View style={{ flex: 1, borderRightWidth: 1, borderRightColor: RULE, flexDirection: 'row' }}>
-          <SigBox en="Tenant Signature" ar="توقيع المستأجر" img={tSig?.signatureImage} date={fmtDate(tSig?.signedAt)} />
+          <SigBox en="Tenant Signature" ar="توقيع المستأجر" img={tSig?.signatureImage} stamp={tSig?.stampImage ?? null} date={fmtDate(tSig?.signedAt)} />
         </View>
         <View style={{ flex: 1, flexDirection: 'row' }}>
           <SigBox en="Lessor's Signature" ar="توقيع المؤجر" img={lSig?.signatureImage} date={fmtDate(lSig?.signedAt)} />

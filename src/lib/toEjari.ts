@@ -78,6 +78,7 @@ export function toEjari(c: any, signatures: any[]): EjariContractData {
     signatures: (Array.isArray(signatures) ? signatures : []).map((s) => ({
       role: s.role,
       signatureImage: s.signatureImage ?? null,
+      stampImage: s.stampImage ?? null,
       signedAt: s.signedAt,
       method: s.method,
     })),

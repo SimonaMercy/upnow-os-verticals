@@ -155,7 +155,9 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
       return isPng ? await doc.embedPng(buf) : await doc.embedJpg(buf);
     } catch { return null; }
   };
-  const [tImg, lImg] = await Promise.all([embedImg(tSig?.signatureImage), embedImg(lSig?.signatureImage)]);
+  // Company stamp given with the customer's signature (commercial leases, 0258)
+  // — drawn beside the tenant signature in every Signatures block.
+  const [tImg, lImg, tStamp] = await Promise.all([embedImg(tSig?.signatureImage), embedImg(lSig?.signatureImage), embedImg(tSig?.stampImage)]);
   const sign = (pi: number, cx: number, baseline: number, img: Awaited<ReturnType<typeof embedImg>>, sig?: typeof tSig, name?: string | null) => {
     if (img) {
       const maxH = 34, maxW = 150;
@@ -180,6 +182,13 @@ export async function fillEjariPdf(data: EjariContractData, addendums: EjariAdde
   for (const [pi, tCx, lCx, base, dateB] of SIG) {
     sign(pi, tCx, base, tImg, tSig, tenantName);
     sign(pi, lCx, base, lImg, lSig, landlordName);
+    if (tStamp) {
+      // Seal to the right of the tenant's signature, sized like an ink stamp.
+      const maxH = 44, maxW = 70;
+      const s = Math.min(maxH / tStamp.height, maxW / tStamp.width, 1);
+      const w = tStamp.width * s, h = tStamp.height * s;
+      pages[pi].drawImage(tStamp, { x: tCx + 82, y: H - base - h + 20, width: w, height: h });
+    }
     if (tSig?.signedAt) pages[pi].drawText(fmtDate(tSig.signedAt), { x: 200, y: H - dateB + 2, size: 8, font: roboto, color: rgb(0.05, 0.05, 0.05) });
     if (lSig?.signedAt) pages[pi].drawText(fmtDate(lSig.signedAt), { x: 473, y: H - dateB + 2, size: 8, font: roboto, color: rgb(0.05, 0.05, 0.05) });
   }

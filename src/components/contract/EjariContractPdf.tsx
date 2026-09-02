@@ -73,7 +73,7 @@ export interface EjariContractData {
   // district ("Al Nuaimiya 2") that same form prints as `District`.
   property: { buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; city?: string | null; subCommunity?: string | null; plotNumber: string | null; makaniNumber: string | null; sewerageNumber?: string | null; premisesNumber?: string | null; spaceCategory?: string | null };
   unit: { number: string | null; name: string | null; type: string | null; floor?: string | null; sizeSqm: number | null; dewaPremiseNumber?: string | null; sewerageNumber?: string | null; bedrooms?: number | null };
-  signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string; method?: string }[];
+  signatures?: { role: 'landlord' | 'tenant'; signatureImage: string | null; stampImage?: string | null; signedAt: string; method?: string }[];
   /** Ajman-form overrides. The Ajman tenancy contract prints boxes our model has
    *  no source for (Sector, Floor, Room, Sewerage No., the Request Details block,
    *  the Arabic mirrors of names/nationalities). Anything set here wins over the
@@ -202,14 +202,16 @@ const TermsBlock = ({ termsEn, termsAr, start, end, header }: { termsEn: string[
     </View>
   </View>
 );
-const SigBox = ({ label, ar, img, date, onFile, hideAr }: { label: string; ar: string; img?: string | null; date?: string; onFile?: boolean; hideAr?: boolean }) => (
+const SigBox = ({ label, ar, img, stamp, date, onFile, hideAr }: { label: string; ar: string; img?: string | null; stamp?: string | null; date?: string; onFile?: boolean; hideAr?: boolean }) => (
   <View style={{ width: '100%', padding: 6 }}>
-    <View style={{ height: 44, alignItems: 'flex-start', justifyContent: 'flex-end' }}>
+    <View style={{ height: 44, flexDirection: 'row', alignItems: 'flex-end' }}>
       {img
-        ? <Image src={img} style={{ maxHeight: 34, maxWidth: 150, objectFit: 'contain' }} />
+        ? <Image src={img} style={{ maxHeight: 34, maxWidth: stamp ? 105 : 150, objectFit: 'contain' }} />
         : onFile
           ? <Text style={{ fontSize: 7.5, color: '#555' }}>Signed on file — N/A</Text>
           : <Text style={{ fontSize: 7, color: '#bbb' }}>Not yet signed</Text>}
+      {/* Company stamp given with the customer's signature (commercial leases, 0258). */}
+      {stamp && <Image src={stamp} style={{ maxHeight: 42, maxWidth: 62, objectFit: 'contain', marginLeft: 6 }} />}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#bbb', paddingTop: 3 }}>
       <Text style={{ fontSize: 7.5 }}>{label}{hideAr ? null : <Text style={{ fontFamily: AR }}> {ar}</Text>}</Text>
@@ -220,12 +222,12 @@ const SigBox = ({ label, ar, img, date, onFile, hideAr }: { label: string; ar: s
 // hideAr → English-only signature box (used by the addendum; the contract stays bilingual).
 // footer → rendered inside a react-pdf `fixed` absolute footer (no wrap={false},
 // which breaks fixed rendering; no top margin since it's positioned).
-const Signatures = ({ tenant, landlord, hideAr, footer }: { tenant?: { img?: string | null; date?: string; onFile?: boolean }; landlord?: { img?: string | null; date?: string; onFile?: boolean }; hideAr?: boolean; footer?: boolean }) => (
+const Signatures = ({ tenant, landlord, hideAr, footer }: { tenant?: { img?: string | null; stamp?: string | null; date?: string; onFile?: boolean }; landlord?: { img?: string | null; date?: string; onFile?: boolean }; hideAr?: boolean; footer?: boolean }) => (
   <View wrap={footer ? undefined : false} style={footer ? undefined : { marginTop: 8 }}>
     <Bar en="Signatures" ar={hideAr ? '' : 'التوقيعات'} />
     <View style={{ borderWidth: 1, borderColor: '#bbb', borderTopWidth: 0, flexDirection: 'row' }}>
       <View style={{ width: '50%', borderRightWidth: 1, borderRightColor: '#bbb' }}>
-        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} date={tenant?.date} onFile={tenant?.onFile} hideAr={hideAr} />
+        <SigBox label="Tenant Signature" ar="توقيع المستأجر" img={tenant?.img} stamp={tenant?.stamp} date={tenant?.date} onFile={tenant?.onFile} hideAr={hideAr} />
       </View>
       <View style={{ width: '50%' }}>
         <SigBox label="Lessor's Signature" ar="توقيع المؤجر" img={landlord?.img} date={landlord?.date} onFile={landlord?.onFile} hideAr={hideAr} />
@@ -328,7 +330,7 @@ export function EjariContractDoc({ data, addendums = [] }: { data: EjariContract
   // Official Ejari shows a Signatures bar at the bottom of every page.
   const sigs = (
     <Signatures
-      tenant={tSig ? { img: tSig.signatureImage, date: fmtDate(tSig.signedAt), onFile: tSig.method === 'on_file' } : undefined}
+      tenant={tSig ? { img: tSig.signatureImage, stamp: tSig.stampImage ?? null, date: fmtDate(tSig.signedAt), onFile: tSig.method === 'on_file' } : undefined}
       landlord={lSig ? { img: lSig.signatureImage, date: fmtDate(lSig.signedAt), onFile: lSig.method === 'on_file' } : undefined}
     />
   );
@@ -512,7 +514,7 @@ function buildAddendumPreamble(data?: EjariContractData): string | null {
  *  so the flowing terms never run under them (no overlap). */
 export function addendumPages(
   addendums: EjariAddendum[],
-  contractSigs?: { role: 'landlord' | 'tenant'; signatureImage: string | null; signedAt: string }[],
+  contractSigs?: { role: 'landlord' | 'tenant'; signatureImage: string | null; stampImage?: string | null; signedAt: string }[],
   data?: EjariContractData,
 ) {
   // The addendum is part of the contract — when its own signature fields aren't
@@ -530,6 +532,9 @@ export function addendumPages(
     const title = ((a.name && a.name.trim()) || 'Addendum to Tenancy Contract').toUpperCase();
     const titleAr = a.terms?.nameAr?.trim() || '';
     const tenantImg = a.tenantSig ?? cTenant?.signatureImage ?? null;
+    // The company stamp is given once, with the CONTRACT signature (0258) — the
+    // addendum is part of the same executed contract, so the seal shows here too.
+    const tenantStamp = cTenant?.stampImage ?? null;
     const tenantDate = a.tenantSignedAt ? fmtDate(a.tenantSignedAt) : (cTenant?.signedAt ? fmtDate(cTenant.signedAt) : '');
     const landlordImg = a.landlordSig ?? cLandlord?.signatureImage ?? null;
     const landlordDate = a.landlordSignedAt ? fmtDate(a.landlordSignedAt) : (cLandlord?.signedAt ? fmtDate(cLandlord.signedAt) : '');
@@ -565,7 +570,7 @@ export function addendumPages(
         {/* Tenant & Lessor signature block — fixed footer on EVERY page. */}
         <View fixed style={{ position: 'absolute', bottom: 14, left: 30, right: 30 }}>
           <Signatures footer hideAr
-            tenant={{ img: tenantImg, date: tenantDate }}
+            tenant={{ img: tenantImg, stamp: tenantStamp, date: tenantDate }}
             landlord={{ img: landlordImg, date: landlordDate }} />
         </View>
       </Page>
