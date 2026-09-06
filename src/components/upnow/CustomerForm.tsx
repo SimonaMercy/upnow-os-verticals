@@ -18,6 +18,7 @@ export interface CustomerInitial {
   companyName?: string | null;
   tradeLicenseNumber?: string | null;
   tradeLicenseAuthority?: string | null;
+  vatTrn?: string | null;
 }
 
 const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
@@ -49,6 +50,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
   const [companyName, setCompanyName] = useState(initial?.companyName ?? '');
   const [tradeLicenseNumber, setTradeLicenseNumber] = useState(initial?.tradeLicenseNumber ?? '');
   const [tradeLicenseAuthority, setTradeLicenseAuthority] = useState(initial?.tradeLicenseAuthority ?? '');
+  const [vatTrn, setVatTrn] = useState(initial?.vatTrn ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -83,6 +85,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
             ? {
                 tradeLicenseNumber: tradeLicenseNumber.trim() || null,
                 tradeLicenseAuthority: tradeLicenseAuthority.trim() || null,
+                vatTrn: vatTrn.trim() || null,
                 nationality: nationality.trim() || null,
               }
             : {
@@ -91,6 +94,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
                 dateOfBirth: dateOfBirth || null,
                 tradeLicenseNumber: null,
                 tradeLicenseAuthority: null,
+                vatTrn: null,
               }),
         };
     try {
@@ -147,6 +151,8 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
                     {LICENSING_AUTHORITIES.map(a => <option key={a} value={a}>{a}</option>)}
                   </select>
                 </div>
+                {/* FTA Tax Registration Number — VAT-registered companies only. */}
+                <div><label className={label}>TRN (tax registration no.)</label><input className={field} value={vatTrn} onChange={e => setVatTrn(e.target.value)} placeholder="e.g. 100123456700003" /></div>
               </>
             ) : (
               <>

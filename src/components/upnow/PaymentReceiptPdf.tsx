@@ -132,6 +132,8 @@ export interface ReceiptContract {
     emiratesId?: string | null;
     licenseNumber?: string | null;
     licenseAuthority?: string | null;
+    /** FTA Tax Registration Number — printed under "Billed To" only when set. */
+    vatTrn?: string | null;
     phone?: string | null;
   };
   unit: { number: string | null; name: string | null };
@@ -970,6 +972,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
             <Text style={st.metaLbl}>Billed To</Text>
             <Text style={{ fontSize: 10, color: INK, fontWeight: 500 }}>{tenantName}</Text>
             {tenantIdLine ? <Text style={{ fontSize: 8, color: MUTE, marginTop: 2 }}>{tenantIdLine}</Text> : null}
+            {contract.tenant?.vatTrn ? <Text style={{ fontSize: 8, color: MUTE }}>TRN {contract.tenant.vatTrn}</Text> : null}
             {contract.tenant?.phone ? <Text style={{ fontSize: 8, color: MUTE }}>{contract.tenant.phone}</Text> : null}
           </View>
           <View style={{ flex: 1.25 }}>

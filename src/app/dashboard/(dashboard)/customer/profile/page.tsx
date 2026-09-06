@@ -1196,19 +1196,21 @@ function CompanyTenantCard() {
   const [licenseNo, setLicenseNo] = useState('');
   const [licenseAuth, setLicenseAuth] = useState('');
   const [licenseAuthOther, setLicenseAuthOther] = useState(false);
+  const [trn, setTrn] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    apiGet<{ profile: { entityType?: string; companyName?: string | null; tradeLicenseNumber?: string | null; tradeLicenseAuthority?: string | null } }>('/profiles/customer/me')
+    apiGet<{ profile: { entityType?: string; companyName?: string | null; tradeLicenseNumber?: string | null; tradeLicenseAuthority?: string | null; vatTrn?: string | null } }>('/profiles/customer/me')
       .then(({ profile }) => {
         if (!alive) return;
         setIsCompany(profile?.entityType === 'company');
         setCompanyName(profile?.companyName ?? '');
         setLicenseNo(profile?.tradeLicenseNumber ?? '');
         setLicenseAuth(profile?.tradeLicenseAuthority ?? '');
+        setTrn(profile?.vatTrn ?? '');
         setLicenseAuthOther(!!profile?.tradeLicenseAuthority && !isKnownAuthority(profile.tradeLicenseAuthority));
       })
       .catch(() => { /* non-fatal */ })
@@ -1224,6 +1226,7 @@ function CompanyTenantCard() {
         companyName: isCompany ? companyName.trim() : '',
         tradeLicenseNumber: isCompany ? licenseNo.trim() : '',
         tradeLicenseAuthority: isCompany ? licenseAuth.trim() : '',
+        vatTrn: isCompany ? trn.trim() : '',
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
@@ -1297,6 +1300,10 @@ function CompanyTenantCard() {
                   <p style={{ fontSize: 10.5, color: '#9b9890', margin: '4px 0 0', lineHeight: 1.35 }}>{authorityName(licenseAuth)}</p>
                 ) : null}
               </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b6860', marginBottom: 4 }}>TRN (Tax Registration No.)</label>
+              <input style={inputStyle} placeholder="e.g. 100123456700003 — if VAT-registered" value={trn} onChange={e => setTrn(e.target.value)} />
             </div>
             <p style={{ fontSize: 11, color: '#9b9890', margin: 0 }}>
               Used as the tenant on your tenancy contract. For commercial / industrial leases your Trade License & MOA become required documents.

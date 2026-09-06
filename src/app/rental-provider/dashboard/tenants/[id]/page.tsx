@@ -65,7 +65,7 @@ type CustomerDetail = {
     email: string | null; phone: string | null; emiratesId: string | null; passportNumber: string | null;
     nationality: string | null; gender: string | null; dateOfBirth: string | null;
     entityType: string | null; companyName: string | null; tradeLicenseNumber: string | null;
-    tradeLicenseAuthority: string | null;
+    tradeLicenseAuthority: string | null; vatTrn: string | null;
   };
   summary: { totalLeases: number; activeLeases: number; totalActiveRent: number; documentCount: number };
   financials: Financials;
@@ -573,6 +573,7 @@ export default function CustomerDetailPage() {
       { icon: Building2, label: 'Company', value: c.companyName },
       { icon: IdCard, label: 'Trade license', value: c.tradeLicenseNumber },
       { icon: Landmark, label: 'License authority', value: c.tradeLicenseAuthority },
+      { icon: IdCard, label: 'TRN', value: c.vatTrn },
     ]),
   ];
   // Rent progression — grouped PER UNIT so each unit's renewal chain is its own
@@ -713,6 +714,7 @@ export default function CustomerDetailPage() {
               emiratesIdNumber: c.emiratesId, passportNumber: c.passportNumber, nationality: c.nationality, gender: c.gender,
               dateOfBirth: c.dateOfBirth, entityType: c.entityType, companyName: c.companyName,
               tradeLicenseNumber: c.tradeLicenseNumber, tradeLicenseAuthority: c.tradeLicenseAuthority,
+              vatTrn: c.vatTrn,
             }}
             onCancel={() => setEditing(false)}
             onDone={() => { setEditing(false); load(); }}
