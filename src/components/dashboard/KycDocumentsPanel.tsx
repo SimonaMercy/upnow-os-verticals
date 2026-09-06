@@ -37,6 +37,7 @@ import { currentDocWatermark } from "@/lib/docViewer";
 import { useBackClose } from "@/lib/useSlideOver";
 import { docNeedsExpiry } from "@/lib/docRequirements";
 import { DocExpiryField } from "@/components/upnow/DocExpiryField";
+import { useDocumentScanner } from "@/components/upnow/DocumentScanModal";
 
 // yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
 const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : "");
@@ -265,6 +266,8 @@ export function KycDocumentsPanel({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingKey = useRef<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -370,11 +373,15 @@ export function KycDocumentsPanel({
     );
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
     const docKey = pendingKey.current;
-    if (!file || !docKey || !data) return;
+    if (!picked || !docKey || !data) return;
     e.target.value = "";
+    // Images go through the scan modal (auto-crop, perspective fix, clean-up);
+    // PDFs resolve untouched. Null = the user closed the scanner — no upload.
+    const file = await scan(picked);
+    if (!file) return;
     const reqItem = checklist.find((c) => c.key === docKey) ?? data.checklist.find((c) => c.key === docKey)!;
     const storageKey = reqItem.documentKey ?? docKey;
     // Hold an expiring doc (identity / licence) until its expiry is entered so
@@ -612,8 +619,9 @@ export function KycDocumentsPanel({
         type="file"
         accept=".jpg,.jpeg,.png,.webp,.pdf"
         className="hidden"
-        onChange={handleFileChange}
+        onChange={(e) => { void handleFileChange(e); }}
       />
+      {scannerModal}
 
       {/* Profile-incomplete banner */}
       {profileIncomplete && (

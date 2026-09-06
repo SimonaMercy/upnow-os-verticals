@@ -25,6 +25,7 @@ import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
 import { sectionForDocKey } from '@/lib/documentCatalogue';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -257,13 +258,19 @@ export default function CustomerDetailPage() {
   const [directErr, setDirectErr] = useState<Record<string, string>>({});
   const directFileRef = useRef<HTMLInputElement>(null);
   const directSlot = useRef<UploadSlot | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   const pickDirect = (slot: UploadSlot) => { directSlot.current = slot; directFileRef.current?.click(); };
   const onDirectFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     const slot = directSlot.current;
     e.target.value = '';
-    if (!file || !slot || !params?.id) return;
+    if (!picked || !slot || !params?.id) return;
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const file = await scan(picked);
+    if (!file) return;
     setDirectErr(p => { const n = { ...p }; delete n[slot.canonicalKey]; return n; });
     setDirectBusy(slot.canonicalKey);
     try {
@@ -647,6 +654,7 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="p-6">
+      {scannerModal}
       {/* Needs attention — pinned to the top so action items are seen first */}
       {actions.length > 0 && (
         <div className="rounded-2xl border-t-[3px] border-[#dc2626] bg-[#fef2f2] shadow-sm px-5 py-4 mb-6">

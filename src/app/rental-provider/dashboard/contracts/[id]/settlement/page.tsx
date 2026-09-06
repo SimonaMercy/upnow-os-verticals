@@ -13,6 +13,7 @@ import {
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
 import RentalFinalSettlementDoc, { type RFSData } from '@/components/contract/RentalFinalSettlementDoc';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,8 @@ export default function SettlementPage() {
   const params = useParams<{ id: string }>();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   const contractId = params?.id;
   // Back goes to wherever we came from (Operations pipeline when opened from there,
   // via ?from=…), falling back to the lease record for a direct/bookmarked visit.
@@ -344,6 +347,11 @@ export default function SettlementPage() {
   // lines, the payments-received rows and the refund payout dialog.
   async function uploadEvidence(file: File): Promise<LineAttachment | null> {
     if (!contractId) return null;
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return null;
+    file = scanned;
     if (file.size > 15 * 1024 * 1024) { setError('File must be under 15 MB.'); return null; }
     setError(null);
     try {
@@ -618,6 +626,7 @@ export default function SettlementPage() {
 
   return (
     <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-4 py-8 space-y-5 transition-[max-width]`}>
+      {scannerModal}
       {/* Topbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">

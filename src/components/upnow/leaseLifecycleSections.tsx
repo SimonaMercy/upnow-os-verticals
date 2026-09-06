@@ -16,6 +16,7 @@ import {
   FileText, ExternalLink, Loader2, Camera, ClipboardList, Upload, CheckCircle2, Eye,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 // ─── Shared types (the lifecycle bundle shapes) ─────────────────────────────
 
@@ -206,11 +207,18 @@ function proofCaption(p: ProofDoc, fallback: string) {
 export function AttachButton({ onPick }: { onPick: (f: File) => Promise<void> }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   return (
     <>
+      {scannerModal}
       <input ref={ref} type="file" className="hidden" accept="image/*,application/pdf"
         onChange={async e => {
-          const f = e.target.files?.[0]; if (!f) return;
+          const picked = e.target.files?.[0]; if (!picked) return;
+          // Photos go through the scan modal first; PDFs pass straight
+          // through. Null = the user closed the scanner — abort the upload.
+          const f = await scan(picked);
+          if (!f) { if (ref.current) ref.current.value = ''; return; }
           setBusy(true);
           try { await onPick(f); } catch (err) { alert((err as Error)?.message || 'Upload failed.'); }
           finally { setBusy(false); if (ref.current) ref.current.value = ''; }

@@ -30,6 +30,7 @@ import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 import { useParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -2239,6 +2240,8 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
 
 function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const { user, refresh: refreshUser } = useAuth();
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   const tenantProfileId = resolved.tenantProfileId;
   const viewing = resolved.viewing;
   const unitType = resolved.unit?.unitType ?? null;
@@ -2356,6 +2359,11 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
   }, [refreshUser, onRefresh]);
 
   async function uploadDoc(req: DocReq, file: File) {
+    // Images go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     if (!tenantProfileId) { setUploadErr('Profile not ready.'); return; }
     if (file.size > 10 * 1024 * 1024) { setUploadErr('File must be under 10 MB.'); return; }
     setDocUploading(req.key); setUploadErr(null);
@@ -2489,6 +2497,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {scannerModal}
       {uploadErr && <ErrorBox msg={uploadErr} />}
 
       {eidReading && (
@@ -2825,12 +2834,19 @@ function RenewalDocumentsAction({
   // ── Inline upload ──────────────────────────────────────────────────────
   const [docUploading, setDocUploading] = useState<string | null>(null);
   const [uploadError,  setUploadError]  = useState<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   /** `slotKey` is the row the customer tapped (what the UI tracks); `targetKey` is
    *  the document key the file is written to, which is the same thing UNLESS this
    *  customer's copy is already filed under a legacy key — then we replace THAT row
    *  rather than adding a second one. Keeping the two apart is the whole fix. */
   async function handleUpload(slotKey: string, req: DocReq, file: File) {
+    // Images go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     if (!resolved.tenantProfileId) { setUploadError('Customer profile missing.'); return; }
     setDocUploading(slotKey); setUploadError(null);
     try {
@@ -3028,6 +3044,7 @@ function RenewalDocumentsAction({
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {scannerModal}
       {uploadError && <ErrorBox msg={uploadError} />}
       {prefError && <ErrorBox msg={prefError} />}
 
@@ -3344,6 +3361,8 @@ function PlanAttachCell({ slot, refs, uploading, onFiles, onRemove }: {
 
 function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const { user } = useAuth();
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const plan = resolved.paymentPlan;
@@ -3405,11 +3424,22 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   async function handleChequeFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
+    // Each cheque photo goes through the scan modal in turn (auto-crop +
+    // clean-up); PDFs pass straight through; a cancelled scan skips that file.
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) {
+      const scanned = await scan(picked);
+      if (scanned) ready.push(scanned);
+    }
+    if (ready.length === 0) {
+      if (chequeFileInputRef.current) chequeFileInputRef.current.value = '';
+      return;
+    }
     setUploadErr(null);
-    setUploadingFiles(files.length);
+    setUploadingFiles(ready.length);
     let nextIndex = uploads.length + 1;
     try {
-      for (const file of Array.from(files)) {
+      for (const file of ready) {
         const saved = await uploadOneCheque(file, `Reference ${nextIndex}`);
         if (saved) setUploads(prev => [...prev, saved]);
         nextIndex++;
@@ -3430,11 +3460,18 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
    */
   async function handleSlotFiles(slotLabel: string, files: FileList | null, replaceIds?: number[]) {
     if (!files || files.length === 0) return;
+    // Same scan-first pass as the bulk control (see handleChequeFiles).
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) {
+      const scanned = await scan(picked);
+      if (scanned) ready.push(scanned);
+    }
+    if (ready.length === 0) return;
     setUploadErr(null);
-    setUploadingFiles(files.length);
+    setUploadingFiles(ready.length);
     try {
       const saved: CustomerCheque[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of ready) {
         const one = await uploadOneCheque(file, slotLabel);
         if (one) saved.push(one);
       }
@@ -3500,6 +3537,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {scannerModal}
 
       {/* The SAME Payment Summary card the lease and the landlord's lead view use
           — so the plan the customer is quoted looks like the one they sign. */}
@@ -3743,6 +3781,8 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   const [err, setErr] = useState<string | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   // Locally tracked upload — flips true on a successful POST so the Submit
   // button unlocks immediately, without waiting for a Resolved refresh.
@@ -3768,6 +3808,11 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
   }
 
   async function uploadProof(file: File) {
+    // Images go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     if (!resolved.tenantProfileId) { setErr('Customer profile missing.'); return; }
     setProofBusy(true); setErr(null);
     try {
@@ -3789,6 +3834,7 @@ function UtilityAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh:
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
+      {scannerModal}
       {wasRejected && (
         <div style={{ background: 'var(--brick-soft)', border: '1px solid var(--brick)', borderRadius: 12, padding: '12px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <AlertCircle size={16} style={{ color: 'var(--brick)', flexShrink: 0, marginTop: 1 }} />
@@ -5008,6 +5054,8 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const child = resolved.renewalContract;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   // Uploaded cheque images / PDC. These MUST be registered under a Payment-Advice
   // key so they land in the contract's "Payment Advice" binder slot (which both
   // the RP and customer read cheques from). The binder matches documentKey
@@ -5077,11 +5125,19 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
    */
   async function handleSlotFiles(slotLabel: string, files: FileList | null, replaceIds?: number[]) {
     if (!files || files.length === 0 || !child?.id) return;
-    setUploadErr(null); setUploading(files.length);
+    // Each cheque photo goes through the scan modal in turn (auto-crop +
+    // clean-up); PDFs pass straight through; a cancelled scan skips that file.
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) {
+      const scanned = await scan(picked);
+      if (scanned) ready.push(scanned);
+    }
+    if (ready.length === 0) return;
+    setUploadErr(null); setUploading(ready.length);
     try {
       const saved: PdcDoc[] = [];
       let i = 0;
-      for (const file of Array.from(files)) saved.push(await uploadPdc(file, i++, slotLabel));
+      for (const file of ready) saved.push(await uploadPdc(file, i++, slotLabel));
       if (saved.length) setPdcDocs(prev => [...prev, ...saved]);
       if (saved.length && replaceIds?.length) {
         for (const id of replaceIds) await removePdc(id);
@@ -5094,10 +5150,20 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
    *  whole set over at once than match each cheque to its row. */
   async function handleBulkFiles(files: FileList | null) {
     if (!files || files.length === 0 || !child?.id) return;
-    setUploadErr(null); setUploading(files.length);
+    // Same scan-first pass as the per-payment attach (see handleSlotFiles).
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) {
+      const scanned = await scan(picked);
+      if (scanned) ready.push(scanned);
+    }
+    if (ready.length === 0) {
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
+    setUploadErr(null); setUploading(ready.length);
     try {
       let i = 0;
-      for (const file of Array.from(files)) {
+      for (const file of ready) {
         const saved = await uploadPdc(file, i++);
         setPdcDocs(prev => [...prev, saved]);
       }
@@ -5175,6 +5241,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
+      {scannerModal}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
           Attach a picture / PDF of each post-dated cheque (or transfer receipt) against the payment it covers. Your rental provider reviews and collects them before you sign.

@@ -10,6 +10,7 @@ import { X, Upload, Loader2, Check, ExternalLink, FileText, CalendarClock } from
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { docNeedsExpiry } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 export type UploadSlot = {
   label: string;                 // "Front side", "Back side", or the doc name
@@ -38,6 +39,8 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
   const [errs, setErrs] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = useRef<UploadSlot | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   // This requirement carries an expiry (identity / licence doc). The date is a
   // property of the document, so a two-sided Emirates ID shares ONE expiry across
@@ -108,10 +111,14 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
 
   const pick = (slot: UploadSlot) => { pending.current = slot; fileRef.current?.click(); };
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     const slot = pending.current;
     e.target.value = '';
-    if (!file || !slot) return;
+    if (!picked || !slot) return;
+    // Images go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const file = await scan(picked);
+    if (!file) return;
     setErrs(p => { const n = { ...p }; delete n[slot.canonicalKey]; return n; });
     setBusy(slot.canonicalKey);
     try {
@@ -137,6 +144,7 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
       <div className="absolute inset-0 bg-black/50" onClick={handleClose} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg">
         <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" className="hidden" onChange={onFile} />
+        {scannerModal}
         <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e8e6e0]">
           <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><Upload size={16} className="text-[#2e9f82]" /> {title}</h3>
           <button type="button" onClick={handleClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>

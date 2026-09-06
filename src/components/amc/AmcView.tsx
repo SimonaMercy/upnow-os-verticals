@@ -19,6 +19,7 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { openDocViewer } from '@/lib/docViewer';
 import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 const CATEGORIES = ['elevator','cleaning','security','insurance','waste','electricity_water','fire_safety','maintenance','renovation','landscaping','pest_control','government','other'];
 
@@ -316,6 +317,8 @@ function AddAmcModal({ base, rp, propertiesUrl, existingContracts, onClose, onSa
   const [planDirty, setPlanDirty] = useState(false);
   const [category, setCategory] = useState('maintenance');
   const [file, setFile] = useState<File | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -471,8 +474,15 @@ function AddAmcModal({ base, rp, propertiesUrl, existingContracts, onClose, onSa
             <label className="flex items-center gap-2 text-xs text-[#6b6860] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f9f8f6]">
               <UploadCloud size={14} className="text-[#2e9f82]" />
               {file ? file.name : 'Attach contract PDF'}
-              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+              <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => {
+                const picked = e.target.files?.[0] ?? null;
+                if (!picked) { setFile(null); return; }
+                // Photos go through the scan modal; a cancelled scan clears
+                // the selection instead of staging the raw shot.
+                void scan(picked).then(f => setFile(f));
+              }} />
             </label>
+            {scannerModal}
           </div>
 
           <div>

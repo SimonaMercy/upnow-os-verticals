@@ -13,6 +13,7 @@ import {
   ShieldCheck, AlertTriangle,
 } from 'lucide-react';
 import { openDocViewer, setDocViewerWatermark } from '@/lib/docViewer';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 interface DocItem { key: string; displayName: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; category?: string | null; hint?: string | null; notes?: string | null }
 interface Portal {
@@ -36,6 +37,8 @@ export default function TenantPortalPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   // Contract-scoped links belong on the dedicated review/sign page. The backend
   // already deep-links them there; this redirect is a safety net if someone
@@ -59,7 +62,11 @@ export default function TenantPortalPage() {
 
   // No expiry is sent: identity / licence expiry is recorded by the rental provider when
   // they review the copy, so the tenant just picks the file and it goes.
-  async function upload(doc: DocItem, file: File) {
+  async function upload(doc: DocItem, picked: File) {
+    // Photo captures pass through the scan modal (auto-crop + clean-up) first;
+    // PDFs resolve untouched. Null = the user closed the scanner — no upload.
+    const file = await scan(picked);
+    if (!file) return;
     setUploading(doc.key);
     try {
       const urlRes = await fetch(API(token, '/upload-url'), {
@@ -92,6 +99,7 @@ export default function TenantPortalPage() {
 
   return (
     <div className="min-h-screen bg-[#f7f6f2]">
+      {scannerModal}
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#2e9f82]" /><span className="font-bold text-[#1a1916]">UpNow</span></div>
         <h1 className="text-2xl font-bold text-[#1a1916] mt-3">Hi {greetName(data.tenant.name)},</h1>

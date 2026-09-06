@@ -13,6 +13,7 @@ import {
   ExternalLink, Clock, ShieldCheck, CheckCircle2,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 interface MyDoc { id: number; documentKey: string; fileUrl?: string; status?: string; displayName?: string | null }
 
@@ -80,6 +81,8 @@ export default function ManagerProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   // Identity documents (folded in from the old "My Documents" page).
   const [docs, setDocs] = useState<MyDoc[]>([]);
   const [docBusyKey, setDocBusyKey] = useState<string | null>(null);
@@ -106,6 +109,11 @@ export default function ManagerProfilePage() {
 
   async function uploadIdDoc(key: string, label: string, file: File, existingId?: number) {
     if (!p?.assetManagerId) { setError('Profile still being set up — please retry shortly.'); return; }
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     setDocBusyKey(key); setError(null);
     try {
       const urlRes = await fetch('/api/documents/upload-url', {
@@ -187,6 +195,7 @@ export default function ManagerProfilePage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+      {scannerModal}
       <div>
         <h1 className="text-2xl font-bold text-[#1a1916]">My Profile</h1>
         <p className="text-sm text-[#9b9890] mt-0.5">Your professional details. Visible to the landlords you manage and on your account.</p>

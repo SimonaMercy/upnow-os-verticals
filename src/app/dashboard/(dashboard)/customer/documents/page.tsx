@@ -36,6 +36,7 @@ import {
 } from '@/lib/docRequirements';
 import type { DocReq } from '@/lib/docRequirements';
 import { DocExpiryField } from '@/components/upnow/DocExpiryField';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 // yyyy-mm-dd for a native date input, tolerant of full ISO timestamps.
 const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
@@ -229,6 +230,9 @@ export default function CustomerDocumentsPage() {
   const [attachError, setAttachError]     = useState<string | null>(null);
   const attachInputRef                    = useRef<HTMLInputElement>(null);
 
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
+
   const reloadDocs = useCallback(() => {
     setLoading(true);
     Promise.all([
@@ -301,8 +305,12 @@ export default function CustomerDocumentsPage() {
 
   // ── Utility: upload proof of payment ─────────────────────────────────────────
 
-  async function handleUtilityUpload(file: File) {
+  async function handleUtilityUpload(picked: File) {
     if (!tenantProfileId) return;
+    // Photo captures pass through the scan modal (auto-crop + clean-up) first;
+    // PDFs resolve untouched. Null = the user closed the scanner — no upload.
+    const file = await scan(picked);
+    if (!file) return;
     setDewaError(null);
     setDewaUploading(true);
     try {
@@ -357,8 +365,12 @@ export default function CustomerDocumentsPage() {
 
   // ── Upload handler (required + landlord-requested docs) ───────────────────
 
-  async function handleUpload(req: DocReq, file: File, existingDocId?: number) {
+  async function handleUpload(req: DocReq, picked: File, existingDocId?: number) {
     if (!tenantProfileId) return;
+    // Photo captures pass through the scan modal (auto-crop + clean-up) first;
+    // PDFs resolve untouched. Null = the user closed the scanner — no upload.
+    const file = await scan(picked);
+    if (!file) return;
     setDocUploading(req.key);
     setUploadError(null);
     try {
@@ -487,6 +499,7 @@ export default function CustomerDocumentsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+      {scannerModal}
 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
@@ -810,7 +823,16 @@ export default function CustomerDocumentsPage() {
                 ref={attachInputRef}
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
-                onChange={e => setAttachFile(e.target.files?.[0] ?? null)}
+                onChange={e => {
+                  const picked = e.target.files?.[0] ?? null;
+                  if (!picked) { setAttachFile(null); return; }
+                  // Photo captures go through the scan modal; a cancelled scan
+                  // clears the selection so the stale filename isn't uploaded.
+                  void scan(picked).then(f => {
+                    setAttachFile(f);
+                    if (!f && attachInputRef.current) attachInputRef.current.value = '';
+                  });
+                }}
                 className="w-full text-sm text-[#6b6860] file:mr-3 file:text-xs file:font-semibold file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#f0faf6] file:text-[#2e9f82] hover:file:bg-[#e0f5ee] cursor-pointer"
               />
               {attachError && <p className="text-xs text-red-600">{attachError}</p>}

@@ -72,6 +72,7 @@ import { recomputeSubleaseCharges, classifySubleaseCharge } from '@/lib/sublease
 import { configuredFeeFromRules, feeVatFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3422,6 +3423,8 @@ function DetailsDrawer({
   };
   // ── Upload document state (Flow 5) ──
   const docFileRef = useRef<HTMLInputElement>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan: scanDoc, scannerModal: docScannerModal } = useDocumentScanner();
   const [showUpload, setShowUpload] = useState(false);
   const [upFile, setUpFile] = useState<File | null>(null);
   const [upType, setUpType] = useState('');
@@ -4828,7 +4831,17 @@ function DetailsDrawer({
                         </div>
                         <div style={{ padding: '14px 18px', overflowY: 'auto', flex: 1 }}>
                         <input ref={docFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style={{ display: 'none' }}
-                          onChange={e => setUpFile(e.target.files?.[0] ?? null)} />
+                          onChange={e => {
+                            const picked = e.target.files?.[0] ?? null;
+                            if (!picked) { setUpFile(null); return; }
+                            // Photos go through the scan modal; a cancelled scan
+                            // clears the selection instead of staging the raw shot.
+                            void scanDoc(picked).then(f => {
+                              setUpFile(f);
+                              if (!f && docFileRef.current) docFileRef.current.value = '';
+                            });
+                          }} />
+                        {docScannerModal}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
                         {/* Searchable, because the list is ~60 entries long and a
                             native <select> makes you hunt. Same two section
@@ -6438,6 +6451,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // landlord (rental-provider) area. Backend endpoints are already role-aware.
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Camera captures pass through the scan modal (auto-crop + clean-up) BEFORE
+  // each picker's uploading flag flips — that flag raises a fullscreen
+  // "Uploading…" overlay which would otherwise cover the scanner.
+  const { scan, scannerModal } = useDocumentScanner();
   const isManagerView = pathname.startsWith('/dashboard/manager');
   const contractsBase = pathname.startsWith('/dashboard/manager')
     ? '/dashboard/manager/contracts'
@@ -6843,6 +6860,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
   const onUploadEjari = () => ejariInputRef.current?.click();
   const onEjariFilePicked = async (file: File) => {
+    const scanned = await scan(file);
+    if (!scanned) { if (ejariInputRef.current) ejariInputRef.current.value = ''; return; }
+    file = scanned;
     setEjariUploading(true);
     try {
       await uploadContractDoc(file, 'Contract Registration Certificate', 'ejari_certificate');
@@ -6871,6 +6891,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   };
   const onUploadUtility = () => utilityInputRef.current?.click();
   const onUtilityFilePicked = async (file: File) => {
+    const scanned = await scan(file);
+    if (!scanned) { if (utilityInputRef.current) utilityInputRef.current.value = ''; return; }
+    file = scanned;
     setUtilityUploading(true);
     try {
       // Write the SAME document the customer reads (their utility_proof_of_payment)
@@ -6901,6 +6924,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // skipped and the step opens straight into the recording table.
   const onUploadCheques = () => chequesInputRef.current?.click();
   const onChequesFilePicked = async (file: File) => {
+    const scanned = await scan(file);
+    if (!scanned) { if (chequesInputRef.current) chequesInputRef.current.value = ''; return; }
+    file = scanned;
     setChequesUploading(true);
     try {
       await uploadContractDoc(file, 'Payment Confirmation', 'payment_advice');
@@ -6960,6 +6986,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       clearance:  { name: 'Utility Clearance',   key: 'utility_clearance' },
       final_bill: { name: 'Utility Final Bill',  key: 'utility_final_bill' },
     }[kind];
+    const scanned = await scan(file);
+    if (!scanned) { if (windDownInputRef.current) windDownInputRef.current.value = ''; return; }
+    file = scanned;
     setWindDownUploading(true);
     try {
       await uploadContractDoc(file, spec.name, spec.key);
@@ -8091,6 +8120,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       {modal === 'renew' && perms.renewals && <RenewalProposeModal contract={contract} onClose={closeDeepLinkedModal} onSubmitted={() => { closeDeepLinkedModal(); void reload(); }} />}
       {modal === 'reject-utility' && perms.agreements && <RejectUtilityModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); }} />}
 
+      {scannerModal}
       {/* Hidden file pickers for inline Ejari / utility upload (self-contained, no redirect to the old page). */}
       <input ref={ejariInputRef} type="file" accept="application/pdf,image/jpeg,image/png" style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onEjariFilePicked(f); }} />

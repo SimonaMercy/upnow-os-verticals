@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { KYC_DOCS, type DocReq } from '@/lib/docRequirements';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 
 type DocSlot = { documentKey: string; fileUrl?: string | null; status?: string };
 
@@ -36,6 +37,8 @@ export default function WelcomePage() {
   const [uploaded, setUploaded] = useState<Record<string, DocSlot>>({});
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   // Bounce non-customers away — this page is customer-only onboarding.
   useEffect(() => {
@@ -73,6 +76,11 @@ export default function WelcomePage() {
 
   async function handleUpload(req: DocReq, file: File) {
     if (!tenantProfileId) { setError('Profile not ready — please retry in a moment.'); return; }
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     setUploadingKey(req.key); setError(null);
     try {
       const urlRes = await fetch('/api/documents/upload-url', {
@@ -119,6 +127,7 @@ export default function WelcomePage() {
       padding: '48px 24px',
       display: 'flex', justifyContent: 'center',
     }}>
+      {scannerModal}
       <div style={{ maxWidth: 600, width: '100%', display: 'grid', gap: 24 }}>
         <header style={{ display: 'grid', gap: 8 }}>
           <p style={{

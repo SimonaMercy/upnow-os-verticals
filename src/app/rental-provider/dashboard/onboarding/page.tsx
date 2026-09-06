@@ -17,6 +17,7 @@ import {
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import s from "./onboarding.module.css";
+import { useDocumentScanner } from "@/components/upnow/DocumentScanModal";
 
 const instrumentSerif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], display: "swap", variable: "--font-serif" });
 
@@ -129,6 +130,8 @@ export default function RentalProviderOnboardingPage() {
   const [shUploadErrors, setShUploadErrors] = useState<Record<string, string>>({});
   const shFileInputRef = useRef<HTMLInputElement>(null);
   const shPendingKey = useRef<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
 
   const [checklist, setChecklist] = useState<Array<{ key: string; displayName: string; description: string; required: boolean; category: string; uploaded: boolean; fileUrl: string | null; mimeType: string | null }>>([]);
 
@@ -399,10 +402,14 @@ export default function RentalProviderOnboardingPage() {
     shFileInputRef.current?.click();
   }
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const picked = e.target.files?.[0];
     const docKey = shPendingKey.current;
-    if (!file || !docKey || !profileId) return;
+    if (!picked || !docKey || !profileId) return;
     e.target.value = "";
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const file = await scan(picked);
+    if (!file) return;
 
     if (!ALLOWED_MIME.includes(file.type)) {
       setShUploadErrors((p) => ({ ...p, [docKey]: "Only JPG, PNG, WebP or PDF files are allowed." }));
@@ -672,6 +679,7 @@ export default function RentalProviderOnboardingPage() {
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
+      {scannerModal}
 
       {/* Topbar */}
       <div className={s.topbar}>

@@ -42,6 +42,7 @@ import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -1566,6 +1567,8 @@ function DocsSection({
 }) {
   const canUpload = !!lead.convertedTenant?.id;
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  // Camera captures pass through the scan modal (auto-crop + clean-up) first.
+  const { scan, scannerModal } = useDocumentScanner();
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<{ id: number; label: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -1664,6 +1667,11 @@ function DocsSection({
   };
 
   async function doUpload(req: DocReq | { key: string; label: string; category: string }, file: File) {
+    // Photos go through the scan modal first; PDFs pass straight through.
+    // Null = the user closed the scanner — abort the upload.
+    const scanned = await scan(file);
+    if (!scanned) return;
+    file = scanned;
     setUploadingKey(req.key); setUploadError(null);
     try { await onUploadDoc({ key: req.key, label: req.label, category: req.category }, file); }
     catch (e) { setUploadError(e instanceof Error ? e.message : 'Upload failed'); }
@@ -1756,6 +1764,7 @@ function DocsSection({
 
   return (
     <>
+      {scannerModal}
       <div>
         <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FileText size={13} /> KYC documents · {received} of {required.length} required received</span>
