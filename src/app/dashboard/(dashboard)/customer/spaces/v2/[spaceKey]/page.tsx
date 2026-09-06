@@ -212,6 +212,11 @@ interface ApiSettlement {
   depositHeld: number;
   notes: string | null;
   refundAmount: number | null;
+  // How the refund was paid back (0260) — set when the landlord closes a
+  // settlement with a refund due.
+  refundMethod?: 'cash' | 'bank_transfer' | 'cheque' | 'card' | 'online' | null;
+  refundReference?: string | null;
+  refundPaidOn?: string | null;
   lines: ApiSettlementLine[];
   paymentsReceivedTotal?: number;
   balance?: number;
@@ -4470,7 +4475,12 @@ function SettlementCard({ contractId, settlement, onAgreed }: { contractId: numb
         </p>
       )}
       {settlement.status === 'paid' && (
-        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>{balance > 0 ? 'Refund processed' : 'Settlement completed'}{settlement.paidAt ? ` on ${fmtDT(settlement.paidAt)}` : ''}.</p>
+        <p style={{ fontSize: 12, color: 'var(--jade-deep)', margin: 0, fontWeight: 600 }}>
+          {balance > 0 ? 'Refund processed' : 'Settlement completed'}{settlement.paidAt ? ` on ${fmtDT(settlement.paidAt)}` : ''}.
+          {settlement.refundMethod ? ` Paid by ${({ cash: 'cash', bank_transfer: 'bank transfer', cheque: 'cheque', card: 'card', online: 'online payment' } as const)[settlement.refundMethod]}` : ''}
+          {settlement.refundReference ? ` · ref ${settlement.refundReference}` : ''}
+          {settlement.refundPaidOn ? ` · on ${fmtDT(settlement.refundPaidOn)}` : ''}
+        </p>
       )}
     </div>
   );

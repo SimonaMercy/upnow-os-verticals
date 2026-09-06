@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, createElement } from 'react';
+import { useState, useEffect, useCallback, useRef, createElement } from 'react';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,7 +32,7 @@ interface ApiLine {
   paymentId?: number | null; net?: number; meta?: Record<string, unknown> | null;
   sourceContractId?: number; sourceContractNo?: string; inspectionContractId?: number;
 }
-interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null }
+interface ApiPayment { id?: number; amount: number; method: PayMethod; reference: string | null; receivedOn: string | null; attachments?: LineAttachment[] | null }
 interface StatementPayRow { description: string; date?: string | null; amount?: number; method?: string | null; chequeNumber?: string | null; mode?: string; status?: string; penalty?: number | null; kind?: string }
 interface ApiStatement {
   contract: TFSContract & { landlordName?: string; rpSignatoryName?: string; propertyType?: string | null; contractNo?: string; actualMoveOutDate?: string | null };
@@ -44,6 +44,7 @@ interface ApiGap { id: string; section: string; severity: GapSeverity; title: st
 interface ApiSettlement {
   exists: boolean; id?: number; status: SettlementStatus; depositHeld: number; notes: string | null;
   rpSignature: string | null; tenantSignature: string | null; refundAmount: number | null;
+  refundMethod?: PayMethod | null; refundReference?: string | null; refundPaidOn?: string | null; refundAttachments?: LineAttachment[] | null;
   lines: ApiLine[]; payments: ApiPayment[]; chargesTotal: number; paymentsReceivedTotal: number; balance: number;
   sentAt: string | null; agreedAt: string | null; paidAt: string | null; updatedAt: string | null;
   moveoutDateOverride?: string | null;
@@ -66,7 +67,7 @@ interface Row {
 // worksheet mirrors the final-settlement form (the RP just fills the amounts).
 const STD_UTILITIES = ['Electricity / Water', 'Cooling / District Cooling', 'Gas', 'Community Fees', 'Telecommunications'];
 const STD_RESTORATION = ['Repairs & Maintenance', 'Cleaning', 'Missing Keys / Remotes'];
-interface PayRow { key: string; amount: string; method: PayMethod; reference: string; receivedOn: string }
+interface PayRow { key: string; amount: string; method: PayMethod; reference: string; receivedOn: string; attachments?: LineAttachment[] }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function aed(n: number) { return 'AED ' + new Intl.NumberFormat('en-AE', { maximumFractionDigits: 2 }).format(n); }
@@ -190,12 +191,21 @@ export default function SettlementPage() {
   const [caps, setCaps] = useState<ApiSettlement['discountCaps']>({ rent: null, penalties: null, restoration: null, utilities: null });
   const [payRows, setPayRows] = useState<PayRow[]>([]);
   const [stamps, setStamps] = useState<{ sentAt: string | null; agreedAt: string | null; paidAt: string | null }>({ sentAt: null, agreedAt: null, paidAt: null });
+  // How the refund was paid out (0260) — shown on the paid banner once closed.
+  const [refundInfo, setRefundInfo] = useState<{ method: PayMethod | null; reference: string | null; paidOn: string | null; attachments: LineAttachment[] | null }>({ method: null, reference: null, paidOn: null, attachments: null });
+  // "Mark refund paid" dialog draft (only when a refund is actually due).
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundDraft, setRefundDraft] = useState<{ method: PayMethod; reference: string; paidOn: string; attachments: LineAttachment[] }>({ method: 'bank_transfer', reference: '', paidOn: '', attachments: [] });
   const [sig, setSig] = useState<{ rp: string | null; tenant: string | null }>({ rp: null, tenant: null });
 
   const [isDirect, setIsDirect] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingPayments, setSavingPayments] = useState(false);
+  // Payments-received problems render INSIDE that card (the page-top banner is
+  // off-screen when the RP is working at the bottom of the form).
+  const [payError, setPayError] = useState<string | null>(null);
+  const payCardRef = useRef<HTMLDivElement | null>(null);
   const [reseeding, setReseeding] = useState<string | null>(null);
   const [acting, setActing] = useState<null | 'send' | 'paid' | 'unsend'>(null);
   const [savedTick, setSavedTick] = useState(false);
@@ -246,8 +256,9 @@ export default function SettlementPage() {
     setAvailable(s.availablePenalties ?? []);
     setAdminRules(s.adminChargeRules ?? []);
     setCaps(s.discountCaps ?? { rent: null, penalties: null, restoration: null, utilities: null });
-    setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '' })));
+    setPayRows((s.payments ?? []).map(p => ({ key: uid(), amount: String(p.amount), method: p.method, reference: p.reference ?? '', receivedOn: p.receivedOn ?? '', attachments: Array.isArray(p.attachments) ? p.attachments : undefined })));
     setStamps({ sentAt: s.sentAt, agreedAt: s.agreedAt, paidAt: s.paidAt });
+    setRefundInfo({ method: s.refundMethod ?? null, reference: s.refundReference ?? null, paidOn: s.refundPaidOn ?? null, attachments: s.refundAttachments ?? null });
     setSig({ rp: s.rpSignature ?? null, tenant: s.tenantSignature ?? null });
     if (s.statement) setStatement(s.statement);
   }, []);
@@ -328,10 +339,12 @@ export default function SettlementPage() {
       });
   }
 
-  // Attach an evidence document (invoice, receipt, photo) to a settlement line.
-  async function attachToLine(key: string, file: File) {
-    if (!contractId) return;
-    if (file.size > 15 * 1024 * 1024) { setError('File must be under 15 MB.'); return; }
+  // Upload one evidence document (invoice, receipt, transfer slip, photo) against
+  // this contract and return the attachment descriptor — shared by the charge
+  // lines, the payments-received rows and the refund payout dialog.
+  async function uploadEvidence(file: File): Promise<LineAttachment | null> {
+    if (!contractId) return null;
+    if (file.size > 15 * 1024 * 1024) { setError('File must be under 15 MB.'); return null; }
     setError(null);
     try {
       const docKey = `settlement_evidence_${Date.now()}`;
@@ -349,11 +362,30 @@ export default function SettlementPage() {
         body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: Number(contractId), category: 'payment', documentKey: docKey, displayName: file.name, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, storageProvider: 's3' }),
       });
       const cj = created.ok ? await created.json().catch(() => ({})) : {};
-      setRows(rs => rs.map(r => r.key === key ? { ...r, attachments: [...(r.attachments ?? []), { name: file.name, fileUrl, s3Key: fileKey, docId: (cj as { id?: number })?.id }] } : r));
-    } catch { setError('Attachment upload failed. Please try again.'); }
+      return { name: file.name, fileUrl, s3Key: fileKey, docId: (cj as { id?: number })?.id };
+    } catch { setError('Attachment upload failed. Please try again.'); return null; }
+  }
+
+  async function attachToLine(key: string, file: File) {
+    const att = await uploadEvidence(file);
+    if (att) setRows(rs => rs.map(r => r.key === key ? { ...r, attachments: [...(r.attachments ?? []), att] } : r));
   }
   function removeAttachment(key: string, idx: number) {
     setRows(rs => rs.map(r => r.key === key ? { ...r, attachments: (r.attachments ?? []).filter((_, i) => i !== idx) } : r));
+  }
+  async function attachToPayment(key: string, file: File) {
+    const att = await uploadEvidence(file);
+    if (att) {
+      setPayRows(rs => rs.map(r => r.key === key ? { ...r, attachments: [...(r.attachments ?? []), att] } : r));
+      setPayError(null);
+    }
+  }
+  function removePayAttachment(key: string, idx: number) {
+    setPayRows(rs => rs.map(r => r.key === key ? { ...r, attachments: (r.attachments ?? []).filter((_, i) => i !== idx) } : r));
+  }
+  async function attachToRefund(file: File) {
+    const att = await uploadEvidence(file);
+    if (att) setRefundDraft(d => ({ ...d, attachments: [...d.attachments, att] }));
   }
 
   // Client-side discount guard mirrors the backend (within the line + within cap).
@@ -437,16 +469,23 @@ export default function SettlementPage() {
 
   async function savePayments(opts?: { silent?: boolean }): Promise<boolean> {
     if (!contractId) return false;
-    setSavingPayments(true); setError(null);
+    // Proof is mandatory on every payment received (charges exceeded the deposit
+    // — money changed hands outside the ledger). Mirrors the backend guard.
+    if (payRows.some(r => Number(r.amount) > 0 && !(r.attachments?.length))) {
+      setPayError('Attach proof of payment (receipt / transfer slip) to every payment received — use the paper-clip on each highlighted payment.');
+      payCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return false;
+    }
+    setSavingPayments(true); setError(null); setPayError(null);
     try {
       const res = await fetch(`/api/contracts/${contractId}/settlement/payments`, {
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           payments: payRows.filter(r => Number(r.amount) > 0)
-            .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null })),
+            .map(r => ({ amount: Math.max(0, Number(r.amount) || 0), method: r.method, reference: r.reference.trim() || null, receivedOn: r.receivedOn || null, attachments: r.attachments?.length ? r.attachments : null })),
         }),
       });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to save payments'); return false; }
+      if (!res.ok) { const b = await res.json().catch(() => ({})); setPayError(b?.message ?? 'Failed to save payments'); payCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return false; }
       const s = await res.json() as ApiSettlement;
       apply(s);
       if (!opts?.silent) { setSavedTick(true); setTimeout(() => setSavedTick(false), 2500); }
@@ -479,7 +518,7 @@ export default function SettlementPage() {
     finally { setActing(null); }
   }
 
-  async function markPaid(override?: { allowGaps?: boolean; allowOutstanding?: boolean }) {
+  async function markPaid(override?: { allowGaps?: boolean; allowOutstanding?: boolean; refund?: { method: PayMethod; reference: string | null; paidOn: string | null; attachments: LineAttachment[] | null } }) {
     setActing('paid'); setError(null);
     if (isDirect && status === 'draft') {
       const ok = await save();
@@ -493,6 +532,7 @@ export default function SettlementPage() {
         body: JSON.stringify(override ?? {}),
       });
       if (!res.ok) { const b = await res.json().catch(() => ({})); setError(b?.message ?? 'Failed to mark paid'); return; }
+      setRefundOpen(false);
       await load();
       try {
         const rfs = buildRfsData();
@@ -613,7 +653,25 @@ export default function SettlementPage() {
         <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
           <CheckCircle size={15} className="text-[#2e9f82] shrink-0 mt-0.5" />
           <div><p className="font-semibold text-[#1a7a5a]">Refund paid — settlement closed</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">Marked paid {fmtDateTime(stamps.paidAt)}.</p></div>
+            <p className="text-xs text-[#1a7a5a] mt-0.5">
+              Marked paid {fmtDateTime(stamps.paidAt)}.
+              {refundInfo.method ? ` Paid by ${METHOD_LABELS[refundInfo.method]}` : ''}
+              {refundInfo.reference ? ` · ref ${refundInfo.reference}` : ''}
+              {refundInfo.paidOn ? ` · on ${refundInfo.paidOn}` : ''}
+            </p>
+            {(refundInfo.attachments?.length ?? 0) > 0 && (
+              <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                {(refundInfo.attachments ?? []).map((a, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#1a7a5a] bg-white/70 border border-[#c5e8df] rounded-full px-2 py-0.5">
+                    <Paperclip size={10} />
+                    {a.docId
+                      ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[160px] truncate hover:underline">{a.name}</a>
+                      : <span className="max-w-[160px] truncate">{a.name}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
       {status === 'agreed' && (
@@ -804,16 +862,16 @@ export default function SettlementPage() {
       </div>
 
       {/* Payments received from the customer */}
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
+      <div ref={payCardRef} className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><Coins size={15} className="text-[#2e9f82]" /> Payments received</h2>
           <span className="text-xs text-[#9b9890]">collected from the customer</span>
         </div>
-        <p className="text-xs text-[#9b9890]">Money the customer pays you — e.g. when penalties or damages exceed the held deposit.</p>
+        <p className="text-xs text-[#9b9890]">Money the customer pays you — e.g. when penalties or damages exceed the held deposit. Proof of payment (receipt / transfer slip) is required on every payment.</p>
         {payRows.length > 0 && (
           <div className="space-y-2">
             {payRows.map(r => (
-              <div key={r.key} className="rounded-xl border border-[#eceae4] p-2.5 space-y-2">
+              <div key={r.key} className={`rounded-xl border p-2.5 space-y-2 ${payError && Number(r.amount) > 0 && !(r.attachments?.length) ? 'border-[#fca5a5] bg-[#fef2f2]' : 'border-[#eceae4]'}`}>
                 <div className="grid grid-cols-[1fr_140px_150px_auto] gap-2 items-center">
                   <div className="flex items-center gap-1">
                     <span className="text-[11px] text-[#9b9890]">AED</span>
@@ -828,14 +886,42 @@ export default function SettlementPage() {
                   <input type="date" value={r.receivedOn} disabled={payLocked} onChange={e => updatePayRow(r.key, { receivedOn: e.target.value })}
                     className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] bg-white" />
                   {!payLocked
-                    ? <button type="button" onClick={() => removePayRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={15} /></button>
+                    ? (
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-[#9b9890] hover:text-[#2e9f82] cursor-pointer shrink-0" title="Attach proof of payment (receipt, transfer slip)">
+                          <Paperclip size={14} />
+                          <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToPayment(r.key, f); e.currentTarget.value = ''; }} />
+                        </label>
+                        <button type="button" onClick={() => removePayRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={15} /></button>
+                      </div>
+                    )
                     : <span className="w-[15px]" />}
                 </div>
                 <input type="text" value={r.reference} disabled={payLocked} placeholder="Reference (cheque no, transfer ref) — optional"
                   onChange={e => updatePayRow(r.key, { reference: e.target.value })}
                   className="w-full text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6]" />
+                {(r.attachments?.length ?? 0) > 0 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(r.attachments ?? []).map((a, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
+                        <Paperclip size={10} className="text-[#9b9890]" />
+                        {a.docId
+                          ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[140px] truncate hover:underline">{a.name}</a>
+                          : <span className="max-w-[140px] truncate">{a.name}</span>}
+                        {!payLocked && (
+                          <button type="button" onClick={() => removePayAttachment(r.key, i)} className="text-[#c8c6be] hover:text-[#ef4444]" title="Remove attachment"><X size={10} /></button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
+        {payError && (
+          <div className="flex items-start gap-2 text-xs text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-lg px-3 py-2">
+            <AlertCircle size={13} className="shrink-0 mt-0.5" /> {payError}
           </div>
         )}
         {!payLocked && (
@@ -930,11 +1016,67 @@ export default function SettlementPage() {
         )}
         {canSettle && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
           <div className="flex flex-col items-end gap-1.5">
-            <button onClick={() => void markPaid({ allowGaps: true })} disabled={acting !== null || balance < -0.005}
+            {/* Closing always opens the payout dialog: mandatory reference+proof
+                when a refund is due; optional closing record when the deposit was
+                fully applied (balance 0 — e.g. 4,000 held, 4,000 deducted). */}
+            <button onClick={() => setRefundOpen(o => !o)} disabled={acting !== null || balance < -0.005}
               className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
               {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />}
               {balance > 0 ? 'Mark refund paid' : 'Mark settled & close'}
             </button>
+            {refundOpen && balance > -0.005 && (
+              <div className="w-[340px] bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-2.5 text-left shadow-sm">
+                <p className="text-sm font-semibold text-[#1a1916]">{balance > 0 ? `Refund payout — ${aed(balance)}` : 'Close settlement — deposit fully applied'}</p>
+                {balance <= 0 && (
+                  <p className="text-[11px] text-[#9b9890] m-0">The charges consumed the whole deposit — no refund is due. You can still record a reference and attach proof of the closure (optional).</p>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={refundDraft.method} onChange={e => setRefundDraft(d => ({ ...d, method: e.target.value as PayMethod }))}
+                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] bg-white">
+                    {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
+                  </select>
+                  <input type="date" value={refundDraft.paidOn} onChange={e => setRefundDraft(d => ({ ...d, paidOn: e.target.value }))}
+                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] bg-white" />
+                </div>
+                <input type="text" value={refundDraft.reference} placeholder={`Reference (transfer ref, cheque no) — ${balance > 0 ? 'required' : 'optional'}`}
+                  onChange={e => setRefundDraft(d => ({ ...d, reference: e.target.value }))}
+                  className="w-full text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] cursor-pointer hover:opacity-75">
+                    <Paperclip size={12} /> Attach proof of payment{balance > 0 ? ' (required)' : ''}
+                    <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToRefund(f); e.currentTarget.value = ''; }} />
+                  </label>
+                  {refundDraft.attachments.map((a, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
+                      <Paperclip size={10} className="text-[#9b9890]" />
+                      <span className="max-w-[120px] truncate">{a.name}</span>
+                      <button type="button" onClick={() => setRefundDraft(d => ({ ...d, attachments: d.attachments.filter((_, j) => j !== i) }))} className="text-[#c8c6be] hover:text-[#ef4444]"><X size={10} /></button>
+                    </span>
+                  ))}
+                </div>
+                {/* Reference + proof are mandatory only when money is returned —
+                    mirrors the backend guard in markSettlementPaid. */}
+                {balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0) && (
+                  <p className="text-[11px] text-[#b45309] m-0">A payment reference and a proof attachment are required to close.</p>
+                )}
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => setRefundOpen(false)} className="text-xs font-medium text-[#6b6860] px-3 py-1.5 rounded-full border border-[#e8e6e0] hover:bg-[#f4f3ef]">Cancel</button>
+                  <button type="button" disabled={acting !== null || (balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0))}
+                    onClick={() => {
+                      // Only persist a payout record when something was actually
+                      // entered — a bare zero-balance close stores nothing.
+                      const hasPayout = !!refundDraft.reference.trim() || refundDraft.attachments.length > 0 || !!refundDraft.paidOn;
+                      void markPaid({
+                        allowGaps: true,
+                        ...(hasPayout ? { refund: { method: refundDraft.method, reference: refundDraft.reference.trim() || null, paidOn: refundDraft.paidOn || null, attachments: refundDraft.attachments.length ? refundDraft.attachments : null } } : {}),
+                      });
+                    }}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] rounded-full px-4 py-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                    {acting === 'paid' ? <Loader2 size={12} className="animate-spin" /> : <BadgeCheck size={12} />} {balance > 0 ? 'Confirm refund paid' : 'Close settlement'}
+                  </button>
+                </div>
+              </div>
+            )}
             {balance < -0.005 && (
               <div className="flex flex-col items-end gap-1">
                 <span className="text-xs text-[#b91c1c]">Record the {aed(Math.abs(balance))} still owed, or:</span>
