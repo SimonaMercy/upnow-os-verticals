@@ -19,6 +19,8 @@ import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
+import { buildInstallmentDueDates } from '@/lib/installmentDates';
+import { derivedChargeHint, recomputeThirdPartyCharges } from '@/lib/thirdPartyCharges';
 
 interface Tenant {
   id: number;
@@ -137,6 +139,11 @@ interface ContractDetail {
   ejariFeeFils: number | null;
   /** Actual fee payment rows — the source of truth the Fees section displays. */
   fees?: { paymentType: string | null; amount: number }[];
+  /** Every non-fee payment row. The `other` ones are the third-party charges
+   *  (sub-lease charge + its VAT, a labelled "5% VAT on Rent", service charge…)
+   *  this form edits as a list. */
+  payments?: { id: number; paymentType: string | null; description: string | null; amount: number; chequeStatus: string | null; transactionDate: string | null }[];
+  preferredChequeDays?: number[] | null;
   numberOfInstallments: number | null;
   modeOfPayment: string | null;
   customClauses?: string[] | null;
@@ -144,6 +151,15 @@ interface ContractDetail {
   tenant?: { id?: number | null; name?: string | null } | null;
   unit?: { number?: string | null; name?: string | null } | null;
   property?: { buildingName?: string | null } | null;
+}
+
+interface ExtraLine {
+  key: string;
+  id?: number;
+  description: string;
+  amount: string;
+  dueDate: string;
+  locked: boolean;
 }
 
 const toDateInput = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '');
@@ -193,6 +209,13 @@ export default function EditContractPage() {
   // Rent VAT rate on this contract (commercial/industrial = 5%; residential exempt).
   // Read-only here — the backend recomputes it from the RP's fee rules on save.
   const [rentVatRate, setRentVatRate] = useState(0);
+  // Third-party charge lines — seeded from the contract's `other` rows and sent
+  // back as `extraCharges`. `id` names the row to update in place; a recorded
+  // row (cleared/bounced) is `locked`: shown for the full picture, never edited
+  // or sent. The derived lines (sub-lease %, "5% VAT on Rent") follow the net
+  // rent as it is typed — see lib/thirdPartyCharges.
+  const [extras, setExtras] = useState<ExtraLine[]>([]);
+  const [preferredChequeDays, setPreferredChequeDays] = useState<number[]>([]);
   // Installment plans this RP offers (Settings → Rules). Empty = all allowed.
   const [allowedInstallments, setAllowedInstallments] = useState<number[]>([]);
   const [modeOfPayment, setModeOfPayment] = useState('cheque');
@@ -269,6 +292,19 @@ export default function EditContractPage() {
         setEjariFee(ejariRow ? numStr(ejariRow.amount) : numStr(c.ejariFeeFils));
         setInstallments(c.numberOfInstallments ? String(c.numberOfInstallments) : '1');
         setModeOfPayment(c.modeOfPayment || 'cheque');
+        setPreferredChequeDays(Array.isArray(c.preferredChequeDays) ? c.preferredChequeDays : []);
+        // Bounced/cancelled rows are history, not charges the lease still bills.
+        setExtras((c.payments ?? [])
+          .filter((p) => (p.paymentType ?? '') === 'other')
+          .filter((p) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase()))
+          .map((p) => ({
+            key: `row-${p.id}`,
+            id: p.id,
+            description: p.description ?? '',
+            amount: p.amount != null ? String(p.amount) : '',
+            dueDate: toDateInput(p.transactionDate),
+            locked: (p.chequeStatus ?? 'pending').toLowerCase() !== 'pending',
+          })));
         setClauses(Array.isArray(c.customClauses) ? c.customClauses : []);
         setNotes(c.notes ?? '');
         setMeta({
@@ -360,6 +396,22 @@ export default function EditContractPage() {
   const rentVat = rentVatRate > 0 ? Math.round(rentNum * rentVatRate) / 100 : 0;
   const durationLabel = calcDurationLabel(startDate, endDate);
 
+  // Keep the derived third-party lines pinned to the net rent as it is edited.
+  // recomputeThirdPartyCharges returns the same array when nothing moved, so
+  // this settles in one pass. Flat charges and recorded rows are untouched.
+  useEffect(() => {
+    setExtras((prev) => recomputeThirdPartyCharges(prev, rentNum));
+  }, [rentNum]);
+
+  // New lines fall due with the first rent instalment — the same anchor the
+  // backend uses for an undated line and the renewal form uses for carried ones.
+  const firstInstalmentDue = buildInstallmentDueDates(startDate, endDate, inst, preferredChequeDays)[0] ?? startDate;
+  const addExtra = () => setExtras((p) => [...p, { key: `new-${Date.now()}`, description: '', amount: '', dueDate: firstInstalmentDue, locked: false }]);
+  const setExtra = (key: string, k: 'description' | 'amount' | 'dueDate', v: string) =>
+    setExtras((p) => p.map((e) => (e.key === key ? { ...e, [k]: v } : e)));
+  const removeExtra = (key: string) => setExtras((p) => p.filter((e) => e.key !== key));
+  const extrasTotal = extras.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
   // Live four-group preview — same segregated view (Deposit · Rent · Management · Third Party)
   // shown on the contract, receipts and lead. Built from the form state so it updates as you type.
   const previewRows: SegPaymentInput[] = [];
@@ -375,6 +427,11 @@ export default function EditContractPage() {
   if (Number(securityDeposit) > 0) previewRows.push({ paymentType: 'security_deposit', description: 'Security Deposit', amount: Number(securityDeposit) });
   if (Number(adminFee) > 0) previewRows.push({ paymentType: 'admin_fee', description: 'Admin Fee', amount: Number(adminFee) });
   if (Number(ejariFee) > 0) previewRows.push({ paymentType: 'ejari_fee', description: 'Contract Registration Fee', amount: Number(ejariFee) });
+  for (const e of extras) {
+    if (e.description.trim() && Number(e.amount) > 0) {
+      previewRows.push({ paymentType: 'other', description: e.description.trim(), amount: Number(e.amount), transactionDate: e.dueDate || null });
+    }
+  }
   const previewSeg = buildSegregatedPlan(previewRows);
 
   const save = async () => {
@@ -413,6 +470,13 @@ export default function EditContractPage() {
         modeOfPayment,
         customClauses: clauses,
         notes: notes.trim(),
+        // The full pending third-party list: rows with an id update in place,
+        // new lines insert, pending rows left out are removed. Recorded rows
+        // are never sent (and the backend never touches them).
+        extraCharges: extras
+          .filter((e) => !e.locked)
+          .map((e) => ({ id: e.id, description: e.description.trim(), amount: Number(e.amount) || 0, dueDate: e.dueDate || undefined }))
+          .filter((e) => e.description && e.amount > 0),
       });
       router.push(`${contractsBase}/${id}/v2`);
     } catch (e) {
@@ -724,6 +788,77 @@ export default function EditContractPage() {
                 </div>
               </div>
 
+              {/* Third-party charges — the contract's `other` rows, edited as a list */}
+              <div className={cardCls}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-sm text-[#1a1916]">Third-party Charges</h2>
+                    <p className="text-xs text-[#9b9890] mt-1">
+                      Pass-through amounts billed with this lease — sub-lease charge, its VAT, VAT on rent recorded as a charge, service charge, parking. Percentage lines follow the net rent automatically.
+                    </p>
+                  </div>
+                  <button type="button" onClick={addExtra}
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-[#e6f7f1] text-[#2e9f82] text-sm font-semibold">
+                    <Plus size={14} /> Add charge
+                  </button>
+                </div>
+                {extras.length === 0 ? (
+                  <p className="text-sm text-[#6b6860]">No third-party charges on this contract.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {extras.map((e) => {
+                      const hint = derivedChargeHint(e.description);
+                      const derived = !!hint && !e.locked;
+                      return (
+                        <li key={e.key} className="rounded-xl border border-[#e8e6e0] bg-[#fbfaf7] px-3 py-2.5">
+                          <div className="grid grid-cols-[1fr_140px_150px_28px] gap-2 items-start">
+                            <div>
+                              <label className={labelCls}>Description</label>
+                              {e.locked ? (
+                                <p className="text-sm text-[#1a1916] py-2">{e.description || '—'}</p>
+                              ) : (
+                                <input value={e.description} onChange={(ev) => setExtra(e.key, 'description', ev.target.value)}
+                                  placeholder="e.g. Service Charge" className={inputCls} />
+                              )}
+                            </div>
+                            <div>
+                              <label className={labelCls}>Amount (AED)</label>
+                              {e.locked || derived ? (
+                                <p className="text-sm font-semibold text-[#1a1916] py-2">{e.amount ? fmtAed(Number(e.amount)) : '—'}</p>
+                              ) : (
+                                <input type="number" min={0} value={e.amount} onChange={(ev) => setExtra(e.key, 'amount', ev.target.value)} className={inputCls} />
+                              )}
+                            </div>
+                            <div>
+                              <label className={labelCls}>Due date</label>
+                              {e.locked ? (
+                                <p className="text-sm text-[#1a1916] py-2">{e.dueDate || '—'}</p>
+                              ) : (
+                                <input type="date" value={e.dueDate} onChange={(ev) => setExtra(e.key, 'dueDate', ev.target.value)} className={inputCls} />
+                              )}
+                            </div>
+                            <div className="pt-6">
+                              {e.locked ? (
+                                <Lock size={14} className="text-[#9b9890]" aria-label="Recorded — cannot be edited" />
+                              ) : (
+                                <button type="button" onClick={() => removeExtra(e.key)} className="text-[#9b9890] hover:text-[#b91c1c]" aria-label="Remove charge">
+                                  <X size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {e.locked ? (
+                            <p className="text-[11px] text-[#9b9890] mt-1.5">Recorded — collected money is kept as is.</p>
+                          ) : hint ? (
+                            <p className="text-[11px] text-[#2e9f82] mt-1.5">Auto · {hint}. Rename the line without a percentage to make it a fixed amount.</p>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+
               {/* Clauses & Notes */}
               <div className={cardCls}>
                 <h2 className="font-semibold text-sm text-[#1a1916]">Clauses &amp; Notes</h2>
@@ -809,6 +944,7 @@ export default function EditContractPage() {
                 ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
                 ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
                 ['Contract Registration Fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
+                ['Third-party charges', extrasTotal > 0 ? fmtAed(extrasTotal) : '—'],
                 ['Payments / year', String(inst)],
                 ['Per cheque', rentNum > 0 ? fmtAed(chequeAmount) : '—'],
                 ['Duration', durationLabel],
