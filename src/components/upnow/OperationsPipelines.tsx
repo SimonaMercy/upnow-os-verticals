@@ -1,6 +1,6 @@
 /**
  * OperationsPipelines — the Operations page as separate pipeline trackers, one
- * per tab: Lead · New Lease · Renewal · Terminated · Maintenance · Breach · Legal.
+ * per tab: Lead · New Lease · Renewal · Terminated · Maintenance · Breach & Legal.
  *
  * Each tab renders that pipeline's own stages as fixed kanban lanes; a card sits
  * in its current stage (first incomplete step) with earlier steps ticked. This
@@ -18,13 +18,14 @@
  * active lease drops off entirely (it lives in the Leases register); an accepted
  * termination surfaces under Terminated for move-out + settlement.
  *
- * Maintenance · Breach · Legal are workflow-only pipelines: Maintenance tracks
+ * Maintenance and Breach & Legal are workflow pipelines: Maintenance tracks
  * who holds the ball on a routed request (Requested → Awaiting approval → In
- * progress → Sign-off → Close-out), Legal carries the stage model from the
- * business process sheet (Process Flow UpNow — Legal), Breach carries the
- * Violations-module pipeline. Their lanes render today so each workflow's shape
- * is visible; records wire in as each module lands (Breach = Violations Phase 1,
- * Legal = Phase 2, Maintenance = the maintenance-routing module).
+ * progress → Sign-off → Close-out); Breach & Legal is ONE continuum (owner,
+ * 10 Sep 2026): the Violations-module breach steps run into the legal stages
+ * from the business process sheet (Process Flow UpNow — Legal) at the
+ * "Escalated · Case opened" lane. Its lanes render today so the workflow's
+ * shape is visible; records wire in as the Violations module lands.
+ * ?tab=breach and ?tab=legal still deep-link to the combined board.
  */
 'use client';
 
@@ -34,7 +35,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
-  BarChart3, Info, Wrench, ShieldAlert, Scale,
+  BarChart3, Info, Wrench, Scale,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -91,15 +92,16 @@ interface Props {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
-type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'breach' | 'legal';
+type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'breach_legal';
+/** Old deep links (?tab=breach / ?tab=legal) land on the combined board. */
+const LEGACY_TAB: Record<string, TabKey> = { breach: 'breach_legal', legal: 'breach_legal' };
 const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
   { key: 'lead',        label: 'Lead',        icon: UserPlus },
   { key: 'new',         label: 'New Lease',   icon: FileText },
   { key: 'renewal',     label: 'Renewal',     icon: RefreshCcw },
   { key: 'terminated',  label: 'Terminated',  icon: LogOut },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
-  { key: 'breach',      label: 'Breach',      icon: ShieldAlert },
-  { key: 'legal',       label: 'Legal',       icon: Scale },
+  { key: 'breach_legal', label: 'Breach & Legal', icon: Scale },
 ];
 
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
@@ -167,7 +169,7 @@ const TERM_STAGES: StageDef[] = [
   { key: 'settlement',     title: 'Deposit settlement',  keys: ['settlement'] },
 ];
 
-/* ── Process pipelines: Maintenance · Breach · Legal ──────────────────────────
+/* ── Process pipelines: Maintenance · Breach & Legal ──────────────────────────
  * Lane-only stage models (no checklist keys — their records aren't the
  * operations-contract shape). Maintenance = owner-based lanes (see the note on
  * MAINT_STAGES; spec MAINTENANCE_ROUTING_SPEC_2026-08-30 §4); Legal carries
@@ -190,23 +192,23 @@ const MAINT_STAGES: StageDef[] = [
   { key: 'sign_off',    title: 'Sign-off',          keys: [], desc: 'Provider marked the job complete; customer sign-off outstanding.' },
   { key: 'close_out',   title: 'Close-out',         keys: [], desc: 'Signed off; invoice and cost allocation pending.' },
 ];
-const BREACH_STAGES: StageDef[] = [
-  { key: 'draft',        title: 'Draft',                keys: [], desc: 'Violation logged against unit, lease and customer — not yet issued.' },
-  { key: 'notice_sent',  title: 'Notice Sent',          keys: [], desc: 'Customer notified of the breach from a notice template.' },
-  { key: 'awaiting',     title: 'Awaiting Response',    keys: [], desc: 'Waiting on the customer’s response within the notice window.' },
-  { key: 'under_review', title: 'Under Review',         keys: [], desc: 'Response and evidence under review.' },
-  { key: 'warning',      title: 'Warning Issued',       keys: [], desc: 'Second or final warning issued to the customer.' },
-  { key: 'fee_applied',  title: 'Fee Applied',          keys: [], desc: 'Authorised violation fee applied to the lease ledger.' },
-  { key: 'escalated',    title: 'Escalated to Dispute', keys: [], desc: 'Escalated to the legal / dispute process.' },
-];
-const LEGAL_STAGES: StageDef[] = [
-  { key: 'identification', title: 'Case Identification',         keys: [], desc: 'Identify tenant breach, payment default, contract dispute or other legal issue.' },
-  { key: 'review',         title: 'Document Review',             keys: [], desc: 'Review tenancy contract, addendum, notices, payment records and supporting evidence.' },
-  { key: 'notice',         title: 'Legal Notice',                keys: [], desc: 'Prepare and issue formal legal notice to tenant.' },
-  { key: 'translation',    title: 'Translation / Notarization',  keys: [], desc: 'Arabic translation and/or notarization where required.' },
-  { key: 'filing',         title: 'Filing / Case Registration',  keys: [], desc: 'Register dispute/case with the relevant authority or court.' },
-  { key: 'court',          title: 'Court / Dispute Process',     keys: [], desc: 'Attend hearings, submit evidence and follow the case process.' },
-  { key: 'eviction',       title: 'Final Eviction',              keys: [], desc: 'Confirm settlement, payment, eviction or final judgment and close the file.' },
+/* One continuum: the breach handling (Violations module) hands over to the
+ * legal process at "Escalated · Case opened" — the breach's "Escalated to
+ * Dispute" and the legal sheet's "Case Identification" are the same moment. */
+const BREACH_LEGAL_STAGES: StageDef[] = [
+  { key: 'draft',        title: 'Draft',                keys: [], desc: 'Breach · Violation logged against unit, lease and customer — not yet issued.' },
+  { key: 'notice_sent',  title: 'Notice Sent',          keys: [], desc: 'Breach · Customer notified of the breach from a notice template.' },
+  { key: 'awaiting',     title: 'Awaiting Response',    keys: [], desc: 'Breach · Waiting on the customer’s response within the notice window.' },
+  { key: 'under_review', title: 'Under Review',         keys: [], desc: 'Breach · Response and evidence under review.' },
+  { key: 'warning',      title: 'Warning Issued',       keys: [], desc: 'Breach · Second or final warning issued to the customer.' },
+  { key: 'fee_applied',  title: 'Fee Applied',          keys: [], desc: 'Breach · Authorised violation fee applied to the lease ledger.' },
+  { key: 'escalated',    title: 'Escalated · Case opened', keys: [], desc: 'Hand-over · Escalated to the legal / dispute process: tenant breach, payment default, contract dispute or other legal issue identified as a case.' },
+  { key: 'review',         title: 'Document Review',             keys: [], desc: 'Legal · Review tenancy contract, addendum, notices, payment records and supporting evidence.' },
+  { key: 'notice',         title: 'Legal Notice',                keys: [], desc: 'Legal · Prepare and issue formal legal notice to tenant.' },
+  { key: 'translation',    title: 'Translation / Notarization',  keys: [], desc: 'Legal · Arabic translation and/or notarization where required.' },
+  { key: 'filing',         title: 'Filing / Case Registration',  keys: [], desc: 'Legal · Register dispute/case with the relevant authority or court.' },
+  { key: 'court',          title: 'Court / Dispute Process',     keys: [], desc: 'Legal · Attend hearings, submit evidence and follow the case process.' },
+  { key: 'eviction',       title: 'Final Eviction',              keys: [], desc: 'Legal · Confirm settlement, payment, eviction or final judgment and close the file.' },
 ];
 
 /* ── Unified card view-model ───────────────────────────────────────────────── */
@@ -452,7 +454,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [maint, setMaint] = useState<MaintReq[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>(() => {
-    const t = sp.get('tab'); return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
+    const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return LEGACY_TAB[t]; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
   });
   // Guards the one-shot "land on a pipeline that actually has records" hop below;
   // a manual tab click sets it so an empty pipeline the RP chose is never overridden.
@@ -550,11 +552,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const maintCards = maint.filter(passM)
       .map(m => maintToCard(m, maintenanceHref ? maintenanceHref(m.id) : null, nowMs));
 
-    // Breach / Legal: workflow lanes only — no record source yet (see the
-    // header comment). Their boards render every stage with zero cards.
+    // Breach & Legal: workflow lanes only — no record source yet (see the
+    // header comment). The board renders every stage with zero cards.
     return {
       lead: leadCards, new: newCards, renewal: renewalCards, terminated: termCards,
-      maintenance: maintCards, breach: [], legal: [],
+      maintenance: maintCards, breach_legal: [],
     } as Record<TabKey, CardVM[]>;
   }, [contracts, leads, maint, search, filterAsset, filterYear, contractHref, leadHref, maintenanceHref, nowMs]);
 
@@ -564,8 +566,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     renewal: RENEWAL_STAGES,
     terminated: TERM_STAGES,
     maintenance: MAINT_STAGES,
-    breach: BREACH_STAGES,
-    legal: LEGAL_STAGES,
+    breach_legal: BREACH_LEGAL_STAGES,
   };
 
   const focusKey = sp.get('focus');
@@ -578,10 +579,10 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   useEffect(() => {
     if (loading || didAutoTab.current || focusKey) return;
     didAutoTab.current = true;
-    // Workflow-only pipelines (Breach / Legal) have no records yet by design —
-    // a deep link to one of them means "show me the workflow", so never hop
-    // away from it. Maintenance carries live records now and hops normally.
-    if (tab === 'breach' || tab === 'legal') return;
+    // The workflow-only pipeline (Breach & Legal) has no records yet by design —
+    // a deep link to it means "show me the workflow", so never hop away from
+    // it. Maintenance carries live records now and hops normally.
+    if (tab === 'breach_legal') return;
     if (cardsByTab[tab].length > 0) return;
     const first = TABS.find(t => cardsByTab[t.key].length > 0);
     if (first) selectTab(first.key);
