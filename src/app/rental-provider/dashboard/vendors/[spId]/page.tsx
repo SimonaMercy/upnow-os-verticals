@@ -5,14 +5,15 @@
  * identity card with the record grid, a headline stat bar, then the vendor's
  * real records: AMC contracts, maintenance history, rates, technicians.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Copy, ExternalLink, FileSignature, FileText, Pencil, TrendingUp, Wallet, Wrench, X } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { KIND_META, chip, type VendorRow } from '../page';
+import { VendorForm } from '@/components/vendors/VendorForm';
 
 interface Tech { id: number; name: string; phone: string | null; status: string; isLeadCapable: boolean }
 interface Cat { id: number; name: string; parentId: number | null }
@@ -101,6 +102,21 @@ export default function VendorDetailPage() {
     { label: 'Email', node: missing(v.email) },
     { label: 'Phone', node: missing(v.phone) },
     { label: 'Entity', node: <span className="text-[#1a1916] font-medium">{v.entityType === 'individual' ? 'Individual / solo' : 'Company'}</span> },
+    { label: 'Contact person', node: <span className="text-[#1a1916] font-medium">{v.contactName ?? '—'}</span> },
+    { label: 'Address', node: <span className="text-[#1a1916] font-medium break-words">{v.address ?? '—'}</span> },
+    { label: 'Trade licence', node: (() => {
+      const lic = v.tradeLicence; const today = new Date().toISOString().slice(0, 10);
+      if (!lic || (!lic.number && !lic.expiry && !lic.doc)) return <span className="text-[#9b9890]">Not on file</span>;
+      const expired = lic.expiry != null && lic.expiry < today;
+      return (
+        <span className="text-[#1a1916] font-medium">
+          {lic.number ?? 'No number'}
+          {lic.expiry && <> · <span className={expired ? 'text-[#b91c1c] font-semibold' : 'text-[#1a7a5a]'}>{expired ? `expired ${fmtD(lic.expiry)}` : `valid until ${fmtD(lic.expiry)}`}</span></>}
+          {lic.doc && <> · <button type="button" onClick={() => openDocViewer({ fileUrl: lic.doc!.fileUrl, caption: lic.doc!.displayName ?? 'Trade licence', documentKey: 'trade_license' })} className="text-[#1a7a5a] font-semibold underline cursor-pointer">View copy</button></>}
+          {!lic.doc && <> · <span className="text-[#b45309]">no copy attached</span></>}
+        </span>
+      );
+    })() },
     { label: "What they're for", node: <span className="text-[#1a1916] font-medium">{v.category ?? '—'}</span> },
     ...(participating ? [
       { label: 'Relationship', node: <span className="text-[#1a1916] font-medium">{own ? 'Our own team' : 'Contracted vendor'}</span> },
@@ -446,147 +462,7 @@ export default function VendorDetailPage() {
         </div>
       )}
 
-      {editing && <EditVendorModal v={v} groups={groups} onClose={() => setEditing(false)} onDone={() => { setEditing(false); load(); }} />}
-    </div>
-  );
-}
-
-/** Edit the record: the landlord's fields. Contact locks once the vendor has
- *  accepted (their account, their details); an invited vendor stays 'service'. */
-function EditVendorModal({ v, groups, onClose, onDone }: { v: VendorRow; groups: Cat[]; onClose: () => void; onDone: () => void }) {
-  const [name, setName] = useState(v.name);
-  const [kind, setKind] = useState<VendorRow['kind']>(v.kind);
-  const [category, setCategory] = useState(v.category ?? '');
-  const [relationship, setRelationship] = useState<VendorRow['relationship']>(v.relationship);
-  const [entityType, setEntityType] = useState<'company' | 'individual'>(v.entityType === 'individual' ? 'individual' : 'company');
-  const [phone, setPhone] = useState(v.phone ?? '');
-  const [email, setEmail] = useState(v.email ?? '');
-  const [trades, setTrades] = useState<number[]>(v.trades.map(t => t.id));
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const service = kind === 'service';
-  const kindLocked = v.inviteStatus !== 'not_invited';
-  const contactLocked = v.inviteStatus === 'accepted';
-
-  const submit = async () => {
-    if (!name.trim()) { setErr('The vendor needs a name.'); return; }
-    setBusy(true); setErr(null);
-    try {
-      await apiPatch(`/maintenance/vendors/${v.serviceProviderId}`, {
-        name: name.trim(), kind, category: category.trim() || null,
-        relationship: service ? relationship : 'contracted_vendor',
-        entityType,
-        ...(contactLocked ? {} : { phone: phone.trim(), email: email.trim() }),
-        ...(service ? { trades } : {}),
-      });
-      onDone();
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not save the vendor.'); }
-    finally { setBusy(false); }
-  };
-
-  const field = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2.5 text-sm bg-white text-[#1a1916] placeholder:text-[#b8b5ad] focus:outline-none focus:border-[#2e9f82] focus:ring-2 focus:ring-[#2e9f82]/15 disabled:bg-[#f9f8f6] disabled:text-[#9b9890]';
-  const label = 'block text-[12px] font-semibold text-[#4a4842] mb-1';
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(26,25,22,0.45)' }}>
-      <form className="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-xl"
-        onSubmit={e => { e.preventDefault(); if (!busy) void submit(); }}>
-        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-[#f0eee8]">
-          <div>
-            <h2 className="text-lg font-bold text-[#1a1916]">Edit vendor</h2>
-            <p className="text-[12.5px] text-[#9b9890] mt-0.5">Your record of {v.name}.</p>
-          </div>
-          <button type="button" onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer mt-1" aria-label="Close"><X size={18} /></button>
-        </div>
-
-        <div className="px-6 py-5 grid gap-4">
-          <div>
-            <span className={label}>Vendor type</span>
-            <div className="flex gap-1.5 flex-wrap">
-              {(Object.keys(KIND_META) as VendorRow['kind'][]).map(k => {
-                const disabled = kindLocked && k !== 'service';
-                return (
-                  <button key={k} type="button" disabled={disabled} onClick={() => setKind(k)}
-                    className={`px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border transition-colors ${kind === k ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e8e6e0] hover:border-[#c9c6be]'} ${disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`}>
-                    {KIND_META[k].label}
-                  </button>
-                );
-              })}
-            </div>
-            {kindLocked && <p className="text-[11.5px] text-[#9b9890] mt-1.5">Already invited — an invited vendor stays a service vendor.</p>}
-          </div>
-
-          <div>
-            <label className={label} htmlFor="ev-name">Name <span className="text-[#d4553f]">*</span></label>
-            <input id="ev-name" className={field} value={name} onChange={e => setName(e.target.value)} />
-          </div>
-
-          <div>
-            <label className={label} htmlFor="ev-category">What they&rsquo;re for</label>
-            <input id="ev-category" className={field} placeholder="e.g. Elevator Maintenance" value={category} onChange={e => setCategory(e.target.value)} />
-          </div>
-
-          {service && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={label} htmlFor="ev-relationship">Relationship</label>
-                <select id="ev-relationship" className={field} value={relationship} onChange={e => setRelationship(e.target.value as typeof relationship)}>
-                  <option value="contracted_vendor">Contracted vendor</option>
-                  <option value="internal_team">Our own team</option>
-                </select>
-              </div>
-              <div>
-                <label className={label} htmlFor="ev-entity">Entity</label>
-                <select id="ev-entity" className={field} value={entityType} onChange={e => setEntityType(e.target.value as typeof entityType)}>
-                  <option value="company">Company</option>
-                  <option value="individual">Individual / solo</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label} htmlFor="ev-phone">Phone</label>
-              <input id="ev-phone" type="tel" className={field} disabled={contactLocked} value={phone} onChange={e => setPhone(e.target.value)} />
-            </div>
-            <div>
-              <label className={label} htmlFor="ev-email">Email</label>
-              <input id="ev-email" type="email" className={field} disabled={contactLocked} value={email} onChange={e => setEmail(e.target.value)} />
-              {contactLocked && <p className="text-[11.5px] text-[#9b9890] mt-1">They&rsquo;ve accepted — sign-in details are theirs to change.</p>}
-            </div>
-          </div>
-
-          {service && (
-            <div>
-              <span className={label}>Trades</span>
-              <div className="flex gap-1.5 flex-wrap">
-                {groups.map(g => {
-                  const on = trades.includes(g.id);
-                  return (
-                    <button key={g.id} type="button" onClick={() => setTrades(t => on ? t.filter(x => x !== g.id) : [...t, g.id])}
-                      className={`px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border cursor-pointer transition-colors ${on ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e8e6e0] hover:border-[#c9c6be]'}`}>
-                      {g.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {err && <p className="text-[12.5px] text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</p>}
-        </div>
-
-        <div className="px-6 py-4 border-t border-[#f0eee8] flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="h-10 px-4 rounded-xl text-sm font-semibold text-[#6b6860] border border-[#e8e6e0] bg-white hover:border-[#c9c6be] cursor-pointer">
-            Cancel
-          </button>
-          <button type="submit" disabled={busy}
-            className="h-10 px-5 rounded-xl text-sm font-bold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </form>
+      {editing && <VendorForm mode="edit" initial={v} groups={groups} onClose={() => setEditing(false)} onDone={() => { setEditing(false); load(); }} />}
     </div>
   );
 }

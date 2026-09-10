@@ -20,8 +20,11 @@ export async function uploadOwnedDocument(opts: {
   displayName: string;
   file: File;
   replaceDocId?: number | null;
-}): Promise<void> {
-  const { ownerType, ownerId, documentKey, category, displayName, file, replaceDocId } = opts;
+  /** Optional record fields saved with the document (e.g. a licence's number and validity). */
+  documentNumber?: string | null;
+  expiryDate?: string | null;
+}): Promise<{ id: number | null }> {
+  const { ownerType, ownerId, documentKey, category, displayName, file, replaceDocId, documentNumber, expiryDate } = opts;
   if (file.size > 15 * 1024 * 1024) throw new Error('File must be under 15 MB.');
 
   const { uploadUrl, fileUrl, fileKey } = await fetch('/api/documents/upload-url', {
@@ -48,10 +51,13 @@ export async function uploadOwnedDocument(opts: {
     : await fetch('/api/documents', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ownerType, ownerId, documentKey, category, displayName, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3' }),
+        body: JSON.stringify({ ownerType, ownerId, documentKey, category, displayName, fileUrl, mimeType: file.type, s3Key: fileKey, storageProvider: 's3',
+          ...(documentNumber ? { documentNumber } : {}), ...(expiryDate ? { expiryDate } : {}) }),
       });
   if (!created.ok) {
     const b = await created.json().catch(() => ({}));
     throw new Error((b as { message?: string }).message ?? 'Saving the document record failed');
   }
+  const doc = await created.json().catch(() => null) as { id?: number } | null;
+  return { id: doc?.id ?? replaceDocId ?? null };
 }
