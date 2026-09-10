@@ -93,7 +93,13 @@ export default function EndedLeasesPage() {
       const withSettle = lcs.filter(l => l.settlement);
       const pool = withSettle.length ? withSettle : lcs;
       const target = pool.slice().sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
-      if (target) setPreviewLeaseId(target.leaseId);
+      // A tenancy is a renewal CHAIN but the settlement lives on ONE lease of it, and
+      // `leaseId` is the chain's latest-ENDING lease — which for a cancelled renewal is a
+      // term nobody ever occupied. Opening that lease finds no settlement row and the API
+      // seeds a phantom draft off the wrong chain tip (different deposit, different
+      // penalties), so the worksheet contradicted the customer's portal. Always prefer the
+      // lease the settlement is actually on.
+      if (target) setPreviewLeaseId(target.settlement?.contractId ?? target.leaseId);
     } catch {
       /* transient — the user can click again */
     } finally {

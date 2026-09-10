@@ -97,7 +97,10 @@ export default function ManagerEndedLeasesPage() {
       const withSettle = lcs.filter(l => l.settlement);
       const pool = withSettle.length ? withSettle : lcs;
       const target = pool.slice().sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
-      if (target) setPreviewLeaseId(target.leaseId);
+      // Same chain-vs-lease trap as the RP page: `leaseId` is the tenancy's latest-ENDING
+      // lease, not the one holding the settlement. Open the settlement's own lease so the
+      // worksheet matches what the customer sees in their portal.
+      if (target) setPreviewLeaseId(target.settlement?.contractId ?? target.leaseId);
     } catch {
       /* transient — the user can click again */
     } finally {
