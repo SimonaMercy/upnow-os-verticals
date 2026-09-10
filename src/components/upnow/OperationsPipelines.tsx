@@ -93,6 +93,11 @@ interface Props {
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
 type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'breach_legal';
+/** Breach & Legal is workflow-only (no records until the Violations module
+ *  lands) — hidden on PRODUCTION builds, shown in local development where the
+ *  team keeps working on it (owner, 10 Sep). NEXT_PUBLIC_OPS_BREACH_LEGAL=1
+ *  forces it on for a production build (e.g. a review deploy). */
+const SHOW_BREACH_LEGAL = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_OPS_BREACH_LEGAL === '1';
 /** Old deep links (?tab=breach / ?tab=legal) land on the combined board. */
 const LEGACY_TAB: Record<string, TabKey> = { breach: 'breach_legal', legal: 'breach_legal' };
 const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
@@ -101,7 +106,7 @@ const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
   { key: 'renewal',     label: 'Renewal',     icon: RefreshCcw },
   { key: 'terminated',  label: 'Terminated',  icon: LogOut },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
-  { key: 'breach_legal', label: 'Breach & Legal', icon: Scale },
+  ...(SHOW_BREACH_LEGAL ? [{ key: 'breach_legal' as TabKey, label: 'Breach & Legal', icon: Scale }] : []),
 ];
 
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
@@ -454,7 +459,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [maint, setMaint] = useState<MaintReq[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>(() => {
-    const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return LEGACY_TAB[t]; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
+    const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return SHOW_BREACH_LEGAL ? LEGACY_TAB[t] : 'lead'; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
   });
   // Guards the one-shot "land on a pipeline that actually has records" hop below;
   // a manual tab click sets it so an empty pipeline the RP chose is never overridden.
