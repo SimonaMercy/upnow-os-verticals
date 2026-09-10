@@ -366,7 +366,12 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     );
     return <button type="button" disabled={b} onClick={() => inspect(t)} className={btnFillSm}>Mark inspected</button>;
   };
-  const whoAttended = (t: Task) => t.supervisedBy === 'self' ? (t.attendedByName ?? 'personally') : (t.supervisedBy ?? '—');
+  // Always the person who marked the visit attended; a named supervisor is added after, never in their place.
+  const whoAttended = (t: Task) => {
+    const by = t.attendedByName ? `by ${t.attendedByName}` : '';
+    const sup = t.supervisedBy && t.supervisedBy !== 'self' ? `supervised by ${t.supervisedBy}` : '';
+    return [by, sup].filter(Boolean).join(' · ') || '—';
+  };
 
   const dotStyle = (x: Visit): CSSProperties => {
     if (x.state === 'done') return { background: '#1a7a52', border: '2px solid #1a7a52', color: '#fff' };
@@ -583,7 +588,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                   <div className="text-[12.5px] font-bold">Visit {x.n} · due {fmtD(t.dueDate)}</div>
                   {t.attendedAt || t.inspectedAt ? (
                     <div className="text-[11px] text-[#5b615e] mt-0.5">
-                      <b className="text-[#1a7a52]">Attended</b> {fmtS(t.attendedAt)} · {whoAttended(t)}
+                      <b className="text-[#1a7a52]">Attended</b> {fmtS(t.attendedAt)} {whoAttended(t)}
                       {t.deliveryNote && <> · <b className="text-[#1a7a52]">Delivery note</b> filed</>}
                       {t.inspectedAt && <> · <b className="text-[#1a7a52]">Inspected</b> {fmtS(t.inspectedAt)}{t.inspectedByName ? ` by ${t.inspectedByName}` : ''}</>}
                     </div>
