@@ -263,15 +263,15 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref }: { base: string
       ) : view === 'rows' ? (
         <div className="bg-white border border-[#e6e8e6] rounded-[14px] mt-3.5 overflow-hidden">
           <div className="overflow-x-auto">
-            <div className="min-w-[720px]">
-              <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,1fr)_92px] gap-3 items-center px-[18px] py-2.5 text-[10px] font-bold tracking-[.08em] text-[#8a8f8c] border-b border-[#eef0ee]">
+            <div className="min-w-[860px]">
+              <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,1fr)_150px] gap-3 items-center px-[18px] py-2.5 text-[10px] font-bold tracking-[.08em] text-[#8a8f8c] border-b border-[#eef0ee]">
                 <span>VENDOR</span><span>PERIOD</span><span>VALUE / YR</span><span>VISITS</span><span />
               </div>
               {shown.map(c => {
                 const flag = visitsFlag(c); const href = detailHrefOf(c);
                 return (
                   <div key={c.id} onClick={() => router.push(href)}
-                    className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,1fr)_92px] gap-3 items-center px-[18px] py-3.5 text-[12.5px] border-b border-[#f1f3f1] last:border-0 cursor-pointer hover:bg-[#fafbfa]">
+                    className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,1fr)_150px] gap-3 items-center px-[18px] py-3.5 text-[12.5px] border-b border-[#f1f3f1] last:border-0 cursor-pointer hover:bg-[#fafbfa]">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold">{c.vendorName}</span>
