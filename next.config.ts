@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
   // working tree without fighting over the .next build cache
   ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
 
+  // Dev only: keep compiled pages alive for the whole session instead of the
+  // default ~60s buffer of a handful of routes. Without this, visiting a few
+  // pages evicts the rest and every return visit pays a full recompile — the
+  // "dashboard takes forever to show" complaint. Numbers: an hour, 60 routes.
+  onDemandEntries: {
+    maxInactiveAge: 60 * 60 * 1000,
+    pagesBufferLength: 60,
+  },
+
   // Standalone output for Docker / Cloud Run SSR deployments
   output: "standalone",
 

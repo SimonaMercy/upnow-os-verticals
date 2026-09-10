@@ -23,7 +23,7 @@ import { SpJobReady, SpTeamSkills, catLabel } from '@/components/upnow/SpJobRead
 import { SpTeamPanel } from '@/components/upnow/SpTeamPanel';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { PlatformAgreementPanel, fetchAgreementStatus, type AgreementStatus } from '@/components/upnow/PlatformAgreementPanel';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiGet, apiPatch, apiPut } from '@/lib/api';
 import {
   BadgeCheck, MessageCircle, User, Percent, Users, Bell, AlertCircle, Loader2, Save,
 } from 'lucide-react';
@@ -51,6 +51,7 @@ interface SpProfile {
   opsContactWhatsapp?: boolean | null;
   opsContactLanguages?: string[] | null;
   complianceStatus?: string | null;
+  tier?: string | null;
 }
 interface ChecklistItem {
   key: string;
@@ -211,6 +212,9 @@ function ProfileTab() {
   }, []);
 
   const approved = profile?.complianceStatus === 'compliant';
+  // v2 (0260): a landlord-invited light account — no marketplace compliance
+  // chrome; instead, the optional door INTO the marketplace.
+  const lightVendor = profile?.tier === 'landlord_vendor';
 
   const saveBusiness = async () => {
     if (!businessName.trim()) { setBizError('Business name is required'); return; }
@@ -261,6 +265,21 @@ function ProfileTab() {
 
   return (
     <div className="space-y-6">
+      {lightVendor && <VendorRateCard />}
+      {lightVendor && (
+        <div style={{ background: '#fff', border: '1px solid #E4E7E2', borderRadius: 14, padding: '16px 18px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#182420' }}>Want marketplace jobs too?</div>
+            <p style={{ fontSize: 13, color: '#55645B', margin: '4px 0 0', lineHeight: 1.5 }}>
+              Today you work only for the landlords who invited you. Becoming an UpNow marketplace provider opens customer bookings —
+              it needs the full onboarding (verification, services, coverage area) and applies to marketplace work only; your landlord jobs are unaffected.
+            </p>
+          </div>
+          <a href="/dashboard/service-provider/onboarding" style={{ flexShrink: 0, padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, background: '#0B7A4E', color: '#fff', textDecoration: 'none' }}>
+            Start marketplace onboarding
+          </a>
+        </div>
+      )}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         {/* Business profile — editable */}
         <Card
@@ -584,6 +603,47 @@ export default function ServiceProviderSettingsPage() {
       )}
       {mainTab === 'team' && <TeamTab />}
       {mainTab === 'notifications' && <NotificationsTab />}
+    </div>
+  );
+}
+
+/** The vendor's own rate card (maintenance v2, 0263): the landlord decides if
+ *  and who pays; the vendor decides how much — none (at cost), hourly, or
+ *  quote per job, per category. Saves per click. */
+function VendorRateCard() {
+  const [rows, setRows] = useState<{ categoryGroupId: number; group: string; mode: 'none' | 'hourly' | 'quote'; hourlyRateAed: number | null }[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const load = () => { apiGet<typeof rows>('/maintenance/my-pricing').then(r => setRows(Array.isArray(r) ? r : [])).catch(() => setRows([])); };
+  useEffect(() => { load(); }, []);
+  const save = async (categoryGroupId: number, mode: 'none' | 'hourly' | 'quote', rate?: number) => {
+    setBusy(true); setErr(null);
+    try { await apiPut('/maintenance/my-pricing', { rows: [{ categoryGroupId, mode, ...(mode === 'hourly' ? { hourlyRateAed: rate } : {}) }] }); load(); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not save.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E4E7E2', borderRadius: 14, padding: '16px 18px', marginBottom: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#182420' }}>How you charge</div>
+      <p style={{ fontSize: 13, color: '#55645B', margin: '4px 0 10px', lineHeight: 1.5 }}>
+        Per kind of work: <b>None</b> — you work at cost (own team) · <b>Hourly</b> — your time at your rate · <b>Quote</b> — you price each job after seeing it. Landlords see this on your card.
+      </p>
+      {err && <p style={{ fontSize: 12.5, color: '#b42318', margin: '0 0 8px' }}>{err}</p>}
+      {rows == null ? <p style={{ fontSize: 13, color: '#8A968D' }}>Loading…</p> : rows.map(r => (
+        <div key={r.categoryGroupId} style={{ display: 'grid', gridTemplateColumns: '1.2fr auto 1fr', gap: 12, alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #EEF1EE' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: '#182420' }}>{r.group}</span>
+          <span style={{ display: 'inline-flex', border: '1px solid #E4E7E2', borderRadius: 10, overflow: 'hidden' }}>
+            {(['none', 'hourly', 'quote'] as const).map((m, i) => (
+              <button key={m} type="button" disabled={busy}
+                onClick={() => { if (m !== 'hourly') void save(r.categoryGroupId, m); else { const v = window.prompt(`${r.group} — your hourly rate (AED/h)`, String(r.hourlyRateAed ?? 120)); if (v && Number(v) > 0) void save(r.categoryGroupId, 'hourly', Number(v)); } }}
+                style={{ padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', borderLeft: i > 0 ? '1px solid #E4E7E2' : 'none', background: r.mode === m ? '#0B7A4E' : '#fff', color: r.mode === m ? '#fff' : '#55645B' }}>
+                {m === 'none' ? 'None' : m === 'hourly' ? 'Hourly' : 'Quote'}
+              </button>
+            ))}
+          </span>
+          <span style={{ fontSize: 12.5, color: '#8A968D' }}>{r.mode === 'hourly' && r.hourlyRateAed ? `AED ${r.hourlyRateAed}/h` : '—'}</span>
+        </div>
+      ))}
     </div>
   );
 }

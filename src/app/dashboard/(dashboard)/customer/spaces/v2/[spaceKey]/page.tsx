@@ -41,6 +41,7 @@ import {
   Sparkles, ArrowRight, Camera, Trash2, ClipboardCheck,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { MaintenanceSection } from '@/components/customer/MaintenanceSection';
 import { LocationMap } from '@/components/upnow/LocationMap';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import type { PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
@@ -5506,6 +5507,8 @@ export default function CustomerSpaceV2Page() {
   }
 
   const stateKey = deriveStateKey(resolved);
+  const maintCandidate = resolved.contract ?? resolved.renewalContract;
+  const maintContract = maintCandidate && ['issued', 'active'].includes(maintCandidate.status) ? maintCandidate : null;
   const { steps, currentIndex } = stepsFor(stateKey, resolved);
   const def = STATE_DEFS[stateKey];
 
@@ -5521,6 +5524,10 @@ export default function CustomerSpaceV2Page() {
             : <QuestMap steps={steps} currentIndex={currentIndex} mode={def.mode} />}
           <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
             <QuestActionCard stateKey={stateKey} resolved={resolved} onRefresh={fetchAll} />
+            {/* Maintenance — ONLY the way in (owner, 31 Aug): raise a request on this
+                lease; tracking lives on My Services. My Spaces is where a customer
+                actually lands; the backend accepts issued + active leases. */}
+            {maintContract && <MaintenanceSection contractId={maintContract.id} variant="raise" />}
             <SetupDownloads resolved={resolved} stateKey={stateKey} />
           </div>
         </div>
@@ -5571,7 +5578,11 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
       <DualSection eyebrow="02 · Original lease" title="Your current lease" sub={`Until ${endStr}`} tone="jade">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 380px) minmax(0, 1fr)', gap: 28, alignItems: 'start' }}>
           <QuestMap steps={originalSteps} currentIndex={originalCurrentIdx} mode={originalDef.mode} />
-          <QuestActionCard stateKey={originalStateKey} resolved={resolvedOriginalOnly} onRefresh={onRefresh} />
+          <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+            <QuestActionCard stateKey={originalStateKey} resolved={resolvedOriginalOnly} onRefresh={onRefresh} />
+            {/* Maintenance stays on the ORIGINAL lease — it is the one being lived in. */}
+            {c && <MaintenanceSection contractId={c.id} variant="raise" />}
+          </div>
         </div>
       </DualSection>
     </div>

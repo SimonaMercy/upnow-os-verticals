@@ -11,7 +11,7 @@
  * immediately; on later loads the API returns already-signed viewUrls.
  */
 
-export type EvidenceKind = 'problem' | 'before' | 'after';
+export type EvidenceKind = 'problem' | 'before' | 'after' | 'quote';
 
 export interface EvidencePhoto {
   id: number;
@@ -25,9 +25,11 @@ export interface EvidenceGroups {
   problem: EvidencePhoto[];
   before: EvidencePhoto[];
   after: EvidencePhoto[];
+  /** Supplier quotations attached alongside the provider's quote. */
+  quote: EvidencePhoto[];
 }
 
-export const EMPTY_EVIDENCE: EvidenceGroups = { problem: [], before: [], after: [] };
+export const EMPTY_EVIDENCE: EvidenceGroups = { problem: [], before: [], after: [], quote: [] };
 
 const MAX_BYTES = 10 * 1024 * 1024; // matches the KYC upload ceiling
 

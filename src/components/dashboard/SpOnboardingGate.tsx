@@ -58,6 +58,8 @@ interface ProfilePeek {
     opsContactName?: string | null;
     complianceStatus?: string | null;
     complianceNotes?: string | null;
+    /** v2 (0260): landlord_vendor = a landlord-invited light account. */
+    tier?: string | null;
   };
 }
 
@@ -100,6 +102,15 @@ export function SpOnboardingGate({ children }: { children: ReactNode }) {
       .then((res) => {
         if (cancelled) return;
         const p = res?.profile;
+        // v2: a landlord-invited vendor has no marketplace registration to
+        // complete and no compliance review — the light portal is its home.
+        if (p?.tier === 'landlord_vendor') {
+          try { sessionStorage.setItem('sp_tier', 'landlord_vendor'); window.dispatchEvent(new CustomEvent('sp-tier', { detail: 'landlord_vendor' })); } catch { /* fine */ }
+          setStatus(null);
+          setAllowed(true);
+          return;
+        }
+        try { sessionStorage.setItem('sp_tier', p ? 'marketplace' : ''); window.dispatchEvent(new CustomEvent('sp-tier', { detail: p ? 'marketplace' : '' })); } catch { /* fine */ }
         const st = p?.complianceStatus ?? null;
         // Hard-block the cases that must complete a flow first: no/partial
         // registration (still mid-wizard or an imported stub), or admin-paused.

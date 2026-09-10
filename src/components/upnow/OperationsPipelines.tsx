@@ -1,6 +1,6 @@
 /**
- * OperationsPipelines — the Operations page as FOUR separate pipeline trackers,
- * one per tab: Lead · New Lease · Renewal · Terminated.
+ * OperationsPipelines — the Operations page as separate pipeline trackers, one
+ * per tab: Lead · New Lease · Renewal · Terminated · Maintenance · Breach · Legal.
  *
  * Each tab renders that pipeline's own stages as fixed kanban lanes; a card sits
  * in its current stage (first incomplete step) with earlier steps ticked. This
@@ -17,6 +17,14 @@
  * naturally moves out of the Lead tab and into New Lease / Renewal. A fully set-up
  * active lease drops off entirely (it lives in the Leases register); an accepted
  * termination surfaces under Terminated for move-out + settlement.
+ *
+ * Maintenance · Breach · Legal are workflow-only pipelines: Maintenance tracks
+ * who holds the ball on a routed request (Requested → Awaiting approval → In
+ * progress → Sign-off → Close-out), Legal carries the stage model from the
+ * business process sheet (Process Flow UpNow — Legal), Breach carries the
+ * Violations-module pipeline. Their lanes render today so each workflow's shape
+ * is visible; records wire in as each module lands (Breach = Violations Phase 1,
+ * Legal = Phase 2, Maintenance = the maintenance-routing module).
  */
 'use client';
 
@@ -26,11 +34,12 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
-  BarChart3, Info,
+  BarChart3, Info, Wrench, ShieldAlert, Scale,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
+import { maintenancePlace } from '@/lib/maintenanceScope';
 import type { OpsContract, StageHandler } from '@/components/upnow/OperationsBoard';
 
 /* ── Lead shape (subset of GET /leads) ─────────────────────────────────────── */
@@ -66,6 +75,11 @@ interface Props {
   contractHref: (id: number) => string;
   /** Deep-link to a lead's detail (Leads page anchor). Omitted → no lead link. */
   leadHref?: (id: number) => string;
+  /** Maintenance requests endpoint (without /api), e.g. '/maintenance/requests'.
+   *  Omitted → the Maintenance tab shows its lanes with no records. */
+  maintenancePath?: string;
+  /** Deep-link to a maintenance request's detail page. */
+  maintenanceHref?: (id: number) => string;
   /** Manager scope: keep only leads whose unit belongs to this RP. */
   rpFilter?: number;
   /** Link to the manager-performance report (landlord-only) — omitted → no button. */
@@ -77,19 +91,22 @@ interface Props {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
-type TabKey = 'lead' | 'new' | 'renewal' | 'terminated';
+type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'breach' | 'legal';
 const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
-  { key: 'lead',       label: 'Lead',       icon: UserPlus },
-  { key: 'new',        label: 'New Lease',  icon: FileText },
-  { key: 'renewal',    label: 'Renewal',    icon: RefreshCcw },
-  { key: 'terminated', label: 'Terminated', icon: LogOut },
+  { key: 'lead',        label: 'Lead',        icon: UserPlus },
+  { key: 'new',         label: 'New Lease',   icon: FileText },
+  { key: 'renewal',     label: 'Renewal',     icon: RefreshCcw },
+  { key: 'terminated',  label: 'Terminated',  icon: LogOut },
+  { key: 'maintenance', label: 'Maintenance', icon: Wrench },
+  { key: 'breach',      label: 'Breach',      icon: ShieldAlert },
+  { key: 'legal',       label: 'Legal',       icon: Scale },
 ];
 
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
  * `keys` = the operations checklist keys that belong to that lane; a contract
  * card lands in the FIRST lane that still has an incomplete item. A lane with no
  * keys is a terminal "everything done" lane. */
-interface StageDef { key: string; title: string; keys: string[] }
+interface StageDef { key: string; title: string; keys: string[]; desc?: string }
 
 // Lead lanes match RAW lead stages (interested-onward, pre-contract).
 const LEAD_STAGES: { key: string; title: string; match: string[] }[] = [
@@ -148,6 +165,48 @@ const TERM_STAGES: StageDef[] = [
   { key: 'move_out',       title: 'Move-out inspection', keys: ['move_out'] },
   { key: 'bill_clearance', title: 'Bills cleared',       keys: ['bill_clearance'] },
   { key: 'settlement',     title: 'Deposit settlement',  keys: ['settlement'] },
+];
+
+/* ── Process pipelines: Maintenance · Breach · Legal ──────────────────────────
+ * Lane-only stage models (no checklist keys — their records aren't the
+ * operations-contract shape). Maintenance = owner-based lanes (see the note on
+ * MAINT_STAGES; spec MAINTENANCE_ROUTING_SPEC_2026-08-30 §4); Legal carries
+ * the stages from the business process sheet (Process Flow UpNow: Legal);
+ * Breach carries the Violations-module pipeline (resolved / cancelled cases
+ * leave the board, so they're not lanes). Each board shows its workflow's
+ * shape today; records wire in as each module lands. */
+// Maintenance lanes track WHO IS HOLDING THE BALL (one owner + one action per
+// lane), mirroring the SP portal's Requests → Quotes → Active Jobs → Closure
+// board so both sides see the same shape. The process sheet's seven steps
+// (received → diagnosed → quoted → approved → executed → verified → invoiced)
+// are the request's timeline events, not columns — as columns, Quotation and
+// Approval sit empty for every fixed-price job and Diagnosis vs Execution is
+// the same SP job status. Awaiting approval is a parking lane a card can enter
+// from In progress (diagnose → quote → approve → repair).
+const MAINT_STAGES: StageDef[] = [
+  { key: 'requested',   title: 'Requested',         keys: [], desc: 'Raised and routed — waiting on landlord triage (no rule / no provider) or the provider’s acceptance.' },
+  { key: 'approval',    title: 'Awaiting approval', keys: [], desc: 'A quote is on the table — the landlord (covered, over threshold) or the customer (chargeable) must approve.' },
+  { key: 'in_progress', title: 'In progress',       keys: [], desc: 'Provider accepted and working — diagnosing or repairing.' },
+  { key: 'sign_off',    title: 'Sign-off',          keys: [], desc: 'Provider marked the job complete; customer sign-off outstanding.' },
+  { key: 'close_out',   title: 'Close-out',         keys: [], desc: 'Signed off; invoice and cost allocation pending.' },
+];
+const BREACH_STAGES: StageDef[] = [
+  { key: 'draft',        title: 'Draft',                keys: [], desc: 'Violation logged against unit, lease and customer — not yet issued.' },
+  { key: 'notice_sent',  title: 'Notice Sent',          keys: [], desc: 'Customer notified of the breach from a notice template.' },
+  { key: 'awaiting',     title: 'Awaiting Response',    keys: [], desc: 'Waiting on the customer’s response within the notice window.' },
+  { key: 'under_review', title: 'Under Review',         keys: [], desc: 'Response and evidence under review.' },
+  { key: 'warning',      title: 'Warning Issued',       keys: [], desc: 'Second or final warning issued to the customer.' },
+  { key: 'fee_applied',  title: 'Fee Applied',          keys: [], desc: 'Authorised violation fee applied to the lease ledger.' },
+  { key: 'escalated',    title: 'Escalated to Dispute', keys: [], desc: 'Escalated to the legal / dispute process.' },
+];
+const LEGAL_STAGES: StageDef[] = [
+  { key: 'identification', title: 'Case Identification',         keys: [], desc: 'Identify tenant breach, payment default, contract dispute or other legal issue.' },
+  { key: 'review',         title: 'Document Review',             keys: [], desc: 'Review tenancy contract, addendum, notices, payment records and supporting evidence.' },
+  { key: 'notice',         title: 'Legal Notice',                keys: [], desc: 'Prepare and issue formal legal notice to tenant.' },
+  { key: 'translation',    title: 'Translation / Notarization',  keys: [], desc: 'Arabic translation and/or notarization where required.' },
+  { key: 'filing',         title: 'Filing / Case Registration',  keys: [], desc: 'Register dispute/case with the relevant authority or court.' },
+  { key: 'court',          title: 'Court / Dispute Process',     keys: [], desc: 'Attend hearings, submit evidence and follow the case process.' },
+  { key: 'eviction',       title: 'Final Eviction',              keys: [], desc: 'Confirm settlement, payment, eviction or final judgment and close the file.' },
 ];
 
 /* ── Unified card view-model ───────────────────────────────────────────────── */
@@ -328,13 +387,69 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
   };
 }
 
-export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, rpFilter, performanceHref, afterHeading }: Props) {
+/* ── Maintenance request shape (subset of GET /maintenance/requests) ────────── */
+interface MaintReq {
+  id: number;
+  ref: string;
+  title: string;
+  stage: string;
+  stageNote: string | null;
+  coverage: string | null;
+  category?: { id: number; name: string } | null;
+  /** 0267 — where the work is: a unit, or a named common area / building system. */
+  scope?: string | null; locationLabel?: string | null;
+  unit?: { id: number; unitNumber: string | null; unitName: string | null } | null;
+  property?: { id: number; buildingName: string | null } | null;
+  customer?: { id: number; name: string | null; companyName: string | null; entityType: string | null } | null;
+  provider?: { id: number; name: string; relationship: string | null } | null;
+  quote?: { status: string; totalAed: number | null } | null;
+  booking?: { id: number; status: string; totalAed: number | null } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Backend stage → board lane key (terminal stages never arrive: the list is open-scoped).
+const MAINT_STAGE_KEY: Record<string, string> = {
+  requested: 'requested', awaiting_approval: 'approval', in_progress: 'in_progress',
+  sign_off: 'sign_off', close_out: 'close_out',
+};
+
+function maintToCard(m: MaintReq, href: string | null, nowMs: number): CardVM {
+  const stageKey = MAINT_STAGE_KEY[m.stage] ?? 'requested';
+  const idx = Math.max(0, MAINT_STAGES.findIndex(s => s.key === stageKey));
+  return {
+    key: `m-${m.id}`,
+    // The party, not the signatory — same company rule as every other card here.
+    name: tenantDisplayName({
+      name: m.customer?.name ?? null,
+      entityType: m.customer?.entityType, companyName: m.customer?.companyName,
+    }) ?? (m.property?.buildingName ?? '—'),
+    sub: `${maintenancePlace(m)} · ${m.property?.buildingName ?? '—'} · ${m.category?.name ?? 'Maintenance'}`,
+    ref: m.ref,
+    // The money on the job (quote, else priced booking) — not rent.
+    rentAed: m.quote?.totalAed ?? m.booking?.totalAed ?? null,
+    // The stage note rides the small term slot: "No coverage rule — triage",
+    // "Diagnosing", "Provider declined — reassign"…
+    term: m.stageNote,
+    done: idx + 1,
+    total: MAINT_STAGES.length,
+    href,
+    stageKey,
+    building: m.property?.buildingName ?? null,
+    ageDays: daysSince(m.updatedAt ?? m.createdAt, nowMs),
+    handler: m.provider ? [{ name: m.provider.name, inferred: false }] : [],
+    handlerBreakdown: [],
+  };
+}
+
+export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, maintenancePath, maintenanceHref, rpFilter, performanceHref, afterHeading }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
   const [nowMs] = useState(() => Date.now());
   const [contracts, setContracts] = useState<OpsContract[]>([]);
   const [leads, setLeads] = useState<OpsLead[]>([]);
+  const [maint, setMaint] = useState<MaintReq[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>(() => {
     const t = sp.get('tab'); return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
@@ -367,10 +482,14 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const load = useMemo(() => () => Promise.all([
     apiGet<OpsContract[]>(contractsPath).then(d => Array.isArray(d) ? d : []).catch(() => []),
     apiGet<OpsLead[]>(leadsPath).then(d => Array.isArray(d) ? d : []).catch(() => []),
-  ]).then(([c, l]) => {
+    maintenancePath
+      ? apiGet<MaintReq[]>(maintenancePath).then(d => Array.isArray(d) ? d : []).catch(() => [])
+      : Promise.resolve([] as MaintReq[]),
+  ]).then(([c, l, m]) => {
     setContracts(c);
     setLeads(rpFilter != null ? l.filter(x => x.unit?.property?.rentalProviderId === rpFilter) : l);
-  }), [contractsPath, leadsPath, rpFilter]);
+    setMaint(m);
+  }), [contractsPath, leadsPath, maintenancePath, rpFilter]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
@@ -380,8 +499,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const s = new Set<string>();
     for (const c of contracts) if (c.property.buildingName) s.add(c.property.buildingName);
     for (const l of leads) if (l.unit?.property?.buildingName) s.add(l.unit.property.buildingName);
+    for (const m of maint) if (m.property?.buildingName) s.add(m.property.buildingName);
     return [...s].sort();
-  }, [contracts, leads]);
+  }, [contracts, leads, maint]);
 
   const matchSearch = (hay: (string | null | undefined)[]) => {
     const q = search.trim().toLowerCase();
@@ -420,14 +540,32 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const renewalCards = setup.filter(c => c.contractType === 'renewal').map(c => contractToCard(c, RENEWAL_STAGES, contractHref(c.id), nowMs));
     const termCards = contracts.filter(c => (c.windDown || c.terminationRequested) && passC(c)).map(c => contractToCard(c, TERM_STAGES, contractHref(c.id), nowMs));
 
-    return { lead: leadCards, new: newCards, renewal: renewalCards, terminated: termCards } as Record<TabKey, CardVM[]>;
-  }, [contracts, leads, search, filterAsset, filterYear, contractHref, leadHref, nowMs]);
+    // Maintenance: live requests from maintenancePath. The backend list is
+    // open-scoped (terminal stages already dropped), and an open request is
+    // relevant whatever year it was raised — so no year gate here.
+    const passM = (m: MaintReq) =>
+      (filterAsset === 'all' || m.property?.buildingName === filterAsset)
+      && matchSearch([m.ref, m.title, m.customer?.name, m.customer?.companyName,
+                      m.unit?.unitNumber, m.property?.buildingName, m.category?.name, m.provider?.name]);
+    const maintCards = maint.filter(passM)
+      .map(m => maintToCard(m, maintenanceHref ? maintenanceHref(m.id) : null, nowMs));
 
-  const stagesForTab: Record<TabKey, { key: string; title: string }[]> = {
+    // Breach / Legal: workflow lanes only — no record source yet (see the
+    // header comment). Their boards render every stage with zero cards.
+    return {
+      lead: leadCards, new: newCards, renewal: renewalCards, terminated: termCards,
+      maintenance: maintCards, breach: [], legal: [],
+    } as Record<TabKey, CardVM[]>;
+  }, [contracts, leads, maint, search, filterAsset, filterYear, contractHref, leadHref, maintenanceHref, nowMs]);
+
+  const stagesForTab: Record<TabKey, { key: string; title: string; desc?: string }[]> = {
     lead: LEAD_STAGES,
     new: NEW_STAGES,
     renewal: RENEWAL_STAGES,
     terminated: TERM_STAGES,
+    maintenance: MAINT_STAGES,
+    breach: BREACH_STAGES,
+    legal: LEGAL_STAGES,
   };
 
   const focusKey = sp.get('focus');
@@ -440,6 +578,10 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   useEffect(() => {
     if (loading || didAutoTab.current || focusKey) return;
     didAutoTab.current = true;
+    // Workflow-only pipelines (Breach / Legal) have no records yet by design —
+    // a deep link to one of them means "show me the workflow", so never hop
+    // away from it. Maintenance carries live records now and hops normally.
+    if (tab === 'breach' || tab === 'legal') return;
     if (cardsByTab[tab].length > 0) return;
     const first = TABS.find(t => cardsByTab[t.key].length > 0);
     if (first) selectTab(first.key);
@@ -490,7 +632,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     c.name,
     c.ref ?? 'Lead',
     c.sub,
-    c.rentAed != null ? `AED ${fmtAed(c.rentAed)}/yr` : null,
+    c.rentAed != null ? `AED ${fmtAed(c.rentAed)}${c.key.startsWith('m-') ? '' : '/yr'}` : null,
     c.term,
     `Stage: ${stageTitleOf(c.stageKey)}`,
     ...(c.handlerBreakdown.length
@@ -648,7 +790,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
               const cards = byStage.get(s.key) ?? [];
               return (
                 <section key={s.key} className="lane">
-                  <header className="lane-head">
+                  <header className="lane-head" title={s.desc}>
                     <span className="lane-title">{s.title}</span>
                     <span className="lane-count">{cards.length}</span>
                   </header>
@@ -714,8 +856,9 @@ export function OpsPipelineStyle() {
       .opsp-page .reset{ background:transparent; border:0; color:var(--green-d); font-weight:600; font-size:12.5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:7px; }
       .opsp-page .reset:hover{ background:var(--green-t2); }
 
-      .opsp-page .pcards{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:0 0 14px; }
-      @media (max-width:640px){ .opsp-page .pcards{ grid-template-columns:repeat(2,1fr); } }
+      /* auto-fit: the selector row holds however many pipelines the page has
+         (4 on the SP page, 7 here), wrapping to new rows on narrow screens. */
+      .opsp-page .pcards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:8px; margin:0 0 14px; }
       .opsp-page .pcard{ appearance:none; text-align:left; background:#fff; border:1px solid var(--line); border-radius:11px; padding:9px 12px; box-shadow:var(--sh-sm); cursor:pointer; display:flex; align-items:center; gap:10px; transition:border-color .15s, box-shadow .15s, background .15s; }
       .opsp-page .pcard:hover{ border-color:var(--ink-3); }
       .opsp-page .pcard.active{ border-color:var(--green); background:var(--green-t2); box-shadow:0 0 0 2px rgba(46,159,130,.1); }

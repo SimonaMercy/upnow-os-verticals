@@ -19,6 +19,8 @@
  */
 'use client';
 
+import { useRouter } from 'next/navigation';
+
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Schibsted_Grotesk } from 'next/font/google';
@@ -190,6 +192,13 @@ export default function ServiceProviderOverview() {
   const [pendingInvites, setPendingInvites] = useState(0);
   const [bookings, setBookings] = useState<SpBooking[]>([]);
   const [services, setServices] = useState<SpService[]>([]);
+  // v2: a landlord-invited light vendor's home IS the job board — the
+  // marketplace checklist (KYC, services, job-ready) is the other tier.
+  const router = useRouter();
+  useEffect(() => {
+    try { if (sessionStorage.getItem('sp_tier') === 'landlord_vendor') router.replace('/dashboard/service-provider/operations'); } catch { /* stay */ }
+  }, [router]);
+
   const [jobReady, setJobReady] = useState<{ jobReady: boolean; cards: Record<string, { complete: boolean }> } | null>(null);
 
   useEffect(() => {

@@ -60,6 +60,9 @@ export interface SpBooking {
   quote?: { status?: string | null } | null;
   /** Status of the booking's escrow row ('held' | 'released' | 'refunded' | …). */
   escrowStatus?: string | null;
+  /** Landlord-routed maintenance job (src/maintenance): who pays. */
+  source?: 'marketplace' | 'rp_maintenance' | null;
+  payer?: 'customer' | 'rental_provider' | null;
   /** Admin payload only (SP-260) — whose job this is, across all providers. */
   serviceProviderId?: number | null;
   providerName?: string | null;
@@ -160,6 +163,8 @@ interface CardVM {
   sub: string;             // "Service · Emirate"
   ref: string;             // booking ref
   amountAed: number | null;
+  /** Chip text when there is no amount: 'Quote', or what a landlord-paid job reads. */
+  amountLabel: string;
   when: string | null;     // scheduled slot
   href: string | null;
   stageKey: string;
@@ -197,6 +202,9 @@ function stageOf(b: SpBooking, tab: TabKey): string {
   if (tab === 'closure') {
     if (st === 'dispute') return 'dispute';
     if (st === 'escrow_release' || norm(b.escrowStatus) === 'released') return 'released';
+    // A landlord-paid maintenance job has no escrow to release — the landlord
+    // settles it off-platform at close-out. Once completed it is done here.
+    if (b.source === 'rp_maintenance' && b.payer === 'rental_provider' && st === 'completed') return 'released';
     return 'completed';
   }
   return stages.find(s => s.match.includes(st))?.key ?? stages[0].key;
@@ -208,7 +216,8 @@ function toCard(b: SpBooking, tab: TabKey, href: string | null, nowMs: number): 
   const amount = b.totalAmount ?? b.price ?? null;
   return {
     key: `b-${b.id}`,
-    name: b.customer?.name ?? b.customerName ?? '—',
+    name: b.customerName ?? b.customer?.name ?? '—',
+    amountLabel: b.source === 'rp_maintenance' && b.payer === 'rental_provider' ? 'Landlord pays' : 'Quote',
     // providerName only exists on the admin payload — provider-side cards keep
     // their exact current text.
     sub: [service, where, b.providerName].filter(Boolean).join(' · '),
@@ -347,7 +356,7 @@ export default function SpOperationsPipelines({
       </div>
       <div className="c-unit">{c.sub}</div>
       <div className="c-foot">
-        <span className="rent">{c.amountAed != null ? `AED ${fmtAed(c.amountAed)}` : 'Quote'}</span>
+        <span className="rent">{c.amountAed != null ? `AED ${fmtAed(c.amountAed)}` : c.amountLabel}</span>
         {c.when && <span className="term">{c.when}</span>}
       </div>
       {c.href
@@ -368,7 +377,7 @@ export default function SpOperationsPipelines({
       {c.ageDays != null && (
         <span className={'age ' + ageTone(c.ageDays)} title={`${c.ageDays} day${c.ageDays === 1 ? '' : 's'} since last activity`}>{c.ageDays}d</span>
       )}
-      <span className="r-rent">{c.amountAed != null ? `AED ${fmtAed(c.amountAed)}` : 'Quote'}</span>
+      <span className="r-rent">{c.amountAed != null ? `AED ${fmtAed(c.amountAed)}` : c.amountLabel}</span>
       <span className="r-term">{c.when ?? '—'}</span>
       {c.href
         ? <Link href={c.href} className="open">Open <ArrowRight size={12} /></Link>
@@ -508,7 +517,9 @@ export default function SpOperationsPipelines({
 
         {!loading && bookings.length === 0 && (
           <p style={{ marginTop: 14, fontSize: 12, color: 'var(--mute)', textAlign: 'center' }}>
-            No bookings yet — the customer booking flow feeds these pipelines automatically once it goes live.
+            {(() => { try { return sessionStorage.getItem('sp_tier') === 'landlord_vendor'; } catch { return false; } })()
+              ? 'No jobs yet — work from your landlords appears here the moment they assign you.'
+              : 'No bookings yet — the customer booking flow feeds these pipelines automatically once it goes live.'}
           </p>
         )}
       </main>

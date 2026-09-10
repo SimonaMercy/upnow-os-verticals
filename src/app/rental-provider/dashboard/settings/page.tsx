@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck } from 'lucide-react';
+import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
+import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -24,20 +25,25 @@ const NOTIF_LABELS: Record<NotifKey, { title: string; description: string }> = {
 const NOTIF_KEYS: NotifKey[] = ['newInquiry', 'chequeReminder', 'renewalAlert', 'maintenanceUpdate', 'promotional'];
 
 /**
- * "Notification Preferences" card — HIDDEN 3 Aug 2026 until it is wired.
+ * "Notification Preferences" card — shows ONLY the toggles that are wired.
  *
- * The five toggles were never connected to anything: they are local state with
- * hardcoded defaults, no request is made when one is flipped, and they reset on
- * reload. Nothing consumes them either — `notification_preferences` (migr 0002)
- * has no code referencing it, notifications carry no category, and no sender
- * checks a preference. Shown, the card promised control it did not have ("turn
- * off Cheque Reminders" still sent them).
- *
- * The markup below is left intact and switched off here, so turning it back on
- * once the preferences persist is a one-word edit. The Customer Correspondence
- * card on the same tab is unaffected — that one really does save.
+ * Hidden entirely from 3 Aug 2026: the five toggles were local state with
+ * hardcoded defaults, nothing persisted them and no sender read them, so the
+ * card promised control it did not have. Since 31 Aug (maintenance Phase B)
+ * a toggle persists to `notification_preferences` (GET/PUT
+ * /notifications/preferences, event_code per key) and the maintenance module
+ * honours it for every landlord-side notice (in-app + email). Only the keys in
+ * WIRED_NOTIF_KEYS are rendered; add a key here the day its senders read it —
+ * never before, or the same broken promise comes back.
  */
-const SHOW_NOTIF_PREFS: boolean = false;
+const SHOW_NOTIF_PREFS: boolean = true;
+const WIRED_NOTIF_KEYS: NotifKey[] = ['maintenanceUpdate'];
+const NOTIF_EVENT_CODE: Record<NotifKey, string> = {
+  newInquiry: 'new_inquiry', chequeReminder: 'cheque_reminder', renewalAlert: 'renewal_alert',
+  maintenanceUpdate: 'maintenance_update', promotional: 'promotional',
+};
+const NOTIF_KEY_OF_CODE = Object.fromEntries(Object.entries(NOTIF_EVENT_CODE).map(([k, v]) => [v, k])) as Record<string, NotifKey>;
+interface NotifPrefRow { eventCode: string; emailEnabled: boolean; inAppEnabled: boolean }
 
 /* ─────────────────────────────────────────────────────────────
    Fee rules types
@@ -497,7 +503,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'team' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'team' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -648,7 +654,7 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   );
 }
 
-const MAIN_TABS: MainTab[] = ['general', 'fee_rules', 'team', 'notifications'];
+const MAIN_TABS: MainTab[] = ['general', 'fee_rules', 'maintenance', 'team', 'notifications'];
 
 export default function SettingsPage() {
   const { user, refresh } = useAuth();
@@ -761,8 +767,38 @@ export default function SettingsPage() {
 
   const [notifs, setNotifs] = useState<Record<NotifKey, boolean>>({
     newInquiry: true, chequeReminder: true, renewalAlert: true,
-    maintenanceUpdate: false, promotional: false,
+    maintenanceUpdate: true, promotional: false,
   });
+  const [notifErr, setNotifErr] = useState<string | null>(null);
+  // A preference row exists only once the landlord has flipped the toggle; no
+  // row = enabled, which is what the default state above already says.
+  useEffect(() => {
+    fetch('/api/notifications/preferences', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: { items?: NotifPrefRow[] } | null) => {
+        if (!d?.items) return;
+        setNotifs(prev => {
+          const next = { ...prev };
+          for (const row of d.items!) {
+            const key = NOTIF_KEY_OF_CODE[row.eventCode];
+            if (key) next[key] = row.inAppEnabled || row.emailEnabled;
+          }
+          return next;
+        });
+      })
+      .catch(() => {});
+  }, []);
+  // One toggle = in-app AND email for that event; saved the moment it flips,
+  // reverted if the save fails.
+  const setNotif = (key: NotifKey, v: boolean) => {
+    setNotifs(prev => ({ ...prev, [key]: v }));
+    setNotifErr(null);
+    fetch('/api/notifications/preferences', {
+      method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventCode: NOTIF_EVENT_CODE[key], inAppEnabled: v, emailEnabled: v }),
+    }).then(r => { if (!r.ok) throw new Error(); })
+      .catch(() => { setNotifs(prev => ({ ...prev, [key]: !v })); setNotifErr('Could not save that preference — try again.'); });
+  };
 
   // ── Correspondence (CC) ──────────────────────────────────────
   // Addresses copied on every customer-facing email, so the RP holds the same
@@ -1367,6 +1403,14 @@ export default function SettingsPage() {
           <Percent size={14} /> Rules
         </button>
         <button
+          onClick={() => selectTab('maintenance')}
+          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+            mainTab === 'maintenance' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+          }`}
+        >
+          <Wrench size={14} /> Maintenance
+        </button>
+        <button
           onClick={() => selectTab('team')}
           className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
             mainTab === 'team' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
@@ -1385,6 +1429,10 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Team tab ───────────────────────────────────────────── */}
+      {/* ── Maintenance tab — what's offered, per property type, and who does it.
+             The item list itself is managed on the Maintenance List page. ── */}
+      {mainTab === 'maintenance' && <MaintenanceCoveragePanel />}
+
       {mainTab === 'team' && <TeamPanel />}
 
       {/* ── Notifications tab ──────────────────────────────────── */}
@@ -1478,15 +1526,16 @@ export default function SettingsPage() {
         {SHOW_NOTIF_PREFS && (
         <div className="bg-white rounded-2xl p-6 shadow-sm">
           <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
-          <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about.</p>
+          <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about — in the app and by email. Saved as you switch.</p>
+          {notifErr && <p className="text-xs text-red-600 mb-3">{notifErr}</p>}
           <div className="space-y-4">
-            {NOTIF_KEYS.map(key => (
+            {WIRED_NOTIF_KEYS.map(key => (
               <div key={key} className="flex items-center justify-between py-1">
                 <div>
                   <p className="text-sm font-medium text-[#1a1916]">{NOTIF_LABELS[key].title}</p>
                   <p className="text-xs text-[#9b9890]">{NOTIF_LABELS[key].description}</p>
                 </div>
-                <Toggle value={notifs[key]} onChange={v => setNotifs(prev => ({ ...prev, [key]: v }))} />
+                <Toggle value={notifs[key]} onChange={v => setNotif(key, v)} />
               </div>
             ))}
           </div>

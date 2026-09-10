@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
+import { MaintenanceSection } from '@/components/customer/MaintenanceSection';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
 import { taxPortionOf } from '@/lib/chargeTax';
@@ -465,6 +466,9 @@ export default function TenantContractDetailPage() {
 
         {/* Addendums — tenant can review + sign each. RP attaches/removes on their side. */}
         <AddendumsPanel contractId={contract.id} role="tenant" contractStatus={contract.status} />
+
+        {/* Maintenance — raise a request on this lease and track it */}
+        <MaintenanceSection contractId={contract.id} />
 
         {/* Action required banner */}
         {canSign && (

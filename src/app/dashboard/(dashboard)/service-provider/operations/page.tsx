@@ -25,6 +25,11 @@ function JobReadyBanner() {
   const [jr, setJr] = useState<JobReadyLite | null>(null);
   useEffect(() => { apiGet<JobReadyLite>('/service-provider/job-ready').then(setJr).catch(() => {}); }, []);
 
+  // v2: a landlord-invited light vendor is not a marketplace dispatch target —
+  // "get job-ready" is the tier they may upgrade to, not a to-do.
+  let light = false;
+  try { light = sessionStorage.getItem('sp_tier') === 'landlord_vendor'; } catch { /* not light */ }
+  if (light) return null;
   if (!jr || jr.jobReady) return null;
   const done = Object.values(jr.cards).filter((c) => c.complete).length;
   const left = Math.max(0, 5 - done);

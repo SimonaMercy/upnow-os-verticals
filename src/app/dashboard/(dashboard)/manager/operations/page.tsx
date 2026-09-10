@@ -41,8 +41,10 @@ export default function ManagerOperationsPage() {
         key={rp}
         contractsPath={`/manager/contracts/operations?rp=${rp}`}
         leadsPath={`/manager/leads?rp=${rp}`}
+        maintenancePath={`/manager/maintenance/requests?rp=${rp}`}
         contractHref={(id) => `/dashboard/manager/operations/${id}?rp=${rp}`}
         leadHref={(id) => `/dashboard/manager/leads/${id}?rp=${rp}`}
+        maintenanceHref={(id) => `/dashboard/manager/maintenance/${id}?rp=${rp}`}
         rpFilter={rp}
       />
     </Suspense>

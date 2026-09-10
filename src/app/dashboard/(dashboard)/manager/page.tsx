@@ -7,6 +7,7 @@ import {
   Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight,
   RefreshCw, LogIn, LogOut, XCircle, Clock,
   PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus, IdCard, CalendarOff, FileWarning,
+  Wrench, ClipboardList,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -38,6 +39,9 @@ interface ActionItem {
   // problem they are is the bucket, not the field.
   rent?: number; fee?: number;
   deposit?: string | number | null;
+  // Maintenance rows: the request title, and the price waiting on approval
+  // (a quote total or a catalog pre-price). `reason` above carries the hold.
+  title?: string | null; amount?: string | number | null;
 }
 interface Bucket { count: number; items: ActionItem[]; truncated?: boolean }
 interface ActionCenter {
@@ -49,7 +53,15 @@ interface ActionCenter {
   chequesBounced: Bucket; chequesOverdue: Bucket; settlementPending: Bucket;
   amcExpired: Bucket; delayedFollowups: Bucket;
   docsExpired: Bucket; docsNoExpiry: Bucket; docsMissing: Bucket;
+  maintenanceApprovals: Bucket; maintenanceHeld: Bucket;
 }
+/** Why a maintenance request could not route — the decision it waits on. */
+const HOLD_WORDS: Record<string, string> = {
+  no_rule: 'No coverage rule · triage',
+  no_provider: 'No linked provider · route',
+  provider_declined: 'Provider declined · reassign',
+  vacant_unit: 'Vacant unit · no occupant to book',
+};
 
 /** Every Action Center row is the same two things: the unit, and the one state
  *  that says what is owed on it. The building is the group heading, so it never
@@ -113,6 +125,13 @@ export default function ManagerOverview() {
   return <ManagerMultiOverview />;
 }
 
+interface InspectionRow {
+  taskId: number; contractId: number; rpId: number;
+  title: string; dueDate: string | null; overdue: boolean;
+  vendorName: string; propertyName: string | null;
+  attended: boolean; hasDeliveryNote: boolean;
+}
+
 function ManagerMultiOverview() {
   const { user }                            = useAuth();
   const { rps, loading: permsLoading } = useManagerPermissions();
@@ -122,6 +141,7 @@ function ManagerMultiOverview() {
   const [action, setAction]                 = useState<ActionCenter | null>(null);
   const [actionLoading, setActionLoading]   = useState(true);
   const [days, setDays]                     = useState(90);
+  const [inspections, setInspections]       = useState<InspectionRow[] | null>(null);
   const name = user?.name ?? user?.firstName ?? 'Manager';
 
   // LandlordSwitcher scope: ?rp=<id> narrows the headline stats + Action Center
@@ -147,6 +167,23 @@ function ManagerMultiOverview() {
       .finally(() => setActionLoading(false));
   }, [days, scopedRp]);
   useEffect(() => { loadAction(); }, [loadAction]);
+
+  // 0266 — upcoming AMC inspections (attended → delivery note → inspected).
+  // Scoped landlord when one is selected; else merged across every landlord
+  // that grants maintenance (a 403/absence just yields an empty list).
+  useEffect(() => {
+    if (permsLoading) return;
+    const targets = scopedRp ? [scopedRp] : rps.map(r => r.rentalProviderId);
+    if (!targets.length) { setInspections([]); return; }
+    Promise.all(targets.map(id =>
+      apiGet<Omit<InspectionRow, 'rpId'>[]>(`/manager/amc/inspections/upcoming?rp=${id}`)
+        .then(rows => (Array.isArray(rows) ? rows : []).map(r => ({ ...r, rpId: id })))
+        .catch(() => [] as InspectionRow[]),
+    )).then(lists => {
+      const merged = lists.flat().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''));
+      setInspections(merged.slice(0, 8));
+    });
+  }, [permsLoading, scopedRp, rps]);
 
   const loading = statsLoading || permsLoading;
 
@@ -185,6 +222,10 @@ function ManagerMultiOverview() {
     if (!base || !i.reqKey) return base;
     return `${base}${base.includes('?') ? '&' : '?'}kyc=${i.reqKey}`;
   };
+  /** The maintenance request itself — approve / triage / reassign live there. */
+  const maintHref = (i: ActionItem) =>
+    `/dashboard/manager/maintenance/${i.id}${scopeQ(i.rpId)}`;
+  const maintBoardHref = `/dashboard/manager/operations${scopeQ(undefined, 'tab=maintenance&view=kanban')}`;
 
   return (
     <DashboardPage
@@ -433,6 +474,34 @@ function ManagerMultiOverview() {
               status: chequeCount(i, 'overdue'),
               href: leaseHref(i),
             })} />
+          {/* Maintenance (Phase B): the two queues the landlord side owns on the
+              Maintenance board. A price waiting on approval on COVERED work — a
+              provider's quote or a catalog pre-price — and a request held
+              because no rule, no provider or no occupant let it route. Both rows
+              open the request itself: that page carries the approve / triage /
+              reassign controls. Chargeable work is not here — the customer
+              approves and pays that from their own portal. */}
+          <ActionBucket icon={Wrench} color="#0f766e" label="Maintenance approvals" href={maintBoardHref}
+            loading={actionLoading} bucket={action?.maintenanceApprovals}
+            groupBy={buildingOf}
+            compact={i => ({
+              unit: unitOf(i),
+              status: i.amount != null ? `AED ${Number(i.amount).toLocaleString('en-AE')} to approve` : 'Price to approve',
+              href: maintHref(i),
+              note: i.title ?? undefined,
+            })} />
+          <ActionBucket icon={ClipboardList} color="#b45309" label="Maintenance held — your call" href={maintBoardHref}
+            loading={actionLoading} bucket={action?.maintenanceHeld}
+            groupBy={buildingOf}
+            compact={i => ({
+              unit: unitOf(i),
+              status: HOLD_WORDS[i.reason ?? ''] ?? 'Needs a decision',
+              // No rule means the customer is waiting on the landlord's first
+              // word; the other holds are a routing chore, not a customer wait.
+              overdue: i.reason === 'no_rule',
+              href: maintHref(i),
+              note: i.title ?? undefined,
+            })} />
           {/* AMC Expired is deliberately NOT on this dashboard — vendor contracts
               are not lease work and every historically-expired AMC qualified, so the
               card was permanently full of items nobody was chasing. It lives on
@@ -452,6 +521,34 @@ function ManagerMultiOverview() {
               href: kycHref(i),
             })} />
       </div>
+
+      {/* Upcoming AMC inspections — the visits that complete only through the
+          inspection pipeline (attended → delivery note → inspected). */}
+      {inspections != null && inspections.length > 0 && (
+        <div className="rounded-2xl bg-white p-5 mb-8" style={{ boxShadow: 'var(--shadow-sm)' }}>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="text-sm font-bold text-[#1a1916]">Upcoming AMC inspections</h2>
+            <Link href={`/dashboard/manager/amc${scopedRp ? `?rp=${scopedRp}` : ''}`} className="text-xs font-semibold text-[#1a7a5a] underline">AMC page</Link>
+          </div>
+          <div className="grid gap-1.5">
+            {inspections.map(i => (
+              <Link key={`${i.rpId}-${i.taskId}`} href={`/dashboard/manager/amc?rp=${i.rpId}`}
+                className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-lg hover:bg-[#faf9f7] flex-wrap">
+                <span className={`text-[12px] font-bold tabular-nums shrink-0 ${i.overdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`}>
+                  {i.dueDate ? new Date(i.dueDate).toLocaleDateString('en-AE', { day: '2-digit', month: 'short' }) : '—'}
+                  {i.overdue ? ' · overdue' : ''}
+                </span>
+                <span className="text-[13px] font-medium text-[#1a1916] truncate max-w-[220px]">{i.title}</span>
+                <span className="text-[12px] text-[#6b6860] truncate">{i.vendorName}{i.propertyName ? ` · ${i.propertyName}` : ''}</span>
+                <span className="ml-auto flex items-center gap-1.5 shrink-0">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${i.attended ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>attended</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${i.hasDeliveryNote ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>note</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* The "Your Landlords" list is gone: the LandlordSwitcher in the header
           already names every landlord and is where scope actually gets changed,

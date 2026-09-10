@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { MaintenanceSection } from '@/components/customer/MaintenanceSection';
 import {
   CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Clock, Loader2,
   MapPin, Plus, Wrench, XCircle,
@@ -39,7 +41,16 @@ interface BookingRow {
   pendingReschedule?: { id: number; proposedByRole: string; toScheduledAt: string } | null;
   template?: { name?: string | null } | null;
   variant?: { name?: string | null } | null;
+  /** Landlord-routed maintenance jobs carry these (src/maintenance). */
+  source?: 'marketplace' | 'rp_maintenance' | null;
+  payer?: 'customer' | 'rental_provider' | null;
 }
+/** My Services is the customer's MONEY: marketplace bookings and chargeable
+ *  maintenance jobs (their quote to approve, their price to pay). A job the
+ *  LANDLORD pays for has nothing for the customer to do here — its payment /
+ *  quote steps would read as the customer's — so it lives on the Maintenance
+ *  page only. */
+const isMine = (b: BookingRow) => !(b.source === 'rp_maintenance' && b.payer === 'rental_provider');
 
 const STATUS_TONES: Record<string, { bg: string; fg: string; label: string }> = {
   booked:      { bg: '#fef3c7', fg: '#92400e', label: 'Awaiting payment' },
@@ -69,6 +80,14 @@ const fmtWhen = (iso: string) =>
 
 export default function CustomerServicesPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([]);
+  // Two tabs in one place (owner, 31 Aug): Bookings = the customer's marketplace
+  // orders and chargeable maintenance jobs; Maintenance = every request on
+  // their leases, tracked here rather than on a page of its own.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tab: 'bookings' | 'maintenance' = searchParams.get('tab') === 'maintenance' ? 'maintenance' : 'bookings';
+  const setTab = (t: 'bookings' | 'maintenance') =>
+    router.replace(t === 'maintenance' ? '/dashboard/customer/services?tab=maintenance' : '/dashboard/customer/services');
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<number | null>(null);
   const [timeline, setTimeline] = useState<Record<number, TimelineStep[]>>({});
@@ -106,7 +125,7 @@ export default function CustomerServicesPage() {
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: BookingRow[] | { data?: BookingRow[] }) => { setBookings(Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])); void loadDisputes(); })
+      .then((d: BookingRow[] | { data?: BookingRow[] }) => { setBookings((Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])).filter(isMine)); void loadDisputes(); })
       .catch(() => setBookings([]));
 
   const loadReviews = () =>
@@ -307,23 +326,50 @@ export default function CustomerServicesPage() {
     }
   };
 
-  return (
-    <div className="px-6 py-8 max-w-4xl mx-auto">
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-neutral-900)' }}>My Services</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-neutral-500)' }}>
-            Your home-service bookings — track progress, or cancel while it&apos;s free.
-          </p>
+  const tabBtn = (t: 'bookings' | 'maintenance', label: string) => (
+    <button type="button" onClick={() => setTab(t)}
+      className="px-3.5 py-1.5 rounded-lg text-sm font-semibold cursor-pointer"
+      style={tab === t ? { backgroundColor: 'var(--color-primary)', color: '#fff' } : { color: 'var(--color-neutral-500)' }}>
+      {label}
+    </button>
+  );
+  const header = (
+    <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex-1 min-w-0">
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--color-neutral-900)' }}>My Services</h1>
+        <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--color-neutral-500)' }}>
+          {tab === 'maintenance'
+            ? 'Maintenance requests on your leases — what your landlord covers, what is yours to confirm, and where each one stands.'
+            : 'Your home-service bookings — track progress, or cancel while it\u2019s free.'}
+        </p>
+        <div className="inline-flex items-center gap-1 mt-3 p-1 rounded-xl" style={{ background: 'var(--color-base-100, #f4f3ef)' }}>
+          {tabBtn('bookings', 'Bookings')}{tabBtn('maintenance', 'Maintenance')}
         </div>
-        <Link
-          href="/services"
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-        >
+      </div>
+      {tab === 'maintenance' ? (
+        <Link href="/dashboard/customer/spaces" className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white" style={{ backgroundColor: 'var(--color-primary)' }}>
+          <Plus size={15} /> Request maintenance
+        </Link>
+      ) : (
+        <Link href="/services" className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white" style={{ backgroundColor: 'var(--color-primary)' }}>
           <Plus size={15} /> Book a service
         </Link>
+      )}
+    </div>
+  );
+
+  if (tab === 'maintenance') {
+    return (
+      <div className="px-6 py-8 max-w-4xl mx-auto">
+        {header}
+        <MaintenanceSection variant="track" />
       </div>
+    );
+  }
+
+  return (
+    <div className="px-6 py-8 max-w-4xl mx-auto">
+      {header}
 
       {error && (
         <div className="rounded-xl px-4 py-3 mb-4 text-sm" style={{ background: '#fef2f2', color: 'var(--color-error)' }}>{error}</div>

@@ -72,7 +72,8 @@ type NavItem =
 
 /**
  * HIDDEN sections (3 Aug 2026) — parked for a later development cycle:
- * **AMC & Vendors**, **Communications** and **Analytics**. They carry
+ * **Communications** and **Analytics** (AMC un-parked 6 Sep 2026 — it sits
+ * under the Maintenance section until it folds into the vendor pages). They carry
  * `hidden: true` below, which drops them from the rail for every role while
  * leaving the entry (route, icon, ordering) recorded in place. The pages,
  * routes and APIs are untouched and still reachable by URL, so nothing is lost
@@ -81,6 +82,32 @@ type NavItem =
  * analytics" cross-link (`reports/page.tsx`) — deliberately left, since Reports
  * is where Analytics belongs once it returns.
  */
+/** v2 (0260): a landlord-invited vendor's LIGHT portal — its jobs, its
+ *  people, its profile. No marketplace chrome (services, earnings, reviews,
+ *  live map): those belong to the tier the vendor may upgrade to later.
+ *  Picked over NAV.service_provider when the onboarding gate stamped
+ *  sp_tier = landlord_vendor (SpOnboardingGate). */
+/** The SP tier the onboarding gate stamped — reactive, because the stamp
+ *  lands after first render (sessionStorage + the gate's 'sp-tier' event). */
+function useSpTier(): string | null {
+  const [tier, setTier] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('sp_tier'); } catch { return null; }
+  });
+  useEffect(() => {
+    const on = (e: Event) => setTier((e as CustomEvent<string>).detail ?? null);
+    window.addEventListener('sp-tier', on);
+    return () => window.removeEventListener('sp-tier', on);
+  }, []);
+  return tier;
+}
+
+const SP_LIGHT_NAV: NavItem[] = [
+  { label: 'Jobs',        href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs', '/dashboard/service-provider'] },
+  { label: 'Technicians', href: '/dashboard/service-provider/team',       icon: Users },
+  { divider: true },
+  { label: 'Profile',     href: '/dashboard/service-provider/settings',   icon: Settings },
+];
+
 const NAV: Record<UserRole, NavItem[]> = {
   customer: [
     { label: 'My Spaces',   href: '/dashboard/customer/spaces',   icon: BedDouble },
@@ -102,9 +129,19 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, match: ['/rental-provider/dashboard/contracts'] },
     { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
     { divider: true },
+    // v2: maintenance is a first-class section — the request worklist, the item
+    // catalogue, and the landlord's own vendor roster (which also highlights for
+    // the AMC contracts page until that folds in fully).
+    { section: 'Maintenance' },
+    { label: 'Requests',         href: '/rental-provider/dashboard/maintenance',      icon: ClipboardList, match: ['/rental-provider/dashboard/maintenance/'] },
+    { label: 'Maintenance List', href: '/rental-provider/dashboard/maintenance-list', icon: Wrench },
+    { label: 'Vendors',          href: '/rental-provider/dashboard/vendors',          icon: Users },
+    // AMC contracts — destined to fold into the vendor pages as the
+    // commitments layer lands; until then it lives here under Maintenance.
+    { label: 'AMC',              href: '/rental-provider/dashboard/amc',              icon: FileSignature },
+    { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
-    { label: 'AMC & Vendors',    href: '/rental-provider/dashboard/amc',            icon: Wrench, hidden: true },
     { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare, hidden: true },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
@@ -147,12 +184,18 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Leases',           href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
     { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
     { divider: true },
+    // Mirrors the landlord rail's Maintenance section; the header drops on its
+    // own when canManageMaintenance empties it (see sectionsKept).
+    { section: 'Maintenance' },
+    { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'] },
+    { label: 'Maintenance List', href: '/dashboard/manager/maintenance-list', icon: Wrench, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance-coverage'] },
+    { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: 'canManageMaintenance' },
+    { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
     { label: 'Restoration List', href: '/dashboard/manager/restoration-list', icon: Receipt, requirePerm: 'canManageInspections' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
-    { label: 'AMC & Vendors',    href: '/dashboard/manager/amc',        icon: Wrench, requirePerm: 'canManageMaintenance', hidden: true },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
   ],
   technician: [
@@ -339,7 +382,12 @@ function Sidebar({
     scopeRp && href.startsWith('/dashboard/manager') ? `${href}?rp=${scopeRp}` : href;
   // Parked sections (see the HIDDEN note on NAV) drop out for every role, ahead
   // of the manager permission filter so an emptied section header still goes.
-  const rawNav = (NAV[role] ?? []).filter(item => !('hidden' in item && item.hidden));
+  // The onboarding gate stamps the SP tier (sessionStorage + an 'sp-tier'
+  // event, since the stamp lands AFTER this shell first renders); a light
+  // vendor gets its own nav.
+  const spTier = useSpTier();
+  const baseNav = role === 'service_provider' && spTier === 'landlord_vendor' ? SP_LIGHT_NAV : (NAV[role] ?? []);
+  const rawNav = baseNav.filter(item => !('hidden' in item && item.hidden));
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
   // withholds, say, all Finance permissions doesn't leave an empty "Finance").
@@ -597,6 +645,7 @@ function CustomerAvatarMenu() {
    DashboardShell — main export
 ───────────────────────────────────────────── */
 export function DashboardShell({ children }: { children: ReactNode }) {
+  const spTier = useSpTier();
   const { user, loading, isAuthenticated, refresh, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -774,7 +823,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 Managers are invited sub-accounts and never do KYC; technicians DO
                 (SP-131) but their state lives on technicians.compliance_status,
                 surfaced on their own home screen — not on users.kyc_status. */}
-            {['rental_provider', 'service_provider'].includes(role) && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
+            {['rental_provider', 'service_provider'].includes(role) && !(role === 'service_provider' && spTier === 'landlord_vendor') && user.kycStatus && !['verified', 'approved'].includes(user.kycStatus) && (
               <Link
                 href={`${dashboardPath(role)}/documents`}
                 className="hidden sm:flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full"

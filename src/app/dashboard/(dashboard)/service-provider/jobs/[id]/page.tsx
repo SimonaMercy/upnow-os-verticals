@@ -26,6 +26,12 @@ interface Booking {
   id: number; status: string; pricingMode: string | null; serviceName: string | null; packageName: string | null;
   totalAmount: number | string | null; scheduledAt: string; hours: number | null; addressText: string | null;
   tenant?: { user?: { name?: string | null } | null } | null; timeline?: TimelineStep[];
+  /** Company-aware customer name from the API (a company by its company name). */
+  customerName?: string | null;
+  /** Landlord-routed maintenance job (src/maintenance): who pays and the request it serves. */
+  source?: 'marketplace' | 'rp_maintenance' | null;
+  payer?: 'customer' | 'rental_provider' | null;
+  maintenanceRequestId?: number | null;
 }
 interface Technician { id: number; name: string; jobStatus: string }
 interface TeamMember { id: number; name: string; isLeadCapable: boolean }
@@ -202,7 +208,14 @@ export default function ProviderJobPage() {
   if (!data) return null;
 
   const { booking: b, technician, team, quote, accepted } = data;
-  const st = STATUS[b.status] ?? STATUS.booked;
+  // A landlord-routed maintenance job: the landlord (not the customer) owns the
+  // approval when they pay, and there is no marketplace payment step at all.
+  const isMaint = b.source === 'rp_maintenance';
+  const landlordPays = isMaint && b.payer === 'rental_provider';
+  const approver = landlordPays ? 'landlord' : 'customer';
+  const st = b.status === 'booked' && landlordPays
+    ? { label: 'Awaiting landlord approval', bg: TINT_AMBER, fg: AMBER }
+    : (STATUS[b.status] ?? STATUS.booked);
   const isQuote = b.pricingMode === 'quote';
   const next = NEXT[b.status];
   const lineAmt = (r: { quantity: string; unitPrice: string }) => (Number(r.quantity) || 0) * (Number(r.unitPrice) || 0);
@@ -218,6 +231,11 @@ export default function ProviderJobPage() {
         <h1 style={{ fontSize: 24, fontWeight: 700, color: INK, letterSpacing: '-.01em' }}>{label}</h1>
         <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '4px 10px', background: st.bg, color: st.fg }}>{st.label}</span>
         <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, color: FAINT }}>BK-{b.id}</span>
+        {isMaint && (
+          <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '4px 10px', background: landlordPays ? TINT_GREEN : '#E0F2FE', color: landlordPays ? GREEN : '#0369A1' }}>
+            Landlord maintenance{b.maintenanceRequestId ? ` · MR-${b.maintenanceRequestId}` : ''} · {landlordPays ? 'landlord pays' : 'customer pays'}
+          </span>
+        )}
       </div>
 
       {error && <div style={{ marginTop: 12, background: '#FEF2F2', color: '#B42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
@@ -272,10 +290,10 @@ export default function ProviderJobPage() {
       {/* Job facts */}
       <div style={card({ marginTop: 16, padding: '16px 18px' })}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 14 }}>
-          <div><div style={lbl}>Customer</div><div style={val}>{b.tenant?.user?.name ?? 'Customer'}</div></div>
+          <div><div style={lbl}>Customer</div><div style={val}>{b.customerName ?? b.tenant?.user?.name ?? 'Customer'}</div></div>
           <div><div style={lbl}>When</div><div style={val}>{fmtWhen(b.scheduledAt)}{b.hours ? ` · ${b.hours}h` : ''}</div></div>
           <div><div style={lbl}>Address</div><div style={val}>{b.addressText ?? '—'}</div></div>
-          <div><div style={lbl}>Price</div><div style={val}>{b.totalAmount != null ? aed(b.totalAmount) : (isQuote ? 'To be quoted' : '—')}</div></div>
+          <div><div style={lbl}>{landlordPays ? 'Cost' : 'Price'}</div><div style={val}>{b.totalAmount != null ? aed(b.totalAmount) : (landlordPays ? 'Covered by the landlord — record at close-out' : isQuote ? 'To be quoted' : '—')}</div></div>
         </div>
         {/* SP-190 · propose / answer a new time (confirmed | assigned only) */}
         <ReschedulePanel bookingId={b.id} bookingStatus={b.status} onChanged={load} />
@@ -323,7 +341,7 @@ export default function ProviderJobPage() {
             <>
               {quote?.status === 'rejected' && (
                 <div style={{ marginTop: 10, padding: '9px 12px', background: TINT_AMBER, border: '1px solid #F5D9A8', borderRadius: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>The customer declined your quote.</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>The {approver} declined your quote.</span>
                   {quote.rejectionReason && <span style={{ fontSize: 13, color: MUTE }}> “{quote.rejectionReason}”</span>}
                   <span style={{ fontSize: 13, color: MUTE }}> Send a revised quote below.</span>
                 </div>
@@ -331,10 +349,16 @@ export default function ProviderJobPage() {
               {quote?.status === 'expired' && (
                 <div style={{ marginTop: 10, padding: '9px 12px', background: TINT_AMBER, border: '1px solid #F5D9A8', borderRadius: 10 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: AMBER }}>Your previous quote expired.</span>
-                  <span style={{ fontSize: 13, color: MUTE }}> Send a fresh quote below if the customer still wants the job.</span>
+                  <span style={{ fontSize: 13, color: MUTE }}> Send a fresh quote below if the {approver} still wants the job.</span>
                 </div>
               )}
-              <p style={{ fontSize: 13, color: MUTE, marginTop: quote ? 10 : 4 }}>After your assessment, price the job. The customer approves and pays before you start.</p>
+              <p style={{ fontSize: 13, color: MUTE, marginTop: quote ? 10 : 4 }}>
+                {landlordPays
+                  ? (b.status === 'booked'
+                    ? 'After your assessment, price the job. The landlord approves before you start.'
+                    : "Already approved — the landlord's own team or an approved price. A quote here is your estimate for the landlord's close-out, not a gate.")
+                  : 'After your assessment, price the job. The customer approves and pays before you start.'}
+              </p>
               <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {rows.map((r, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8 }}>
@@ -362,6 +386,24 @@ export default function ProviderJobPage() {
               </div>
               <input placeholder="Summary for the customer (optional)" value={summary} onChange={(e) => setSummary(e.target.value)}
                 style={{ width: '100%', marginTop: 8, border: BORDER, borderRadius: 9, padding: '8px 10px', fontSize: 13, color: INK }} />
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: MUTE }}>Supplier quotations (optional, up to 4)</div>
+                <p style={{ fontSize: 12, color: FAINT, marginTop: 2 }}>Photos of the quotations you collected — the {approver} sees them beside your price.</p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  {media.quote.map((p) => (
+                    <a key={p.id} href={p.viewUrl} target="_blank" rel="noopener noreferrer" title={p.caption ?? 'Open quotation'}>
+                      <img src={p.viewUrl} alt={p.caption ?? 'Quotation'} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, border: BORDER }} />
+                    </a>
+                  ))}
+                  {media.quote.length < 4 && (
+                    <label style={{ width: 72, height: 72, border: '1px dashed #cfccc4', borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 22, color: FAINT, cursor: 'pointer' }}>
+                      {mediaBusy === 'quote' ? '…' : '+'}
+                      <input type="file" accept="image/*" style={{ display: 'none' }} disabled={mediaBusy === 'quote'}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void addPhoto('quote', f); e.target.value = ''; }} />
+                    </label>
+                  )}
+                </div>
+              </div>
               {draftMaterials > 0 && (
                 <div style={{ marginTop: 10, fontSize: 12, color: FAINT, display: 'flex', gap: 14 }}>
                   <span>Labour {aed(draftLabor)}</span><span>Materials {aed(draftMaterials)}</span>
@@ -371,7 +413,7 @@ export default function ProviderJobPage() {
                 <span style={{ fontSize: 15, fontWeight: 700, color: INK }}>Total {aed(draftTotal)}</span>
                 <button disabled={busy || draftTotal <= 0} onClick={submitQuote}
                   style={{ background: GREEN, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 14, fontWeight: 600, opacity: busy || draftTotal <= 0 ? 0.5 : 1, cursor: 'pointer' }}>
-                  {busy ? 'Sending…' : 'Send quote to customer'}
+                  {busy ? 'Sending…' : `Send quote to ${approver}`}
                 </button>
               </div>
             </>
@@ -379,7 +421,7 @@ export default function ProviderJobPage() {
             <div style={{ marginTop: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: quote.status === 'approved' ? TINT_GREEN : TINT_AMBER, color: quote.status === 'approved' ? GREEN : AMBER }}>
-                  {quote.status === 'approved' ? 'Approved by customer' : 'Sent — awaiting customer approval'}
+                  {quote.status === 'approved' ? `Approved by ${approver}` : `Sent — awaiting ${approver} approval`}
                 </span>
               </div>
               {quote.summary && <p style={{ fontSize: 13, color: MUTE, marginTop: 8 }}>{quote.summary}</p>}
@@ -404,6 +446,18 @@ export default function ProviderJobPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: HAIRLINE, fontWeight: 700, color: INK }}>
                 <span>Total</span><span>{aed(quote.totalAmount)}</span>
               </div>
+              {media.quote.length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: HAIRLINE }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: MUTE }}>Attached quotations · {media.quote.length}</div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                    {media.quote.map((p) => (
+                      <a key={p.id} href={p.viewUrl} target="_blank" rel="noopener noreferrer" title={p.caption ?? 'Open quotation'}>
+                        <img src={p.viewUrl} alt={p.caption ?? 'Quotation'} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 10, border: BORDER }} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -413,7 +467,11 @@ export default function ProviderJobPage() {
       <div style={card({ marginTop: 14, padding: '16px 18px' })}>
         <div style={lbl}>Job progress</div>
         {b.status === 'booked' && isQuote ? (
-          <p style={{ fontSize: 14, color: MUTE, marginTop: 8 }}>Waiting for the customer to approve your quote. You&apos;ll be able to start once they pay.</p>
+          <p style={{ fontSize: 14, color: MUTE, marginTop: 8 }}>
+            {landlordPays
+              ? 'Waiting for the landlord to approve. You\u2019ll be able to start once they do.'
+              : 'Waiting for the customer to approve your quote. You\u2019ll be able to start once they pay.'}
+          </p>
         ) : b.status === 'assigned' ? (
           <div style={{ marginTop: 10 }}>
             {accepted && <div style={{ fontSize: 13, fontWeight: 600, color: GREEN, marginBottom: 10 }}>✓ You accepted this job</div>}
@@ -469,7 +527,11 @@ export default function ProviderJobPage() {
         <div onClick={() => setDeclineOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,18,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} style={card({ width: 440, maxWidth: '100%', padding: 22 })}>
             <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>Decline this job?</div>
-            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>We&apos;ll reassign BK-{b.id} to another provider (or hand it to Ops). A reason helps us dispatch better.</p>
+            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>
+              {isMaint
+                ? <>BK-{b.id} goes back to the landlord, who re-routes it to another of their providers. A reason helps them.</>
+                : <>We&apos;ll reassign BK-{b.id} to another provider (or hand it to Ops). A reason helps us dispatch better.</>}
+            </p>
             <textarea value={declineReason} onChange={(e) => setDeclineReason(e.target.value)} rows={3}
               placeholder="Reason (optional) — e.g. fully booked at that time"
               style={{ width: '100%', marginTop: 12, border: BORDER, borderRadius: 10, padding: '9px 11px', fontSize: 13, color: INK, resize: 'vertical', fontFamily: 'inherit' }} />
