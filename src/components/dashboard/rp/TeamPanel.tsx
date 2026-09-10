@@ -65,6 +65,8 @@ interface ManagerPermissions {
   canViewReports:       boolean;
   // Maintenance & communication
   canManageMaintenance: boolean;
+  canManageVendors:     boolean;
+  canManageAmc:         boolean;
   canCommunicateTenants: boolean;
   // Per-report access — report slugs (empty = all reports)
   reportAccess:         string[];
@@ -158,10 +160,12 @@ export const PERM_GROUPS = [
     ],
   },
   {
-    label: 'AMC & Vendors',
-    description: 'The AMC & Vendors section',
+    label: 'Maintenance',
+    description: 'Requests, the vendor roster and AMC contracts — three switches (0275)',
     perms: [
-      { key: 'canManageMaintenance', label: 'Handle AMC & maintenance',     meta: 'can_manage_maintenance' },
+      { key: 'canManageMaintenance', label: 'Handle maintenance requests & coverage', meta: 'can_manage_maintenance' },
+      { key: 'canManageVendors',     label: 'Handle vendors (roster, invites, licences)', meta: 'can_manage_vendors' },
+      { key: 'canManageAmc',         label: 'Handle AMC contracts, visits & payments', meta: 'can_manage_amc' },
     ],
   },
   {
@@ -237,12 +241,12 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'operations',
     label: 'Operations / Property Manager',
-    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canViewFinancials', 'canViewReports'],
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canViewFinancials', 'canViewReports'],
   },
   {
     id: 'maintenance',
     label: 'Maintenance Coordinator',
-    keys: ['canListProperties', 'canManageMaintenance'],
+    keys: ['canListProperties', 'canManageMaintenance', 'canManageVendors', 'canManageAmc'],
   },
 ];
 

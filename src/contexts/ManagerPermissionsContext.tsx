@@ -52,6 +52,10 @@ export interface RpPermissions {
      *  may attach a file is not thereby allowed to destroy one (migration 0247). */
     canDeleteDocuments:   boolean;
     canManageMaintenance: boolean;
+    /** 0275 — the vendor roster. */
+    canManageVendors:     boolean;
+    /** 0275 — AMC contracts, visits, payables. */
+    canManageAmc:         boolean;
     // Communication & admin
     canCommunicateTenants:boolean;
     canEscalateToAdmin:   boolean;

@@ -7,7 +7,6 @@
  */
 import { Lock, Building2 } from 'lucide-react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { MaintenanceRequestView } from '@/components/upnow/MaintenanceRequestView';
 
@@ -19,7 +18,6 @@ export default function ManagerMaintenanceRequestPage() {
   if (!permsLoading && (needsLandlord || !allowed)) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-end mb-4"><LandlordSwitcher /></div>
         <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-[18px] px-7 py-10 mt-12">
           <div className={`w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 ${needsLandlord ? 'bg-[#eef3f1] text-[#2e6f5e]' : 'bg-[#ffedd5] text-[#9a3412]'}`}>
             {needsLandlord ? <Building2 size={20} /> : <Lock size={20} />}
@@ -37,7 +35,6 @@ export default function ManagerMaintenanceRequestPage() {
 
   return (
     <div className="px-2 py-4">
-      <div className="flex items-center justify-end mb-2 max-w-4xl mx-auto px-4"><LandlordSwitcher /></div>
       {effectiveRp != null && (
         <MaintenanceRequestView
           base="/manager/maintenance"

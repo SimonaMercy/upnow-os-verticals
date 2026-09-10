@@ -6,12 +6,11 @@
  * /manager/amc/*?rp=<id>, gated on the per-landlord canManageMaintenance flag.
  */
 import { Lock, Building2 } from 'lucide-react';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { AmcView } from '@/components/amc/AmcView';
 
 export default function ManagerAmcPage() {
-  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageMaintenance');
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageAmc');
 
   // "Select a landlord" and "Permission required" both keep the switcher visible
   // so the manager can change scope from here (AMC renders its own switcher, not
@@ -19,7 +18,6 @@ export default function ManagerAmcPage() {
   if (!permsLoading && (needsLandlord || !allowed)) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-end mb-4"><LandlordSwitcher /></div>
         {needsLandlord ? (
           <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-[18px] px-7 py-10 mt-12">
             <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#eef3f1] text-[#2e6f5e]"><Building2 size={20} /></div>
@@ -43,7 +41,6 @@ export default function ManagerAmcPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-end mb-4"><LandlordSwitcher /></div>
       {effectiveRp != null && <AmcView base="/manager/amc" rp={effectiveRp} propertiesUrl="/manager/properties" />}
     </div>
   );

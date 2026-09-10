@@ -16,12 +16,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  Building2, DoorOpen,
-  Percent, X,
-  TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye,
-  RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText, Wrench,
-} from 'lucide-react';
+import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { contractHref, type ContractSurface } from '@/lib/contractHref';
 import { unitHref } from '@/lib/unitHref';
@@ -390,18 +385,6 @@ const FEED_POLL_MS = 5_000;
  *  `target` always: a bare _blank hands the opened page `window.opener`. */
 const NEW_TAB = { target: '_blank', rel: 'noopener noreferrer' } as const;
 
-/** One open row of the Maintenance board (GET /maintenance/requests?scope=open). */
-interface MaintRow {
-  id: number; stage: string; coverage: string | null; holdReason: string | null;
-  quote: { totalAed: number } | null; booking: { totalAed: number | null } | null;
-}
-/** "2 no rule · 1 provider declined" — the held card's caption names its reasons. */
-function heldBreakdown(rows: MaintRow[]): string {
-  const words: Record<string, string> = { no_rule: 'no rule', no_provider: 'no provider', provider_declined: 'provider declined', vacant_unit: 'vacant unit' };
-  const counts = new Map<string, number>();
-  for (const r of rows) counts.set(r.holdReason ?? 'other', (counts.get(r.holdReason ?? 'other') ?? 0) + 1);
-  return [...counts.entries()].map(([k, n]) => `${n} ${words[k] ?? k}`).join(' · ');
-}
 
 function fmtAed(n: number) {
   // TWO decimals in the abbreviations, and the trailing zero is kept.
@@ -641,9 +624,6 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
    *  manager-portal equivalent, and a manager has no business managing the list
    *  of managers, so the tile does not link in that portal. */
   const managersHref = manager ? null : '/rental-provider/dashboard/settings?tab=team';
-  const maintBoardHref = manager
-    ? `/dashboard/manager/operations?tab=maintenance&view=kanban&rp=${manager.rp}`
-    : '/rental-provider/dashboard/operations?tab=maintenance&view=kanban';
   /** Rent vs Market opens the report the two figures come from. The manager
    *  portal has no per-slug report routes — its hub takes the report inline on
    *  ?slug= — so the two portals reach it by different means rather than one of
@@ -701,26 +681,6 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const [timePerDay,  setTimePerDay]  = useState<ManagerTimeData | null>(null);
   const [statsErr,    setStatsErr]    = useState<string | null>(null);
   const [finErr,      setFinErr]      = useState<string | null>(null);
-  // Maintenance needing the landlord side (Phase B) — read off the open board,
-  // the same list the Operations → Maintenance tab renders, so the two figures
-  // can never disagree. Hidden when the read fails (a manager without the
-  // Manage Maintenance permission gets a 403 here, not a broken card).
-  const [maint, setMaint] = useState<{ approvals: MaintRow[]; held: MaintRow[] } | null | 'hidden'>(null);
-  useEffect(() => {
-    const ac = new AbortController();
-    fetch(`/api/${manager ? 'manager/maintenance/requests' : 'maintenance/requests'}?${rpQ}scope=open`, { credentials: 'include', signal: ac.signal })
-      .then(async r => {
-        if (!r.ok) throw new Error(String(r.status));
-        const rows = (await r.json()) as MaintRow[];
-        const list = Array.isArray(rows) ? rows : [];
-        setMaint({
-          approvals: list.filter(r => r.coverage === 'covered' && r.stage === 'awaiting_approval'),
-          held: list.filter(r => r.stage === 'requested' && !!r.holdReason),
-        });
-      })
-      .catch(() => { if (!ac.signal.aborted) setMaint('hidden'); });
-    return () => ac.abort();
-  }, [manager, rpQ]);
   const [extrasErr,   setExtrasErr]   = useState<string | null>(null);
   const [refreshing,  setRefreshing]  = useState(false);
 
@@ -1680,45 +1640,6 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         </div>
       </section>
 
-      {/* ── Section 3b: MAINTENANCE ──────────────────────────────────────────
-          The two queues the landlord side owns on the Maintenance board (Phase
-          B): a price waiting on approval on COVERED work — a provider's quote or
-          a catalog pre-price — and a request held because no rule, no provider
-          or no occupant let it route. Money is on the first because AED 350 and
-          AED 9,500 are not the same decision; the second names its reasons.
-          Chargeable work is absent by design: the customer approves and pays
-          that from their own portal. */}
-      {maint !== 'hidden' && (
-        <section className="space-y-4">
-          <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
-            Maintenance
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <KpiCard
-              icon={<Wrench size={12} />}
-              label="Approvals"
-              value={maint ? String(maint.approvals.length) : '…'}
-              sub={maint
-                ? (maint.approvals.length
-                  ? `${fmtAed(maint.approvals.reduce((s, r) => s + (r.quote?.totalAed ?? r.booking?.totalAed ?? 0), 0))} of covered work priced, awaiting your yes`
-                  : 'no covered work waiting on a price decision')
-                : 'covered work priced by the provider'}
-              tone={(maint && maint.approvals.length > 0) ? 'warn' : 'default'}
-              href={maintBoardHref}
-            />
-            <KpiCard
-              icon={<AlertTriangle size={12} />}
-              label="Held"
-              value={maint ? String(maint.held.length) : '…'}
-              sub={maint
-                ? (maint.held.length ? heldBreakdown(maint.held) : 'every request has routed')
-                : 'requests that could not route'}
-              tone={(maint && maint.held.length > 0) ? 'warn' : 'default'}
-              href={maintBoardHref}
-            />
-          </div>
-        </section>
-      )}
 
       {/* ── Section 4: OCCUPANCY & RENEWALS ───────────────────────────────
           The same live state as the strip above, at the size these two need:

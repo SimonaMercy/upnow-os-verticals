@@ -17,6 +17,7 @@ import { apiPatch, apiPost } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { openDocViewer } from '@/lib/docViewer';
 
+const url = (base: string, rp: number | null | undefined, path: string) => rp != null ? `${base}${path}${path.includes('?') ? '&' : '?'}rp=${rp}` : `${base}${path}`;
 export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier';
 export interface VendorFormValue {
   serviceProviderId: number; name: string; kind: VendorKind; category: string | null;
@@ -51,8 +52,10 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-export function VendorForm({ mode, initial, groups, onClose, onDone }: {
+export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/maintenance', rp = null }: {
   mode: 'add' | 'edit'; initial?: VendorFormValue | null; groups: Group[]; onClose: () => void; onDone: () => void;
+  /** '/maintenance' for the landlord, '/manager/maintenance' (+ rp) for a manager. */
+  base?: string; rp?: number | null;
 }) {
   const v = initial ?? null;
   const [name, setName] = useState(v?.name ?? '');
@@ -89,7 +92,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone }: {
       };
       let spId = v?.serviceProviderId ?? null;
       if (mode === 'add') {
-        const created = await apiPost<{ serviceProviderId: number }>('/maintenance/vendors', {
+        const created = await apiPost<{ serviceProviderId: number }>(url(base, rp, '/vendors'), {
           name: name.trim(), kind, ...(category.trim() ? { category: category.trim() } : {}),
           relationship: service ? relationship : 'contracted_vendor', entityType,
           ...(phone.trim() ? { phone: phone.trim() } : {}), ...(email.trim() ? { email: email.trim() } : {}),
@@ -97,7 +100,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone }: {
         });
         spId = created?.serviceProviderId ?? null;
       } else {
-        await apiPatch(`/maintenance/vendors/${spId}`, {
+        await apiPatch(url(base, rp, `/vendors/${spId}`), {
           name: name.trim(), kind, category: category.trim() || null,
           relationship: service ? relationship : 'contracted_vendor', entityType,
           ...(contactLocked ? {} : { phone: phone.trim(), email: email.trim() }),
@@ -111,7 +114,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone }: {
           displayName: `Trade licence${licNo.trim() ? ` · ${licNo.trim()}` : ''}`, file: licFile,
           documentNumber: licNo.trim() || null, expiryDate: licExpiry || null,
         });
-        if (id != null) await apiPatch(`/maintenance/vendors/${spId}`, { tradeLicenceDocId: id });
+        if (id != null) await apiPatch(url(base, rp, `/vendors/${spId}`), { tradeLicenceDocId: id });
       }
       onDone();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not save the vendor.'); }

@@ -10,7 +10,6 @@
  */
 import Link from 'next/link';
 import { Lock, Building2, ArrowLeft } from 'lucide-react';
-import { LandlordSwitcher } from '@/components/dashboard/LandlordSwitcher';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 
@@ -20,7 +19,6 @@ export default function ManagerMaintenanceCoveragePage() {
   if (!permsLoading && (needsLandlord || !allowed)) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-end mb-4"><LandlordSwitcher /></div>
         <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-[18px] px-7 py-10 mt-12">
           <div className={`w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 ${needsLandlord ? 'bg-[#eef3f1] text-[#2e6f5e]' : 'bg-[#ffedd5] text-[#9a3412]'}`}>
             {needsLandlord ? <Building2 size={20} /> : <Lock size={20} />}
@@ -46,7 +44,6 @@ export default function ManagerMaintenanceCoveragePage() {
           <h1 className="text-2xl font-bold text-[#1a1916]">Maintenance Coverage</h1>
           <p className="text-sm text-[#6b6860] max-w-xl">What this landlord covers during a tenancy, who pays, and which provider does the work. Items themselves are managed on the Maintenance List.</p>
         </div>
-        <LandlordSwitcher />
       </div>
       {effectiveRp != null && <MaintenanceCoveragePanel manager={{ rp: effectiveRp }} />}
     </div>
