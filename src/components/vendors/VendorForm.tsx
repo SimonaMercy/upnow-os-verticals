@@ -18,7 +18,8 @@ import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { openDocViewer } from '@/lib/docViewer';
 
 const url = (base: string, rp: number | null | undefined, path: string) => rp != null ? `${base}${path}${path.includes('?') ? '&' : '?'}rp=${rp}` : `${base}${path}`;
-export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier';
+/** 0279 adds landlord (head landlord / authority the rent goes to) and internal (employees). */
+export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier' | 'landlord' | 'internal';
 export interface VendorFormValue {
   serviceProviderId: number; name: string; kind: VendorKind; category: string | null;
   relationship: 'internal_team' | 'contracted_vendor'; entityType: string | null;
@@ -29,10 +30,11 @@ export interface VendorFormValue {
 }
 interface Group { id: number; name: string }
 
-export const KIND_LABEL: Record<VendorKind, string> = { service: 'Service', utility: 'Utility', government: 'Government', insurance: 'Insurance', supplier: 'Supplier' };
+export const KIND_LABEL: Record<VendorKind, string> = { service: 'Service', utility: 'Utility', government: 'Government', insurance: 'Insurance', supplier: 'Supplier', landlord: 'Head landlord', internal: 'Internal' };
 const KIND_HINT: Record<VendorKind, string> = {
   service: 'e.g. Elevator Maintenance, Pest Control', utility: 'e.g. Utility – Power, Utility – Water',
   government: 'e.g. Land Renewal, Municipal Fees', insurance: 'e.g. Building Insurance', supplier: 'e.g. Cleaning Material',
+  landlord: 'e.g. Land Renewal, Main Lease, Sub Lease Tax', internal: 'e.g. Employee Salary',
 };
 
 const field = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2.5 text-sm bg-white text-[#1a1916] placeholder:text-[#b8b5ad] focus:outline-none focus:border-[#2e9f82] focus:ring-2 focus:ring-[#2e9f82]/15 disabled:bg-[#f9f8f6] disabled:text-[#9b9890]';

@@ -138,7 +138,6 @@ const NAV: Record<UserRole, NavItem[]> = {
     // the AMC contracts page until that folds in fully).
     { section: 'Maintenance' },
     { label: 'Requests',         href: '/rental-provider/dashboard/maintenance',      icon: ClipboardList, match: ['/rental-provider/dashboard/maintenance/'], ...DEV_ONLY },
-    { label: 'Maintenance List', href: '/rental-provider/dashboard/maintenance-list', icon: Wrench, ...DEV_ONLY },
     { label: 'Vendors',          href: '/rental-provider/dashboard/vendors',          icon: Users },
     // AMC contracts — destined to fold into the vendor pages as the
     // commitments layer lands; until then it lives here under Maintenance.
@@ -149,14 +148,15 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare, hidden: true },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
-    { label: 'Restoration List', href: '/rental-provider/dashboard/restoration-list', icon: Receipt },
     // What the managers are doing — the visual overview built on the activity
     // log. Sits directly above Settings, where the team is administered.
     // LANDLORD-ONLY: the manager rail has no counterpart, and the API refuses a
     // manager outright (see ReportsController's team-overview routes).
     { label: 'Team',             href: '/rental-provider/dashboard/team',           icon: Users },
     { divider: true },
-    { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings },
+    // Profile OUT of Settings; Maintenance List / Restoration List / AMC categories IN (owner, 12 Sep).
+    { label: 'My Profile',       href: '/rental-provider/dashboard/profile',        icon: UserCircle },
+    { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings, match: ['/rental-provider/dashboard/maintenance-list', '/rental-provider/dashboard/restoration-list', '/rental-provider/dashboard/amc/categories'] },
   ],
   service_provider: [
     // Onboarding, Team and Documents intentionally have no nav entries:

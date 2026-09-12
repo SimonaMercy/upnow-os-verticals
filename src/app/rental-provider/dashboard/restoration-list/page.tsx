@@ -58,7 +58,7 @@ function catUnitLabel(key: string): string {
  * with `manager={{ rp }}`, which swaps every call to the landlord-scoped
  * /manager/inspection-price-book?rp= endpoints (gated by canManageInspections).
  */
-export function RestorationListWorkspace({ manager }: { manager?: { rp: number } }) {
+export function RestorationListWorkspace({ manager, embedded = false }: { manager?: { rp: number }; embedded?: boolean }) {
   const router = useRouter();
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -196,14 +196,16 @@ export function RestorationListWorkspace({ manager }: { manager?: { rp: number }
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+    <div className={embedded ? 'pb-12' : 'max-w-4xl mx-auto px-4 py-6 pb-24'}>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer">
+          {!embedded && <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer">
             <ArrowLeft size={15} /> Back
-          </button>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Restoration List</h1>
-          <p className="text-sm text-[#6b6860] max-w-xl">Reference unit prices used by the move-in / move-out inspection. Seeded from the platform standard — edit any rate to match your properties; the inspection scaffold uses <span className="font-semibold">your</span> prices.</p>
+          </button>}
+          {!embedded && <h1 className="text-2xl font-bold text-[#1a1916]">Restoration List</h1>}
+          {embedded
+            ? <p className="text-sm text-[#6b6860]">Unit prices the move-in / move-out inspection uses. Edit any rate in place.</p>
+            : <p className="text-sm text-[#6b6860] max-w-xl">Reference unit prices used by the move-in / move-out inspection. Seeded from the platform standard — edit any rate to match your properties; the inspection scaffold uses <span className="font-semibold">your</span> prices.</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button type="button" onClick={() => setAddingSection(true)}

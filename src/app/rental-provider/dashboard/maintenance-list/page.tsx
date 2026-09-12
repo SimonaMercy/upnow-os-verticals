@@ -27,7 +27,7 @@ interface Payload {
  * `manager={{ rp }}`, which swaps every call to the landlord-scoped
  * /manager/maintenance/*?rp= mirror (gated by canManageMaintenance).
  */
-export function MaintenanceListWorkspace({ manager }: { manager?: { rp: number } }) {
+export function MaintenanceListWorkspace({ manager, embedded = false }: { manager?: { rp: number }; embedded?: boolean }) {
   const router = useRouter();
   const u = useCallback((path: string) => manager
     ? `/manager/maintenance${path}${path.includes('?') ? '&' : '?'}rp=${manager.rp}`
@@ -95,19 +95,21 @@ export function MaintenanceListWorkspace({ manager }: { manager?: { rp: number }
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+    <div className={embedded ? 'pb-12' : 'max-w-4xl mx-auto px-4 py-6 pb-24'}>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer">
+          {!embedded && <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer">
             <ArrowLeft size={15} /> Back
-          </button>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Maintenance List</h1>
-          <p className="text-sm text-[#6b6860] max-w-xl">
-            The maintenance items your customers can raise during a tenancy, grouped the way services
-            are offered. What's <span className="font-semibold">covered</span>, for which property type,
-            and which provider does the work is set in{' '}
-            <Link href={coverageHref} className="text-[#1a7a5a] font-semibold underline">{manager ? 'Maintenance Coverage' : 'Settings → Maintenance'}</Link>.
-          </p>
+          </button>}
+          {!embedded && <h1 className="text-2xl font-bold text-[#1a1916]">Maintenance List</h1>}
+          {embedded
+            ? <p className="text-sm text-[#6b6860]">What a customer can raise during a tenancy. Hide what you don&apos;t handle; add your own.</p>
+            : <p className="text-sm text-[#6b6860] max-w-xl">
+                The maintenance items your customers can raise during a tenancy, grouped the way services
+                are offered. What&apos;s <span className="font-semibold">covered</span>, for which property type,
+                and which provider does the work is set in{' '}
+                <Link href={coverageHref} className="text-[#1a7a5a] font-semibold underline">{manager ? 'Maintenance Coverage' : 'Settings → Maintenance coverage'}</Link>.
+              </p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button type="button" onClick={() => setAddingCategory(true)}

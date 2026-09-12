@@ -3,9 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench } from 'lucide-react';
+import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
+import { MaintenanceListWorkspace } from '../maintenance-list/page';
+import { RestorationListWorkspace } from '../restoration-list/page';
+import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -503,7 +506,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'team' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'team' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -654,18 +657,36 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   );
 }
 
-const MAIN_TABS: MainTab[] = ['general', 'fee_rules', 'maintenance', 'team', 'notifications'];
+// Settings tabs (owner, 12 Sep: the profile moved OUT to its own page; the
+// Maintenance List, Restoration List and AMC categories moved IN).
+const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'team', 'notifications'];
+/** The left-hand settings menu, grouped by what the landlord is doing. */
+const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
+  { title: 'Leasing', tabs: ['fee_rules'] },
+  { title: 'Maintenance', tabs: ['maintenance', 'maintenance_list', 'restoration'] },
+  { title: 'Contracts', tabs: ['categories'] },
+  { title: 'Account', tabs: ['team', 'notifications'] },
+];
+const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }> }> = {
+  // Two maintenance tabs read as one thing to the owner (12 Sep) — say what each is:
+  // coverage = what is offered per property type and who does it; items = what a customer can raise.
+  general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
+  maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
+  categories: { label: 'AMC categories', Icon: FileSignature }, team: { label: 'Team', Icon: Users }, notifications: { label: 'Notifications', Icon: Bell },
+};
 
-export default function SettingsPage() {
+/** One component, two pages: /settings (tabs) and /profile (the business profile alone). */
+export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile' }) {
   const { user, refresh } = useAuth();
-  const [mainTab, setMainTab] = useState<MainTab>('general');
+  const [mainTab, setMainTab] = useState<MainTab>(view === 'profile' ? 'general' : 'fee_rules');
 
   // Persist the active tab in the URL (?tab=) so it survives a page refresh and
-  // stays shareable. Restore from the query param on mount (default: general).
+  // stays shareable. Restore from the query param on mount.
   useEffect(() => {
+    if (view === 'profile') return;
     const t = new URLSearchParams(window.location.search).get('tab');
     if (t && (MAIN_TABS as string[]).includes(t)) setMainTab(t as MainTab);
-  }, []);
+  }, [view]);
 
   // Switch tab + reflect it in the URL (replaceState — no history spam / no back-
   // button tab cycling; a refresh lands back on the same tab).
@@ -1380,53 +1401,34 @@ export default function SettingsPage() {
     <div className="p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">Settings</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">Manage your business details, rules, and preferences.</p>
+        <h1 className="text-2xl font-bold text-[#1a1916]">{view === 'profile' ? 'My Profile' : 'Settings'}</h1>
+        <p className="text-sm text-[#6b6860] mt-0.5">{view === 'profile' ? 'Your business details and KYC documents.' : 'How your business runs on UpNow.'}</p>
       </div>
 
-      {/* Top-level tabs */}
-      <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e8e6e0] mb-6 w-fit">
-        <button
-          onClick={() => selectTab('general')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-            mainTab === 'general' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
-          }`}
-        >
-          <User size={14} /> Profile
-        </button>
-        <button
-          onClick={() => selectTab('fee_rules')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-            mainTab === 'fee_rules' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
-          }`}
-        >
-          <Percent size={14} /> Rules
-        </button>
-        <button
-          onClick={() => selectTab('maintenance')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-            mainTab === 'maintenance' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
-          }`}
-        >
-          <Wrench size={14} /> Maintenance
-        </button>
-        <button
-          onClick={() => selectTab('team')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-            mainTab === 'team' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
-          }`}
-        >
-          <Users size={14} /> Team
-        </button>
-        <button
-          onClick={() => selectTab('notifications')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-            mainTab === 'notifications' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
-          }`}
-        >
-          <Bell size={14} /> Notifications
-        </button>
-      </div>
+      {/* Settings menu on the left, grouped (owner, 12 Sep: seven pills in a row looked cluttered);
+          the profile has its own page, so no Profile entry here. */}
+      <div className={view === 'settings' ? 'lg:grid lg:grid-cols-[220px_minmax(0,1fr)] gap-6 items-start' : ''}>
+      {view === 'settings' && (
+        <nav className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-2 mb-6 lg:mb-0 lg:sticky lg:top-4">
+          {SETTINGS_MENU.map(group => (
+            <div key={group.title} className="mb-2 last:mb-0">
+              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#9b9890]">{group.title}</div>
+              {group.tabs.map(t => { const { label, Icon } = TAB_META[t]; const on = mainTab === t; return (
+                <button key={t} onClick={() => selectTab(t)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer ${on ? 'bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'text-[#4a4842] hover:bg-[#f4f3ef]'}`}>
+                  <Icon size={15} /> {label}
+                </button>
+              ); })}
+            </div>
+          ))}
+        </nav>
+      )}
+      <div className="min-w-0">
+
+      {/* ── Lists that moved in from the sidebar (owner, 12 Sep) ── */}
+      {mainTab === 'maintenance_list' && <MaintenanceListWorkspace embedded />}
+      {mainTab === 'restoration' && <RestorationListWorkspace embedded />}
+      {mainTab === 'categories' && <AmcCategoriesView base="/amc" listHref="/rental-provider/dashboard/amc" embedded />}
 
       {/* ── Team tab ───────────────────────────────────────────── */}
       {/* ── Maintenance tab — what's offered, per property type, and who does it.
@@ -2533,6 +2535,12 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
+}
+
+export default function SettingsPage() {
+  return <RpSettings view="settings" />;
 }

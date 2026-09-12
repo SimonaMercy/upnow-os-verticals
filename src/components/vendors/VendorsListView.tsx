@@ -18,7 +18,8 @@ import { apiGet } from '@/lib/api';
 import { VendorForm } from '@/components/vendors/VendorForm';
 
 interface Trade { id: number; name: string }
-export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier';
+/** 0279 adds landlord (head landlord / authority the rent goes to) and internal (employees). */
+export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier' | 'landlord' | 'internal';
 const url = (base: string, rp: number | null | undefined, path: string) => rp != null ? `${base}${path}${path.includes('?') ? '&' : '?'}rp=${rp}` : `${base}${path}`;
 export interface VendorRow {
   serviceProviderId: number; name: string; entityType: string | null; tier: string;
@@ -41,6 +42,8 @@ export const KIND_META: Record<VendorKind, { label: string; bg: string; fg: stri
   government: { label: 'Government', bg: '#ede9fe', fg: '#6d28d9' },
   insurance:  { label: 'Insurance', bg: '#fef3c7', fg: '#92400e' },
   supplier:   { label: 'Supplier', bg: '#f4f3ef', fg: '#6b6860' },
+  landlord:   { label: 'Head landlord', bg: '#fce7f3', fg: '#9d174d' },
+  internal:   { label: 'Internal', bg: '#e0e7ff', fg: '#3730a3' },
 };
 const STATUS: Record<VendorRow['inviteStatus'], { label: string; bg: string; fg: string }> = {
   accepted:    { label: 'Accepted', bg: '#d8f2e8', fg: '#1a7a5a' },
