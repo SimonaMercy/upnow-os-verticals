@@ -89,11 +89,15 @@ export default function ManagerEndedLeasesPage() {
   );
 
   // Row click → open the final settlement statement directly.
-  const openStatement = useCallback(async (customerId: number) => {
+  const openStatement = useCallback(async (row: EndedCustomerRow) => {
     setResolving(true);
     try {
-      const detail = await loadDetail(customerId);
-      const lcs = detail.lifecycles ?? [];
+      const detail = await loadDetail(row.customerId);
+      const all = detail.lifecycles ?? [];
+      // A row is ONE tenancy: open that tenancy's own settlement, matched on its
+      // unit — the customer may have others, ended or still running.
+      const own = row.unitId != null ? all.filter(l => l.unit?.id === row.unitId) : [];
+      const lcs = own.length ? own : all;
       const withSettle = lcs.filter(l => l.settlement);
       const pool = withSettle.length ? withSettle : lcs;
       const target = pool.slice().sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
@@ -142,7 +146,7 @@ export default function ManagerEndedLeasesPage() {
     if (filterProperty !== 'all' && r.lastProperty !== filterProperty) return false;
     if (search) {
       const q = search.toLowerCase();
-      const hay = [r.name, r.email, r.lastUnit, r.lastProperty, r.lastContractRef, r.emiratesId].filter(Boolean).join(' ').toLowerCase();
+      const hay = [r.name, r.companyName, r.email, r.lastUnit, r.lastProperty, r.lastContractRef, r.emiratesId].filter(Boolean).join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -151,7 +155,10 @@ export default function ManagerEndedLeasesPage() {
   const hasFilters = filterOutcome !== 'all' || filterProperty !== 'all' || search !== '';
   const clearFilters = () => { setFilterOutcome('all'); setFilterProperty('all'); setSearch(''); };
 
-  const endedLeaseTotal = yearScoped.reduce((s, r) => s + r.endedLeaseCount, 0);
+  // One row per ended tenancy. Ended customers have EVERY tenancy ended — the
+  // complement of the Customers page; a customer still renting another unit is
+  // listed for the lease that ended but not counted here.
+  const endedCustomers = new Set(yearScoped.filter(r => !r.customerStillActive).map(r => r.customerId)).size;
   const depositsToSettle = yearScoped.filter(r => r.depositStatus === 'held').length;
   const depositsSettled = yearScoped.filter(r => ['returned', 'partial_return', 'forfeited'].includes(r.depositStatus)).length;
 
@@ -162,7 +169,7 @@ export default function ManagerEndedLeasesPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1916]">Ended Leases</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Customers whose tenancies have all ended — open one for the full lifecycle.</p>
+          <p className="text-sm text-[#6b6860] mt-0.5">Every lease that has ended — expired, or terminated with its settlement paid. Open one for its settlement statement.</p>
         </div>
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]" title="Scope by lease year">
@@ -183,8 +190,8 @@ export default function ManagerEndedLeasesPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Ended Customers', value: String(yearScoped.length), sub: filterYear === 'all' ? 'all time' : `in ${filterYear}` },
-          { label: 'Ended Leases', value: String(endedLeaseTotal), sub: 'tenancies' },
+          { label: 'Ended Leases', value: String(yearScoped.length), sub: filterYear === 'all' ? 'all time' : `in ${filterYear}` },
+          { label: 'Ended Customers', value: String(endedCustomers), sub: 'every lease ended' },
           { label: 'Deposits to Settle', value: String(depositsToSettle), sub: 'still held' },
           { label: 'Deposits Settled', value: String(depositsSettled), sub: 'returned / deducted' },
         ].map((s, i) => (
@@ -225,7 +232,7 @@ export default function ManagerEndedLeasesPage() {
       </div>
 
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} customer{filtered.length !== 1 ? 's' : ''}</span>
+        <span className="text-sm text-[#6b6860]">{filtered.length} ended lease{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
       {/* Table */}
@@ -243,10 +250,10 @@ export default function ManagerEndedLeasesPage() {
               <CalendarX size={24} className="text-[#6b6860]" />
             </div>
             <p className="text-sm text-[#6b6860] mb-1">
-              {filterYear !== 'all' ? `No ended leases for ${filterYear}.` : hasFilters ? 'No customers match your filters.' : 'No ended leases yet.'}
+              {filterYear !== 'all' ? `No ended leases for ${filterYear}.` : hasFilters ? 'No ended leases match your filters.' : 'No ended leases yet.'}
             </p>
             <p className="text-xs text-[#9b9890]">
-              {filterYear !== 'all' ? 'Switch to “All years” to see every ended customer.' : 'Customers appear here once all their leases have ended.'}
+              {filterYear !== 'all' ? 'Switch to “All years” to see every ended lease.' : 'A lease appears here once it expires, or once its termination settlement is paid.'}
             </p>
           </div>
         ) : (
@@ -254,18 +261,23 @@ export default function ManagerEndedLeasesPage() {
             <table className="w-full text-left min-w-[900px]">
               <thead>
                 <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
-                  {['Customer', 'Last Property / Unit', 'Last Lease', 'Period', 'Ended On', 'Outcome', 'Deposit'].map(h => (
+                  {['Customer', 'Property / Unit', 'Lease', 'Period', 'Ended On', 'Outcome', 'Deposit'].map(h => (
                     <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.customerId} onClick={() => openStatement(r.customerId)}
+                  <tr key={`${r.customerId}-${r.leaseId ?? r.lastContractRef}`} onClick={() => openStatement(r)}
                     className="border-b border-[#f0ede8] hover:bg-[#fafaf8] text-sm text-[#1a1916] cursor-pointer transition-colors">
                     <td className="px-4 py-3.5">
-                      <div className="font-medium">{r.name || '—'}</div>
+                      <div className="font-medium">{(r.entityType === 'company' && r.companyName?.trim()) || r.name || '—'}</div>
                       <div className="text-xs text-[#9b9890]">{r.email || r.emiratesId || ''}</div>
+                      {r.customerStillActive && (
+                        <span className="inline-flex mt-1 rounded-full text-[10px] font-semibold px-2 py-0.5 bg-[#d8f2e8] text-[#1a7a5a]" title="This customer still rents another unit">
+                          Still a customer
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-[#6b6860]">
                       <div>{r.lastProperty}</div>
@@ -273,7 +285,6 @@ export default function ManagerEndedLeasesPage() {
                     </td>
                     <td className="px-4 py-3.5 font-mono text-xs text-[#6b6860]">
                       {r.lastContractRef}
-                      {r.endedLeaseCount > 1 && <span className="ml-1 text-[#9b9890]">+{r.endedLeaseCount - 1}</span>}
                     </td>
                     <td className="px-4 py-3.5 text-xs text-[#6b6860]">{r.startDate?.slice(0, 10) ?? '—'} → {r.endDate?.slice(0, 10) ?? '—'}</td>
                     <td className="px-4 py-3.5 text-[#6b6860]">{r.latestEndDate?.slice(0, 10) ?? '—'}</td>

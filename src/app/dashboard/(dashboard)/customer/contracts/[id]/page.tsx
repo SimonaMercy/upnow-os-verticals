@@ -328,7 +328,13 @@ export default function TenantContractDetailPage() {
   // A receipt is available once the landlord has collected the PDCs (pdcConfirmed)
   // or the individual payment has cleared. Matches the agreed trigger.
   const receiptHref = (p: ContractPayment) => `/dashboard/customer/contracts/${contract!.id}/print/receipt?pid=${p.id}`;
-  const canReceipt = (p: ContractPayment) => p.chequeStatus === 'cleared' || !!contract?.pdcConfirmed;
+  // …but never for a cheque that bounced or was cancelled: that is not money
+  // received, whatever the lease's PDC flag says.
+  const canReceipt = (p: ContractPayment) => {
+    const raw = (p.chequeStatus ?? '').toLowerCase();
+    if (raw === 'bounced' || raw === 'cancelled') return false;
+    return raw === 'cleared' || !!contract?.pdcConfirmed;
+  };
   /** What a cheque row should read as — see ContractPayment.effectiveStatus. */
   const chequeState = (p: { chequeStatus: string; effectiveStatus?: string | null }) =>
     p.effectiveStatus ?? p.chequeStatus;
@@ -709,7 +715,7 @@ export default function TenantContractDetailPage() {
                               receipt, so don't advertise a "View Receipt" link for it.
                               `?kind=deposit` rather than a payment id: the deposit is a register
                               record and its receipt is numbered against that, not a cheque row. */}
-                          {contract.contractType !== 'renewal' && (deposit.chequeStatus === 'cleared' || contract.pdcConfirmed) && (
+                          {contract.contractType !== 'renewal' && deposit.chequeStatus !== 'bounced' && deposit.chequeStatus !== 'cancelled' && (deposit.chequeStatus === 'cleared' || contract.pdcConfirmed) && (
                             <a
                               href={`/dashboard/customer/contracts/${contract.id}/print/receipt?kind=deposit`}
                               target="_blank"

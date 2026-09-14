@@ -300,8 +300,11 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     finally { setBusyUnit(null); }
   };
 
+  // Occupied = has a current lease (server-derived), falling back to the flag only
+  // on an older payload — so this page and the dashboard count the same units.
+  const isOccupied = (u: UnitRecord) => u.occupiedByLease ?? u.availability === 'occupied';
   const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
-    if (u.availability === 'occupied')    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
+    if (isOccupied(u))    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
     if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
     // Reserved is the fourth availability state and had no case here, so it fell
     // through to the LISTING status below and rendered "Expired" — which on a let
@@ -473,7 +476,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // Status buckets for the By-unit status tabs (mock's three buckets): occupied
   // wins, then a live "published" listing, else "Draft" (anything not yet live).
   const unitBucket = (u: UnitRecord): 'Occupied' | 'Published' | 'Draft' =>
-    u.availability === 'occupied' ? 'Occupied'
+    isOccupied(u) ? 'Occupied'
     : u.listingStatus === 'published' ? 'Published'
     : 'Draft';
   const statusCounts = scopedUnitRows.reduce(

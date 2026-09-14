@@ -122,8 +122,11 @@ type BadgeTone = 'green' | 'amber' | 'red' | 'indigo' | 'gray';
  *  was already issued and only waiting to commence therefore read "Pending"
  *  inside the Renewed list. The bucket knows about the successor and the
  *  termination response; `renewal_status` does not. */
-function bucketBadge(bucket: RenewalBucket | undefined): { label: string; tone: BadgeTone } {
-  const b = RENEWAL_BUCKETS.find(x => x.key === (bucket ?? 'noticeDue'));
+function bucketBadge(x: Pick<UpcomingRenewal, 'bucket' | 'runningUnsigned'>): { label: string; tone: BadgeTone } {
+  // Counted under Notice Sent, but named for what it is: the new term is already
+  // running without a signature or a confirmed payment.
+  if (x.runningUnsigned) return { label: 'Running, not signed', tone: 'amber' };
+  const b = RENEWAL_BUCKETS.find(k => k.key === (x.bucket ?? 'noticeDue'));
   return { label: b?.label ?? 'Notice due', tone: b?.tone ?? 'amber' };
 }
 
@@ -235,11 +238,14 @@ interface UpcomingRenewal {
   renewalStartDate?: string | null;
   renewalEndDate?: string | null;
   daysUntilEnd: number;
-  /** The term has already ended with the renewal still unanswered. These sit
-   *  OUTSIDE the horizon (they are behind us, not ahead), and are in the list
-   *  because a renewal is still a renewal once its parent term runs out — that
-   *  is the state the Operations board counts and this card used to miss. */
-  lapsed?: boolean;
+  /** The day that puts the row in its month: the renewal's due date, or — for a
+   *  unit already renewed, a renewal running but not signed, or a new customer —
+   *  the day its term started. The API decides it the same way Renewal Plan -
+   *  Yearly and the Upcoming Renewals report do. Older payloads omit it. */
+  placedOn?: string;
+  placedBy?: 'due' | 'start';
+  /** A renewal whose term has begun but is neither activated nor paid for. */
+  runningUnsigned?: boolean;
   renewalStatus: string | null;
   /** The offer has actually gone out and is waiting on the customer — the API
    *  decides this (it can see `renewalAccepted`, which is not sent to us). */
@@ -292,7 +298,7 @@ interface DashboardExtras {
 /** The four states a lease coming up for renewal can be in. Decided server-side
  *  (see renewal-bucket.ts) because the call needs the termination response and a
  *  successor-lease lookup, neither of which is in this payload. */
-type RenewalBucket = 'renewed' | 'noticeSent' | 'noticeDue' | 'vacating';
+type RenewalBucket = 'renewed' | 'noticeSent' | 'noticeDue' | 'newCustomer' | 'vacating';
 
 /** Display order and copy. `noticeDue` is the only bucket that is the LANDLORD's
  *  own next action, so it is the one tinted as work; Notice Sent is a wait on
@@ -308,7 +314,13 @@ const RENEWAL_BUCKETS: Array<{
   { key: 'renewed',    label: 'Renewed',     hint: 'agreed — starts at term end',  tone: 'green' },
   { key: 'noticeSent', label: 'Notice Sent', hint: 'awaiting the customer',        tone: 'indigo' },
   { key: 'noticeDue',  label: 'Notice due',  hint: 'nobody asked yet — your move', tone: 'amber' },
-  { key: 'vacating',   label: 'Vacating',    hint: 'leaving at term end',          tone: 'red' },
+  // A new customer's first lease starting in the window. The card counts renewals
+  // the Renewal Plan way (decided 14 Sep 2026), which places such a unit by the
+  // term that starts; customers who are leaving count as vacant, not here.
+  { key: 'newCustomer', label: 'New customer', hint: 'a first lease starting',     tone: 'gray' },
+  // Declined before any termination was started: still a let unit, so still in
+  // the count. The tile shows only when there is one.
+  { key: 'vacating',    label: 'Declined',     hint: 'said no — start the termination', tone: 'red' },
 ];
 
 /** One thing a manager did, from the audit trail. `at` is when they did it and
@@ -852,14 +864,11 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   const activeLeases     = stats?.activeLeases ?? 0;
   const totalManagers    = stats?.totalManagers ?? 0;
   const occupancyRate    = stats?.occupancyRate ?? 0;
-  // Split the renewals in the chosen horizon into already-sent (offer is out) vs
-  // still pending (drafted-but-not-sent, or not started) for the status display.
+  // Until the figures arrive the tiles read "…", never 0 — a slow load must not
+  // look like an empty portfolio.
+  const statsReady       = stats != null;
+  const shown            = (n: number) => (statsReady ? String(n) : '…');
   const renewalsList     = extras?.upcomingRenewals ?? [];
-  // SENT = the offer is out and the wait is on the customer. PENDING = nobody has
-  // been asked yet, so it is the landlord's own next action. `offerSent` is the
-  // API's call; the renewalStatus test is the fallback for an older payload.
-  const renewalsSent     = renewalsList.filter(r => r.offerSent ?? r.renewalStatus === 'proposed').length;
-  const renewalsPending  = renewalsList.length - renewalsSent;
   const units            = stats?.units ?? [];
   // Vacancy roll-up. Absent on an older payload — every read of it is guarded so
   // the dashboard degrades to the plain counts rather than rendering "0 days".
@@ -981,7 +990,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     const meta = RENEWAL_BUCKETS.find(b => b.key === bucket);
     const list = (extras?.upcomingRenewals ?? [])
       .filter(r => !bucket || (r.bucket ?? 'noticeDue') === bucket)
-      .slice().sort((a, b) => a.daysUntilEnd - b.daysUntilEnd);
+      .slice().sort((a, b) => (a.placedOn ?? '').localeCompare(b.placedOn ?? '') || a.daysUntilEnd - b.daysUntilEnd);
     // "Days left" as a highlighted badge on the right, by urgency.
     const daysBadge = (n: number): { label: string; tone: BadgeTone } =>
       n <= 0 ? { label: `expired ${Math.abs(n)}d`, tone: 'red' }
@@ -991,36 +1000,36 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     // THE TERM ON THE ROW IS THE ONE BEING OFFERED, not the one running out.
     //
     // A notice on Room-10 offers 1 Sep 2026 → 31 Aug 2027; the lease it replaces
-    // runs 1 Sep 2025 → 31 Aug 2026. The row showed the expiring lease, so every
-    // Notice Sent line named a term a year behind the notice the manager sent.
-    // Where no renewal record exists yet (notice due / vacating) there is only
-    // the expiring term to show, and it is labelled as such rather than left to
-    // pass for the new one.
+    // runs 1 Sep 2025 → 31 Aug 2026. Where no renewal record exists yet there is
+    // only the expiring term to show, and it is labelled as such. A term that
+    // began in the window IS the new term, and says which kind it is.
     const termDay = (iso: string) =>
       new Date(iso).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
-    const term = (x: UpcomingRenewal) =>
-      x.renewalStartDate && x.renewalEndDate
+    const term = (x: UpcomingRenewal) => {
+      if (x.placedBy === 'start') {
+        const kind = x.bucket === 'newCustomer' ? 'New lease' : x.runningUnsigned ? 'Running, not signed' : 'Renewed';
+        return `${kind} ${termDay(x.startDate ?? x.placedOn ?? x.endDate)} → ${termDay(x.endDate)}`;
+      }
+      return x.renewalStartDate && x.renewalEndDate
         ? `Renews ${termDay(x.renewalStartDate)} → ${termDay(x.renewalEndDate)}`
         : x.startDate
           ? `Current term ${termDay(x.startDate)} → ${termDay(x.endDate)}`
           : `Current term ends ${termDay(x.endDate)}`;
-    // GROUPED BY THE MONTH THE RENEWAL STARTS — the same anchor as the Renewal
-    // Forecast report, so the two views agree.
-    //
-    // Grouping by the expiring lease's end month put the ten leases ending
-    // 31 Aug under "August" while the forecast counts their renewals under
-    // September (they commence 1 Sep): the whole popup sat one month behind the
-    // report it is read alongside. Falls back to end + 1 day where nothing is
-    // drafted yet — identical on this book, since a renewal picks up the day the
-    // term stops. Date arithmetic on the date PART only: these are 'YYYY-MM-DD'
-    // strings and a local-time Date would shift the day, hence the month.
+    };
+    // GROUPED BY THE MONTH THE API PLACED EACH ROW IN — the month its renewal
+    // falls due, or the month its term started for a unit already renewed, a
+    // renewal running but not signed, or a new customer. The same months as
+    // Renewal Plan - Yearly and the Upcoming Renewals report. An older payload
+    // without `placedOn` falls back to the renewal's start, then to end + 1 day.
+    // Date arithmetic on the date PART only: these are 'YYYY-MM-DD' strings and a
+    // local-time Date would shift the day, hence the month.
     const nextDay = (iso: string) => {
       const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
       d.setUTCDate(d.getUTCDate() + 1);
       return d.toISOString().slice(0, 10);
     };
     const monthKey = (x: UpcomingRenewal) =>
-      (x.renewalStartDate ?? nextDay(x.endDate)).slice(0, 7);
+      (x.placedOn ?? x.renewalStartDate ?? nextDay(x.endDate)).slice(0, 7);
     const byMonth = new Map<string, UpcomingRenewal[]>();
     for (const x of list) {
       const key = monthKey(x);
@@ -1030,48 +1039,27 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     const groups = [...byMonth.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([key, items]) => ({
-        // "Renewals starting …", not a bare month: a row whose renewal is not
-        // drafted yet shows its EXPIRING term, and under a bare "September 2026"
-        // a term reading 2025 → 2026 looks misfiled. The header says what the
-        // month is measuring.
-        label: `Renewals starting ${new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' })} · ${items.length}`,
+        // Mid-month at noon UTC, so no browser time zone can name the wrong month.
+        label: `Renewals in ${new Date(`${key}-15T12:00:00Z`).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, month: 'long', year: 'numeric' })} · ${items.length}`,
         rows: items.map(x => ({
           key: x.contractId,
           title: x.unitLabel,
-          subtitle: `${term(x)} · ${x.tenantName ?? 'Tenant'}`,
-          // Opens the record that HAS the work: a drafted-but-unlocked renewal
-          // goes to Operations, anything blessed goes to its lease page. It used
-          // to hard-code the lease route for the expiring parent, which landed
-          // the reader on a page with nothing to do on it.
+          subtitle: `${term(x)} · ${x.tenantName ?? 'Customer'}`,
+          // Opens the record that HAS the work: a lease not yet set up goes to
+          // Operations, anything set up goes to its lease page.
           href: contractHref(x.openContractId ?? x.contractId, x.openIn ?? 'lease', manager),
-          // The row's badge is its BUCKET, not `renewal_status`.
-          //
-          // renewalStatusInfo() maps anything that is not 'proposed'/'draft' to
-          // "Pending", so a lease whose successor is already issued and merely
-          // waiting to commence came back as Pending — inside the Renewed
-          // list, which the landlord had just clicked. Two vocabularies for one
-          // fact, and the older one contradicting the tile above it.
-          badges: [bucketBadge(x.bucket), daysBadge(x.daysUntilEnd)],
+          // The row's badge is its tile, the one clicked to reach it. Days left
+          // only on a term coming to its end — a term that has just begun has
+          // nothing falling due.
+          badges: x.placedBy === 'start' ? [bucketBadge(x)] : [bucketBadge(x), daysBadge(x.daysUntilEnd)],
         })),
       }));
-    // Rows whose term has already ended. The horizon in the title describes the
-    // rest of the list but not these, so when any are present the title says so
-    // instead of filing an expired lease under "next 180 days".
-    const lapsed = list.filter(r => r.lapsed ?? r.daysUntilEnd < 0).length;
-    const span = lapsed
-      ? `next ${renewalWindow} days + ${lapsed} past term end`
-      : `next ${renewalWindow} days`;
+    const span = `this month + next ${renewalWindow} days`;
     setDrill({
-      title: meta
-        ? `${meta.label} · ${list.length} — ${span}`
-        : `Renewals due · ${list.length} — ${span}`,
+      title: `${meta ? meta.label : 'Renewals'} · ${list.length} — ${span}`,
       note: !list.length
-        ? `No leases end in the next ${renewalWindow} days.`
-        : meta
-          ? `${meta.hint.charAt(0).toUpperCase()}${meta.hint.slice(1)} — grouped by the month the new term starts, the same anchor as the Renewal Forecast report. Dates are the term being offered.${
-              lapsed ? ` ${lapsed} ${lapsed === 1 ? 'lease has' : 'leases have'} already passed term end with the renewal unanswered.` : ''
-            }`
-          : `${renewalsSent} sent · ${renewalsPending} pending — grouped by the month the new term starts, the same anchor as the Renewal Forecast report. Propose a renewal before they lapse.`,
+        ? `No renewals this month or in the next ${renewalWindow} days.`
+        : `${meta ? `${meta.hint.charAt(0).toUpperCase()}${meta.hint.slice(1)} — ` : ''}grouped by renewal month, the same months as Renewal Plan - Yearly. Each let unit is listed once; a unit whose termination has started counts as vacant.`,
       groups,
     });
   };
@@ -1336,7 +1324,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         <KpiCard
           icon={<Building2 size={12} />}
           label="Properties"
-          value={String(totalProperties)}
+          value={shown(totalProperties)}
           href={propertiesHref}
         />
         {/* No occupied/vacant split here — the Occupancy Rate donut below states
@@ -1349,7 +1337,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         <KpiCard
           icon={<DoorOpen size={12} />}
           label="Units"
-          value={String(totalUnits)}
+          value={shown(totalUnits)}
           href={unitsHref}
         />
         {/* Who the portfolio is run WITH, next to what it is made of. Both link
@@ -1360,7 +1348,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         <KpiCard
           icon={<Users size={12} />}
           label="Customers"
-          value={String(totalCustomers)}
+          value={shown(totalCustomers)}
           href={customersHref}
         />
         {/* People and tenancies are DIFFERENT counts and are shown as two tiles
@@ -1371,13 +1359,13 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         <KpiCard
           icon={<FileText size={12} />}
           label="Active Leases"
-          value={String(activeLeases)}
+          value={shown(activeLeases)}
           href={leasesHref}
         />
         <KpiCard
           icon={<UserCog size={12} />}
           label="Managers"
-          value={String(totalManagers)}
+          value={shown(totalManagers)}
           href={managersHref ?? undefined}
         />
         </div>
@@ -1673,7 +1661,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[36px] font-bold tracking-tight text-[var(--neutral-900)] tabular-nums leading-none">{occupancyRate}%</span>
+                <span className="text-[36px] font-bold tracking-tight text-[var(--neutral-900)] tabular-nums leading-none">{statsReady ? `${occupancyRate}%` : '…'}</span>
                 <span className="text-xs text-[var(--neutral-400)] mt-1.5">Occupancy</span>
               </div>
             </div>
@@ -1681,8 +1669,8 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           <div className="flex justify-center gap-6 text-[13px] text-[var(--neutral-700)] font-medium">
 {/* Occupied is the donut's other segment and has to be named, but it is a
                 label only — the vacant units are the ones worth opening. */}
-            <button type="button" onClick={drillOccupied} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--primary)]" />Occupied {occupied}</button>
-            <button type="button" onClick={drillAvailable} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--base-200)]" />Vacant {available}</button>
+            <button type="button" onClick={drillOccupied} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--primary)]" />Occupied {statsReady ? occupied : '…'}</button>
+            <button type="button" onClick={drillAvailable} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--base-200)]" />Vacant {statsReady ? available : '…'}</button>
           </div>
           {/* How long each of those vacant units has been empty, and what it has
               cost, lives one click away — the "Vacant N" legend and the Vacant
@@ -1999,14 +1987,11 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
     const k = r.bucket ?? 'noticeDue';
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
-  }, { renewed: 0, noticeSent: 0, noticeDue: 0, vacating: 0 } as Record<RenewalBucket, number>);
+  }, { renewed: 0, noticeSent: 0, noticeDue: 0, newCustomer: 0, vacating: 0 } as Record<RenewalBucket, number>);
   const total = RENEWAL_BUCKETS.reduce((n, b) => n + (counts[b.key] ?? 0), 0);
-  // Leases already past their term end with the renewal unanswered. They ARE
-  // counted in the tiles (they are outstanding renewals, and the tiles have to
-  // agree with the Operations board), but the subtitle says "coming up in the
-  // next N days" — which is not true of them — so the overdue ones are named
-  // separately rather than being quietly folded into a forward-looking count.
-  const lapsedCount = list.filter(r => r.lapsed ?? r.daysUntilEnd < 0).length;
+  // Declined is rare and has no tile until it happens; its units are still in the
+  // total, which is what keeps the card equal to the Renewal Plan.
+  const tiles = RENEWAL_BUCKETS.filter(b => b.key !== 'vacating' || (counts.vacating ?? 0) > 0);
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)] flex flex-col">
@@ -2016,12 +2001,7 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
           <p className="text-xs text-[var(--neutral-400)] mt-0.5">
             {loading
               ? 'Loading…'
-              : `${total - lapsedCount} lease${total - lapsedCount === 1 ? '' : 's'} coming up in the next ${windowDays} days`}
-            {!loading && lapsedCount > 0 && (
-              <span className="text-[var(--error)] font-semibold">
-                {' · '}{lapsedCount} past term end
-              </span>
-            )}
+              : `${total} renewal${total === 1 ? '' : 's'} this month and the next ${windowDays} days`}
           </p>
         </div>
         <select
@@ -2039,7 +2019,7 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-            {RENEWAL_BUCKETS.map(b => {
+            {tiles.map(b => {
               const n = counts[b.key] ?? 0;
               const t = DRILL_TONE[b.tone];
               return (
@@ -2067,7 +2047,7 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
               and the same colours as the tiles above them. */}
           {total > 0 && (
             <div className="flex gap-[2px] mt-4 h-2">
-              {RENEWAL_BUCKETS.map(b => {
+              {tiles.map(b => {
                 const n = counts[b.key] ?? 0;
                 if (!n) return null;
                 return (
@@ -2087,7 +2067,7 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
               so the line stays plain text. */}
           {total === 0 ? (
             <span className="mt-4 text-xs font-semibold text-[var(--neutral-700)] opacity-50 self-start">
-              No renewals due in the next {windowDays} days
+              No renewals this month or in the next {windowDays} days
             </span>
           ) : (
             <Link

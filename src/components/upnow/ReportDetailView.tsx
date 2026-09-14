@@ -141,7 +141,7 @@ interface ReportDef {
   matrixGroupKey?: string;
   /** Small tables printed under the matrix — the reconciliations the sheet is
    *  meant to prove, rather than leaving the reader to do the arithmetic. */
-  summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string; type?: 'aed' | 'number' }[] }[];
+  summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string; type?: 'aed' | 'number'; tone?: 'red' | 'green' }[] }[];
 }
 
 /** A vacant unit, listed when a Vacant cell in the renewal-details matrix is clicked.
@@ -164,6 +164,9 @@ interface Column {
   align?: 'left' | 'right' | 'center';
   type?: 'aed' | 'date' | 'number' | 'bucket' | 'stage' | 'rate' | 'delta' | 'stack';
   width?: string;
+  /** Non-zero figures print in this colour — red for money still owed, green for
+   *  money made good (Executive Cashflow's two Bounced columns). */
+  tone?: 'red' | 'green';
   /** Show this column even when every value is 0 — its 0 is meaningful (e.g. "Days left"). */
   keep?: boolean;
   /** Decimal places for a 'rate'. Defaults to 1, which is right for an occupancy
@@ -313,39 +316,49 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'lease-expiry': {
     title: 'Upcoming Renewals',
-    description: 'Active leases whose term is ending within the chosen window — grouped by the month they come up for renewal. Each row is a month; expand it to see the individual leases and their renewal state. Adjust the window above.',
+    description: 'Renewals counted the way Renewal Plan - Yearly counts them: each let unit once, in the month its renewal falls due, or in the month its new term started if it has already renewed or a new customer moved in. Customers who are leaving count as vacant. The window is the whole current month plus the days chosen above; the last month stops on that day. Expand a month to see its leases.',
     endpoint: '/api/reports/lease-expiry',
     buildingLeaseFilter: true,
     layout: 'grouped',
     controlKey: 'leaseExpiryWindow',
     columns: [
       { key: 'monthLabel', label: 'Renewal month' },
-      { key: 'leases', label: 'Leases', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed' },
-      { key: 'inProgress', label: 'Renewal started', align: 'right', type: 'number' },
-      { key: 'notStarted', label: 'Not started', align: 'right', type: 'number' },
+      { key: 'leases', label: 'Units', align: 'right', type: 'number' },
+      { key: 'annualRentFils', label: 'Confirmed rent', align: 'right', type: 'aed' },
+      { key: 'renewed', label: 'Renewed', align: 'right', type: 'number' },
+      { key: 'noticeSent', label: 'Notice sent', align: 'right', type: 'number' },
+      { key: 'noticeDue', label: 'Notice due', align: 'right', type: 'number' },
+      { key: 'newCustomers', label: 'New customers', align: 'right', type: 'number' },
     ],
+    // The same four tiles as the dashboard's Upcoming Renewals card, zeros included.
+    // Declined shows only when a customer said no before any termination started.
     totals: [
       { key: 'expiring', label: 'Upcoming renewals', type: 'number', keep: true },
-      { key: 'renewedOrAccepted', label: 'Renewed / Accepted', type: 'number' },
-      { key: 'awaitingDecision', label: 'Awaiting Decision', type: 'number' },
-      { key: 'rejected', label: 'Rejected', type: 'number' },
-      { key: 'contractedRentFils', label: 'Contracted Rent', type: 'aed' },
+      { key: 'renewed', label: 'Renewed', type: 'number', keep: true },
+      { key: 'noticeSent', label: 'Notice sent', type: 'number', keep: true },
+      { key: 'noticeDue', label: 'Notice due', type: 'number', keep: true },
+      { key: 'newCustomers', label: 'New customers', type: 'number', keep: true },
+      { key: 'declined', label: 'Declined', type: 'number' },
+      { key: 'contractedRentFils', label: 'Confirmed rent', type: 'aed' },
     ],
     drilldown: {
       childKey: 'items',
       titleKey: 'monthLabel',
       countLabel: 'leases',
       contractIdKey: 'contractId',
+      // A lease not yet set up in the register opens its Operations entry.
+      opsLinkKey: 'inOperations',
       itemsMinWidth: '62rem',
       columns: [
         { key: 'contractRef', label: 'Contract', width: '9%' },
-        { key: 'tenantName', label: 'Customer', width: '18%' },
+        { key: 'tenantName', label: 'Customer', width: '17%' },
         { key: 'unitLabel', label: 'Unit', width: '8%' },
-        { key: 'buildingName', label: 'Property', width: '15%' },
+        { key: 'buildingName', label: 'Property', width: '14%' },
+        // The day that puts the lease in this month: its renewal's due date, or
+        // the day its term started for a unit already renewed or a new customer.
+        { key: 'placedOn', label: 'Renewal date', type: 'date', width: '11%' },
         { key: 'endDate', label: 'Lease ends', type: 'date', width: '11%' },
-        { key: 'daysUntilExpiry', label: 'Days left', align: 'right', type: 'number', width: '8%' },
-        { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '11%' },
+        { key: 'annualRentFils', label: 'Confirmed rent', align: 'right', type: 'aed', width: '11%' },
         { key: 'renewalStatus', label: 'Renewal', type: 'stage', width: '13%' },
       ],
     },
@@ -915,7 +928,10 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       { key: 'expectedFils', label: 'Expected', align: 'right', type: 'aed' },
       { key: 'receivedFils', label: 'Received', align: 'right', type: 'aed' },
       { key: 'pendingFils', label: 'Pending', align: 'right', type: 'aed' },
-      { key: 'bouncedFils', label: 'Bounced', align: 'right', type: 'aed' },
+      // Bounced, split by whether it was made good: red is still owed, green was
+      // replaced and its replacement already sits inside Received.
+      { key: 'bouncedOwedFils', label: 'Bounced · not replaced', align: 'right', type: 'aed', tone: 'red' },
+      { key: 'bouncedReplacedFils', label: 'Bounced · replaced', align: 'right', type: 'aed', tone: 'green' },
       { key: 'penaltyFils', label: 'Penalty', align: 'right', type: 'aed' },
       { key: 'collectionRate', label: 'Collection %', align: 'right', type: 'rate' },
     ],
@@ -948,8 +964,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         title: 'Bounced cheques',
         note: 'A bounce that was made good is reported but never added into Expected — its replacement cheque already sits inside Received, so counting both would count the money twice. A bounce nobody replaced is still owed, and is added back below.',
         rows: [
-          { label: 'Bounced and replaced', key: 'bouncedReplacedFils', note: 'already inside Received — excluded' },
-          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', total: true, note: 'still owed — chase alongside the late rent' },
+          { label: 'Bounced and replaced', key: 'bouncedReplacedFils', note: 'already inside Received — excluded', tone: 'green' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', total: true, note: 'still owed — chase alongside the late rent', tone: 'red' },
         ],
       },
       {
@@ -957,7 +973,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         note: 'Annual rent is what the leases are contracted at over their whole terms, so it is deliberately NOT one calendar year of cheques — a lease starting in August is paid across two years. The Cash Management sheet imposes no year at all; add its years together and they come back to this figure.',
         rows: [
           { label: 'Expected this year — received + pending', key: 'expectedFils' },
-          { label: 'Bounced, never replaced', key: 'bouncedOwedFils' },
+          { label: 'Bounced, never replaced', key: 'bouncedOwedFils', tone: 'red' },
           { label: 'Everything receivable this year', key: 'receivableFils', total: true },
           { label: 'Annual rent contracted (whole book)', key: 'annualRentFils' },
         ],
@@ -976,7 +992,8 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'chequeNumber', label: 'Cheque #' },
         { key: 'dueDate', label: 'Due', type: 'date' },
         { key: 'amountFils', label: 'Amount', align: 'right', type: 'aed' },
-        { key: 'status', label: 'Status', type: 'stage' },
+        // A bounced rent cheque reads replaced (green) or not replaced (red).
+        { key: 'displayStatus', label: 'Status', type: 'stage' },
       ],
     },
   },
@@ -1242,15 +1259,12 @@ const FULL_REGISTER_SLUGS = new Set<ReportSlug>(['security-deposits']);
 
 // Local-date YYYY-MM-DD (no UTC shift) for the date-range control presets.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-/** The month an Upcoming Renewals window runs through — "Nov 2026". The backend
- *  extends every window to that month's end so the last group is never a partial
- *  month; this puts the same fact on the option the user is choosing. */
-const monthEndLabel = (windowDays: number): string => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + windowDays);
-  return new Intl.DateTimeFormat('en-AE', { month: 'short', year: 'numeric' }).format(d);
-};
+/** The last day an Upcoming Renewals window reaches — "13 Dec 2026". The window is
+ *  the whole current month plus the chosen number of days (decided 14 Sep 2026), in
+ *  Dubai; naming its last day puts that fact on the option the user is choosing. */
+const windowEndLabel = (windowDays: number): string =>
+  new Intl.DateTimeFormat('en-AE', { timeZone: 'Asia/Dubai', day: 'numeric', month: 'short', year: 'numeric' })
+    .format(new Date(Date.now() + windowDays * 86_400_000));
 // Reports that default to a single day (today) rather than the whole year — a
 // daily activity view (e.g. Manager Performance).
 const DAILY_DEFAULT_SLUGS = new Set<ReportSlug>(['manager-performance']);
@@ -1303,7 +1317,7 @@ function SummaryPanels({ panels, totals, topBorder = true }: {
                     {r.label}
                     {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">
+                  <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${toneText(r.tone, r.key ? totals?.[r.key] : undefined)}`}>
                     {(() => {
                       const v = r.key ? (totals?.[r.key] as number | undefined) : undefined;
                       // A count printed as money reads AED 7.00 for seven deposits.
@@ -1504,6 +1518,14 @@ const CELL_STATUS_STYLE: Record<string, string> = {
   bounced:   'text-[#dc2626] font-semibold', // bounced → red
   cancelled: 'text-[#9b9890] line-through',
 };
+/** A column or summary line can carry a tone: its non-zero figures print in that
+ *  colour — the same green and red as the cheque cells above. */
+const TONE_TEXT: Record<'red' | 'green', string> = {
+  red:   'text-[#dc2626] font-semibold',
+  green: 'text-[#15803d] font-semibold',
+};
+const toneText = (tone: 'red' | 'green' | undefined, value: unknown, fallback = 'text-[#1a1916]') =>
+  tone && Number(value) ? TONE_TEXT[tone] : fallback;
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
@@ -1518,6 +1540,15 @@ const BUCKET_STYLE: Record<string, string> = {
   '90+':    'bg-[#dc2626] text-white',
   undated:  'bg-[#f4f3ef] text-[#6b6860]',  // pending cheque with no due date — age unknown
 };
+/** Stage names that read badly with the underscores simply swapped for spaces.
+ *  Only values no other report produces — Contract Status shows `new_lease` too,
+ *  so that one is left as it is. */
+const STAGE_TEXT: Record<string, string> = {
+  running_unsigned: 'Running, not signed',
+  bounced_replaced: 'Bounced · replaced',
+  bounced_part_replaced: 'Bounced · part replaced',
+  bounced_not_replaced: 'Bounced · not replaced',
+};
 const STAGE_STYLE: Record<string, string> = {
   not_started: 'bg-[#f4f3ef] text-[#6b6860]',
   proposed:    'bg-[#fef3c7] text-[#854d0e]',
@@ -1531,6 +1562,15 @@ const STAGE_STYLE: Record<string, string> = {
   // the unit had gone vacant and was re-let. Blue rather than the renewal green,
   // so the two read apart at a glance on the renewal calendar.
   new_lease:   'bg-[#dbeafe] text-[#1e40af]',
+  // A renewal whose term has begun but is not signed off (not activated, payment
+  // not confirmed) — still that month's renewal, amber because it is still owed work.
+  running_unsigned: 'bg-[#fef3c7] text-[#854d0e]',
+  // Bounced cheques: red while the money is still owed, green once a replacement
+  // has made it good (Executive Cashflow's cheque list).
+  bounced:               'bg-[#fee2e2] text-[#b91c1c]',
+  bounced_not_replaced:  'bg-[#fee2e2] text-[#b91c1c]',
+  bounced_part_replaced: 'bg-[#fee2e2] text-[#b91c1c]',
+  bounced_replaced:      'bg-[#dcfce7] text-[#15803d]',
   // contract-status lifecycle (leases-by-year register)
   issued:      'bg-[#dbeafe] text-[#1e40af]',  // signed/issued, term not yet started
   terminated:  'bg-[#fee2e2] text-[#b91c1c]',  // ended early
@@ -1645,7 +1685,8 @@ function CellValue({ value, type, decimals }: { value: unknown; type?: Column['t
   }
   if (type === 'stage') {
     const cls = STAGE_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
-    return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{String(value).replace(/_/g, ' ')}</span>;
+    const text = STAGE_TEXT[String(value)] ?? String(value).replace(/_/g, ' ');
+    return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{text}</span>;
   }
   return <span>{String(value)}</span>;
 }
@@ -2892,12 +2933,10 @@ export function ReportDetailView({
               <select className={fSelect} value={leaseWindow}
                 onChange={e => { const w = Number(e.target.value); setLeaseWindow(w); if (urlBase) router.replace(`${urlBase}/lease-expiry?window=${w}`); }}
                 aria-label="Window">
-                {/* The window runs to the end of the month it lands in, so every
-                    month in view is complete. Naming that month makes the option
-                    self-explanatory — "90 days" alone gave no hint that November
-                    was included whole. */}
+                {/* The window is the whole current month plus the chosen days, so
+                    each option names the day it stops on. */}
                 {[30, 60, 90, 180, 365].map(w => (
-                  <option key={w} value={w}>{`${w} days · to ${monthEndLabel(w)}`}</option>
+                  <option key={w} value={w}>{`This month + ${w} days · to ${windowEndLabel(w)}`}</option>
                 ))}
               </select>
             </div>
@@ -3870,7 +3909,7 @@ export function ReportDetailView({
                             ? (unitsBase ?? null)
                             : `${contractsBase}/${rlId}/v2`;
                         return (
-                        <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} text-[#1a1916]`}>
+                        <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} ${toneText(c.tone, row[c.key])}`}>
                           {rlHref ? (
                             <Link
                               href={rlHref}
@@ -3981,7 +4020,7 @@ export function ReportDetailView({
                     {items.map((it, idx) => (
                       <tr key={idx} className={drillRowClass(it)}>
                         {dd.columns.map(c => (
-                          <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                          <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${toneText(c.tone, it[c.key])}`}>
                             <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />
                           </td>
                         ))}
@@ -4094,7 +4133,7 @@ export function ReportDetailView({
                     <Fragment key={idx}>
                     <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
                       {cellModal.columns.map(c => (
-                        <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                        <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${toneText(c.tone, it[c.key])}`}>
                           <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />
                         </td>
                       ))}

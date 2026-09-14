@@ -291,6 +291,25 @@ function isDeposit(p: ReceiptPayment): boolean {
 }
 /** Renewals carry the deposit from the original lease (read-only, never re-collected),
  *  so a renewal issues no security-deposit receipt — only rental income & management fee. */
+/** A cheque that bounced or was cancelled is not money received, so it never gets a
+ *  receipt of its own: not when the lease's PDCs are confirmed, and not when the link
+ *  is opened directly. Its instalment still reads on the rent schedule, with a note. */
+function isUnreceiptable(p: ReceiptPayment | null | undefined): boolean {
+  const s = (p?.chequeStatus ?? '').toLowerCase();
+  return s === 'bounced' || s === 'cancelled';
+}
+
+/** A receipt that was issued and later voided (its cheque was reverted) stays
+ *  viewable, stamped VOID, so whoever holds the old copy can tell it apart. Only a
+ *  receipt that was never issued is refused. */
+function receiptWasVoided(contract: ReceiptContract, p: ReceiptPayment, depositReceipt = false): boolean {
+  if (depositReceipt) {
+    const depositId = contract.securityDeposit?.depositId ?? contract.paymentRefs?.depositReceipt?.depositId;
+    return depositId != null && !!contract.paymentRefs?.voidedDepositIds?.has(depositId);
+  }
+  return !!contract.paymentRefs?.voidedPaymentIds?.has(p.id);
+}
+
 function isRenewalContract(c: ReceiptContract): boolean {
   return (c.contractType ?? '').toLowerCase() === 'renewal';
 }
@@ -785,7 +804,7 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   if (kind === 'replacements') return buildReplacementReceipt(contract, rentals);
   if (kind === 'deposit') {
     const dep = resolveDeposit(contract);
-    return dep ? buildSingleReceipt(dep, contract, rentals) : null;
+    return dep && (!isUnreceiptable(dep) || receiptWasVoided(contract, dep, true)) ? buildSingleReceipt(dep, contract, rentals) : null;
   }
   let sel: ReceiptPayment | undefined;
   if (selectedId != null) sel = all.find(p => p.id === selectedId);
@@ -793,7 +812,19 @@ function resolveReceipt(contract: ReceiptContract, kind: Props['kind'], selected
   // Renewals carry the deposit forward (read-only) — never issue a deposit receipt,
   // even via a direct ?pid=<depositRowId> / ?p=<idx> link (this branch bypasses resolveDeposit).
   if (sel && isDeposit(sel) && isRenewalContract(contract)) return null;
+  if (sel && isUnreceiptable(sel) && !receiptWasVoided(contract, sel)) return null;
   return sel ? buildSingleReceipt(sel, contract, rentals) : null;
+}
+
+/** The one payment a ?pid / ?p / ?kind=deposit request points at, if any — used to
+ *  explain an empty page when that payment cannot be receipted. */
+function selectedPayment(contract: ReceiptContract, kind: Props['kind'], selectedId?: number | null, selectedIdx = 0): ReceiptPayment | undefined {
+  if (kind === 'deposit') return resolveDeposit(contract);
+  if (kind === 'contract' || kind === 'rental' || kind === 'management' || kind === 'vat' || kind === 'charges' || kind === 'replacements') return undefined;
+  const payments = contract.payments ?? [];
+  const all = [...payments, ...((contract.fees ?? []).filter(f => isFee(f) || isChequeCharge(f)))];
+  const byId = selectedId != null ? all.find(p => p.id === selectedId) : undefined;
+  return byId ?? payments[Math.min(Math.max(selectedIdx, 0), Math.max(payments.length - 1, 0))];
 }
 
 /** The segmented receipts (Rental Income · Security Deposit · Management Fee ·
@@ -808,7 +839,7 @@ function buildAllReceipts(contract: ReceiptContract): Receipt[] {
   const repl = buildReplacementReceipt(contract, rentals);
   if (repl) out.push(repl);
   const dep = resolveDeposit(contract);
-  if (dep) { const d = buildSingleReceipt(dep, contract, rentals); if (d) out.push(d); }
+  if (dep && (!isUnreceiptable(dep) || receiptWasVoided(contract, dep, true))) { const d = buildSingleReceipt(dep, contract, rentals); if (d) out.push(d); }
   const mgmt = buildManagementReceipt(contract, rentals);
   if (mgmt) out.push(mgmt);
   const charges = buildChequeChargeReceipt(contract);
@@ -1057,12 +1088,13 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
 }
 
 /** Empty-state document for when the selected receipt has no data. */
-function EmptyDoc({ kind }: { kind: Props['kind'] }) {
+function EmptyDoc({ kind, unreceiptable = false }: { kind: Props['kind']; unreceiptable?: boolean }) {
   return (
     <Document>
       <Page size="A4" style={st.page}>
         <Text style={{ marginTop: 40, textAlign: 'center', color: MUTE }}>
-          {kind === 'deposit' ? 'No security deposit is recorded for this contract.'
+          {unreceiptable ? 'This cheque bounced or was cancelled, so there is no receipt for it.'
+            : kind === 'deposit' ? 'No security deposit is recorded for this contract.'
             : kind === 'management' ? 'No management fees (Contract Registration, admin or commission) are recorded for this contract.'
             : kind === 'charges' ? 'No cheque charges are recorded for this contract — no cheque has bounced, been swapped or been deferred.'
             : kind === 'replacements' ? 'No replacement payments are recorded for this contract — every cheque on the schedule stands as it was issued.'
@@ -1088,7 +1120,7 @@ export function PaymentReceiptDoc({ contract, kind, selectedId, selectedIdx }: P
     );
   }
   const receipt = resolveReceipt(contract, kind, selectedId, selectedIdx);
-  if (!receipt) return <EmptyDoc kind={kind} />;
+  if (!receipt) return <EmptyDoc kind={kind} unreceiptable={isUnreceiptable(selectedPayment(contract, kind, selectedId, selectedIdx))} />;
   return (
     <Document title={receipt.receiptNo}>
       <ReceiptPage receipt={receipt} contract={contract} />

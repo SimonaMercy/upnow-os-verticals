@@ -77,7 +77,7 @@ function cardColumn(c: OpsContract): ColKey {
 
 // Inline one-click flips (mirror OperationsBoard). Everything else deep-links.
 const QUICK: Record<string, { path: string; label: string }> = {
-  pdc:     { path: 'confirm-pdc',           label: 'Confirm PDC' },
+  pdc:     { path: 'confirm-pdc',           label: 'Confirm payment' },
   utility: { path: 'utility/mark-on-file',  label: 'Mark utility on file' },
   ejari:   { path: 'ejari/mark-registered', label: 'Mark Contract Registration on file' },
   move_in: { path: 'move-in/mark-on-file',  label: 'Mark move-in on file' },

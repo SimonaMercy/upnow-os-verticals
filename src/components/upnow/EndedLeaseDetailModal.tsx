@@ -32,6 +32,11 @@ import {
 
 export interface EndedCustomerRow {
   customerId: number;
+  /** The ended tenancy's lease and unit — the list has one row per tenancy. */
+  leaseId?: number;
+  unitId?: number | null;
+  /** The customer still rents another unit; only this tenancy has ended. */
+  customerStillActive?: boolean;
   name: string | null;
   email: string | null;
   phone: string | null;

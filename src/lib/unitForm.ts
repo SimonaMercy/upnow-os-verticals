@@ -53,6 +53,8 @@ export interface UnitRecord {
   // current income: running today, or the next term whose cheques are already
   // collected. Null when neither exists. Read-only, set server-side.
   currentLeaseRent?: number | null;
+  /** Has a current lease (backend UNIT_IS_LET_SQL) — the occupancy every page shows. */
+  occupiedByLease?: boolean | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;

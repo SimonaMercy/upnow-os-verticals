@@ -1,37 +1,31 @@
 /**
- * The platform's "is this tenancy live?" rule, front-end side.
+ * The platform's "is this tenancy current?" rule, front-end side.
  *
- * A clause-for-clause mirror of `LIVE_LEASE_TIPS_SQL` (backend
- * `src/shared/lease-sql.ts`), which is what the RP dashboard's Customers and
- * Active Leases tiles are counted with. Every page that derives live tenancies
- * from the flat `/contracts` feed (`listForRp`) imports from here, so the
- * Customers directory, the Leases register and the dashboard cannot drift.
+ * A clause-for-clause mirror of `LIVE_LEASE_TIPS_SQL` / `CURRENT_LEASE_SQL`
+ * (backend `src/shared/lease-sql.ts`), which the RP dashboard's Active Leases and
+ * Customers tiles count with. Every page that derives tenancies from the flat
+ * `/contracts` feed (`listForRp`) imports from here, so the Customers directory,
+ * the Leases register and the dashboard cannot drift.
  *
  *     contract_active = true
  *     AND status NOT IN ('expired','terminated')
- *     AND contract_end_date >= CURRENT_DATE
- *     AND NOT (termination accepted AND effective date passed)
- *     AND ((status = 'active' OR pdc_confirmed = true)   ← tier 1
- *          OR unit.availability = 'occupied')            ← tier 2
+ *     AND contract_start_date <= today (Dubai)
+ *     AND contract_end_date   >= today (Dubai)
+ *     AND no termination started (termination_response <> 'accepted')
+ *     AND (status = 'active' OR pdc_confirmed = true     ← confirmed
+ *          OR contract_type = 'renewal')                 ← running renewal
  *
- * Tier 1 is the earning rule (`LEASE_COUNTS_SQL`). Tier 2 adds the in-flight
- * renewal on a unit the customer still occupies — the tenancy has neither ended
- * nor been terminated, the cheques simply are not in yet. Tier 1 always wins on
- * a given unit, so a confirmed term never loses its place to a draft.
- *
- * ⚠️ Tier 2 MUST stay gated on occupancy. Without that gate this collapses into
- * the old chain-tip rule and re-admits unsigned drafts on VACANT units — the
- * case lease-sql.ts records as having quietly inflated receivables.
- *
- * RP 2 reference figures: 107 live leases (103 tier-1 + 4 tier-2), 93 customers.
+ * A lease that starts later is not current, and a unit is vacant the moment a
+ * termination is started on its lease (both decided 14 Sep 2026). Per unit, a
+ * confirmed lease always wins over an unconfirmed one, then the later start.
  */
 
 /** The fields the rule reads. Both the Customers and Leases pages map into this. */
 export type LiveLeaseInput = {
   id?: number | null;
   unitId?: number | null;
-  /** `unit.availability === 'occupied'` on the /contracts row. */
-  unitOccupied?: boolean | null;
+  /** 'renewal' | 'new' | … — a running renewal counts before it is confirmed. */
+  contractType?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   status?: string | null;
@@ -41,46 +35,48 @@ export type LiveLeaseInput = {
   terminationEffectiveDate?: string | null;
 };
 
-/** Today as a YYYY-MM-DD key — the client-side stand-in for SQL CURRENT_DATE. */
+/**
+ * Today in Dubai as a YYYY-MM-DD key — the client-side stand-in for the backend's
+ * `DUBAI_TODAY_SQL`. Never the browser's local date: a landlord abroad would
+ * otherwise count a different set of leases from the server.
+ */
 export function todayKey(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
 }
 
 /**
- * Neither ENDED nor TERMINATED. A missing end date fails `>= CURRENT_DATE` in
- * SQL (NULL comparison), so it fails here too.
+ * Running today: started, not ended, not expired or terminated, no termination
+ * started. A missing start or end date fails the SQL comparison, so it fails here.
  */
 export function leaseIsLive(l: LiveLeaseInput, today = todayKey()): boolean {
   if (l.contractActive !== true) return false;
   const status = (l.status ?? '').toLowerCase();
   if (status === 'expired' || status === 'terminated') return false;
+  if (!l.startDate || l.startDate.slice(0, 10) > today) return false;
   if (!l.endDate || l.endDate.slice(0, 10) < today) return false;
-  return !(
-    (l.terminationResponse ?? '') === 'accepted' &&
-    l.terminationEffectiveDate &&
-    l.terminationEffectiveDate.slice(0, 10) <= today
-  );
+  return (l.terminationResponse ?? '') !== 'accepted';
 }
 
-/** Tier 1 — LEASE_COUNTS_SQL: live, and activated or cheques confirmed. */
+/** Running today and activated, or its payment confirmed. */
 export function leaseIsConfirmed(l: LiveLeaseInput, today = todayKey()): boolean {
   if (!leaseIsLive(l, today)) return false;
   return (l.status ?? '').toLowerCase() === 'active' || l.pdcConfirmed === true;
 }
 
-/** Tier 2 — live, not yet confirmed, on a unit the customer still occupies. */
+/** Running today, not yet confirmed, and a renewal for the customer already in the unit. */
 export function leaseIsInFlight(l: LiveLeaseInput, today = todayKey()): boolean {
-  return leaseIsLive(l, today) && !leaseIsConfirmed(l, today) && l.unitOccupied === true;
+  return leaseIsLive(l, today) && !leaseIsConfirmed(l, today) && (l.contractType ?? '').toLowerCase() === 'renewal';
 }
 
-/** Either tier — the lease belongs to the live set. */
+/** A current lease — either tier. */
 export function leaseIsCounted(l: LiveLeaseInput, today = todayKey()): boolean {
   return leaseIsConfirmed(l, today) || leaseIsInFlight(l, today);
 }
 
 /**
- * The ONE live lease per unit — `DISTINCT ON (unit_id) … ORDER BY confirmed
+ * The ONE current lease per unit — `DISTINCT ON (unit_id) … ORDER BY confirmed
  * DESC, contract_start_date DESC, id DESC`. Rows with no unit stand alone, so a
  * unit-less lease is never silently merged with another.
  *

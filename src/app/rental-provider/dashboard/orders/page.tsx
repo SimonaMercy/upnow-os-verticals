@@ -35,7 +35,7 @@ import {
   Bell, Download, Shield, Coins, Pencil, Info, ClipboardList, Archive, CalendarClock,
 } from 'lucide-react';
 import { tenantDisplayName } from '@/lib/tenantName';
-import { liveLeaseTips } from '@/lib/liveLease';
+import { liveLeaseTips, todayKey } from '@/lib/liveLease';
 import { contractHref, surfaceOfLockedAt } from '@/lib/contractHref';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 
@@ -87,7 +87,7 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
 // lease, not a rival headline.
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'all',          label: 'Active Leases' },
-  { key: 'starts_later', label: 'Upcoming Renewals' },
+  { key: 'starts_later', label: 'Starts later' },
   { key: 'expired',      label: 'Expired Leases' },
 ];
 
@@ -98,11 +98,9 @@ const TYPE_FILTERS: { key: string; label: string }[] = [
   { key: 'renewal', label: 'Renewal' },
 ];
 
-/** Local YYYY-MM-DD (no UTC shift) — the page's "today" for term-state checks. */
-const TODAY = (() => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-})();
+/** Today in Dubai (YYYY-MM-DD) — the same "today" the dashboard's lease counts use,
+ *  never the browser's local date. */
+const TODAY = todayKey();
 
 /** Map the raw DB status to a display status. Synthetic labels on top of the
  *  DB enum (docs/CONTRACT_LIFECYCLE.md §3 + §4.3):
@@ -542,13 +540,38 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     [grossLeaseCandidates, opsIds],
   );
 
+  // ── Reconciliation with the dashboard ──────────────────────────────────────
+  // The dashboard's "Active Leases" tile counts LIVE TENANCIES (lib/liveLease,
+  // the mirror of LIVE_LEASE_TIPS_SQL). This register is narrower on purpose —
+  // leases still being set up belong to Operations, and the two pages must not
+  // both claim them. So the figures differ, and the strip below says by how many
+  // and where the rest are, rather than leaving the reader to guess.
+  const liveTenancies = useMemo(
+    () => liveLeaseTips(contracts, c => ({
+      id: c.id,
+      unitId: c.unit.id,
+      contractType: c.contractType,
+      startDate: c.startDate,
+      endDate: c.endDate,
+      status: c.status,
+      contractActive: c.contractActive,
+      pdcConfirmed: c.pdcConfirmed,
+      terminationResponse: c.termination?.response ?? null,
+      terminationEffectiveDate: c.termination?.effectiveDate ?? null,
+    })),
+    [contracts],
+  );
+  // Units with a current lease — the dashboard's Active Leases set, by unit.
+  const liveUnitKeys = useMemo(() => new Set(liveTenancies.map(unitLeaseKey)), [liveTenancies]);
+
   const currentLeases = useMemo(
     () => grossLeaseCandidates.filter(c =>
+      liveUnitKeys.has(unitLeaseKey(c)) &&
       c.lockedAt != null &&
       displayStatusOf(c) !== 'needs_activation' &&
       displayStatusOf(c) !== 'terminating' &&
       !opsIds.has(c.id)),
-    [grossLeaseCandidates, opsIds],
+    [grossLeaseCandidates, opsIds, liveUnitKeys],
   );
 
 
@@ -573,38 +596,22 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
     [yearScoped, opsIds],
   );
 
-  // ── Reconciliation with the dashboard ──────────────────────────────────────
-  // The dashboard's "Active Leases" tile counts LIVE TENANCIES (lib/liveLease,
-  // the mirror of LIVE_LEASE_TIPS_SQL). This register is narrower on purpose —
-  // leases still being set up belong to Operations, and the two pages must not
-  // both claim them. So the figures differ, and the strip below says by how many
-  // and where the rest are, rather than leaving the reader to guess.
-  const liveTenancies = useMemo(
-    () => liveLeaseTips(contracts, c => ({
-      id: c.id,
-      unitId: c.unit.id,
-      unitOccupied: c.unit.availability === 'occupied',
-      startDate: c.startDate,
-      endDate: c.endDate,
-      status: c.status,
-      contractActive: c.contractActive,
-      pdcConfirmed: c.pdcConfirmed,
-      terminationResponse: c.termination?.response ?? null,
-      terminationEffectiveDate: c.termination?.effectiveDate ?? null,
-    })),
-    [contracts],
-  );
   // The live tenancies this register does NOT list, each with the reason it is
   // held back. The info icon on "Fully set up" opens this, so the gap is a list
   // of real units you can click into — not a number you have to take on trust.
   const currentIds = useMemo(() => new Set(currentLeases.map(c => c.id)), [currentLeases]);
+  // Partitioned by UNIT, not by lease id. The register and the live set can pick
+  // different leases for one unit — its running term here, a renewal signed ahead
+  // there — and comparing ids counted that unit in BOTH tiles (Unit 306, 13 Sep
+  // 2026: 96 + 8 against the dashboard's 103).
+  const currentUnitKeys = useMemo(() => new Set(currentLeases.map(unitLeaseKey)), [currentLeases]);
   const pendingSetupLeases = useMemo(
     () => liveTenancies
-      .filter(c => !currentIds.has(c.id))
+      .filter(c => !currentUnitKeys.has(unitLeaseKey(c)))
       .map(c => ({ c, reason: setupReasonOf(c, opsIds) }))
       .sort((a, b) => (a.c.property.buildingName ?? '').localeCompare(b.c.property.buildingName ?? '')
         || (a.c.unit.number ?? '').localeCompare(b.c.unit.number ?? '')),
-    [liveTenancies, currentIds, opsIds],
+    [liveTenancies, currentUnitKeys, opsIds],
   );
   const elsewhereCount = pendingSetupLeases.length;
   // Expired/ended leases — e.g. the prior term of a renewed lease (an expired
@@ -671,14 +678,14 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
   // this page has been carrying.
   //
   // Active Leases is the only bucket with two cards, and they ADD UP to the
-  // dashboard's figure: 93 + 14 = 107. The breakdown tooltip rides on that first
+  // dashboard's Active Leases, partitioned by unit (RP 2, 14 Sep 2026: 96 + 7 = 103). The breakdown tooltip rides on that first
   // card — it walks gross → setup → operations → running, i.e. precisely the
   // "why is this not the dashboard's number" question.
   const kpis: { lbl: string; val: string; aed?: boolean; accent?: boolean; ic: React.ReactNode; info?: React.ReactNode; href?: string }[] =
     activeTab === 'expired'
       ? [{ lbl: 'Expired Leases', val: String(expiredLeases.length), ic: <Archive size={12} /> }]
       : activeTab === 'starts_later'
-        ? [{ lbl: 'Upcoming Renewals', val: String(startsLaterLeases.length), ic: <CalendarClock size={12} /> }]
+        ? [{ lbl: 'Starts later', val: String(startsLaterLeases.length), ic: <CalendarClock size={12} /> }]
         : [
             { lbl: 'Active Leases', val: String(currentLeases.length), ic: <Shield size={12} />, info: <RentBreakdownTip breakdown={rentBreakdown} pending={pendingSetupLeases} manager={manager} opsHref={opsHref} /> },
             { lbl: 'In Operations', val: String(elsewhereCount),       ic: <ClipboardList size={12} />, href: opsHref },

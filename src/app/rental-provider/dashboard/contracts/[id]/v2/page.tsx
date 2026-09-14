@@ -398,8 +398,12 @@ function isDone(key: StepKey, st: DerivedState): boolean {
     // on Ejari (_autoActivateRenewalOnEjari) silently refused for exactly that reason.
     // Every case the clause covered correctly is already covered by the statuses
     // below; it fired alone only on the stuck records, where it hid the problem.
+    //
+    // An ACTIVE lease no longer counts as done on its own (decided 14 Sep 2026): rent
+    // only counts once the payment is confirmed, so an activated lease without it has
+    // this step open until someone confirms the cheques or the bank transfer.
     case 'cheques': return st.pdcConfirmed
-      || st.status === 'active' || st.status === 'expired' || st.status === 'terminated';
+      || st.status === 'expired' || st.status === 'terminated';
     case 'sign':    return st.tenantSigned && st.landlordSigned;
     case 'ejari':   return st.ejariStatus === 'registered';
     case 'utility': return st.utilityDoc;
@@ -1195,12 +1199,12 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
           type="button"
           className="btn btn-jade btn-block"
           disabled={confirming}
-          onClick={() => { setConfirming(true); setErr(null); void h.onConfirmPdc().catch(e => setErr(e instanceof Error ? e.message : 'Failed to mark collected')).finally(() => setConfirming(false)); }}
+          onClick={() => { setConfirming(true); setErr(null); void h.onConfirmPdc().catch(e => setErr(e instanceof Error ? e.message : 'Failed to confirm payment')).finally(() => setConfirming(false)); }}
         >
-          <Check size={15} /> {confirming ? 'Marking…' : 'Mark as Collected'}
+          <Check size={15} /> {confirming ? 'Confirming…' : 'Confirm payment received'}
         </button>
       )}
-      <p className="note" style={{ margin: 0 }}>Mark once every cheque above is in hand — this unlocks the signature step.</p>
+      <p className="note" style={{ margin: 0 }}>Confirm once every cheque above is in hand, or the bank transfer has been received — this unlocks the signature step and counts the lease's rent.</p>
     </div>
   );
 }

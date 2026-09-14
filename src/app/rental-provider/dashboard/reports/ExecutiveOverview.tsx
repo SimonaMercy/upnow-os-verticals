@@ -197,8 +197,8 @@ export default function ExecutiveOverview({
           tone={k.arrearsFils > 0 ? 'bad' : 'good'} />
         <KpiTile icon={CalendarClock} label="PDC next 90 days" value={`AED ${fmtAedShort(k.upcoming90Fils)}`}
           sub="post-dated cheques landing" />
-        <KpiTile icon={RefreshCw} label="Expiring ≤ 90 days" value={String(k.expiring90)}
-          sub={`AED ${fmtAedShort(k.expiring90RentFils)} at stake · ${k.renewalsOverdue} already lapsed`}
+        <KpiTile icon={RefreshCw} label="Renewals · month + 90 days" value={String(k.expiring90)}
+          sub={`AED ${fmtAedShort(k.expiring90RentFils)} confirmed rent · ${k.renewalsOverdue} already lapsed`}
           tone={k.renewalsOverdue > 0 ? 'warn' : 'neutral'} />
         <KpiTile icon={ShieldCheck} label="Deposit liability" value={`AED ${fmtAedShort(k.depositLiabilityFils)}`}
           sub={k.depositsPartial ? `${k.depositsHeld} held · ${k.depositsPartial} partially returned` : `${k.depositsHeld} deposits held`} />

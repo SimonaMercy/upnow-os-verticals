@@ -54,7 +54,8 @@ interface UnitLite {
   planLabel: string | null;
   rentalPrice: number | null;
   lastLeaseRent: number | null;      // annual rent of the unit's most recent lease (active OR ended); null = never leased
-  currentLeaseRent: number | null;   // annual rent of the lease counting as current income — running today, or next term with cheques collected; null = none
+  currentLeaseRent: number | null;   // annual rent of the current lease once its payment is confirmed; null = none
+  occupiedByLease: boolean | null;   // has a current lease (backend UNIT_IS_LET_SQL); null = older payload
 }
 
 interface Property {
@@ -243,7 +244,7 @@ function buildUnitMix(units: UnitLite[], planLabels: Set<string>): { rows: MixRo
     //    contribute nothing, so this reconciles with the portfolio KPI
     //    (annualRentTotalsFor).
     const market = u.rentalPrice;
-    const leaseNet = u.availability === 'occupied' ? u.currentLeaseRent : null;
+    const leaseNet = (u.occupiedByLease ?? u.availability === 'occupied') ? u.currentLeaseRent : null;
     for (const bucket of [g, l]) {
       bucket.count += 1;
       bucket.sqmLo = minOf(bucket.sqmLo, u.unitSizeSqm);
@@ -407,6 +408,7 @@ export function PropertyDetailsModal({
         rentalPrice: numOrNull(r.rentalPrice),
         lastLeaseRent: numOrNull(r.lastLeaseRent),
         currentLeaseRent: numOrNull(r.currentLeaseRent),
+        occupiedByLease: typeof r.occupiedByLease === 'boolean' ? r.occupiedByLease : null,
       }));
       rows.sort((a, b) => (a.unitNumber ?? '').localeCompare(b.unitNumber ?? '', undefined, { numeric: true, sensitivity: 'base' }));
       setUnits(rows);
@@ -594,7 +596,7 @@ export function PropertyDetailsModal({
   }, [lb, reader, dismiss]);
 
   // ── summary numbers ─────────────────────────────────────
-  const occFromUnits = units.filter((u) => u.availability === 'occupied').length;
+  const occFromUnits = units.filter((u) => u.occupiedByLease ?? u.availability === 'occupied').length;
   const totalUnits = stats ? stats.units : units.length;
   const occupied = stats ? stats.occupied : occFromUnits;
   const vacant = Math.max(0, totalUnits - occupied);
