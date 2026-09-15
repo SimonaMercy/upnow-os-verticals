@@ -3,15 +3,7 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import {
-  LayoutDashboard, Home, Search, Building2, FileText,
-  CalendarCheck, Wrench, Users, Star, Wallet, BookOpen,
-  Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft,
-  ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle,
-  TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble,
-  Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature,
-  HeartPulse, MapPin,
-} from 'lucide-react';
+import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
@@ -143,6 +135,13 @@ const NAV: Record<UserRole, NavItem[]> = {
     // commitments layer lands; until then it lives here under Maintenance.
     { label: 'AMC',              href: '/rental-provider/dashboard/amc',              icon: FileSignature },
     { divider: true },
+    // Legal & breach management — the disputes register (spec 2026-09-14);
+    // breaches themselves live on the lease page and the Operations boards.
+    { section: 'Legal' },
+    // Two pipelines, two pages (owner, 14 Sep: "keep breaches and Legal separate — separate pages").
+    { label: 'Breaches',         href: '/rental-provider/dashboard/breaches',         icon: ShieldAlert, match: ['/rental-provider/dashboard/breaches'] },
+    { label: 'Legal',            href: '/rental-provider/dashboard/legal',            icon: Scale, match: ['/rental-provider/dashboard/legal'] },
+    { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
     { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare, hidden: true },
@@ -192,16 +191,20 @@ const NAV: Record<UserRole, NavItem[]> = {
     // own when canManageMaintenance empties it (see sectionsKept).
     { section: 'Maintenance' },
     { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'], ...DEV_ONLY },
-    { label: 'Maintenance List', href: '/dashboard/manager/maintenance-list', icon: Wrench, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance-coverage'], ...DEV_ONLY },
     { label: 'Vendors',          href: '/dashboard/manager/vendors',          icon: Users, requirePerm: 'canManageVendors' },
     { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: 'canManageAmc' },
     { divider: true },
+    { section: 'Legal' },
+    { label: 'Breaches',         href: '/dashboard/manager/breaches',         icon: ShieldAlert, requirePerm: 'canManageLegal', match: ['/dashboard/manager/breaches'] },
+    { label: 'Legal',            href: '/dashboard/manager/legal',            icon: Scale, requirePerm: 'canManageLegal', match: ['/dashboard/manager/legal'] },
+    { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
-    { label: 'Restoration List', href: '/dashboard/manager/restoration-list', icon: Receipt, requirePerm: 'canManageInspections' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
+    // The lists moved under Settings (owner, 12 Sep) — the page shows only what the landlord delegated.
+    { label: 'Settings',         href: '/dashboard/manager/settings',   icon: Settings, match: ['/dashboard/manager/maintenance-coverage', '/dashboard/manager/maintenance-list', '/dashboard/manager/restoration-list', '/dashboard/manager/amc/categories'] },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
@@ -255,6 +258,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     // It is a platform document (audience-scoped: provider today, others later), so it lives
     // here rather than under one provider section.
     { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
+    // Legal & breach — the jurisdiction rule book (cure periods, notice days, filing fee).
+    { label: 'Jurisdiction',     href: '/dashboard/admin/legal',               icon: Scale },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
     { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
@@ -300,6 +305,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     // It is a platform document (audience-scoped: provider today, others later), so it lives
     // here rather than under one provider section.
     { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
+    // Legal & breach — the jurisdiction rule book (cure periods, notice days, filing fee).
+    { label: 'Jurisdiction',     href: '/dashboard/admin/legal',               icon: Scale },
     { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
     { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
     { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },

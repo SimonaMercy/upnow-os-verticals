@@ -131,7 +131,7 @@ interface PubPayload {
 }
 
 /** The board's own tabs, plus the two presence tabs no pipeline can hold. */
-type TabKey = 'lead' | 'newlease' | 'renewal' | 'terminated' | 'all' | 'pageviews' | 'publicvisits';
+type TabKey = 'lead' | 'newlease' | 'renewal' | 'terminated' | 'breach' | 'legal' | 'maintenance' | 'amc' | 'all' | 'pageviews' | 'publicvisits';
 const VIEWS_TAB: TabKey = 'pageviews';
 const PUBLIC_TAB: TabKey = 'publicvisits';
 

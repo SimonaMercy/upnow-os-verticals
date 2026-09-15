@@ -11,9 +11,9 @@
  * The licence copy is filed against the vendor record after the save, then
  * linked to it; the number and validity are kept on the record either way.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { UploadCloud, X } from 'lucide-react';
-import { apiPatch, apiPost } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { openDocViewer } from '@/lib/docViewer';
 
@@ -21,7 +21,7 @@ const url = (base: string, rp: number | null | undefined, path: string) => rp !=
 /** 0279 adds landlord (head landlord / authority the rent goes to) and internal (employees). */
 export type VendorKind = 'service' | 'utility' | 'government' | 'insurance' | 'supplier' | 'landlord' | 'internal';
 export interface VendorFormValue {
-  serviceProviderId: number; name: string; kind: VendorKind; category: string | null;
+  serviceProviderId: number; name: string; kind: VendorKind; category: string | null; expenseCategoryId?: number | null;
   relationship: 'internal_team' | 'contracted_vendor'; entityType: string | null;
   phone: string | null; email: string | null; inviteStatus: 'not_invited' | 'invited' | 'accepted';
   trades: { id: number; name: string }[];
@@ -63,6 +63,11 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
   const [name, setName] = useState(v?.name ?? '');
   const [kind, setKind] = useState<VendorKind>(v?.kind ?? 'service');
   const [category, setCategory] = useState(v?.category ?? '');
+  // 0284 — what they're for is a sub-category of the contracts book (owner, 13 Sep: the vendor is primary; AMCs inherit it).
+  const [categoryId, setCategoryId] = useState<number | null>(v?.expenseCategoryId ?? null);
+  const [cats, setCats] = useState<{ id: number; name: string; defaultKind: string; isActive: boolean }[]>([]);
+  const [newCat, setNewCat] = useState(false);
+  useEffect(() => { apiGet<typeof cats>(rp != null ? `/manager/amc/categories?rp=${rp}` : '/amc/categories').then(setCats).catch(() => setCats([])); }, [rp]);
   const [relationship, setRelationship] = useState<'contracted_vendor' | 'internal_team'>(v?.relationship ?? 'contracted_vendor');
   const [entityType, setEntityType] = useState<'company' | 'individual'>(v?.entityType === 'individual' ? 'individual' : 'company');
   const [contactName, setContactName] = useState(v?.contactName ?? '');
@@ -95,7 +100,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
       let spId = v?.serviceProviderId ?? null;
       if (mode === 'add') {
         const created = await apiPost<{ serviceProviderId: number }>(url(base, rp, '/vendors'), {
-          name: name.trim(), kind, ...(category.trim() ? { category: category.trim() } : {}),
+          name: name.trim(), kind, ...(category.trim() ? { category: category.trim() } : {}), expenseCategoryId: newCat ? null : categoryId,
           relationship: service ? relationship : 'contracted_vendor', entityType,
           ...(phone.trim() ? { phone: phone.trim() } : {}), ...(email.trim() ? { email: email.trim() } : {}),
           ...(service && trades.length ? { trades } : {}), ...details,
@@ -103,7 +108,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
         spId = created?.serviceProviderId ?? null;
       } else {
         await apiPatch(url(base, rp, `/vendors/${spId}`), {
-          name: name.trim(), kind, category: category.trim() || null,
+          name: name.trim(), kind, category: category.trim() || null, expenseCategoryId: newCat ? null : categoryId,
           relationship: service ? relationship : 'contracted_vendor', entityType,
           ...(contactLocked ? {} : { phone: phone.trim(), email: email.trim() }),
           ...(service ? { trades } : {}), ...details,
@@ -155,8 +160,22 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
               </div>
               <div>
                 <label className={label} htmlFor="vf-category">What they&rsquo;re for</label>
-                <input id="vf-category" className={field} placeholder={KIND_HINT[kind]} value={category} onChange={e => setCategory(e.target.value)} />
-                <p className={hint}>In your own words — shown on the list.</p>
+                {newCat ? (
+                  <div className="flex items-center gap-2">
+                    <input id="vf-category" autoFocus className={field} placeholder={KIND_HINT[kind]} value={category} onChange={e => setCategory(e.target.value)} />
+                    <button type="button" onClick={() => { setNewCat(false); setCategory(''); }} className="text-[11px] text-[#9b9890] hover:text-[#1a1916] cursor-pointer whitespace-nowrap">Pick existing</button>
+                  </div>
+                ) : (
+                  <select id="vf-category" className={field} value={categoryId ?? ''} onChange={e => {
+                    if (e.target.value === '__new') { setNewCat(true); setCategoryId(null); setCategory(''); return; }
+                    const id = e.target.value ? Number(e.target.value) : null; setCategoryId(id); setCategory(cats.find(c => c.id === id)?.name ?? '');
+                  }}>
+                    <option value="">— none —</option>
+                    {cats.filter(c => c.isActive || c.id === categoryId).map(c => <option key={c.id} value={c.id}>{c.name}{c.isActive ? '' : ' (retired)'}</option>)}
+                    <option value="__new">+ New sub-category…</option>
+                  </select>
+                )}
+                <p className={hint}>A sub-category from Settings → AMC categories. A contract added for this vendor starts with it.</p>
               </div>
             </div>
           </Section>

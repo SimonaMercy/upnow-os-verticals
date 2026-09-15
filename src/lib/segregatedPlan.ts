@@ -328,7 +328,7 @@ const isEjari = (p: SegPaymentInput) => typeOf(p) === 'ejari_fee';
 const RULE_FEE_TYPES = new Set([
   'bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee', 'late_renewal_fee',
   'early_termination_fee', 'late_moveout_fee', 'unauthorized_sharing_fee', 'access_card_fee',
-  'contract_name_change_fee', 'unit_transfer_fee',
+  'contract_name_change_fee', 'unit_transfer_fee', 'legal_fee',
 ]);
 const isManagementFee = (p: SegPaymentInput) => isAdmin(p) || isCommission(p) || RULE_FEE_TYPES.has(typeOf(p));
 // Third Party is the CATCH-ALL: everything that isn't the deposit, rent, a management

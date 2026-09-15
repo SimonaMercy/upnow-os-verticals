@@ -6,7 +6,7 @@
  *
  * Header (identity, actions, fact strip, lineage) · Visits (month strip, the
  * next visit, needs-action rows worked through attended → delivery note →
- * inspected, history) · right rail: Vendor, Payments, Documents.
+ * delivery note, history) · right rail: Vendor, Payments, Documents.
  *
  * Payments: the platform holds the contract's TERMS (value, count, mode) and the
  * proofs filed against it — not a per-installment ledger yet. The schedule shown
@@ -42,7 +42,7 @@ interface Task {
   /** pending | approved | declined | completed — "either processed or still pending". */
   quotationStatus?: string | null; quotationStatusAt?: string | null;
 }
-interface Visit { t: Task; n: number; stages: [boolean, boolean, boolean]; done: number; overdueDays: number; state: 'done' | 'overdue' | 'next' | 'upcoming' | 'closed' }
+interface Visit { t: Task; n: number; stages: [boolean, boolean]; done: number; overdueDays: number; state: 'done' | 'overdue' | 'next' | 'upcoming' | 'closed' }
 interface InstDoc { id: number; fileUrl: string; displayName: string | null; documentKey: string }
 /** 0281 — `bill` is the vendor's bill copy; `proof` is the proof of PAYMENT; `paymentMethod` how it was settled. */
 interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null }
@@ -96,10 +96,10 @@ async function uploadContractFile(cid: number, f: File, documentKey: string, cat
   return doc?.id ?? null;
 }
 
-function StageBars({ stages, tone }: { stages: [boolean, boolean, boolean]; tone: 'neutral' | 'red' }) {
+function StageBars({ stages, tone }: { stages: [boolean, boolean]; tone: 'neutral' | 'red' }) {
   const off = tone === 'red' ? '#e3c6c2' : '#e6e8e6';
   return (
-    <div className="flex gap-1 shrink-0" title="Attended · Inspected · Delivery note">
+    <div className="flex gap-1 shrink-0" title="Attended & inspected · Delivery note">
       {stages.map((on, i) => <span key={i} className="w-[22px] h-[5px] rounded-full" style={{ background: on ? '#1a7a52' : off }} />)}
     </div>
   );
@@ -185,6 +185,11 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
   const [annual, setAnnual] = useState(c.annualValueAed != null ? String(c.annualValueAed) : '');
   const [mode, setMode] = useState(c.modeOfPayment ?? '');
   const [notes, setNotes] = useState(c.notes ?? '');
+  // Same fields, same order, same words as the Add form (owner, 12 Sep: "are Add and Edit aligned?").
+  const frequency = c.frequency ?? 'annually';
+  const [propertyId, setPropertyId] = useState(c.propertyId != null ? String(c.propertyId) : '');
+  const [props, setProps] = useState<{ id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }[]>([]);
+  useEffect(() => { apiGet<typeof props>(rp != null ? '/manager/properties' : '/properties').then(list => setProps(rp != null ? list.filter(p => p.rentalProviderId == null || p.rentalProviderId === rp) : list)).catch(() => setProps([])); }, [rp]);
   const { active: kindList, meta: kindOf } = useKinds(base, rp);
   const [kind, setKind] = useState<ContractKind>(c.kind ?? 'service');
   const [categoryLabel, setCategoryLabel] = useState(c.categoryLabel ?? '');
@@ -203,6 +208,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
         startDate: startDate || null, endDate: endDate || null,
         annualValueAed: annual.trim() !== '' ? Number(annual) : null,
         modeOfPayment: mode || null, notes: notes.trim() || null,
+        propertyId: propertyId ? Number(propertyId) : null,
         kind, categoryLabel: categoryLabel.trim() || null, expenseCategoryId: newCat ? null : categoryId,
       });
       onSaved();
@@ -247,18 +253,31 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
             )}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <div><span className={l}>Start</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
-            <div><span className={l}>End</span><input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
+            <div><span className={l}>{kind === 'head_lease' ? 'Head landlord / authority' : 'Vendor'}</span><div className="text-[13px] font-semibold px-1 py-2 truncate">{c.vendorName}</div></div>
+            <div><span className={l}>Property <span className="font-normal text-[#8a8f8c]">— which building</span></span>
+              <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
+                <option value="">— all / none —</option>
+                {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
+              </select>
+            </div>
           </div>
-          <div><span className={l}>Annual value (AED)</span><input type="number" min="0" step="0.01" className={field} value={annual} onChange={e => setAnnual(e.target.value)} /></div>
           <div className="grid grid-cols-2 gap-2">
-            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.numberOfPayments ?? '—'} on the schedule · edit them in the Payments card</div></div>
+            <div><span className={l}>Start date</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
+            <div><span className={l}>End date</span><input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
+            {/* Cadence is set once, on the Add form, where it generates the visits and the schedule. Changing it
+                here would only relabel the contract — the rows already on record would not move — so it is read-only
+                and says where the real change is made (owner, 12 Sep: "if I change, what will happen?"). */}
+            <div><span className={l}>{kindOf(kind).schedule === 'bills' ? 'Billing cycle' : kindOf(kind).visits ? 'Visit & payment cadence' : 'Payment cadence'}</span>
+              <div className="text-[13px] font-semibold px-1 py-2">{cap(frequency)}<span className="block text-[11px] font-normal text-[#8a8f8c]">Set when the contract was added. {kindOf(kind).visits ? 'Re-date or add visits on the contract page; ' : ''}edit the payment schedule under Payments.</span></div>
+            </div>
+            <div><span className={l}>{kind === 'policy' ? 'Annual premium (AED)' : kindOf(kind).schedule === 'bills' ? 'Annual value (AED, optional)' : 'Annual value (AED)'}</span><input type="number" min="0" step="0.01" className={field} value={annual} onChange={e => setAnnual(e.target.value)} /></div>
             <div><span className={l}>Mode of payment</span>
               <select className={field} value={mode} onChange={e => setMode(e.target.value)}>
                 <option value="">—</option>
                 {['cheque', 'bank_transfer', 'cash', 'card', 'online'].map(m => <option key={m} value={m}>{cap(m)}</option>)}
               </select>
             </div>
+            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.numberOfPayments ?? '—'} on the schedule · edit them on the contract page</div></div>
           </div>
           <div><span className={l}>Notes</span><textarea rows={3} className={field} value={notes} onChange={e => setNotes(e.target.value)} /></div>
           <p className="text-[11px] text-[#8a8f8c]">{kindOf(kind).visits ? 'The visit plan stays as scheduled — edit visits from the Visits card.' : 'No visit plan for this kind — bills and payments are worked on the contract page.'}</p>
@@ -350,7 +369,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     setBulkAttend(false);
     for (const t of list) { setBusy(t.id); try { await apiPatch(scoped(base, rp, `/tasks/${t.id}/attend`), { supervisedBy: who }); } catch { /* keep going */ } }
     setBusy(null); load();
-    say(`${list.length} visit${list.length === 1 ? '' : 's'} marked attended — inspect each, then file its delivery note.`);
+    say(`${list.length} visit${list.length === 1 ? '' : 's'} marked attended & inspected — file each delivery note to complete it.`);
   };
   const uploadNote = async (t: Task, f: File) => {
     setBusy(t.id);
@@ -359,11 +378,6 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
       if (docId) await apiPatch(scoped(base, rp, `/tasks/${t.id}/delivery-note`), { documentId: docId });
       load();
     } finally { setBusy(null); }
-  };
-  const inspect = async (t: Task) => {
-    setBusy(t.id);
-    try { await apiPatch(scoped(base, rp, `/tasks/${t.id}/inspect`), {}); load(); }
-    finally { setBusy(null); }
   };
   /** Processed or still pending — the quotation's status, set from the visit. */
   const setQuotationStatus = async (t: Task, n: number, status: string) => {
@@ -516,8 +530,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const contactPhone = v?.phone ?? v?.contactPhone ?? null;
 
   const all: Visit[] = (tasks ?? []).map((t, i) => {
-    // Attended → inspected → delivery note (the note follows the inspection and completes the visit).
-    const stages: [boolean, boolean, boolean] = [!!t.attendedAt, !!t.inspectedAt, !!t.deliveryNote];
+    // Attended (which is the inspection — owner, 15 Sep 2026: "keep one") → delivery note completes the visit.
+    const stages: [boolean, boolean] = [!!t.attendedAt, !!t.deliveryNote];
     const due = t.dueDate ? isoDay(t.dueDate) : null;
     // 'closed' = missed (cleared past visit) or cancelled with the contract — neither late nor pending.
     const closed = t.status === 'missed' || t.status === 'cancelled';
@@ -527,9 +541,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const next = all.find(x => x.state === 'upcoming') ?? null;
   if (next) next.state = 'next';
   const overdue = all.filter(x => x.state === 'overdue');
-  const history = all.filter(x => x.state === 'done').sort((a, b) => (b.t.inspectedAt ?? b.t.completedAt ?? '').localeCompare(a.t.inspectedAt ?? a.t.completedAt ?? ''));
-  const inspected = all.filter(x => x.stages[1]).length;
-  const notesFiled = all.filter(x => x.stages[2]).length;
+  const history = all.filter(x => x.state === 'done').sort((a, b) => (b.t.completedAt ?? b.t.attendedAt ?? '').localeCompare(a.t.completedAt ?? a.t.attendedAt ?? ''));
+  const attendedCount = all.filter(x => x.stages[0]).length;
+  const notesFiled = all.filter(x => x.stages[1]).length;
   // Quotations for fixes attached to visits — open (pending/approved) first, newest first within.
   const quotes = all.filter(x => x.t.quotation || x.t.quotationAmountAed != null)
     .sort((a, b) => Number(['declined', 'completed'].includes(a.t.quotationStatus ?? '')) - Number(['declined', 'completed'].includes(b.t.quotationStatus ?? '')) || (b.t.quotationAt ?? '').localeCompare(a.t.quotationAt ?? ''));
@@ -568,11 +582,10 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const contractEnd = c.endDate ? isoDay(c.endDate) : '';
   const annualStr = c.annualValueAed != null ? String(c.annualValueAed) : '';
 
-  const stageWord = (x: Visit) => !x.stages[0] ? 'awaiting attendance' : !x.stages[1] ? 'awaiting inspection' : 'awaiting delivery note';
+  const stageWord = (x: Visit) => !x.stages[0] ? 'awaiting attendance' : 'awaiting delivery note';
   const primaryAction = (x: Visit) => {
     const t = x.t; const b = busy === t.id;
     if (!x.stages[0]) return <button type="button" disabled={b} onClick={() => { setExpandedId(t.id); setAttendingId(t.id); }} className={btnGreenSm}>Mark attended</button>;
-    if (!x.stages[1]) return <button type="button" disabled={b} onClick={() => inspect(t)} className={btnFillSm}>Mark inspected</button>;
     return (
       <label className={btnFillSm + (b ? ' opacity-50' : '')}>{b ? 'Uploading…' : 'Upload note'}
         <input type="file" accept="image/*,application/pdf" className="hidden" disabled={b} onChange={e => { const f = e.target.files?.[0]; if (f) void uploadNote(t, f); e.target.value = ''; }} />
@@ -803,7 +816,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <h2 className="text-[14px] font-bold">Visits</h2>
             <span className="text-[11px] text-[#8a8f8c]">
               {(c.tasks.quotationsPending ?? 0) > 0 && <span className="font-bold text-[#c47a00] mr-2">{c.tasks.quotationsPending} quotation{c.tasks.quotationsPending === 1 ? '' : 's'} open</span>}
-              A visit completes when attended, inspected, and the delivery note is filed
+              A visit completes when attended (which is the inspection) and the delivery note is filed
             </span>
           </div>
 
@@ -862,14 +875,14 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                       <div className="text-[13px] font-bold">Visit {x.n} · due {fmtD(t.dueDate)}{b && <Loader2 size={12} className="inline ml-2 animate-spin text-[#8a8f8c]" />}</div>
                       <div className="text-[11px] text-[#b42318] font-semibold">{x.overdueDays} days overdue · {stageWord(x)}</div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
-                      {/* 1 attended */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                      {/* 1 attended & inspected */}
                       <div className="flex gap-2 items-start">
                         {x.stages[0]
                           ? <div className="w-[18px] h-[18px] rounded-full bg-[#1a7a52] text-white text-[10px] font-extrabold grid place-items-center shrink-0">✓</div>
                           : <div className="w-[18px] h-[18px] rounded-full border-2 border-[#1c1f1d] box-border text-[10px] font-extrabold grid place-items-center shrink-0">1</div>}
                         <div className="min-w-0">
-                          <div className="text-[11.5px] font-bold">Attended</div>
+                          <div className="text-[11.5px] font-bold">Attended &amp; inspected</div>
                           {x.stages[0]
                             ? <div className="text-[10.5px] text-[#5b615e]">{fmtS(t.attendedAt)} · {whoAttended(t)}</div>
                             : attendingId === t.id
@@ -877,34 +890,20 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                               : <button type="button" disabled={b} onClick={() => setAttendingId(t.id)} className={btnFillSm + ' mt-1'}>Mark attended</button>}
                         </div>
                       </div>
-                      {/* 2 inspected */}
+                      {/* 2 delivery note */}
                       <div className={`flex gap-2 items-start ${x.stages[0] ? '' : 'opacity-45'}`}>
                         {x.stages[1]
                           ? <div className="w-[18px] h-[18px] rounded-full bg-[#1a7a52] text-white text-[10px] font-extrabold grid place-items-center shrink-0">✓</div>
                           : <div className={`w-[18px] h-[18px] rounded-full border-2 box-border text-[10px] font-extrabold grid place-items-center shrink-0 ${x.stages[0] ? 'border-[#1c1f1d]' : 'border-[#8a8f8c]'}`}>2</div>}
                         <div className="min-w-0">
-                          <div className="text-[11.5px] font-bold">Inspected</div>
-                          {x.stages[1]
-                            ? <div className="text-[10.5px] text-[#5b615e]">{fmtS(t.inspectedAt)}{t.inspectedByName ? ` by ${t.inspectedByName}` : ''}</div>
-                            : x.stages[0]
-                              ? <button type="button" disabled={b} onClick={() => inspect(t)} className={btnFillSm + ' mt-1'}>Mark inspected</button>
-                              : <div className="text-[10.5px] text-[#5b615e]">After attendance</div>}
-                        </div>
-                      </div>
-                      {/* 3 delivery note */}
-                      <div className={`flex gap-2 items-start ${x.stages[0] && x.stages[1] ? '' : 'opacity-45'}`}>
-                        {x.stages[2]
-                          ? <div className="w-[18px] h-[18px] rounded-full bg-[#1a7a52] text-white text-[10px] font-extrabold grid place-items-center shrink-0">✓</div>
-                          : <div className={`w-[18px] h-[18px] rounded-full border-2 box-border text-[10px] font-extrabold grid place-items-center shrink-0 ${x.stages[0] && x.stages[1] ? 'border-[#1c1f1d]' : 'border-[#8a8f8c]'}`}>3</div>}
-                        <div className="min-w-0">
                           <div className="text-[11.5px] font-bold">Delivery note</div>
-                          {x.stages[2]
+                          {x.stages[1]
                             ? <button type="button" onClick={() => openDocViewer({ fileUrl: t.deliveryNote!.fileUrl, caption: `Delivery note — Visit ${x.n}`, documentKey: 'delivery_note' })} className="text-[10.5px] font-semibold text-[#1a7a52] underline cursor-pointer">View note</button>
-                            : x.stages[0] && x.stages[1]
+                            : x.stages[0]
                               ? <label className={btnFillSm + ' mt-1 inline-block' + (b ? ' opacity-50' : '')}>{b ? 'Uploading…' : 'Upload note'}
                                   <input type="file" accept="image/*,application/pdf" className="hidden" disabled={b} onChange={e => { const f = e.target.files?.[0]; if (f) void uploadNote(t, f); e.target.value = ''; }} />
                                 </label>
-                              : <div className="text-[10.5px] text-[#5b615e]">After inspection · completes the visit</div>}
+                              : <div className="text-[10.5px] text-[#5b615e]">After attendance · completes the visit</div>}
                         </div>
                       </div>
                     </div>
@@ -918,7 +917,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                     <div className="text-[12.5px] font-bold flex-1 whitespace-nowrap">Visit {x.n} · due {fmtD(t.dueDate)}</div>
                     <StageBars stages={x.stages} tone="red" />
                     <div className="text-[11px] text-[#b42318] font-semibold whitespace-nowrap text-right">{x.overdueDays} days overdue</div>
-                    <span className="text-[11px] text-[#b9bdba] whitespace-nowrap" title="Available after inspection">Report</span>
+                    <span className="text-[11px] text-[#b9bdba] whitespace-nowrap" title="Available after attendance">Report</span>
                     <span onClick={e => e.stopPropagation()}>{primaryAction(x)}</span>
                   </div>
                 );
@@ -929,11 +928,11 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           {/* history */}
           <div className="flex items-center justify-between mt-[22px] gap-2 flex-wrap">
             <div className="text-[12px] font-bold">History · {history.length}</div>
-            <div className="text-[11px] text-[#8a8f8c]">Attended · inspected · delivery note filed</div>
+            <div className="text-[11px] text-[#8a8f8c]">Attended &amp; inspected · delivery note filed</div>
           </div>
           {history.length === 0 ? (
             <div className="border border-dashed border-[#d9ddda] rounded-[10px] px-4 py-2.5 mt-2 flex items-center gap-3.5 text-[#8a8f8c] flex-wrap">
-              <div className="text-[12px] flex-1">Completed visits list here with <b className="text-[#5b615e]">Attended · Inspected · Delivery note</b> dates</div>
+              <div className="text-[12px] flex-1">Completed visits list here with <b className="text-[#5b615e]">Attended &amp; inspected · Delivery note</b> dates</div>
               <span className="text-[11px] font-semibold text-[#b9bdba]">Delivery note</span>
             </div>
           ) : history.map(x => {
@@ -944,8 +943,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                   <div className="text-[12.5px] font-bold">Visit {x.n} · due {fmtD(t.dueDate)}</div>
                   {t.attendedAt || t.inspectedAt ? (
                     <div className="text-[11px] text-[#5b615e] mt-0.5">
-                      <b className="text-[#1a7a52]">Attended</b> {fmtS(t.attendedAt)} {whoAttended(t)}
-                      {t.inspectedAt && <> · <b className="text-[#1a7a52]">Inspected</b> {fmtS(t.inspectedAt)}{t.inspectedByName ? ` by ${t.inspectedByName}` : ''}</>}
+                      <b className="text-[#1a7a52]">Attended &amp; inspected</b> {fmtS(t.attendedAt)} {whoAttended(t)}
                       {t.deliveryNote && <> · <b className="text-[#1a7a52]">Delivery note</b> filed</>}
                     </div>
                   ) : (
@@ -1148,7 +1146,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               ))}
               {km.visits && <>
                 <div className="flex justify-between items-center py-[9px] border-b border-[#f1f3f1] text-[11.5px] text-[#8a8f8c]"><span>Delivery notes · {notesFiled} of {n}</span><span className="text-[10.5px]">on visits</span></div>
-                <div className="flex justify-between items-center py-[9px] text-[11.5px] text-[#8a8f8c]"><span>Inspected · {inspected} of {n}</span><span className="text-[10.5px]">on visits</span></div>
+                <div className="flex justify-between items-center py-[9px] text-[11.5px] text-[#8a8f8c]"><span>Attended &amp; inspected · {attendedCount} of {n}</span><span className="text-[10.5px]">on visits</span></div>
               </>}
             </div>
           </div>

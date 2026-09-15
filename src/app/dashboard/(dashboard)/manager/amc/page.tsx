@@ -41,7 +41,7 @@ export default function ManagerAmcPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      {effectiveRp != null && <AmcView base="/manager/amc" rp={effectiveRp} propertiesUrl="/manager/properties" reportHref={`/dashboard/manager/amc/expenses?rp=${effectiveRp}`} categoriesHref={`/dashboard/manager/amc/categories?rp=${effectiveRp}`} />}
+      {effectiveRp != null && <AmcView base="/manager/amc" rp={effectiveRp} propertiesUrl="/manager/properties" reportHref={`/dashboard/manager/amc/expenses?rp=${effectiveRp}`} categoriesHref={`/dashboard/manager/settings?tab=categories&rp=${effectiveRp}`} />}
     </div>
   );
 }

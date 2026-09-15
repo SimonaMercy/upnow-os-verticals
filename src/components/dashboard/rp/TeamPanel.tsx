@@ -67,6 +67,7 @@ interface ManagerPermissions {
   canManageMaintenance: boolean;
   canManageVendors:     boolean;
   canManageAmc:         boolean;
+  canManageLegal:       boolean;
   canCommunicateTenants: boolean;
   // Per-report access — report slugs (empty = all reports)
   reportAccess:         string[];
@@ -160,12 +161,13 @@ export const PERM_GROUPS = [
     ],
   },
   {
-    label: 'Maintenance',
-    description: 'Requests, the vendor roster and AMC contracts — three switches (0275)',
+    label: 'Maintenance & Legal',
+    description: 'Requests, the vendor roster, AMC contracts, and breaches & legal cases — four switches (0275, 0285)',
     perms: [
       { key: 'canManageMaintenance', label: 'Handle maintenance requests & coverage', meta: 'can_manage_maintenance' },
       { key: 'canManageVendors',     label: 'Handle vendors (roster, invites, licences)', meta: 'can_manage_vendors' },
       { key: 'canManageAmc',         label: 'Handle AMC contracts, visits & payments', meta: 'can_manage_amc' },
+      { key: 'canManageLegal',       label: 'Handle breaches & legal cases', meta: 'can_manage_legal' },
     ],
   },
   {
@@ -241,7 +243,7 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'operations',
     label: 'Operations / Property Manager',
-    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canViewFinancials', 'canViewReports'],
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canManageLegal', 'canViewFinancials', 'canViewReports'],
   },
   {
     id: 'maintenance',
@@ -322,23 +324,31 @@ function RolePresets({ onApply }: { onApply: (keys: Set<string>) => void }) {
 function ReportAccessChecklist({
   selected, onChange,
 }: { selected: string[]; onChange: (slugs: string[]) => void }) {
+  // A grant list can carry slugs of reports since retired or hidden (a manager
+  // set up in 2025 still names `tenant-ledger`, `cheque-register`…). They are
+  // not on the checklist, so they must not be counted ("21 of 14 selected") —
+  // and the next save drops them: every change is written from the known
+  // slugs only.
+  const known = new Set(AVAILABLE_REPORTS.map((r) => r.slug));
+  const current = selected.filter((s) => known.has(s));
+  const stale = selected.length - current.length;
   const toggle = (slug: string) =>
-    onChange(selected.includes(slug) ? selected.filter((s) => s !== slug) : [...selected, slug]);
+    onChange(current.includes(slug) ? current.filter((s) => s !== slug) : [...current, slug]);
   const toggleGroup = (slugs: string[], on: boolean) =>
     onChange(on
-      ? Array.from(new Set([...selected, ...slugs]))
-      : selected.filter((s) => !slugs.includes(s)));
+      ? Array.from(new Set([...current, ...slugs]))
+      : current.filter((s) => !slugs.includes(s)));
   return (
     <div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--color-neutral-400)' }}>
         {selected.length === 0
           ? 'All reports — leave unchecked for full access, or pick specific reports.'
-          : `${selected.length} of ${AVAILABLE_REPORTS.length} reports selected.`}
+          : `${current.length} of ${AVAILABLE_REPORTS.length} reports selected.${stale ? ` ${stale} granted report${stale === 1 ? ' is' : 's are'} no longer offered and will be dropped on save.` : ''}`}
       </p>
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
         {REPORT_GROUPS.map((g) => {
           const slugs = g.reports.map((r) => r.slug);
-          const allOn = slugs.every((s) => selected.includes(s));
+          const allOn = slugs.every((s) => current.includes(s));
           return (
             <div key={g.title}>
               <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -357,7 +367,7 @@ function ReportAccessChecklist({
                   <label key={r.slug} className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--color-neutral-700)' }}>
                     <input
                       type="checkbox"
-                      checked={selected.includes(r.slug)}
+                      checked={current.includes(r.slug)}
                       onChange={() => toggle(r.slug)}
                       style={{ accentColor: 'var(--color-primary)' }}
                     />

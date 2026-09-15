@@ -13,6 +13,7 @@ import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useAuth } from '@/contexts/AuthContext';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { legalApi, type AlertItem } from '@/lib/legal';
 import { DashboardPage, StatCard, SectionHeader } from '@/components/dashboard/DashboardWidgets';
 
 interface OverviewStats {
@@ -63,6 +64,7 @@ const BUCKET_WORDS: Record<string, string> = {
   moveOuts: 'Move-outs', settlementPending: 'Settlements', chequesBounced: 'Bounced cheques', chequesOverdue: 'Overdue cheques',
   maintenanceApprovals: 'Maintenance approvals', maintenanceHeld: 'Maintenance held', delayedFollowups: 'Follow-ups',
   amcInspections: 'AMC inspections', amcExpired: 'Expired AMCs', amcPayables: 'Payments due',
+  legal: 'Breach & legal',
 };
 
 /** Why a maintenance request could not route — the decision it waits on. */
@@ -158,6 +160,9 @@ function ManagerMultiOverview() {
   const [inspections, setInspections]       = useState<InspectionRow[] | null>(null);
   const [expiredAmcs, setExpiredAmcs]       = useState<ExpiredAmcRow[]>([]);
   const [payables, setPayables]             = useState<PayableRow[]>([]);
+  // Legal & breach alerts (spec §8) — only from landlords who delegated
+  // `canManageLegal`; the API 403s the rest, which reads as an empty list.
+  const [legalAlerts, setLegalAlerts]       = useState<(AlertItem & { rpId: number })[] | null>(null);
   const name = user?.name ?? user?.firstName ?? 'Manager';
 
   // LandlordSwitcher scope: ?rp=<id> narrows the headline stats + Action Center
@@ -212,6 +217,15 @@ function ManagerMultiOverview() {
         .then(rows => (Array.isArray(rows) ? rows : []).map(r => ({ ...r, rpId: id })))
         .catch(() => [] as PayableRow[]),
     )).then(lists => setPayables(lists.flat().sort((a, b) => a.dueDate.localeCompare(b.dueDate))));
+    // Breach & legal — deadlines passed, hearings due, notices to send. Scoped
+    // to the landlords that granted canManageLegal (the selected one, or all).
+    const legalTargets = targets.filter(id => rps.find(r => r.rentalProviderId === id)?.permissions.canManageLegal);
+    if (!legalTargets.length) { setLegalAlerts([]); return; }
+    Promise.all(legalTargets.map(id =>
+      legalApi.alerts('/manager/legal', id)
+        .then(d => (Array.isArray(d?.items) ? d.items : []).map(a => ({ ...a, rpId: id })))
+        .catch(() => [] as (AlertItem & { rpId: number })[]),
+    )).then(lists => setLegalAlerts(lists.flat().sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))));
   }, [permsLoading, scopedRp, rps]);
 
   const loading = statsLoading || permsLoading;
@@ -255,6 +269,17 @@ function ManagerMultiOverview() {
   const maintHref = (i: ActionItem) =>
     `/dashboard/manager/maintenance/${i.id}${scopeQ(i.rpId)}`;
   const maintBoardHref = `/dashboard/manager/operations${scopeQ(undefined, 'tab=maintenance&view=kanban')}`;
+  /** Where a legal alert lands (spec §8): a breach on the lease's Breaches
+   *  section, a case on its Legal page, a notice-to-send on the Legal list with
+   *  the lease preselected. `reason` carries the API's href token. */
+  const legalHref = (i: ActionItem) => {
+    const [kind, id] = (i.reason ?? '').split(':');
+    switch (kind) {
+      case 'dispute':      return `/dashboard/manager/legal/${id}${scopeQ(i.rpId)}`;
+      case 'start-notice': return `/dashboard/manager/legal${scopeQ(i.rpId, `start=${id}`)}`;
+      default:             return i.parentId ? `/dashboard/manager/operations/${i.parentId}${scopeQ(i.rpId)}#sec-breaches` : undefined;
+    }
+  };
 
   return (
     <DashboardPage
@@ -328,6 +353,14 @@ function ManagerMultiOverview() {
         const expiredAmcBucket: Bucket = {
           count: expiredAmcs.length,
           items: expiredAmcs.map(c => ({ id: c.id, rpId: c.rpId, building: c.propertyName ?? 'No building on the contract', vendor: c.vendorName, endDate: c.endDate })),
+        };
+        const todayYmd = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+        const legalBucket: Bucket = {
+          count: legalAlerts?.length ?? 0,
+          items: (legalAlerts ?? []).map((a, n) => ({
+            id: n, rpId: a.rpId, parentId: a.leaseId, tenant: a.customerName ?? 'Customer', unit: a.unitNumber,
+            title: a.text, reason: a.href, date: a.date, awaitingLandlord: !!a.date && a.date.slice(0, 10) < todayYmd,
+          })),
         };
         const fmtShort = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { day: '2-digit', month: 'short' }) : '—';
         const buckets: Array<{ key: string; count: number; el: React.ReactNode }> = [
@@ -641,6 +674,23 @@ function ManagerMultiOverview() {
               href: `/dashboard/manager/amc/${i.id}?rp=${i.rpId}`,
             })} />
         ) },
+        /* Breach & legal (spec §8) — a correction deadline passed, a hearing this
+           week, a notice still to serve. Grouped by CUSTOMER like follow-ups: the
+           dispute is with a person, and one person can hold several units. Only
+           shown when a landlord delegated canManageLegal; the row opens the
+           breach on the lease, the case on Legal, or the notice form. */
+        ...(legalAlerts && legalAlerts.length > 0 ? [{ key: 'legal', count: legalBucket.count, el: (
+          <ActionBucket icon={Scale} color="#5b3fbf" label="Breach & legal" href={`/dashboard/manager/legal${scopeQ()}`}
+            loading={false} bucket={legalBucket}
+            groupBy={i => i.tenant ?? 'Customer'}
+            compact={i => ({
+              unit: i.title ?? 'Legal',
+              status: i.date ? `${fmtShort(i.date)}${i.awaitingLandlord ? ' · late' : ''}` : 'Now',
+              overdue: !!i.awaitingLandlord,
+              href: legalHref(i),
+              note: i.unit ? `Unit ${i.unit}` : undefined,
+            })} />
+        ) }] : []),
         ];
         const live = buckets.filter(b => actionLoading || b.count > 0);
         const clear = buckets.filter(b => !actionLoading && b.count === 0);

@@ -56,6 +56,8 @@ export interface RpPermissions {
     canManageVendors:     boolean;
     /** 0275 — AMC contracts, visits, payables. */
     canManageAmc:         boolean;
+    /** Legal & breach — breaches, notices, disputes (spec 2026-09-14). */
+    canManageLegal:       boolean;
     // Communication & admin
     canCommunicateTenants:boolean;
     canEscalateToAdmin:   boolean;

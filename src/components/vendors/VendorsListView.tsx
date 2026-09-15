@@ -30,7 +30,7 @@ export interface VendorRow {
   invitedAt: string | null; acceptedAt: string | null;
   trades: Trade[]; pricing: { categoryGroupId: number; group: string; mode: string; hourlyRateAed: number | null }[];
   technicians: number; openJobs: number;
-  category: string | null;
+  category: string | null; expenseCategoryId?: number | null;
   contactName?: string | null; address?: string | null;
   tradeLicence?: { number: string | null; expiry: string | null; doc: { id: number; fileUrl: string; displayName: string | null } | null } | null;
 }

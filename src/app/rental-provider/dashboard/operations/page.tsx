@@ -18,6 +18,8 @@ import OperationsPipelines from '@/components/upnow/OperationsPipelines';
 const contractHref = (id: number) => `/rental-provider/dashboard/operations/${id}`;
 const leadHref = (id: number) => `/rental-provider/dashboard/leads/${id}`;
 const maintenanceHref = (id: number) => `/rental-provider/dashboard/maintenance/${id}`;
+const amcHref = (id: number) => `/rental-provider/dashboard/amc/${id}`;
+const disputeHref = (id: number) => `/rental-provider/dashboard/legal/${id}`;
 
 export default function RpOperationsPage() {
   return (
@@ -29,6 +31,10 @@ export default function RpOperationsPage() {
         contractHref={contractHref}
         leadHref={leadHref}
         maintenanceHref={maintenanceHref}
+        amcPath="/amc/visits/open"
+        amcHref={amcHref}
+        legalBase="/legal"
+        disputeHref={disputeHref}
       />
     </Suspense>
   );

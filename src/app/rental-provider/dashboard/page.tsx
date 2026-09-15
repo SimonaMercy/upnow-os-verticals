@@ -16,7 +16,8 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText } from 'lucide-react';
+import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText, Scale } from 'lucide-react';
+import { legalApi, type AlertItem, type OpenRecord } from '@/lib/legal';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { contractHref, type ContractSurface } from '@/lib/contractHref';
 import { unitHref } from '@/lib/unitHref';
@@ -257,25 +258,6 @@ interface UpcomingRenewal {
    *  Older payloads omit both, so the row falls back to the expiring lease. */
   openContractId?: number;
   openIn?: ContractSurface;
-}
-
-/** `/reports/manager-time-per-day` — sessionised working time, not a timesheet. */
-interface ManagerTimeData {
-  windowDays: number;
-  idleCapMinutes: number;
-  managers: Array<{
-    userId: number;
-    name: string;
-    /** Averaged over days they were ACTIVE, not over the whole window. */
-    avgMinutesPerDay: number;
-    activeDays: number;
-    totalMinutes: number;
-    pageViews: number;
-    /** Works for more than one landlord — page views carry no landlord scope,
-     *  so their reading time is counted on each landlord's dashboard. */
-    sharedAcrossLandlords: boolean;
-    lastActive: string | null;
-  }>;
 }
 
 interface ActivityItem {
@@ -687,7 +669,9 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   // react-hooks/set-state-in-effect rule happy.
   const [feed,        setFeed]        = useState<ManagerFeed | null>(null);
   const [feedErr,     setFeedErr]     = useState<string | null>(null);
-  const [timePerDay,  setTimePerDay]  = useState<ManagerTimeData | null>(null);
+  // Legal & breach alerts (spec §8) — deadlines passed, hearings due, notices to
+  // send. One fetch on load; the card hides itself when there is nothing open.
+  const [legal, setLegal] = useState<{ items: AlertItem[]; counts: { breaches: number; disputes: number }; open?: { breaches: OpenRecord[]; cases: OpenRecord[] } } | null>(null);
   const [statsErr,    setStatsErr]    = useState<string | null>(null);
   const [finErr,      setFinErr]      = useState<string | null>(null);
   const [extrasErr,   setExtrasErr]   = useState<string | null>(null);
@@ -824,19 +808,12 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
     };
   }, [fetchFeed]);
 
-  // Manager working time — a 30-day aggregate, so it is fetched ONCE and not
-  // put on the feed's 5-second poll: the number cannot move meaningfully within
-  // a session, and polling it would triple the dashboard's query load to redraw
-  // the same figure. Landlord-only, like the other manager-performance reads
-  // (the manager portal 403s them by design), so it is skipped in manager mode.
   useEffect(() => {
-    if (manager) return;
-    const ac = new AbortController();
-    fetch('/api/reports/manager-time-per-day?days=30', { credentials: 'include', signal: ac.signal })
-      .then(r => (r.ok ? r.json() : null))
-      .then((d: ManagerTimeData | null) => { if (d && Array.isArray(d.managers)) setTimePerDay(d); })
-      .catch(() => { /* the panel simply does not render */ });
-    return () => ac.abort();
+    let cancelled = false;
+    legalApi.alerts(manager ? '/manager/legal' : '/legal', manager?.rp)
+      .then(d => { if (!cancelled && d && Array.isArray(d.items)) setLegal(d); })
+      .catch(() => { /* the card simply does not render */ });
+    return () => { cancelled = true; };
   }, [manager]);
 
   const refreshAll = useCallback(async () => {
@@ -1625,6 +1602,22 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
         </div>
       </section>
 
+      {/* ── Section 3b: BREACH & LEGAL ────────────────────────────────────────
+          What the legal module is waiting on the landlord for: a correction
+          deadline that has passed, a hearing this week, a notice still to be
+          served. Absent entirely when nothing is open — most portfolios, most
+          days — so the page does not carry an empty legal panel. */}
+      {legal && (legal.counts.breaches > 0 || legal.counts.disputes > 0) && (
+        <section className="space-y-4">
+          <LegalCard
+            counts={legal.counts}
+            open={legal.open}
+            legalBase={manager ? `/dashboard/manager/legal` : '/rental-provider/dashboard/legal'}
+            opsBase={manager ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}
+            rp={manager?.rp}
+          />
+        </section>
+      )}
 
       {/* ── Section 4: OCCUPANCY & RENEWALS ───────────────────────────────
           The same live state as the strip above, at the size these two need:
@@ -1719,7 +1712,6 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
             </Link>
           )}
         </div>
-        <ManagerTimePerDay data={timePerDay} />
         <LiveActivity feed={feed} error={feedErr} onRetry={fetchFeed} contractBase={contractBase} leadsBase={leadsBase} />
       </section>
 
@@ -1966,6 +1958,98 @@ const fmtDayHeading = (day: string) =>
  *  is the one that reads as work; Notice Sent is a wait on the customer, and the
  *  other two are settled. Every bucket renders even at 0 — a missing tile reads
  *  as "not measured", a 0 reads as "none", and those are different answers. */
+/** The Breach & legal card (owner, 15 Sep 2026: "only keep Open breaches and
+ *  Open cases; on click show the units with their last state — nothing messy").
+ *  Two tiles; clicking one lists that tile's open records, one line each: the
+ *  unit, the customer, and the stage the record is at now. A breach opens on
+ *  its lease, a case on its Legal page. Manager routes carry `?rp=`. */
+function LegalCard({ counts, open, legalBase, opsBase, rp }: {
+  counts: { breaches: number; disputes: number };
+  open?: { breaches: OpenRecord[]; cases: OpenRecord[] };
+  legalBase: string;
+  opsBase: string;
+  rp?: number;
+}) {
+  const q = rp != null ? `?rp=${rp}` : '';
+  const [pick, setPick] = useState<'breaches' | 'cases' | null>(null);
+  useEffect(() => {
+    if (!pick) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPick(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pick]);
+  const rows = pick === 'breaches' ? (open?.breaches ?? []) : pick === 'cases' ? (open?.cases ?? []) : [];
+  const fmt = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short' }) : null;
+  const hrefOf = (r: OpenRecord) => (pick === 'cases' ? `${legalBase}/${r.id}${q}` : `${opsBase}/${r.leaseId}${q}#sec-breaches`);
+  const tile = (key: 'breaches' | 'cases', label: string, n: number, bg: string, fg: string) => (
+    <button type="button" onClick={() => setPick(key)}
+      className="rounded-xl px-4 py-3 text-left transition hover:brightness-95"
+      style={{ background: bg }}>
+      <div className="text-[10px] font-bold tracking-[0.1em] uppercase" style={{ color: fg }}>{label}</div>
+      <div className="text-2xl font-bold tabular-nums leading-tight mt-0.5" style={{ color: fg }}>{n}</div>
+    </button>
+  );
+  return (
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)] flex flex-col">
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <div>
+          <h3 className="text-base font-bold text-[var(--neutral-900)] flex items-center gap-2"><Scale size={16} className="text-[#5b3fbf]" /> Breach &amp; legal</h3>
+          <p className="text-xs text-[var(--neutral-400)] mt-0.5">Click a figure to see the units and where each one stands.</p>
+        </div>
+        <Link href={`${legalBase}${q}`} className="text-[11px] font-semibold text-[var(--primary-dark)] hover:underline inline-flex items-center gap-1">
+          Legal <ArrowUpRight size={11} />
+        </Link>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mt-4">
+        {tile('breaches', 'Open breaches', counts.breaches, '#fff4e0', '#9a5b00')}
+        {tile('cases', 'Open cases', counts.disputes, '#ece9fd', '#5b3fbf')}
+      </div>
+      {/* The list opens as a popup over the page (owner, 15 Sep 2026: "in
+          the form of a popup instead of showing below"), the same dialog
+          shell as the money drill-downs. */}
+      {pick && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={() => setPick(null)} role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-[var(--base-200)] flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-[var(--neutral-900)] flex items-center gap-2">
+                  <Scale size={16} className="text-[#5b3fbf]" /> {pick === 'cases' ? 'Open cases' : 'Open breaches'}
+                </h3>
+                <p className="text-[12px] text-[var(--neutral-400)] mt-0.5">{rows.length} {pick === 'cases' ? (rows.length === 1 ? 'case' : 'cases') : (rows.length === 1 ? 'breach' : 'breaches')} · each with the stage it is at now</p>
+              </div>
+              <button type="button" onClick={() => setPick(null)} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
+            </div>
+            <div className="overflow-y-auto p-2">
+              {rows.length === 0 && <p className="text-[12px] text-[var(--neutral-400)] px-3 py-4">Nothing open.</p>}
+              {rows.map(r => {
+                const when = fmt(r.nextDate);
+                const tone = pick === 'cases' ? { bg: '#ece9fd', fg: '#5b3fbf' } : { bg: '#fff4e0', fg: '#9a5b00' };
+                return (
+                  <Link key={`${pick}-${r.id}`} href={hrefOf(r)}
+                    className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)] transition-colors">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold text-[var(--neutral-900)] leading-tight truncate">
+                        {r.unitNumber ? `Unit ${r.unitNumber}` : 'Unit —'}{r.buildingName ? <span className="font-normal text-[var(--neutral-500)]"> · {r.buildingName}</span> : null}
+                      </div>
+                      <div className="text-[11px] text-[var(--neutral-400)] mt-0.5 truncate">{[r.customerName, r.label].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: tone.bg, color: tone.fg }}>{r.stageLabel}</span>
+                      {when && <span className="text-[11px] font-medium tabular-nums text-[var(--neutral-500)]">{when}</span>}
+                      <ArrowUpRight size={12} className="text-[var(--neutral-400)]" />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWindowChange, allHref, onDrillBucket }: {
   list: UpcomingRenewal[];
   buckets?: Record<RenewalBucket, number>;
@@ -2076,91 +2160,6 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
           )}
         </>
       )}
-    </div>
-  );
-}
-
-/** Minutes as "1h 03m" / "48m" — an average day is read in hours, and a bare
- *  minute count in the hundreds has to be divided in the reader's head. */
-function fmtMins(n: number): string {
-  const m = Math.max(0, Math.round(n));
-  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
-}
-
-/**
- * How much time each manager puts into this portfolio on a working day.
- *
- * Sits directly above the live feed and answers the question the feed cannot:
- * the feed says WHAT they are doing, this says HOW MUCH. Both read the same
- * audit trail, so a manager present in one is present in the other.
- *
- * The figure is SESSIONISED from the spacing of everything they did — pages
- * opened AND changes made — with any gap over the server's idle cap dropped.
- * There is no timer in the product. Counting only the changes measured half the
- * real time, because most of a manager's day is reading: a contract compared, an
- * Operations board worked through, a unit checked.
- *
- * It is still a floor — phone calls and anything off-platform are invisible, and
- * a day with one single event measures zero. The footnote says so on screen
- * rather than leaving a manager looking idle when they were not, because this
- * figure will be read as a performance number whether or not it is one.
- *
- * Bars are scaled to the busiest manager, not to a fixed ceiling — there is no
- * such thing as a target number of minutes, so the only honest comparison is
- * between the people on this roster.
- */
-function ManagerTimePerDay({ data }: { data: ManagerTimeData | null }) {
-  if (!data || data.managers.length === 0) return null;
-  const peak = Math.max(...data.managers.map(m => m.avgMinutesPerDay), 1);
-  return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)]">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <div className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1.5">
-          <Clock size={12} className="text-[var(--primary-dark)]" />
-          Time on your portfolio
-        </div>
-        <span className="text-[11px] text-[var(--neutral-400)]">
-          average per working day · last {data.windowDays} days
-        </span>
-      </div>
-
-      <div className="mt-4 space-y-3">
-        {data.managers.map(m => (
-          <div key={m.userId} className="flex items-center gap-3">
-            <div className="w-[38%] min-w-0">
-              <div className="text-[13px] font-semibold text-[var(--neutral-900)] truncate">{m.name}</div>
-              <div className="text-[11px] text-[var(--neutral-400)]">
-                {m.activeDays === 0
-                  ? 'no activity in this window'
-                  : `${m.activeDays} active ${m.activeDays === 1 ? 'day' : 'days'} · ${fmtMins(m.totalMinutes)} total · ${m.pageViews.toLocaleString()} pages`}
-              </div>
-              {/* Their reading time cannot be split between landlords, so it is
-                  counted here in full and on the other landlord's dashboard
-                  too — better said than silently overstated. */}
-              {m.sharedAcrossLandlords && (
-                <div className="text-[10.5px] text-[var(--neutral-400)] italic mt-0.5">
-                  also manages another portfolio — reading time is not split
-                </div>
-              )}
-            </div>
-            <div className="flex-1 h-2 rounded-full bg-[var(--base-200)] overflow-hidden">
-              <div
-                className="h-full rounded-full bg-[var(--primary-dark)]"
-                style={{ width: `${Math.round((m.avgMinutesPerDay / peak) * 100)}%` }}
-              />
-            </div>
-            <div className="w-[68px] text-right text-[14px] font-bold tabular-nums text-[var(--neutral-900)]">
-              {fmtMins(m.avgMinutesPerDay)}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Says what the number is not. Without this it reads as a timesheet. */}
-      <p className="mt-4 pt-3 border-t border-[var(--base-200)] text-[11px] text-[var(--neutral-400)] leading-relaxed">
-        Measured from the gaps between the pages they opened and the changes they made, with breaks over {data.idleCapMinutes} minutes
-        excluded — so it is a floor, not a timesheet. Phone calls and anything done off the platform do not appear.
-      </p>
     </div>
   );
 }

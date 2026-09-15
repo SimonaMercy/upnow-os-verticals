@@ -3,9 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature } from 'lucide-react';
+import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature, Scale } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
+import { JurisdictionSettingsForm } from '@/components/legal/JurisdictionSettingsForm';
+import { FeeBookEditor } from '@/components/legal/FeeBookEditor';
+import { legalApi } from '@/lib/legal';
 import { MaintenanceListWorkspace } from '../maintenance-list/page';
 import { RestorationListWorkspace } from '../restoration-list/page';
 import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
@@ -506,7 +509,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'team' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -659,12 +662,14 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
 
 // Settings tabs (owner, 12 Sep: the profile moved OUT to its own page; the
 // Maintenance List, Restoration List and AMC categories moved IN).
-const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'team', 'notifications'];
+const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'notifications'];
 /** The left-hand settings menu, grouped by what the landlord is doing. */
 const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   { title: 'Leasing', tabs: ['fee_rules'] },
   { title: 'Maintenance', tabs: ['maintenance', 'maintenance_list', 'restoration'] },
   { title: 'Contracts', tabs: ['categories'] },
+  // The landlord's own notice periods, appeal window and filing-fee rule (0286) — the platform default applies until saved.
+  { title: 'Legal', tabs: ['legal'] },
   { title: 'Account', tabs: ['team', 'notifications'] },
 ];
 const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }> }> = {
@@ -672,7 +677,7 @@ const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ siz
   // coverage = what is offered per property type and who does it; items = what a customer can raise.
   general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
   maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
-  categories: { label: 'AMC categories', Icon: FileSignature }, team: { label: 'Team', Icon: Users }, notifications: { label: 'Notifications', Icon: Bell },
+  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, notifications: { label: 'Notifications', Icon: Bell },
 };
 
 /** One component, two pages: /settings (tabs) and /profile (the business profile alone). */
@@ -1434,6 +1439,22 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
       {/* ── Maintenance tab — what's offered, per property type, and who does it.
              The item list itself is managed on the Maintenance List page. ── */}
       {mainTab === 'maintenance' && <MaintenanceCoveragePanel />}
+
+      {/* ── Legal tab — the landlord's own notice periods, appeal window and filing-fee rule ── */}
+      {mainTab === 'legal' && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="font-semibold text-base text-[#1a1916] mb-1">Periods & fees for breaches and legal cases</h2>
+            <p className="text-xs text-[#9b9890]">Every warning deadline, notice deadline, appeal window and pre-filled filing fee on your cases comes from here. Nothing is fixed in code.</p>
+          </div>
+          <JurisdictionSettingsForm scope="landlord" load={() => legalApi.config('/legal')} save={(b) => legalApi.updateRpConfig(b)} reset={() => legalApi.resetRpConfig()} />
+          <div className="pt-4">
+            <h2 className="font-semibold text-base text-[#1a1916] mb-1">Legal fee book</h2>
+            <p className="text-xs text-[#9b9890]">What each step costs and who is paid. Lines marked recoverable are charged to the customer once paid.</p>
+          </div>
+          <FeeBookEditor />
+        </div>
+      )}
 
       {mainTab === 'team' && <TeamPanel />}
 

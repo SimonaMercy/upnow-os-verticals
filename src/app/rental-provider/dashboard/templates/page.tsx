@@ -15,7 +15,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
-import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3, Download } from 'lucide-react';
+import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3, Download, Scale, ShieldAlert } from 'lucide-react';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
@@ -23,10 +23,12 @@ import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitF
 import AddendumEditorModal from '@/components/upnow/AddendumEditorModal';
 import AddendumPreviewModal from '@/components/upnow/AddendumPreviewModal';
 import MoveTemplatesTab from '@/components/upnow/MoveTemplatesTab';
+import TemplateStudio from '@/components/legal/TemplateStudio';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 import { downloadAddendumPdf, downloadAddendumFile } from '@/lib/openAddendumPdf';
 
-type TemplatesTab = 'addendum' | 'move';
+type TemplatesTab = 'addendum' | 'move' | 'breach' | 'legal';
 
 interface AddendumTemplate {
   id: number;
@@ -70,6 +72,9 @@ export default function AddendumTemplatesPage() {
 }
 
 export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
+  // A manager sees the Breach / Legal letter tabs only when the landlord delegated legal.
+  const { canForRp: mgrCanForRp } = useManagerPermissions();
+  const showLegalTabs = !manager || mgrCanForRp('canManageLegal', manager.rp);
   const [templates, setTemplates] = useState<AddendumTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -100,8 +105,11 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
   // avoids any mount-order / strict-mode overwrite race).
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const t = window.localStorage.getItem('templatesTab');
-    if (t === 'addendum' || t === 'move') setTab(t);
+    // `?tab=legal` (links from the Legal surfaces) wins over the remembered tab.
+    const fromUrl = new URLSearchParams(window.location.search).get('tab');
+    const t = fromUrl ?? window.localStorage.getItem('templatesTab');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (t === 'addendum' || t === 'move' || t === 'breach' || t === 'legal') setTab(t);
     const v = window.localStorage.getItem('addendumTemplatesView');
     if (v === 'grid' || v === 'row') setAddView(v);
   }, []);
@@ -134,7 +142,7 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
       title="Templates"
       subtitle="Reusable templates for your contracts. Addendum terms attach to a contract; move templates drive move-in / move-out inspections."
       actions={
-        tab === 'addendum' ? (
+        tab === 'legal' || tab === 'breach' ? null : tab === 'addendum' ? (
           <button
             onClick={() => setShowForm(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
@@ -165,9 +173,27 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
         >
           <ClipboardCheck size={14} /> Move-in / Move-out
         </button>
+        {showLegalTabs && (<>
+        <button
+          onClick={() => selectTab('breach')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'breach' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
+        >
+          <ShieldAlert size={14} /> Breach
+        </button>
+        <button
+          onClick={() => selectTab('legal')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'legal' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
+        >
+          <Scale size={14} /> Legal
+        </button>
+        </>)}
       </div>
 
-      {tab === 'move' ? (
+      {(tab === 'legal' || tab === 'breach') && !showLegalTabs ? (
+        <div className="rounded-xl border border-[#e8e6e0] bg-white px-5 py-8 text-center text-sm text-[#6b6860]">This landlord hasn’t granted you the <strong>legal</strong> permission, so their letter templates aren’t available.</div>
+      ) : tab === 'legal' || tab === 'breach' ? (
+        <TemplateStudio key={tab} manager={manager} group={tab} />
+      ) : tab === 'move' ? (
         <MoveTemplatesTab manager={manager} createOpen={showMoveEditor} onCloseCreate={() => setShowMoveEditor(false)} />
       ) : (
       <>

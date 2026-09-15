@@ -1,6 +1,6 @@
 /**
  * OperationsPipelines — the Operations page as separate pipeline trackers, one
- * per tab: Lead · New Lease · Renewal · Terminated · Maintenance · Breach & Legal.
+ * per tab: Lead · New Lease · Renewal · Terminated · Maintenance · Breach · Legal.
  *
  * Each tab renders that pipeline's own stages as fixed kanban lanes; a card sits
  * in its current stage (first incomplete step) with earlier steps ticked. This
@@ -18,14 +18,23 @@
  * active lease drops off entirely (it lives in the Leases register); an accepted
  * termination surfaces under Terminated for move-out + settlement.
  *
- * Maintenance and Breach & Legal are workflow pipelines: Maintenance tracks
+ * Maintenance, Breach and Legal are workflow pipelines: Maintenance tracks
  * who holds the ball on a routed request (Requested → Awaiting approval → In
- * progress → Sign-off → Close-out); Breach & Legal is ONE continuum (owner,
- * 10 Sep 2026): the Violations-module breach steps run into the legal stages
- * from the business process sheet (Process Flow UpNow — Legal) at the
- * "Escalated · Case opened" lane. Its lanes render today so the workflow's
- * shape is visible; records wire in as the Violations module lands.
- * ?tab=breach and ?tab=legal still deep-link to the combined board.
+ * progress → Sign-off → Close-out); Breach and Legal are the two pipelines of
+ * the Legal & Breach Management module (owner's build spec, 14 Sep 2026 —
+ * `02 Engineering Specs & Plans/LEGAL_BREACH_MODULE_SPEC_2026-09-14.md`):
+ * Breach = behaviour / agreement breaches handled with warnings (stage enum
+ * reported → warning_sent → final_warning → resolved | escalated); Legal =
+ * the Dispute pipeline (notice_sent → case_filed → settlement → decision →
+ * enforcement → closed). A breach hands over to legal ONLY through the
+ * explicit "Escalate to legal" action, and the two are never shown as one
+ * status list. Lane keys ARE the spec's stage enums so the records wire in
+ * one-to-one. Their lanes render today; records land with the module.
+ * ?tab=breach_legal (the former combined board) deep-links to Breach.
+ *
+ * RULE (owner, 14 Sep): a lease escalated to legal appears ONLY on the Legal
+ * tab — never on Breach, New Lease, Renewal, Terminated or Maintenance — to
+ * avoid confusion. See LEGAL_TAB_ONLY below.
  */
 'use client';
 
@@ -35,12 +44,14 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight,
   UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
-  BarChart3, Info, Wrench, Scale,
+  BarChart3, Info, Wrench, Scale, ShieldAlert, Gavel, ClipboardCheck,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { maintenancePlace } from '@/lib/maintenanceScope';
+import { legalApi, BREACH_STAGES as BREACH_STAGE_ORDER, DISPUTE_STAGES as DISPUTE_STAGE_ORDER, type BreachRow, type DisputeRow } from '@/lib/legal';
+import { StartNoticeModal } from '@/components/legal/StartNoticeModal';
 import type { OpsContract, StageHandler } from '@/components/upnow/OperationsBoard';
 
 /* ── Lead shape (subset of GET /leads) ─────────────────────────────────────── */
@@ -81,6 +92,11 @@ interface Props {
   maintenancePath?: string;
   /** Deep-link to a maintenance request's detail page. */
   maintenanceHref?: (id: number) => string;
+  /** Open AMC visits endpoint (without /api), e.g. '/amc/visits/open' or
+   *  '/manager/amc/visits/open?rp=N'. Omitted → the AMC tab shows its lanes with no records. */
+  amcPath?: string;
+  /** Deep-link to an AMC contract's detail page (the visit's contract). */
+  amcHref?: (contractId: number) => string;
   /** Manager scope: keep only leads whose unit belongs to this RP. */
   rpFilter?: number;
   /** Link to the manager-performance report (landlord-only) — omitted → no button. */
@@ -89,24 +105,35 @@ interface Props {
    *  tracker" heading and above the pipeline cards (e.g. the embedded Leasing
    *  Funnel activity table on the operations page). */
   afterHeading?: ReactNode;
+  /** Legal module API base — '/legal' (landlord) or '/manager/legal' (manager, with legalRp).
+   *  Omitted → the Breach and Legal tabs show their lanes with no records. */
+  legalBase?: string;
+  legalRp?: number;
+  /** Deep-link to a legal case's detail page. */
+  disputeHref?: (id: number) => string;
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
-type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'breach_legal';
-/** Breach & Legal is workflow-only (no records until the Violations module
- *  lands) — hidden on PRODUCTION builds, shown in local development where the
- *  team keeps working on it (owner, 10 Sep). NEXT_PUBLIC_OPS_BREACH_LEGAL=1
- *  forces it on for a production build (e.g. a review deploy). */
+type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'amc' | 'breach' | 'legal';
+/** Breach and Legal are workflow-only (no records until the Violations module
+ *  and the lease legal-case record land) — hidden on PRODUCTION builds, shown
+ *  in local development where the team keeps working on them (owner, 10 Sep).
+ *  NEXT_PUBLIC_OPS_BREACH_LEGAL=1 forces them on for a production build (e.g.
+ *  a review deploy). */
 const SHOW_BREACH_LEGAL = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_OPS_BREACH_LEGAL === '1';
-/** Old deep links (?tab=breach / ?tab=legal) land on the combined board. */
-const LEGACY_TAB: Record<string, TabKey> = { breach: 'breach_legal', legal: 'breach_legal' };
+/** The former combined board's deep link (?tab=breach_legal) lands on Breach. */
+const LEGACY_TAB: Record<string, TabKey> = { breach_legal: 'breach' };
 const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
   { key: 'lead',        label: 'Lead',        icon: UserPlus },
   { key: 'new',         label: 'New Lease',   icon: FileText },
   { key: 'renewal',     label: 'Renewal',     icon: RefreshCcw },
   { key: 'terminated',  label: 'Terminated',  icon: LogOut },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
-  ...(SHOW_BREACH_LEGAL ? [{ key: 'breach_legal' as TabKey, label: 'Breach & Legal', icon: Scale }] : []),
+  { key: 'amc',         label: 'AMC',         icon: ClipboardCheck },
+  ...(SHOW_BREACH_LEGAL ? [
+    { key: 'breach' as TabKey, label: 'Breach', icon: ShieldAlert },
+    { key: 'legal'  as TabKey, label: 'Legal',  icon: Scale },
+  ] : []),
 ];
 
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
@@ -174,14 +201,14 @@ const TERM_STAGES: StageDef[] = [
   { key: 'settlement',     title: 'Deposit settlement',  keys: ['settlement'] },
 ];
 
-/* ── Process pipelines: Maintenance · Breach & Legal ──────────────────────────
+/* ── Process pipelines: Maintenance · Breach · Legal ──────────────────────────
  * Lane-only stage models (no checklist keys — their records aren't the
  * operations-contract shape). Maintenance = owner-based lanes (see the note on
- * MAINT_STAGES; spec MAINTENANCE_ROUTING_SPEC_2026-08-30 §4); Legal carries
- * the stages from the business process sheet (Process Flow UpNow: Legal);
- * Breach carries the Violations-module pipeline (resolved / cancelled cases
- * leave the board, so they're not lanes). Each board shows its workflow's
- * shape today; records wire in as each module lands. */
+ * MAINT_STAGES; spec MAINTENANCE_ROUTING_SPEC_2026-08-30 §4); Breach = the
+ * landlord's tenancy-breach handling; Legal = the business process sheet's legal
+ * stages (Process Flow UpNow: Legal), folded to the five hand-offs an RP
+ * actually tracks. Each board shows its workflow's shape today; records wire
+ * in as each module lands. */
 // Maintenance lanes track WHO IS HOLDING THE BALL (one owner + one action per
 // lane), mirroring the SP portal's Requests → Quotes → Active Jobs → Closure
 // board so both sides see the same shape. The process sheet's seven steps
@@ -197,24 +224,46 @@ const MAINT_STAGES: StageDef[] = [
   { key: 'sign_off',    title: 'Sign-off',          keys: [], desc: 'Provider marked the job complete; customer sign-off outstanding.' },
   { key: 'close_out',   title: 'Close-out',         keys: [], desc: 'Signed off; invoice and cost allocation pending.' },
 ];
-/* One continuum: the breach handling (Violations module) hands over to the
- * legal process at "Escalated · Case opened" — the breach's "Escalated to
- * Dispute" and the legal sheet's "Case Identification" are the same moment. */
-const BREACH_LEGAL_STAGES: StageDef[] = [
-  { key: 'draft',        title: 'Draft',                keys: [], desc: 'Breach · Violation logged against unit, lease and customer — not yet issued.' },
-  { key: 'notice_sent',  title: 'Notice Sent',          keys: [], desc: 'Breach · Customer notified of the breach from a notice template.' },
-  { key: 'awaiting',     title: 'Awaiting Response',    keys: [], desc: 'Breach · Waiting on the customer’s response within the notice window.' },
-  { key: 'under_review', title: 'Under Review',         keys: [], desc: 'Breach · Response and evidence under review.' },
-  { key: 'warning',      title: 'Warning Issued',       keys: [], desc: 'Breach · Second or final warning issued to the customer.' },
-  { key: 'fee_applied',  title: 'Fee Applied',          keys: [], desc: 'Breach · Authorised violation fee applied to the lease ledger.' },
-  { key: 'escalated',    title: 'Escalated · Case opened', keys: [], desc: 'Hand-over · Escalated to the legal / dispute process: tenant breach, payment default, contract dispute or other legal issue identified as a case.' },
-  { key: 'review',         title: 'Document Review',             keys: [], desc: 'Legal · Review tenancy contract, addendum, notices, payment records and supporting evidence.' },
-  { key: 'notice',         title: 'Legal Notice',                keys: [], desc: 'Legal · Prepare and issue formal legal notice to tenant.' },
-  { key: 'translation',    title: 'Translation / Notarization',  keys: [], desc: 'Legal · Arabic translation and/or notarization where required.' },
-  { key: 'filing',         title: 'Filing / Case Registration',  keys: [], desc: 'Legal · Register dispute/case with the relevant authority or court.' },
-  { key: 'court',          title: 'Court / Dispute Process',     keys: [], desc: 'Legal · Attend hearings, submit evidence and follow the case process.' },
-  { key: 'eviction',       title: 'Final Eviction',              keys: [], desc: 'Legal · Confirm settlement, payment, eviction or final judgment and close the file.' },
+/* AMC pipeline (owner, 15 Sep 2026). One card per visit that is overdue or in
+ * hand, plus the NEXT upcoming visit of each contract ("only the upcoming
+ * one, otherwise it shows too many — overdue ones stay until cleared"); the
+ * lane is the next thing the visit waits on. Attending
+ * IS the inspection ("keep one"); the delivery note completes the visit; a
+ * completed visit stays only while its quotation is pending. */
+const AMC_STAGES: StageDef[] = [
+  { key: 'scheduled', title: 'Scheduled',         keys: [], desc: 'Visit due — record who attended and inspected it (overdue visits first).' },
+  { key: 'attended',  title: 'Attended',          keys: [], desc: 'Attended and inspected — file the vendor’s delivery note, which completes the visit.' },
+  { key: 'quotation', title: 'Quotation pending', keys: [], desc: 'Visit complete; the vendor’s quotation for fixes found is still to be processed.' },
 ];
+/* Breach pipeline (spec §4.2). Lane keys = Breach.stage. `escalated` is NOT a
+ * lane: an escalated breach is frozen and its lease shows on the Legal board
+ * only (owner, 14 Sep) — the breach record itself keeps stage `escalated` and
+ * links to the dispute on the lease's Breaches tab. Hints quote the spec;
+ * "N days" is JurisdictionConfig.breach_correction_days, never a constant. */
+const BREACH_STAGES: StageDef[] = [
+  { key: 'reported',      title: 'Reported',        keys: [], desc: 'Review and issue a warning.' },
+  { key: 'warning_sent',  title: 'Warning issued',  keys: [], desc: 'Customer has N days to correct (correction deadline from the jurisdiction settings). Deadline passed — issue the final warning.' },
+  { key: 'final_warning', title: 'Final warning',   keys: [], desc: 'If not corrected by the final deadline, escalate to legal. Escalating moves the lease to the Legal board.' },
+  { key: 'resolved',      title: 'Resolved',        keys: [], desc: 'Closed — stays on the lease record.' },
+];
+/* Legal pipeline (spec §5.2). Lane keys = Dispute.stage. A dispute is filed by
+ * the landlord OR the customer (wording flips, same lanes) and enters from an
+ * escalated breach or directly (unpaid rent, overstaying, eviction, rent
+ * increase, deposit, maintenance, early termination). Deadlines and fees come
+ * from JurisdictionConfig — nothing jurisdiction-specific is named here. */
+const LEGAL_STAGES: StageDef[] = [
+  { key: 'notice_sent', title: 'Notice sent',        keys: [], desc: 'Customer has N days to respond / fix the issue. Deadline passed — you can file the case (proof of service required).' },
+  { key: 'case_filed',  title: 'Case filed',         keys: [], desc: 'Registered with the rental authority — next hearing on the recorded date.' },
+  { key: 'settlement',  title: 'Settlement talks',   keys: [], desc: 'Settlement payment due on the agreed date, or collect from the authority.' },
+  { key: 'decision',    title: 'Decision received',  keys: [], desc: 'Other side has N days to appeal (appeal window from the jurisdiction settings).' },
+  { key: 'enforcement', title: 'Enforcing decision', keys: [], desc: 'Next action: the latest enforcement event.' },
+  { key: 'closed',      title: 'Closed',             keys: [], desc: 'Outcome — resolved by agreement, decided in your favour, decided against you, or withdrawn.' },
+];
+/** Dispute stages during which the lease is "in legal": it is shown on the
+ *  Legal tab ONLY and dropped from every other board (owner, 14 Sep 2026).
+ *  `notice_sent` counts too — the lease is already on the Legal board then,
+ *  and showing it twice is the confusion the rule exists to avoid. */
+export const LEGAL_TAB_ONLY = new Set(['notice_sent', 'case_filed', 'settlement', 'decision', 'enforcement']);
 
 /* ── Unified card view-model ───────────────────────────────────────────────── */
 interface CardVM {
@@ -235,6 +284,9 @@ interface CardVM {
   handler: StageHandler[];
   /** Per-stage handler breakdown (stages present on this contract) for the tooltip. */
   handlerBreakdown: { stage: string; name: string; inferred: boolean; done: boolean }[];
+  /** Breach cards only: the one action the board offers inline — a deep link
+   *  that opens the lease's Breaches section with the Escalate dialog up. */
+  escalateHref?: string | null;
 }
 
 // Days since last activity (updatedAt, falling back to createdAt) — powers the
@@ -449,7 +501,105 @@ function maintToCard(m: MaintReq, href: string | null, nowMs: number): CardVM {
   };
 }
 
-export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, maintenancePath, maintenanceHref, rpFilter, performanceHref, afterHeading }: Props) {
+/* ── AMC visit shape (GET /amc/visits/open) ─────────────────────────────────── */
+interface AmcVisit {
+  id: number; contractId: number; title: string; dueDate: string | null; status: string; overdue: boolean;
+  stage: 'scheduled' | 'attended' | 'quotation';
+  attendedAt: string | null; attendedByName: string | null; supervisedBy: string | null;
+  inspectedAt: string | null; inspectedByName: string | null; hasDeliveryNote: boolean;
+  quotationStatus: string | null; quotationAmountAed: number | null;
+  vendorName: string | null; propertyId: number | null; propertyName: string | null; kindLabel: string | null;
+  contractEndDate: string | null; moreOpen?: number; updatedAt: string | null; createdAt: string | null;
+}
+const fmtDay = (d: string | null) => d ? new Date(`${d.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short' }) : null;
+/* AMC card: one open visit. The stakeholders are whoever holds it now — the
+ * person who attended / inspected (the manager, or the supervisor they named),
+ * and the vendor who does the work. */
+function amcToCard(v: AmcVisit, href: string | null, nowMs: number): CardVM {
+  const idx = Math.max(0, AMC_STAGES.findIndex(s => s.key === v.stage));
+  const holder = v.inspectedByName ?? v.attendedByName ?? null;
+  const supervisor = v.supervisedBy && v.supervisedBy !== 'self' ? v.supervisedBy : null;
+  const term = v.stage === 'quotation'
+    ? `Quotation pending${v.quotationAmountAed != null ? ` · AED ${v.quotationAmountAed.toLocaleString('en-AE')}` : ''}`
+    : v.stage === 'scheduled'
+      ? (v.overdue ? `Overdue — due ${fmtDay(v.dueDate)}` : v.dueDate ? `Due ${fmtDay(v.dueDate)}` : 'No date set')
+      : 'Awaiting delivery note';
+  // The queue behind this visit on the same contract, so one card still says how much is owed.
+  const queued = v.moreOpen ? ` · +${v.moreOpen} more scheduled` : '';
+  return {
+    key: `a-${v.id}`,
+    // The contract is the card (what the visit is for); the vendor is a stakeholder chip.
+    name: v.kindLabel ?? v.title,
+    sub: `${v.propertyName ?? '—'} · ${v.vendorName ?? '—'} · ${v.title}`,
+    ref: `VISIT-${v.id}`,
+    rentAed: v.stage === 'quotation' ? v.quotationAmountAed : null,
+    term: term + queued,
+    done: idx + 1,
+    total: AMC_STAGES.length,
+    href,
+    stageKey: v.stage,
+    building: v.propertyName ?? null,
+    ageDays: daysSince(v.updatedAt ?? v.createdAt ?? null, nowMs),
+    handler: [
+      ...(holder ? [{ name: holder, inferred: false }] : []),
+      ...(supervisor ? [{ name: `${supervisor} (supervised)`, inferred: true }] : []),
+      ...(v.vendorName ? [{ name: `${v.vendorName} (vendor)`, inferred: true }] : []),
+    ],
+    handlerBreakdown: [],
+  };
+}
+
+/* Breach card: one open breach on a lease (spec §4). The lane is the breach's
+ * own stage; the API's `hint` rides the term slot ("Customer has 9 days to
+ * correct"). Opens the lease page at its Breaches section. */
+function breachToCard(b: BreachRow, href: string | null, nowMs: number, escalateHref: string | null): CardVM {
+  const idx = Math.max(0, BREACH_STAGE_ORDER.indexOf(b.stage));
+  return {
+    escalateHref: b.actions.escalate ? escalateHref : null,
+    key: `b-${b.id}`,
+    name: b.lease?.customerName ?? '—',
+    sub: `Unit ${b.lease?.unitNumber ?? '—'} · ${b.lease?.buildingName ?? '—'} · ${b.categoryLabel}`,
+    ref: `BR-${b.id}`,
+    rentAed: null,
+    term: b.alert?.text ?? b.hint,
+    done: idx + 1,
+    total: 4,
+    href,
+    stageKey: b.stage,
+    building: b.lease?.buildingName ?? null,
+    ageDays: daysSince(b.updatedAt ?? b.createdAt, nowMs),
+    // The stakeholder holding the breach: whoever acted on it last.
+    handler: b.handler ? [{ name: b.handler, inferred: false }] : [],
+    handlerBreakdown: [],
+  };
+}
+/* Legal card: one open case on a lease (spec §5). The claim rides the money
+ * slot; the API's `hint` ("Next hearing on …") rides the term slot. */
+function disputeToCard(d: DisputeRow, href: string | null, nowMs: number): CardVM {
+  const idx = Math.max(0, DISPUTE_STAGE_ORDER.indexOf(d.stage));
+  return {
+    key: `d-${d.id}`,
+    name: d.lease?.customerName ?? '—',
+    sub: `Unit ${d.lease?.unitNumber ?? '—'} · ${d.lease?.buildingName ?? '—'} · ${d.typeLabel} · ${d.filedByLabel}`,
+    ref: `CASE-${d.id}`,
+    rentAed: d.claimAmount,
+    term: d.alert?.text ?? d.hint,
+    done: idx + 1,
+    total: 6,
+    href,
+    stageKey: d.stage,
+    building: d.lease?.buildingName ?? null,
+    ageDays: daysSince(d.updatedAt ?? d.createdAt, nowMs),
+    // The stakeholders on the case: whoever acted last, and the representative (lawyer) when one is named.
+    handler: [
+      ...(d.handler ? [{ name: d.handler, inferred: false }] : []),
+      ...(d.representative ? [{ name: `${d.representative} (representative)`, inferred: true }] : []),
+    ],
+    handlerBreakdown: [],
+  };
+}
+
+export default function OperationsPipelines({ contractsPath, leadsPath, contractHref, leadHref, maintenancePath, maintenanceHref, amcPath, amcHref, rpFilter, performanceHref, afterHeading, legalBase, legalRp, disputeHref }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -457,6 +607,12 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [contracts, setContracts] = useState<OpsContract[]>([]);
   const [leads, setLeads] = useState<OpsLead[]>([]);
   const [maint, setMaint] = useState<MaintReq[]>([]);
+  const [visits, setVisits] = useState<AmcVisit[]>([]);
+  const [breaches, setBreaches] = useState<BreachRow[]>([]);
+  const [disputes, setDisputes] = useState<DisputeRow[]>([]);
+  // "Move lease to legal" on the Legal board — the Start-notice dialog, which
+  // can also record a case that is already in progress at its real stage.
+  const [showStartNotice, setShowStartNotice] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>(() => {
     const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return SHOW_BREACH_LEGAL ? LEGACY_TAB[t] : 'lead'; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
@@ -492,11 +648,21 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     maintenancePath
       ? apiGet<MaintReq[]>(maintenancePath).then(d => Array.isArray(d) ? d : []).catch(() => [])
       : Promise.resolve([] as MaintReq[]),
-  ]).then(([c, l, m]) => {
+    amcPath
+      ? apiGet<AmcVisit[]>(amcPath).then(d => Array.isArray(d) ? d : []).catch(() => [])
+      : Promise.resolve([] as AmcVisit[]),
+    // Open breaches + open cases (closed ones live on the lease record / the
+    // Legal list). A missing permission or an old backend just yields empty boards.
+    legalBase ? legalApi.breaches(legalBase, legalRp, { open: true }).then(r => r.items ?? []).catch(() => [] as BreachRow[]) : Promise.resolve([] as BreachRow[]),
+    legalBase ? legalApi.disputes(legalBase, legalRp, { open: true }).then(r => r.items ?? []).catch(() => [] as DisputeRow[]) : Promise.resolve([] as DisputeRow[]),
+  ]).then(([c, l, m, v, b, d]) => {
     setContracts(c);
     setLeads(rpFilter != null ? l.filter(x => x.unit?.property?.rentalProviderId === rpFilter) : l);
     setMaint(m);
-  }), [contractsPath, leadsPath, maintenancePath, rpFilter]);
+    setVisits(v);
+    setBreaches(b);
+    setDisputes(d);
+  }), [contractsPath, leadsPath, maintenancePath, amcPath, rpFilter, legalBase, legalRp]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLoading(true); load().finally(() => setLoading(false)); }, [load]);
@@ -507,8 +673,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     for (const c of contracts) if (c.property.buildingName) s.add(c.property.buildingName);
     for (const l of leads) if (l.unit?.property?.buildingName) s.add(l.unit.property.buildingName);
     for (const m of maint) if (m.property?.buildingName) s.add(m.property.buildingName);
+    for (const v of visits) if (v.propertyName) s.add(v.propertyName);
+    for (const b of breaches) if (b.lease?.buildingName) s.add(b.lease.buildingName);
+    for (const d of disputes) if (d.lease?.buildingName) s.add(d.lease.buildingName);
     return [...s].sort();
-  }, [contracts, leads, maint]);
+  }, [contracts, leads, maint, visits, breaches, disputes]);
 
   const matchSearch = (hay: (string | null | undefined)[]) => {
     const q = search.trim().toLowerCase();
@@ -525,8 +694,14 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
 
   // Build the cards for each tab (partitioned so a record shows in one tab only).
   const cardsByTab = useMemo(() => {
+    // A lease with an open case (LEGAL_TAB_ONLY stage) shows on the Legal tab
+    // only — dropped from New Lease / Renewal / Terminated and from Breach.
+    // Leads are pre-contract so they cannot be in legal; maintenance requests
+    // carry no lease id on this list, so they are not filtered.
+    const legalLeaseIds = new Set<number>(disputes.filter(d => LEGAL_TAB_ONLY.has(d.stage)).map(d => d.leaseId));
     const passC = (c: OpsContract) =>
-      (filterAsset === 'all' || c.property.buildingName === filterAsset)
+      !legalLeaseIds.has(c.id)
+      && (filterAsset === 'all' || c.property.buildingName === filterAsset)
       && contractInYear(c)
       && matchSearch([c.ref, tenantDisplayName(c.tenant), c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]);
     const passL = (l: OpsLead) =>
@@ -557,13 +732,34 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const maintCards = maint.filter(passM)
       .map(m => maintToCard(m, maintenanceHref ? maintenanceHref(m.id) : null, nowMs));
 
-    // Breach & Legal: workflow lanes only — no record source yet (see the
-    // header comment). The board renders every stage with zero cards.
+    // AMC: open visits from amcPath — open work whenever the visit was due, so
+    // no year gate. Search covers the vendor, property, kind and the people on it.
+    const passV = (v: AmcVisit) =>
+      (filterAsset === 'all' || v.propertyName === filterAsset)
+      && matchSearch([`VISIT-${v.id}`, v.title, v.vendorName, v.propertyName, v.kindLabel, v.attendedByName, v.inspectedByName, v.supervisedBy]);
+    const amcCards = visits.filter(passV)
+      .map(v => amcToCard(v, amcHref ? amcHref(v.contractId) : null, nowMs));
+
+    // Breach: open breaches, minus any whose lease is in legal (Legal only).
+    // Escalated breaches are not on the open list at all. Legal: open cases.
+    // Neither is year-gated — an open case matters whenever it was opened.
+    const passB = (b: BreachRow) =>
+      !legalLeaseIds.has(b.leaseId)
+      && (filterAsset === 'all' || b.lease?.buildingName === filterAsset)
+      && matchSearch([`BR-${b.id}`, b.lease?.customerName, b.lease?.unitNumber, b.lease?.buildingName, b.categoryLabel]);
+    const breachCards = breaches.filter(passB)
+      .map(b => breachToCard(b, `${contractHref(b.leaseId)}#sec-breaches`, nowMs,
+        `${contractHref(b.leaseId)}${contractHref(b.leaseId).includes('?') ? '&' : '?'}escalate=${b.id}#sec-breaches`));
+    const passD = (d: DisputeRow) =>
+      (filterAsset === 'all' || d.lease?.buildingName === filterAsset)
+      && matchSearch([`CASE-${d.id}`, d.lease?.customerName, d.lease?.unitNumber, d.lease?.buildingName, d.typeLabel, d.authorityCaseNumber]);
+    const legalCards = disputes.filter(passD)
+      .map(d => disputeToCard(d, disputeHref ? disputeHref(d.id) : null, nowMs));
     return {
       lead: leadCards, new: newCards, renewal: renewalCards, terminated: termCards,
-      maintenance: maintCards, breach_legal: [],
+      maintenance: maintCards, amc: amcCards, breach: breachCards, legal: legalCards,
     } as Record<TabKey, CardVM[]>;
-  }, [contracts, leads, maint, search, filterAsset, filterYear, contractHref, leadHref, maintenanceHref, nowMs]);
+  }, [contracts, leads, maint, visits, breaches, disputes, search, filterAsset, filterYear, contractHref, leadHref, maintenanceHref, amcHref, disputeHref, nowMs]);
 
   const stagesForTab: Record<TabKey, { key: string; title: string; desc?: string }[]> = {
     lead: LEAD_STAGES,
@@ -571,7 +767,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     renewal: RENEWAL_STAGES,
     terminated: TERM_STAGES,
     maintenance: MAINT_STAGES,
-    breach_legal: BREACH_LEGAL_STAGES,
+    amc: AMC_STAGES,
+    breach: BREACH_STAGES,
+    legal: LEGAL_STAGES,
   };
 
   const focusKey = sp.get('focus');
@@ -584,10 +782,9 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   useEffect(() => {
     if (loading || didAutoTab.current || focusKey) return;
     didAutoTab.current = true;
-    // The workflow-only pipeline (Breach & Legal) has no records yet by design —
-    // a deep link to it means "show me the workflow", so never hop away from
-    // it. Maintenance carries live records now and hops normally.
-    if (tab === 'breach_legal') return;
+    // A deep link to Breach or Legal means "show me that pipeline" even when it
+    // is empty — never hop away from it. Maintenance hops normally.
+    if (tab === 'breach' || tab === 'legal') return;
     if (cardsByTab[tab].length > 0) return;
     const first = TABS.find(t => cardsByTab[t.key].length > 0);
     if (first) selectTab(first.key);
@@ -681,6 +878,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
       {c.href
         ? <Link href={c.href} className="open">Open <ArrowRight size={12} /></Link>
         : <span className="open disabled">No detail</span>}
+      {c.escalateHref && (
+        <Link href={c.escalateHref} className="open escalate" title="Opens the lease's Breaches section with the Escalate dialog">
+          <Gavel size={12} /> Escalate to legal
+        </Link>
+      )}
     </article>
   );
 
@@ -714,6 +916,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const hasFilters = filterAsset !== 'all' || search !== '';
 
   return (
+    <>
     <div className="opsp-page">
       <main className="main">
         <div className="hero">
@@ -728,6 +931,11 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
             </h1>
           </div>
           <div className="hero-actions">
+            {tab === 'legal' && legalBase && (
+              <button type="button" className="btn btn-primary" onClick={() => setShowStartNotice(true)} title="Serve a notice, or record a case that is already in progress">
+                <Gavel size={14} /> Move lease to legal
+              </button>
+            )}
             {performanceHref && (
               <Link href={performanceHref} className="btn btn-ghost" title="How the team is performing, stage by stage">
                 <BarChart3 size={14} /> Manager performance
@@ -822,6 +1030,21 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
       </main>
       <OpsPipelineStyle />
     </div>
+    {/* Outside .opsp-page on purpose: the page's own `.grid` rule (its Grid view)
+        would otherwise restyle every grid inside the dialog. */}
+    {showStartNotice && legalBase && (
+      <StartNoticeModal
+        base={legalBase}
+        rp={legalRp}
+        onClose={() => setShowStartNotice(false)}
+        onSaved={(id) => {
+          setShowStartNotice(false);
+          if (disputeHref) router.push(disputeHref(id));
+          else { setLoading(true); load().finally(() => setLoading(false)); }
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -857,6 +1080,8 @@ export function OpsPipelineStyle() {
       .opsp-page .hero p b{ color:var(--ink-2); font-weight:700; }
       .opsp-page .hero-actions{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
       .opsp-page .btn{ display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:9px; font-weight:600; font-size:12px; border:1px solid transparent; cursor:pointer; white-space:nowrap; }
+      .opsp-page .btn-primary{ background:var(--green-d); color:#fff; border-color:var(--green-d); }
+      .opsp-page .btn-primary:hover{ background:var(--green); border-color:var(--green); }
       .opsp-page .btn-ghost{ background:#fff; color:var(--ink-2); border-color:var(--line); }
       .opsp-page .btn-ghost:hover{ border-color:var(--ink-3); color:var(--ink); }
       .opsp-page .reset{ background:transparent; border:0; color:var(--green-d); font-weight:600; font-size:12.5px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:7px; }
@@ -935,6 +1160,7 @@ export function OpsPipelineStyle() {
       .opsp-page .c-foot{ display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:8px; flex-wrap:wrap; }
       .opsp-page .c-foot .rent{ font-size:11px; font-weight:700; color:var(--green-d); font-variant-numeric:tabular-nums; }
       .opsp-page .c-foot .term{ font-size:9.5px; color:var(--mute); font-variant-numeric:tabular-nums; }
+      .opsp-page .open.escalate{ margin-top:6px; color:#5b3fbf; border-color:#d9d3f7; background:#f5f3fd; }
       .opsp-page .open{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:600; color:var(--ink-2); text-decoration:none; padding:5px 8px; border-radius:7px; border:1px solid var(--line); background:#fff; margin-top:8px; width:100%; justify-content:center; }
       .opsp-page a.open:hover{ border-color:var(--green); color:var(--green-d); background:var(--green-t2); }
       .opsp-page .open.disabled{ color:var(--mute); cursor:default; }

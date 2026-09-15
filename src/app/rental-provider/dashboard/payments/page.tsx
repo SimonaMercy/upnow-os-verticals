@@ -73,7 +73,7 @@ const MANAGEMENT_TYPES = [
   'admin_fee', 'commission',
   'bounced_cheque_fee', 'cheque_replacement_fee', 'cheque_deferral_fee',
   'late_renewal_fee', 'early_termination_fee', 'late_moveout_fee',
-  'unauthorized_sharing_fee', 'access_card_fee', 'contract_name_change_fee', 'unit_transfer_fee',
+  'unauthorized_sharing_fee', 'access_card_fee', 'contract_name_change_fee', 'unit_transfer_fee', 'legal_fee',
 ];
 // Third Party — pass-through fees the RP collects on behalf of others. `other`
 // belongs here (a sub-leased building's levy and the tax on it, service charges),
@@ -120,6 +120,7 @@ const TYPE_LABELS: Record<string, string> = {
   access_card_fee:          'Access card / remote replacement',
   contract_name_change_fee: 'Contract name change',
   unit_transfer_fee:        'Unit transfer',
+  legal_fee:                'Legal cost',
   ejari_fee:                'Contract Registration',
   maintenance_fee:          'Maintenance',
   service_charge:           'Service Charge',

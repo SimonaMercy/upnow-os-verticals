@@ -74,6 +74,7 @@ const ITEM_LABELS: Record<string, string> = {
   access_card_fee:          'Access card / remote replacement',
   contract_name_change_fee: 'Contract name change',
   unit_transfer_fee:        'Unit transfer',
+  legal_fee:                'Legal cost',
   // Third Party — pass-through fees the RP collects on behalf of others. Rent
   // VAT is one of them: the RP collects it, it is a tax liability rather than
   // rent, and the SAME charge is recorded on other contracts as a free-text
@@ -133,7 +134,7 @@ const DEFAULT_ASSIGN: Record<string, string> = {
   bounced_cheque_fee: 'management', cheque_replacement_fee: 'management', cheque_deferral_fee: 'management',
   late_renewal_fee: 'management', early_termination_fee: 'management', late_moveout_fee: 'management',
   unauthorized_sharing_fee: 'management', access_card_fee: 'management',
-  contract_name_change_fee: 'management', unit_transfer_fee: 'management',
+  contract_name_change_fee: 'management', unit_transfer_fee: 'management', legal_fee: 'management',
   vat_rental: 'third_party', ejari_fee: 'third_party', vat_fees: 'third_party',
   maintenance_fee: 'third_party', service_charge: 'third_party', refund: 'third_party',
   // Custom 'other' charges are keyed per description (`other:<label>`) so they

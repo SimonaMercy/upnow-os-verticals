@@ -19,6 +19,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
   ArrowUp, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
@@ -33,6 +34,7 @@ import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
 import { tenantDisplayName } from '@/lib/tenantName';
+import { legalApi, breachStageTone, disputeStageTone, type LeaseFlag, type LeaseFlags } from '@/lib/legal';
 
 interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null; emirate?: string | null }
 interface Resp {
@@ -225,6 +227,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [unitsByProperty, setUnitsByProperty] = useState<Record<number, UnitRecord[]>>({});
   const [loadingUnits, setLoadingUnits] = useState<Set<number>>(new Set());
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  // Legal & breach flags keyed by lease id (spec §7.5) — fetched once for the
+  // in-force leases the rows already resolve, chunked like the Leases register.
+  const [leaseFlags, setLeaseFlags] = useState<LeaseFlags>({});
   const [unitModal, setUnitModal] = useState<{ plan: Plan; editingUnit?: UnitRecord } | null>(null);
   const [unitPreview, setUnitPreview] = useState<{ plan: Plan; unit: UnitRecord } | null>(null);
   // Read-only layout detail popup — the same view shown from the portfolio's
@@ -246,6 +251,47 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       .then(rows => setContracts(rows.map(c => (c.tenant ? { ...c, tenant: { ...c.tenant, name: tenantDisplayName(c.tenant) } } : c))))
       .catch(() => {});
   }, [manager]);
+  useEffect(() => {
+    const ids = contracts.filter(c => c.contractActive).map(c => c.id);
+    if (!ids.length) return;
+    let cancelled = false;
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+    Promise.all(chunks.map(chunk => legalApi.leaseFlags(manager ? '/manager/legal' : '/legal', manager?.rp, chunk).catch(() => ({} as LeaseFlags))))
+      .then(parts => { if (!cancelled) setLeaseFlags(Object.assign({}, ...parts)); });
+    return () => { cancelled = true; };
+  }, [contracts, manager]);
+  const router = useRouter();
+  // The two pills a lease can carry — a breach and a legal case are independent.
+  // The unit row/card is itself clickable (opens the preview), so each pill
+  // swallows the click and routes on its own.
+  const legalPills = (leaseId: number | null, flag: LeaseFlag | null | undefined, small = false) => {
+    if (!leaseId || !flag || (!flag.breach && !flag.dispute)) return null;
+    const contractBase = manager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard/contracts';
+    const breachHref = `${contractBase}/${leaseId}/v2#sec-breaches`;
+    const disputeHref = (id: number) => (manager ? `/dashboard/manager/legal/${id}?rp=${manager.rp}` : `/rental-provider/dashboard/legal/${id}`);
+    const pillStyle = (t: { bg: string; fg: string }) => ({
+      fontSize: small ? 10 : 10.5, fontWeight: 700, color: t.fg, background: t.bg, padding: small ? '3px 8px' : '4px 9px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap' as const,
+    });
+    return (
+      <>
+        {flag.breach && (
+          <span role="link" tabIndex={0} title="Open the breach on the lease page" style={pillStyle(breachStageTone(flag.breach.stage))}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(breachHref); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); router.push(breachHref); } }}>
+            Breach · {flag.breach.label}
+          </span>
+        )}
+        {flag.dispute && (
+          <span role="link" tabIndex={0} title="Open the legal case" style={pillStyle(disputeStageTone(flag.dispute.stage))}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(disputeHref(flag.dispute!.id)); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); router.push(disputeHref(flag.dispute!.id)); } }}>
+            Legal · {flag.dispute.label}
+          </span>
+        )}
+      </>
+    );
+  };
 
   const loadUnitsForProperty = useCallback(async (pid: number) => {
     setLoadingUnits(s => new Set(s).add(pid));
@@ -676,7 +722,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     // lease is the fact, and re-testing the flag here made this page the only
     // surface showing a paid-for unit as earning nothing.
     const annual = u.currentLeaseRent ?? null;
-    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id };
+    const leaseId = contract?.id ?? null;
+    return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id, leaseId, flag: leaseId ? leaseFlags[String(leaseId)] : null };
   };
 
   // Listing / edit / delete actions — shared by the unit row and card. (The row
@@ -730,7 +777,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // One unit row — used in the per-unit row view (`showBuilding` adds the
   // building name, since rows can span properties).
   const unitRow = (p: Plan, u: UnitRecord, showBuilding = false) => {
-    const { tenant, leaseRange, pill, size, price, annual, busy } = unitMeta(u);
+    const { tenant, leaseRange, pill, size, price, annual, busy, leaseId, flag } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
         className="flex items-center gap-4 cursor-pointer transition-colors hover:border-[#cfe7da]"
@@ -743,6 +790,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</span>
             <span style={{ fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '5px 11px', borderRadius: 8 }}>{pill.label}</span>
+            {legalPills(leaseId, flag)}
           </div>
           <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
           <div className="flex items-center gap-4" style={{ marginTop: 9, fontSize: 12.5, color: '#6b756f', fontWeight: 600 }}>
@@ -774,7 +822,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
 
   // One unit as a card — used in the per-unit grid view.
   const unitCard = (p: Plan, u: UnitRecord, showBuilding = false) => {
-    const { tenant, leaseRange, pill, size, price, annual, busy } = unitMeta(u);
+    const { tenant, leaseRange, pill, size, price, annual, busy, leaseId, flag } = unitMeta(u);
     return (
       <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
         className="flex flex-col overflow-hidden cursor-pointer"
@@ -787,6 +835,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
         {/* Body */}
         <div className="flex flex-col flex-1" style={{ padding: '14px 16px' }}>
           <div className="truncate" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</div>
+          {(flag?.breach || flag?.dispute) && (
+            <div className="flex items-center gap-1.5 flex-wrap" style={{ marginTop: 6 }}>{legalPills(leaseId, flag, true)}</div>
+          )}
           <div className="truncate" style={{ fontSize: 12, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
           <div className="flex items-center gap-3.5" style={{ marginTop: 11, fontSize: 12, color: '#6b756f', fontWeight: 600 }}>
             {u.bedrooms != null && <span className="inline-flex items-center gap-1"><BedDouble size={13} style={{ color: ICON_MUTE }} />{u.bedrooms === 0 ? 'Studio' : `${u.bedrooms} BR`}</span>}

@@ -67,6 +67,8 @@ interface Bucket { key: string; label: string; changes: number; responses: numbe
 interface Resp { measured: number; avgResponseHours: number | null; onTimePct: number | null; slaPct: number | null; breached: number; slaHours: number }
 interface StepRow {
   key: string; label: string; source: 'table' | 'audit'; inferred: boolean;
+  /** The Operations tab this step belongs to — the table groups by it. */
+  group: string;
   /** Whose step it is — anything but `manager` is a gate the team chases but
    *  cannot perform, so it stays out of the ring and out of "steps done". */
   side: 'manager' | 'customer' | 'landlord';
@@ -124,6 +126,12 @@ const JADE = '#2e9f82', AMBER = '#b45309', PURPLE = '#8250df';
 /** Step colours in journey order — jade → blue → amber → purple → rose → teal…, cycling. */
 /** One hue per team member, by roster id — the same person keeps the same colour everywhere on the page. */
 const PERSON_COLORS = ['#2e9f82', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490'];
+/** The Operations tabs, in the board's own order, as the step table's groups
+ *  (owner, 15 Sep 2026: "group them as per the tabs we have in operations"). */
+const STEP_GROUPS: Array<[string, string]> = [
+  ['lead', 'Lead'], ['new', 'New Lease'], ['renewal', 'Renewal'], ['terminated', 'Terminated'],
+  ['maintenance', 'Maintenance'], ['amc', 'AMC'], ['breach', 'Breach'], ['legal', 'Legal'], ['other', 'Other'],
+];
 const STEP_COLORS = ['#2e9f82', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490', '#16a34a', '#7c3aed', '#b45309', '#2563eb', '#be185d', '#0f766e', '#9333ea', '#dc2626', '#4f46e5', '#65a30d'];
 const GRID = '#f0ede8';
 const TICK = { fontSize: 11, fill: '#9b9890' } as const;
@@ -923,7 +931,7 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
                 </div>
               </div>
               <StepDonut steps={data.steps} team={data.team} person={stepPerson} where={stepWhere}
-                ownerUserId={data.ownerUserId} onDrill={setDrill} />
+                ownerUserId={data.ownerUserId} onDrill={setDrill} operationsHref={operationsHref} />
             </Card>
 
             <Card title="Activity trend" sub={
@@ -994,9 +1002,9 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
  *  · share — in journey order. `person` narrows it to one team member (their
  *  own distinct records per step); steps whose source names nobody are then
  *  left out and said so. Steps with nothing are listed beneath in one line. */
-function StepDonut({ steps, team, person, where, ownerUserId, onDrill }: {
+function StepDonut({ steps, team, person, where, ownerUserId, onDrill, operationsHref }: {
   steps: StepRow[]; team: Person[]; person: number | 'all'; where: 'all' | 'ground' | 'remote';
-  ownerUserId: number; onDrill: (d: Drill) => void;
+  ownerUserId: number; onDrill: (d: Drill) => void; operationsHref: string;
 }) {
   const nameOf = new Map(team.map((p) => [String(p.userId), p.name.split(' ')[0]]));
   /** The landlord is not on the roster, so their share of a step is `owner`,
@@ -1085,7 +1093,27 @@ function StepDonut({ steps, team, person, where, ownerUserId, onDrill }: {
             <span className="text-right" title="The stage's SLA target as the system applies it today — 72h everywhere, no per-stage targets are configured yet">SLA criteria</span>
           </div>
           <ul className="space-y-1 text-[12.5px]">
-            {data.map((s) => (
+            {/* One block per Operations tab, in the board's order, each with its
+                own subtotal — the same shape the reader sees on the tracker. */}
+            {STEP_GROUPS.filter(([g]) => data.some((d) => (d.group ?? 'other') === g)).map(([g, gLabel]) => {
+              const rows = data.filter((d) => (d.group ?? 'other') === g);
+              const gOpen = rows.every((d) => d.open == null) ? null : rows.reduce((a, d) => a + (d.open ?? 0), 0);
+              const gDone = rows.reduce((a, d) => a + (attributed(d) ? d.value : 0), 0);
+              const gBreached = rows.reduce((a, d) => a + d.resp.breached, 0);
+              return [
+              <li key={`g-${g}`} className="grid grid-cols-[10px_minmax(0,1fr)_52px_54px_56px_58px] gap-x-2 items-center pt-2 mt-1 first:mt-0 first:pt-0">
+                <span />
+                <span className="text-[10px] font-bold tracking-[0.08em] uppercase text-[var(--neutral-500)]">
+                  {g === 'other'
+                    ? gLabel
+                    : <Link href={`${operationsHref}?tab=${g}`} className="hover:text-[var(--primary-dark)] hover:underline" title={`Open the ${gLabel} board`}>{gLabel}</Link>}
+                </span>
+                <span className="text-right tabular-nums text-[11px] font-semibold text-[var(--neutral-500)]">{gOpen == null ? '' : nfmt(gOpen)}</span>
+                <span className="text-right tabular-nums text-[11px] font-semibold text-[var(--neutral-500)]">{nfmt(gDone)}</span>
+                <span className="text-right tabular-nums text-[11px] font-semibold text-[var(--neutral-500)]">{gBreached ? nfmt(gBreached) : ''}</span>
+                <span />
+              </li>,
+              ...rows.map((s) => (
               <li key={s.key} className="grid grid-cols-[10px_minmax(0,1fr)_52px_54px_56px_58px] gap-x-2 items-center" title={`${s.label}: ${whoDid(s)}${s.repeats ? ` · ${s.repeats}× recorded` : ''}${s.resp.measured ? ` · avg response ${fmtResp(s.resp.avgResponseHours)} over ${s.resp.measured}` : ' · response not measurable for this step'}`}>
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
                 <span className="text-[var(--neutral-700)] leading-tight">
@@ -1120,7 +1148,8 @@ function StepDonut({ steps, team, person, where, ownerUserId, onDrill }: {
                 </span>
                 <span className="tabular-nums text-right whitespace-nowrap text-[var(--neutral-700)]">{fmtResp(s.resp.slaHours)}</span>
               </li>
-            ))}
+              ))];
+            })}
             <li className="grid grid-cols-[10px_minmax(0,1fr)_52px_54px_56px_58px] gap-x-2 items-center border-t border-[var(--base-200)] mt-1.5 pt-2 font-bold text-[var(--neutral-900)]">
               <span />
               <span>Total</span>

@@ -38,6 +38,7 @@ import { tenantDisplayName } from '@/lib/tenantName';
 import { liveLeaseTips, todayKey } from '@/lib/liveLease';
 import { contractHref, surfaceOfLockedAt } from '@/lib/contractHref';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { legalApi, breachStageTone, disputeStageTone, type LeaseFlag, type LeaseFlags } from '@/lib/legal';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Status model (preserved from previous version)
@@ -389,8 +390,15 @@ function RentBreakdownTip({ breakdown, pending, manager, opsHref }: {
 // ────────────────────────────────────────────────────────────────────────────
 
 function Row({
-  contract, now, soonBy, onEdit, basePath,
-}: { contract: Contract; now: Date; soonBy: Date; onEdit?: (id: number) => void; basePath: string }) {
+  contract, now, soonBy, onEdit, basePath, flag, disputeHref,
+}: {
+  contract: Contract; now: Date; soonBy: Date; onEdit?: (id: number) => void; basePath: string;
+  /** Legal & breach flags for this lease (spec §2.5 / §7.5) — absent until loaded, null when clean. */
+  flag?: LeaseFlag | null;
+  /** Builds the Legal case page href for a dispute id (landlord vs manager route). */
+  disputeHref: (disputeId: number) => string;
+}) {
+  const router = useRouter();
   const c = contract;
   const ds = displayStatusOf(c);
   const soon = isInForce(c) && endsSoon(c, soonBy);
@@ -414,6 +422,35 @@ function Row({
             <span className={'type-chip ' + (isRenewal ? 'renewal' : '')}>{isRenewal ? 'Renewal' : 'New'}</span>
           </div>
           <div className="tenant">{tenantLabel ?? '—'}</div>
+          {/* Two INDEPENDENT pills — a breach and a legal case can coexist. The
+              row is itself a Link, so each pill swallows the click and routes
+              on its own: breach → the lease's Breaches section, legal → the case. */}
+          {(flag?.breach || flag?.dispute) && (
+            <div className="legal-flags">
+              {flag?.breach && (
+                <span
+                  className="status breach" role="link" tabIndex={0}
+                  style={{ background: breachStageTone(flag.breach.stage).bg, color: breachStageTone(flag.breach.stage).fg }}
+                  title="Open the breach on the lease page"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`${href}#sec-breaches`); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); router.push(`${href}#sec-breaches`); } }}
+                >
+                  <span className="sd" />Breach · {flag.breach.label}
+                </span>
+              )}
+              {flag?.dispute && (
+                <span
+                  className="status legal" role="link" tabIndex={0}
+                  style={{ background: disputeStageTone(flag.dispute.stage).bg, color: disputeStageTone(flag.dispute.stage).fg }}
+                  title="Open the legal case"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(disputeHref(flag.dispute!.id)); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); router.push(disputeHref(flag.dispute!.id)); } }}
+                >
+                  <span className="sd" />Legal · {flag.dispute.label}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -477,6 +514,9 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
   // incomplete). The Leases register is the EXACT COMPLEMENT: a lease shows here
   // only once its full pipeline is complete and it has left Operations.
   const [opsIds, setOpsIds] = useState<Set<number>>(new Set());
+  // Legal & breach flags per lease id (spec §2.5) — one batched call after the
+  // register loads, chunked so a big portfolio never builds a giant query string.
+  const [leaseFlags, setLeaseFlags] = useState<LeaseFlags>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAsset, setFilterAsset] = useState('all');
@@ -497,6 +537,19 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
       })
       .finally(() => setLoading(false));
   }, [manager]);
+
+  useEffect(() => {
+    if (!contracts.length) return;
+    let cancelled = false;
+    const ids = contracts.map(c => c.id);
+    const chunks: number[][] = [];
+    for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+    Promise.all(chunks.map(chunk => legalApi.leaseFlags(manager ? '/manager/legal' : '/legal', manager?.rp, chunk).catch(() => ({} as LeaseFlags))))
+      .then(parts => { if (!cancelled) setLeaseFlags(Object.assign({}, ...parts)); });
+    return () => { cancelled = true; };
+  }, [contracts, manager]);
+  const disputeHref = (disputeId: number) =>
+    manager ? `/dashboard/manager/legal/${disputeId}?rp=${manager.rp}` : `/rental-provider/dashboard/legal/${disputeId}`;
 
   useEffect(() => { setPage(1); }, [activeTab, search, filterAsset, filterType]);
 
@@ -831,6 +884,7 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
             <div className="rows">
               {rows.map(c => (
                 <Row key={c.id} contract={c} now={now} soonBy={soonBy} basePath={contractBase}
+                  flag={leaseFlags[String(c.id)]} disputeHref={disputeHref}
                   onEdit={canEditTerms ? (cid) => router.push(`${contractBase}/${cid}/edit`) : undefined} />
               ))}
             </div>
@@ -1336,6 +1390,13 @@ function GlobalStyle() {
       .orders-page .status.declined    { background: var(--danger-bg); color: var(--danger-fg); border-color: #f1c5c2; }
       .orders-page .status.superseded  { background: var(--purple-bg); color: var(--purple-fg); border-color: #d6cef9; }
       .orders-page .status.terminated  { background: #ececec; color: #57534e; border-color: #ddd9d2; }
+      /* Legal & breach flags — same pill, stage colours from lib/legal.ts (inline),
+         a touch smaller so two can sit under the customer name without crowding. */
+      .orders-page .legal-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+      .orders-page .status.breach, .orders-page .status.legal {
+        font-size: 10px; padding: 2px 8px; gap: 5px; border-color: rgba(0,0,0,.06); cursor: pointer;
+      }
+      .orders-page .status.breach:hover, .orders-page .status.legal:hover { filter: brightness(.96); text-decoration: underline; }
 
       .orders-page .col-chev {
         display: flex; align-items: center; justify-content: center; color: var(--mute);

@@ -41,7 +41,7 @@ import {
   User, Building2, Calendar, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
-  Trash2, Plus, Link2,
+  Trash2, Plus, Link2, Scale,
 } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
@@ -73,6 +73,7 @@ import { configuredFeeFromRules, feeVatFromRules, type FeeRuleLite } from '@/lib
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
+import { BreachesSection } from '@/components/legal/BreachesSection';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2160,7 +2161,7 @@ function MissingStrip({
 // Detail cards row
 // ────────────────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses' | 'notes';
+type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses' | 'notes' | 'breaches';
 
 /** One entry in the tenancy's running notes log (newest first). */
 type ContractNote = {
@@ -2248,6 +2249,7 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'documents', label: 'Documents', icon: Paperclip },
   { key: 'clauses',   label: 'Clauses',   icon: ClipboardList },
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
+  { key: 'breaches',  label: 'Breaches',  icon: Scale },
 ];
 
 /** Every Settings → Rules penalty / admin charge, as an addable fee type. Each maps
@@ -2658,8 +2660,10 @@ function DetailsDrawer({
   // onDeletePayment is intentionally not destructured — fee rows are corrected
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false,
+  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal,
 }: {
+  /** Legal & Breach module scope — base path ('/legal' | '/manager/legal'), manager `rp`, and where a dispute page lives. */
+  legal?: { base: string; rp?: number; disputeHrefOf: (disputeId: number) => string };
   /** Refetch after a document is removed — the list must come from the server. */
   onDocsChanged: () => void;
   open: boolean; tab: DrawerTab; setTab: (t: DrawerTab) => void; onClose: () => void;
@@ -5252,7 +5256,7 @@ function DetailsDrawer({
               A running, append-only journal staff keep about this tenancy so
               whoever picks it up next sees the full history. Shared across the
               whole renewal chain, and never locks (unlike the clauses note). */}
-          {(inline || tab === 'notes') && showExtras && (
+          {(inline || tab === 'notes') && (
             <div className="sec" id="sec-notes">
               <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes</span></div>
               <div className="secb">
@@ -5300,6 +5304,11 @@ function DetailsDrawer({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+          {(inline || tab === 'breaches') && legal && (
+            <div className="sec" id="sec-breaches">
+              <BreachesSection leaseId={contract.id} leaseStatus={contract.status} base={legal.base} rp={legal.rp} disputeHrefOf={legal.disputeHrefOf} />
             </div>
           )}
         </div>
@@ -8112,6 +8121,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             perms={perms}
             paymentRefs={paymentRefs}
             showExtras={view !== 'record'}
+            legal={!mgrCan('canManageLegal') ? undefined : {
+              base: isManagerView ? '/manager/legal' : '/legal',
+              rp: isManagerView && rpScope !== '' ? Number(rpScope) : undefined,
+              disputeHrefOf: (id: number) => isManagerView ? `/dashboard/manager/legal/${id}${rpScope !== '' ? `?rp=${rpScope}` : ''}` : `/rental-provider/dashboard/legal/${id}`,
+            }}
           />
         </div>
         )}

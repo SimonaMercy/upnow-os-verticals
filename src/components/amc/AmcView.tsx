@@ -74,7 +74,7 @@ export interface AmcContract {
 }
 interface PropertyOpt { id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }
 export interface CategoryOpt { id: number; name: string; defaultKind: string; isActive: boolean }
-interface VendorOpt { id: number; name: string; serviceCategory: string | null }
+interface VendorOpt { id: number; name: string; serviceCategory: string | null; expenseCategoryId?: number | null; expenseCategoryName?: string | null; expenseCategoryKind?: string | null }
 interface PlanRow { title: string; dueDate: string; notes: string }
 
 const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = {
@@ -532,6 +532,11 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
     setVendorId(id);
     const v = allVendors.find(x => String(x.id) === id);
     setCategory(v?.serviceCategory ?? 'maintenance');
+    // 0284 — the vendor is primary: its sub-category (and that sub-category's category) fill in, still editable below.
+    if (v?.expenseCategoryId != null) {
+      setNewCat(false); setCategoryId(v.expenseCategoryId); setCategoryLabel(v.expenseCategoryName ?? '');
+      if (v.expenseCategoryKind && kindList.some(k => k.key === v.expenseCategoryKind)) pickKind(v.expenseCategoryKind);
+    }
   }
 
   useEffect(() => { if (!planDirty) setPlan(buildPlan(startDate, endDate, frequency, category, categoryLabel)); }, [startDate, endDate, frequency, category, categoryLabel, planDirty]);
@@ -628,7 +633,25 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
         <div className="px-5 py-4 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-x-6 gap-y-4">
           {/* ── left: what it is, who it is with, the term ── */}
           <div className="space-y-4 min-w-0">
-            <Section n={1} title="Category" hint={km.hint}>
+            <Section n={1} title={kind === 'head_lease' ? 'Payee & property' : 'Vendor & property'}>
+              <span className={lbl}>{kind === 'head_lease' ? 'Head landlord / authority' : kind === 'recurring' ? 'Payee' : 'Vendor'}</span>
+              <select className={field} value={vendorId} onChange={e => onPickVendor(e.target.value)} disabled={!!from}>
+                <option value="">Select…</option>
+                {from && !allVendors.some(v => v.id === from.vendorId) && <option value={from.vendorId}>{from.vendorName}</option>}
+                {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.serviceCategory ? ` · ${v.serviceCategory.replace(/_/g,' ')}` : ''}</option>)}
+              </select>
+              {from
+                ? <p className="text-[11px] text-[#2e9f82] mt-1">Everything from AMC-{from.id} ({fmt(from.startDate)} – {fmt(from.endDate)}) is prefilled for the next term — change what differs, then save. The old contract stays on record.</p>
+                : <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <a href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</a> first.</p>}
+              <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#9b9890]">— which building this cost belongs to</span></span>
+                <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
+                  <option value="">— all / none —</option>
+                  {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
+                </select>
+              </div>
+            </Section>
+
+            <Section n={2} title="Category" hint={vendorId && categoryId != null ? `Taken from the vendor — change it here if this contract is different. ${km.hint}` : km.hint}>
               <div className="flex flex-wrap gap-1.5">
                 {kindList.filter(k => k.isActive !== false || k.key === kind).map(k => (
                   <button key={k.key} type="button" onClick={() => pickKind(k.key)} title={k.hint}
@@ -657,24 +680,6 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
                     <option value="__new">+ New sub-category…</option>
                   </select>
                 )}
-              </div>
-            </Section>
-
-            <Section n={2} title={kind === 'head_lease' ? 'Payee & property' : 'Vendor & property'}>
-              <span className={lbl}>{kind === 'head_lease' ? 'Head landlord / authority' : kind === 'recurring' ? 'Payee' : 'Vendor'}</span>
-              <select className={field} value={vendorId} onChange={e => onPickVendor(e.target.value)} disabled={!!from}>
-                <option value="">Select…</option>
-                {from && !allVendors.some(v => v.id === from.vendorId) && <option value={from.vendorId}>{from.vendorName}</option>}
-                {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.serviceCategory ? ` · ${v.serviceCategory.replace(/_/g,' ')}` : ''}</option>)}
-              </select>
-              {from
-                ? <p className="text-[11px] text-[#2e9f82] mt-1">Everything from AMC-{from.id} ({fmt(from.startDate)} – {fmt(from.endDate)}) is prefilled for the next term — change what differs, then save. The old contract stays on record.</p>
-                : <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <a href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</a> first.</p>}
-              <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#9b9890]">— which building this cost belongs to</span></span>
-                <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
-                  <option value="">— all / none —</option>
-                  {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
-                </select>
               </div>
             </Section>
 

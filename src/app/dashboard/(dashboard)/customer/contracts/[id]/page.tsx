@@ -26,6 +26,7 @@ import {
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { AddendumsPanel } from '@/components/upnow/AddendumsPanel';
 import { MaintenanceSection } from '@/components/customer/MaintenanceSection';
+import { NoticesSection } from '@/components/customer/NoticesSection';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { openDocViewer } from '@/lib/docViewer';
 import { taxPortionOf } from '@/lib/chargeTax';
@@ -475,6 +476,9 @@ export default function TenantContractDetailPage() {
 
         {/* Maintenance — raise a request on this lease and track it */}
         <MaintenanceSection contractId={contract.id} />
+
+        {/* Notices & warnings — what the landlord served on this lease (hidden when there is nothing) */}
+        <NoticesSection contractId={contract.id} />
 
         {/* Action required banner */}
         {canSign && (
