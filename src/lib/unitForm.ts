@@ -7,7 +7,7 @@
  */
 import { apiPost, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
-import { isResidentialUnitType, unitHasBathrooms } from '@/lib/unitTaxonomy';
+import { isResidentialUnitType, unitHasBathrooms, unitHasRooms } from '@/lib/unitTaxonomy';
 import type { UnitFormData } from '@/components/upnow/UnitFormModal';
 
 // Sub-lease charge line items — persisted as two regular `additionalPayments`
@@ -39,6 +39,8 @@ export interface UnitRecord {
   sewerageNumber: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  /** Staff accommodation only — rooms in the block (see unitHasRooms). */
+  rooms?: number | null;
   parkingSpaces: number | null;
   unitSizeSqft: number | null;
   unitSizeSqm: number | null;
@@ -143,8 +145,10 @@ export function unitFormToDto(data: UnitFormData) {
   // clears any legacy phantom value):
   //  - bedrooms / furnishing → residential-only (a shop has neither)
   //  - bathrooms → washrooms, kept for any built space, dropped only for land
+  //  - rooms → staff accommodation only, which asks for rooms instead of bedrooms
   const residential = isResidentialUnitType(data.unitType);
   const hasBathrooms = unitHasBathrooms(data.unitType);
+  const hasRooms = unitHasRooms(data.unitType);
   return {
     unitNumber: data.unitNumber,
     unitName: clearable(data.unitName),
@@ -155,8 +159,10 @@ export function unitFormToDto(data: UnitFormData) {
     sewerageNumber: clearable(data.sewerageNumber),
     unitSizeSqft: num(data.unitSizeSqft) ?? undefined,
     unitSizeSqm: num(data.unitSizeSqm) ?? undefined,
-    bedrooms: !residential ? null : data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
+    bedrooms: !residential || hasRooms ? null : data.bedrooms === 'Studio' ? null : num(data.bedrooms) ?? undefined,
     bathrooms: !hasBathrooms ? null : num(data.bathrooms) ?? undefined,
+    // An emptied count PATCHes null so the stored one clears.
+    rooms: hasRooms ? num(data.rooms) : null,
     parkingSpaces: num(data.parkingSpaces) ?? undefined,
     amenities: data.amenities, // empty array clears amenities (kept lease terms are merged server-side)
     view: clearable(data.view),
@@ -199,6 +205,7 @@ export function unitToFormInitial(u: UnitRecord): UnitFormData {
     sewerageNumber:   u.sewerageNumber ?? '',
     bedrooms:         u.bedrooms != null ? String(u.bedrooms) : 'Studio',
     bathrooms:        u.bathrooms != null ? String(u.bathrooms) : '1',
+    rooms:            u.rooms != null ? String(u.rooms) : '',
     parkingSpaces:    u.parkingSpaces != null ? String(u.parkingSpaces) : '',
     unitSizeSqft:     u.unitSizeSqft != null ? String(u.unitSizeSqft) : '',
     unitSizeSqm:      u.unitSizeSqm != null ? String(u.unitSizeSqm) : '',

@@ -34,7 +34,7 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
   initial?: CustomerInitial;
   submitUrl: string;
   method: 'POST' | 'PATCH';
-  onDone: (result: { tenantId?: number; name?: string | null }) => void;
+  onDone: (result: { tenantId?: number; name?: string | null; entityType?: string | null; companyName?: string | null }) => void;
   onCancel: () => void;
 }) {
   const [firstName, setFirstName] = useState(initial?.firstName ?? '');

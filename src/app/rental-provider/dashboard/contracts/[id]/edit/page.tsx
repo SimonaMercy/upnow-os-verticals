@@ -21,10 +21,20 @@ import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { derivedChargeHint, recomputeThirdPartyCharges } from '@/lib/thirdPartyCharges';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 interface Tenant {
   id: number;
   user: { name: string; email: string };
+  entityType?: string | null;
+  companyName?: string | null;
+}
+
+/** The API's user.name is the person. A company customer is labelled by its
+ *  company (never the signatory) as tenants load, so the search, the list and
+ *  the chosen customer all read the same name. */
+function labelTenant(t: Tenant): Tenant {
+  return { ...t, user: { ...t.user, name: tenantDisplayName({ name: t.user.name, entityType: t.entityType, companyName: t.companyName }) ?? t.user.name } };
 }
 
 /** Inline "create a new customer" form — mirrors the new-contract wizard.
@@ -56,7 +66,7 @@ function NewCustomerForm({ createTenantUrl, onCreated, onCancel }: {
       });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? 'Could not create customer'); }
       const d = await res.json();
-      onCreated({ id: d.tenantId, name: d.name ?? name.trim() });
+      onCreated({ id: d.tenantId, name: tenantDisplayName(d) ?? name.trim() });
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to create customer'); }
     finally { setBusy(false); }
   };
@@ -262,7 +272,7 @@ export default function EditContractPage() {
       })
       .catch(() => { if (!cancelled) { setCustomerEditable(false); setSignedLocked(false); } });
     apiGet<Tenant[]>(tenantsListPath)
-      .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows : []); })
+      .then((rows) => { if (!cancelled) setActiveTenants(Array.isArray(rows) ? rows.map(labelTenant) : []); })
       .catch(() => undefined);
     // Allowed installment plans come from the RP profile — managers have no RP
     // profile, so they just fall back to the full set (a non-blocking nicety).
@@ -276,7 +286,7 @@ export default function EditContractPage() {
         if (cancelled) return;
         setTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
         setOriginalTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
-        setTenantName(c.tenant?.name ?? '');
+        setTenantName(tenantDisplayName(c.tenant) ?? '');
         setStartDate(toDateInput(c.startDate));
         setEndDate(toDateInput(c.endDate));
         setListedRent(numStr(c.listedRent ?? c.annualRent));
@@ -310,7 +320,7 @@ export default function EditContractPage() {
         setMeta({
           ref: c.ref ?? `CID-${id}`,
           status: c.status ?? null,
-          tenant: c.tenant?.name ?? null,
+          tenant: tenantDisplayName(c.tenant),
           unit: c.unit?.number ? `Unit ${c.unit.number}${c.unit.name ? ` · ${c.unit.name}` : ''}` : (c.unit?.name ?? null),
           building: c.property?.buildingName ?? null,
         });
@@ -362,7 +372,7 @@ export default function EditContractPage() {
     searchTimer.current = setTimeout(async () => {
       try {
         const rows = await apiGet<Tenant[]>(tenantSearchPath(val));
-        setTenantResults(Array.isArray(rows) ? rows : []);
+        setTenantResults(Array.isArray(rows) ? rows.map(labelTenant) : []);
         setTenantDropdownOpen(true);
       } catch { setTenantResults([]); }
     }, 300);

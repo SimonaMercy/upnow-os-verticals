@@ -52,6 +52,17 @@ export function unitHasBathrooms(unitType: string | null | undefined): boolean {
   return !isLandUnitType(unitType);
 }
 
+/**
+ * True when a unit counts its **rooms** instead of bedrooms — a staff
+ * accommodation block is let as one unit under one lease but holds many rooms.
+ * The unit form asks for the room count only here (in place of Bedrooms), and
+ * the Unit Mix report shows it. Mirrors `unitHasRooms` in the backend
+ * `src/shared/enums.ts`.
+ */
+export function unitHasRooms(unitType: string | null | undefined): boolean {
+  return unitType === 'staff_accommodation';
+}
+
 /** Unit types that attract COMMERCIAL fee/VAT treatment (5% rent VAT) — the
  *  commercial bucket plus workspaces + venues. Mirrors COMMERCIAL_UNIT_TYPES in
  *  the backend `src/shared/enums.ts`.

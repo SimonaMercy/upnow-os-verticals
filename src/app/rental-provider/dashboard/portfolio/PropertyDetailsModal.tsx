@@ -800,7 +800,7 @@ export function PropertyDetailsModal({
                     <div style={{ minWidth: 840 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Bedrooms · Plan', 'Sqft', 'Units', 'Market Rent', 'Annual Rent', ''].map((h, i) => (
+                        {['Unit type', 'Layout', 'Sqft', 'Units', 'Market Rent', 'Annual Rent', ''].map((h, i) => (
                           <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>

@@ -11,6 +11,7 @@ import {
   ChevronRight, FileCheck, Banknote, Lock, Download, Receipt,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
+import { tenantDisplayName } from '@/lib/tenantName';
 import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 
 /* ── Types ────────────────────────────────────────────────────────────── */
@@ -83,7 +84,7 @@ interface ContractDetail {
   renderedContent: string | null;
   createdAt: string;
   updatedAt: string;
-  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null };
+  tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: string | null; companyName?: string | null };
   unit: { id: number | null; number: string | null; name: string | null; type: string | null; floor: string | null; sizeSqft: number | null; sizeSqm: number | null; bedrooms: number | null; bathrooms: number | null };
   property: { id: number | null; buildingName: string | null; fullAddress: string | null; numberOfFloors: string | null; makaniNumber: string | null; plotNumber: string | null; community: string | null; emirate: string | null };
   payments: Payment[];
@@ -365,10 +366,10 @@ export default function ContractDetailPage() {
         <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#f4f3ef]">
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
             style={{ background: 'linear-gradient(135deg, #2e9f82, #1f6655)' }}>
-            {(contract.tenant.name ?? 'T').charAt(0).toUpperCase()}
+            {(tenantDisplayName(contract.tenant) ?? 'T').charAt(0).toUpperCase()}
           </div>
           <div>
-            <p className="font-semibold text-[#1a1916]">{contract.tenant.name ?? '—'}</p>
+            <p className="font-semibold text-[#1a1916]">{tenantDisplayName(contract.tenant) ?? '—'}</p>
             <p className="text-sm text-[#6b6860]">Customer ID #{contract.tenant.id}</p>
           </div>
         </div>

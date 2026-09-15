@@ -22,6 +22,7 @@ import {
   UserCircle, CalendarX, Home,
 } from 'lucide-react';
 import { docLabel } from '@/lib/docLabel';
+import { tenantDisplayName } from '@/lib/tenantName';
 import { useBackClose } from '@/lib/useSlideOver';
 import {
   fmtAed, SectionTitle, InspectionSection, SettlementLines, DocGroupLabel, DocList, ViewAllDocs,
@@ -352,7 +353,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] bg-white">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h2 className="text-lg font-bold text-[#1a1916] truncate">{row.name || c?.name || 'Customer'}</h2>
+              <h2 className="text-lg font-bold text-[#1a1916] truncate">{tenantDisplayName(row) || tenantDisplayName(c) || 'Customer'}</h2>
               <span className="inline-flex items-center gap-1 rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#f4f3ef] text-[#6b6860]">
                 <CalendarX size={12} /> Ended customer
               </span>

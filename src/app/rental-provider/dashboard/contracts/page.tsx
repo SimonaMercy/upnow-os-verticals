@@ -12,6 +12,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, FileText, Loader2, Search } from 'lucide-react';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 interface RpContract {
   id: number;
@@ -25,7 +26,8 @@ interface RpContract {
   contractActive: boolean;
   renewalStatus: string | null;
   createdAt: string;
-  tenant: { id: number | null; name: string | null; email: string | null };
+  // `name` arrives as the person; a company customer is relabelled by its company on load.
+  tenant: { id: number | null; name: string | null; email: string | null; entityType?: string | null; companyName?: string | null };
   unit: { id: number | null; number: string | null; name: string | null };
   property?: { id?: number | null; buildingName?: string | null };
 }
@@ -55,7 +57,10 @@ export default function ContractsListPage() {
   useEffect(() => {
     fetch('/api/contracts', { credentials: 'include' })
       .then(r => r.ok ? r.json() : Promise.reject(`Error ${r.status}`))
-      .then((data: RpContract[]) => setContracts(Array.isArray(data) ? data : []))
+      // A company customer reads as the company (never its signatory) in the list and its search.
+      .then((data: RpContract[]) => setContracts(Array.isArray(data)
+        ? data.map(c => ({ ...c, tenant: { ...c.tenant, name: tenantDisplayName(c.tenant) } }))
+        : []))
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);

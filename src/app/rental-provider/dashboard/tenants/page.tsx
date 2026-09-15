@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { CustomersDirectory } from '@/components/upnow/CustomersDirectory';
 import { deriveCustomers, type DirectoryContractRow, type DirectoryCustomer } from '@/lib/customersDirectory';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 export default function TenantsPage() {
   const router = useRouter();
@@ -55,7 +56,8 @@ export default function TenantsPage() {
                 setShowAdd(false);
                 // New customers have no contract yet (so the contract-scoped list/detail
                 // won't show them); take the RP straight to the contract wizard, prefilled.
-                if (r.tenantId) router.push(`/rental-provider/dashboard/contracts/new?tenantId=${r.tenantId}${r.name ? `&tenantName=${encodeURIComponent(r.name)}` : ''}`);
+                const label = tenantDisplayName(r);
+                if (r.tenantId) router.push(`/rental-provider/dashboard/contracts/new?tenantId=${r.tenantId}${label ? `&tenantName=${encodeURIComponent(label)}` : ''}`);
               }}
             />
           </div>

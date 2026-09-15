@@ -32,6 +32,7 @@ import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
 import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null; emirate?: string | null }
 interface Resp {
@@ -49,7 +50,9 @@ interface ContractSummary {
   contractActive: boolean;
   startDate: string | null;
   endDate: string | null;
-  tenant: { id: number | null; name: string | null } | null;
+  // The API's `name` is the person; a company customer also carries its entity
+  // type and company name, and this page labels it by the company (see load).
+  tenant: { id: number | null; name: string | null; entityType?: string | null; companyName?: string | null } | null;
   unit: { id: number | null } | null;
 }
 
@@ -234,10 +237,14 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [busyUnit, setBusyUnit] = useState<number | null>(null);
 
-  // Contracts power the tenant / lease-end line on each unit row.
+  // Contracts power the tenant / lease-end line on each unit row and the renewal
+  // history in Unit details. Both print tenant.name, so a company customer's
+  // label is resolved once here: the company, never its signatory.
   useEffect(() => {
     if (manager) return;
-    apiGet<ContractSummary[]>('/contracts').then(setContracts).catch(() => {});
+    apiGet<ContractSummary[]>('/contracts')
+      .then(rows => setContracts(rows.map(c => (c.tenant ? { ...c, tenant: { ...c.tenant, name: tenantDisplayName(c.tenant) } } : c))))
+      .catch(() => {});
   }, [manager]);
 
   const loadUnitsForProperty = useCallback(async (pid: number) => {

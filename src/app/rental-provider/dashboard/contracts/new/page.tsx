@@ -25,6 +25,7 @@ import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, segRowsFromCustomerPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,15 @@ interface Unit {
 interface Tenant {
   id: number;
   user: { name: string; email: string };
+  entityType?: string | null;
+  companyName?: string | null;
+}
+
+/** The API's user.name is the person. A company customer is labelled by its
+ *  company (never the signatory) as tenants load, so the search, the lists and
+ *  the chosen customer all read the same name. */
+function labelTenant(t: Tenant): Tenant {
+  return { ...t, user: { ...t.user, name: tenantDisplayName({ name: t.user.name, entityType: t.entityType, companyName: t.companyName }) ?? t.user.name } };
 }
 
 interface FormState {
@@ -159,7 +169,7 @@ function NewCustomerForm({ postUrl, onCreated, onCancel }: {
       });
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? 'Could not create customer'); }
       const d = await res.json();
-      onCreated({ id: d.tenantId, name: d.name ?? name.trim() });
+      onCreated({ id: d.tenantId, name: tenantDisplayName(d) ?? name.trim() });
     } catch (e) { setErr(e instanceof Error ? e.message : 'Failed to create customer'); }
     finally { setBusy(false); }
   };
@@ -329,10 +339,11 @@ export default function NewContractPage() {
       if (Array.isArray(propData)) setProperties(propData);
       setPropertiesLoaded(true);
       if (Array.isArray(tenantData)) {
-        setActiveTenants(tenantData);
+        const labelled = (tenantData as Tenant[]).map(labelTenant);
+        setActiveTenants(labelled);
         // Only try to enrich from list if name wasn't passed via URL
         if (qTenantId && !qTenantName) {
-          const found = tenantData.find((t: Tenant) => String(t.id) === qTenantId);
+          const found = labelled.find((t) => String(t.id) === qTenantId);
           if (found) {
             setForm(f => ({ ...f, tenantId: String(found.id), tenantName: found.user.name }));
           }
@@ -452,7 +463,7 @@ export default function NewContractPage() {
     if (!q || q.length < 2) { setTenantResults([]); return; }
     fetch(tenantSearchUrl(q), { credentials: 'include' })
       .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setTenantResults(data); })
+      .then(data => { if (Array.isArray(data)) setTenantResults((data as Tenant[]).map(labelTenant)); })
       .catch(() => undefined);
   }, []);
 

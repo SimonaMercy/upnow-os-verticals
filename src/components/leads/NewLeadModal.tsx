@@ -30,6 +30,7 @@ import { useSlideOver } from '@/lib/useSlideOver';
 import { MiniCalendar, TIME_SLOTS, fmtSlot, nextAllowedDate } from '@/components/booking/MiniCalendar';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
+import { tenantDisplayName } from '@/lib/tenantName';
 
 interface PropertyOpt {
   id: number;
@@ -51,7 +52,13 @@ interface UnitOpt {
   rentalPrice: number | null;
   availability: 'available' | 'reserved' | 'occupied' | 'maintenance';
 }
-interface TenantOpt { id: number; user: { name: string | null; email: string } }
+interface TenantOpt { id: number; user: { name: string | null; email: string }; entityType?: string | null; companyName?: string | null }
+
+/** The API's user.name is the person. A company customer is labelled by its
+ *  company (never the signatory) as the list loads, so the search, the list and
+ *  the chosen customer all read the same name. */
+const labelTenantOpt = (t: TenantOpt): TenantOpt =>
+  ({ ...t, user: { ...t.user, name: tenantDisplayName({ name: t.user.name, entityType: t.entityType, companyName: t.companyName }) } });
 
 /** Gross, VAT-inclusive cost of letting the unit — computed server-side so it
  *  matches the lead detail, the customer's booking summary and the plan that
@@ -244,7 +251,7 @@ export function NewLeadModal({
       .finally(() => setUnitsLoaded(true));
     fetch(tenantsUrl, { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
-      .then((data: TenantOpt[]) => { if (Array.isArray(data)) setTenants(data); })
+      .then((data: TenantOpt[]) => { if (Array.isArray(data)) setTenants(data.map(labelTenantOpt)); })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -8,7 +8,7 @@ import { validateAddendumFile, ADDENDUM_ACCEPT, ADDENDUM_SAMPLE_URL } from '@/li
 import { openDocViewer } from '@/lib/docViewer';
 import { type AddendumTerms } from '@/lib/addendumTerms';
 import AddendumLayoutSection from './AddendumLayoutSection';
-import { RESIDENTIAL_UNIT_TYPES, isLandUnitType, isResidentialUnitType, effectiveSpaceCategory } from '@/lib/unitTaxonomy';
+import { RESIDENTIAL_UNIT_TYPES, isLandUnitType, isResidentialUnitType, unitHasRooms, effectiveSpaceCategory } from '@/lib/unitTaxonomy';
 import { feeFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { SUBLEASE_NET_LABEL, SUBLEASE_VAT_LABEL, isSubleaseChargeRow } from '@/lib/unitForm';
 import ds from './unitForm.module.css';
@@ -202,6 +202,8 @@ export interface UnitFormData {
   sewerageNumber: string;
   bedrooms: string;
   bathrooms: string;
+  /** Staff accommodation only — rooms in the block, asked in place of Bedrooms. */
+  rooms: string;
   parkingSpaces: string;
   unitSizeSqft: string;
   unitSizeSqm: string;
@@ -248,7 +250,10 @@ function composeUnitDescription(d: UnitFormData, propertyCategory: string): stri
 
   let headline: string;
   if (isResidential) {
-    const beds = d.bedrooms === 'Studio' ? 'studio' : d.bedrooms ? `${d.bedrooms}-bedroom` : '';
+    // A staff accommodation block reads by its rooms ("65-room staff accommodation").
+    const beds = unitHasRooms(d.unitType)
+      ? (d.rooms ? `${d.rooms}-room` : '')
+      : d.bedrooms === 'Studio' ? 'studio' : d.bedrooms ? `${d.bedrooms}-bedroom` : '';
     headline = [tierPrefix, beds, typeLabel ? typeLabel.toLowerCase() : 'home'].filter(Boolean).join(' ').trim();
   } else if (isCommercial) {
     headline = `${tierPrefix}${typeLabel?.toLowerCase() ?? 'commercial unit'}`;
@@ -306,7 +311,7 @@ function ordinal(n: string): string {
 
 const EMPTY_UNIT: UnitFormData = {
   unitNumber: '', unitName: '', unitType: '', unitTier: 'standard',
-  floor: '', premiseNumber: '', sewerageNumber: '', bedrooms: '1', bathrooms: '1', parkingSpaces: '',
+  floor: '', premiseNumber: '', sewerageNumber: '', bedrooms: '1', bathrooms: '1', rooms: '', parkingSpaces: '',
   unitSizeSqft: '', unitSizeSqm: '', view: '',
   furnishing: 'Unfurnished', amenities: [], rentalPrice: '',
   securityDeposit: '', adminFee: '', ejariFeeFils: '', commission: '',
@@ -697,6 +702,11 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
     if (!form.unitType)          errs.unitType    = 'Required';
     if (!form.unitSizeSqft && !form.unitSizeSqm) errs.unitSizeSqft = 'Required';
     if (!layoutBulk && !form.rentalPrice)       errs.rentalPrice  = 'Required';
+    // Staff accommodation: the room count is optional, but a whole number when given.
+    if (unitHasRooms(form.unitType) && form.rooms.trim()) {
+      const n = Number(form.rooms);
+      if (!Number.isInteger(n) || n < 1 || n > 5000) errs.rooms = 'Enter the number of rooms (1–5,000)';
+    }
     setErrors(errs);
     return errs;
   };
@@ -849,14 +859,28 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
           {showBedBath && (
             <>
               <div className={cn(ds.grid2, ds.gap22, ds.field)}>
-                <div>
-                  <label className={ds.lbl}>Bedrooms</label>
-                  <div className={ds.segGroup}>
-                    {['Studio', '1', '2', '3', '4', '5', '6+'].map(b => (
-                      <button key={b} type="button" className={seg(form.bedrooms === b)} onClick={() => upd('bedrooms', b)}>{b === 'Studio' ? 'Studio' : `${b} BR`}</button>
-                    ))}
+                {unitHasRooms(form.unitType) ? (
+                  // A staff accommodation block is one unit under one lease holding
+                  // many rooms — it asks for the room count instead of bedrooms.
+                  <div>
+                    <label className={ds.lbl}>Rooms</label>
+                    <input type="number" min="1" max="5000" step="1" inputMode="numeric"
+                      className={cn(ds.input, errors.rooms && ds.inputErr)} placeholder="e.g. 65"
+                      value={form.rooms} onChange={e => upd('rooms', e.target.value)} />
+                    {errors.rooms
+                      ? <p className={ds.errText}>{errors.rooms}</p>
+                      : <div className={ds.hint}>Rooms in this block, let as one unit under one lease.</div>}
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className={ds.lbl}>Bedrooms</label>
+                    <div className={ds.segGroup}>
+                      {['Studio', '1', '2', '3', '4', '5', '6+'].map(b => (
+                        <button key={b} type="button" className={seg(form.bedrooms === b)} onClick={() => upd('bedrooms', b)}>{b === 'Studio' ? 'Studio' : `${b} BR`}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className={ds.lbl}>Bathrooms</label>
                   <div className={ds.segGroup}>

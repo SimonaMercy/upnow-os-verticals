@@ -306,18 +306,15 @@ type RenewalBucket = 'renewed' | 'noticeSent' | 'noticeDue' | 'newCustomer' | 'v
 const RENEWAL_BUCKETS: Array<{
   key: RenewalBucket; label: string; hint: string; tone: BadgeTone;
 }> = [
-  // "Renewed", not "Renewing" — the outcome, not the activity. A lease whose
-  // successor is issued and only waiting to commence has finished its renewal
-  // cycle; "Renewing" read as work still in progress, which is what Notice Sent
-  // is waiting on. "Notice Sent" pairs with "Notice due" so the two halves of
-  // the same step read as one, and matches the Operations board's own lane name.
-  { key: 'renewed',    label: 'Renewed',     hint: 'agreed — starts at term end',  tone: 'green' },
+  // "Agreed": the customer accepted or signed and the cheques are still to be
+  // collected. A renewal whose cheques are collected is done and is not listed at
+  // all (owner, 15 Sep 2026). "Notice Sent" pairs with "Notice due" so the two
+  // halves of the same step read as one, and matches the Operations board's lane.
+  { key: 'renewed',    label: 'Agreed',      hint: 'accepted — cheques to collect', tone: 'green' },
   { key: 'noticeSent', label: 'Notice Sent', hint: 'awaiting the customer',        tone: 'indigo' },
   { key: 'noticeDue',  label: 'Notice due',  hint: 'nobody asked yet — your move', tone: 'amber' },
-  // A new customer's first lease starting in the window. The card counts renewals
-  // the Renewal Plan way (decided 14 Sep 2026), which places such a unit by the
-  // term that starts; customers who are leaving count as vacant, not here.
-  { key: 'newCustomer', label: 'New customer', hint: 'a first lease starting',     tone: 'gray' },
+  // No "New customer" tile: a new customer's first lease is not a renewal, so it is
+  // listed when its own renewal falls due (owner, 15 Sep 2026).
   // Declined before any termination was started: still a let unit, so still in
   // the count. The tile shows only when there is one.
   { key: 'vacating',    label: 'Declined',     hint: 'said no — start the termination', tone: 'red' },

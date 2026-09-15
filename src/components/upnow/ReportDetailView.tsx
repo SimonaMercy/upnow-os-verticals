@@ -139,6 +139,11 @@ interface ReportDef {
    *  line per group — the shape the printed sheet uses (property, then its
    *  units, then that property's line). */
   matrixGroupKey?: string;
+  /** Plain table only: break the rows into sections by this row field (e.g. the
+   *  building). Each section opens with a bar carrying the group's name and the
+   *  sums of its number columns; the field itself leaves the table columns (the
+   *  bar shows it) but stays on every CSV row. Rows keep their drill-down. */
+  tableGroupKey?: string;
   /** Small tables printed under the matrix — the reconciliations the sheet is
    *  meant to prove, rather than leaving the reader to do the arithmetic. */
   summaryPanels?: { title: string; note?: string; rows: { label: string; key?: string; total?: boolean; note?: string; type?: 'aed' | 'number'; tone?: 'red' | 'green' }[] }[];
@@ -217,7 +222,7 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Plan - Monthly',
-  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each lease is bucketed by the month its renewal falls due (the day after the term ends, so a lease ending 31 Jul renews in August); a unit that already renewed earlier in the year also shows in the month its new term began (stage Renewed). Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
+  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
   endpoint: '/api/reports/renewal-forecast',
   buildingLeaseFilter: true,
   layout: 'grouped',
@@ -229,16 +234,18 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     // The ceiling the month's renewals could reach — read against Annual rent it
     // is the uplift on the table.
     { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
-    { key: 'inProgress', label: 'In progress', align: 'right', type: 'number' },
-    { key: 'notStarted', label: 'Not started', align: 'right', type: 'number' },
   ],
   totals: [
+    // Owner, 15 Sep 2026: Renewals = Renewed + To renew, and nothing else beside
+    // them. Renewed = let units whose current lease began this year (Leases
+    // commenced on Leases - Monthly); To renew = the rest. A sub-count such as
+    // "Not started" (already inside To renew) read as a third bucket and made the
+    // tiles look like 104, so none is shown.
     { key: 'totalLeases', label: 'Renewals', type: 'number', keep: true },
+    { key: 'renewedUnits', label: 'Renewed', type: 'number', keep: true },
+    { key: 'toRenewUnits', label: 'To renew', type: 'number', keep: true },
     { key: 'annualRentFils', label: 'Annual rent', type: 'aed' },
     { key: 'marketRentFils', label: 'Market Rent', type: 'aed' },
-    { key: 'inProgress', label: 'In progress', type: 'number' },
-    { key: 'notStarted', label: 'Not started', type: 'number' },
-    { key: 'renewed', label: 'Renewed', type: 'number', keep: true },
   ],
   drilldown: {
     childKey: 'items',
@@ -316,7 +323,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
   },
   'lease-expiry': {
     title: 'Upcoming Renewals',
-    description: 'Renewals counted the way Renewal Plan - Yearly counts them: each let unit once, in the month its renewal falls due, or in the month its new term started if it has already renewed or a new customer moved in. Customers who are leaving count as vacant. The window is the whole current month plus the days chosen above; the last month stops on that day. Expand a month to see its leases.',
+    description: 'Renewals still to be done: each let unit once, in the month its renewal falls due, or, for a renewal whose term has begun but whose cheques are not collected yet, in the month it started. A renewal whose cheques are collected is done and is not listed. A new customer\'s first lease is not a renewal; it appears when its own renewal falls due. Customers who are leaving count as vacant. Each lease shows its renewal offer beside the unit\'s market (asking) rent, and how far the renewal sits from market: the offer when one has been made, otherwise the current rent. Uplift to market is the rent to gain by bringing those below market up to it. The window is the whole current month plus the days chosen above; the last month stops on that day. Expand a month to see its leases.',
     endpoint: '/api/reports/lease-expiry',
     buildingLeaseFilter: true,
     layout: 'grouped',
@@ -324,22 +331,21 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     columns: [
       { key: 'monthLabel', label: 'Renewal month' },
       { key: 'leases', label: 'Units', align: 'right', type: 'number' },
-      { key: 'annualRentFils', label: 'Confirmed rent', align: 'right', type: 'aed' },
-      { key: 'renewed', label: 'Renewed', align: 'right', type: 'number' },
+      { key: 'upliftFils', label: 'Uplift to market', align: 'right', type: 'aed' },
+      // Accepted or signed, cheques still to collect (a collected renewal is not listed).
+      { key: 'renewed', label: 'Agreed', align: 'right', type: 'number' },
       { key: 'noticeSent', label: 'Notice sent', align: 'right', type: 'number' },
       { key: 'noticeDue', label: 'Notice due', align: 'right', type: 'number' },
-      { key: 'newCustomers', label: 'New customers', align: 'right', type: 'number' },
     ],
-    // The same four tiles as the dashboard's Upcoming Renewals card, zeros included.
+    // The same tiles as the dashboard's Upcoming Renewals card, zeros included.
     // Declined shows only when a customer said no before any termination started.
     totals: [
       { key: 'expiring', label: 'Upcoming renewals', type: 'number', keep: true },
-      { key: 'renewed', label: 'Renewed', type: 'number', keep: true },
+      { key: 'renewed', label: 'Agreed', type: 'number', keep: true },
       { key: 'noticeSent', label: 'Notice sent', type: 'number', keep: true },
       { key: 'noticeDue', label: 'Notice due', type: 'number', keep: true },
-      { key: 'newCustomers', label: 'New customers', type: 'number', keep: true },
       { key: 'declined', label: 'Declined', type: 'number' },
-      { key: 'contractedRentFils', label: 'Confirmed rent', type: 'aed' },
+      { key: 'upliftFils', label: 'Uplift to market', type: 'aed' },
     ],
     drilldown: {
       childKey: 'items',
@@ -348,18 +354,23 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       contractIdKey: 'contractId',
       // A lease not yet set up in the register opens its Operations entry.
       opsLinkKey: 'inOperations',
-      itemsMinWidth: '62rem',
+      itemsMinWidth: '80rem',
       columns: [
-        { key: 'contractRef', label: 'Contract', width: '9%' },
-        { key: 'tenantName', label: 'Customer', width: '17%' },
-        { key: 'unitLabel', label: 'Unit', width: '8%' },
-        { key: 'buildingName', label: 'Property', width: '14%' },
+        { key: 'contractRef', label: 'Contract', width: '7%' },
+        { key: 'tenantName', label: 'Customer', width: '15%' },
+        { key: 'unitLabel', label: 'Unit', width: '6%' },
+        { key: 'buildingName', label: 'Property', width: '12%' },
         // The day that puts the lease in this month: its renewal's due date, or
-        // the day its term started for a unit already renewed or a new customer.
-        { key: 'placedOn', label: 'Renewal date', type: 'date', width: '11%' },
-        { key: 'endDate', label: 'Lease ends', type: 'date', width: '11%' },
-        { key: 'annualRentFils', label: 'Confirmed rent', align: 'right', type: 'aed', width: '11%' },
-        { key: 'renewalStatus', label: 'Renewal', type: 'stage', width: '13%' },
+        // the day a renewal whose cheques are still to collect started.
+        { key: 'placedOn', label: 'Renewal date', type: 'date', width: '8%' },
+        { key: 'endDate', label: 'Lease ends', type: 'date', width: '8%' },
+        // What the renewal was offered (or renewed) at — blank until an offer is made.
+        { key: 'offerRentFils', label: 'Renewal offer', align: 'right', type: 'aed', width: '8%' },
+        { key: 'marketRentFils', label: 'Market rent', align: 'right', type: 'aed', width: '8%' },
+        // Market − (offer, else current rent): red below market, green above.
+        { key: 'gapFils', label: 'Gap to market', align: 'right', type: 'delta', width: '8%' },
+        { key: 'gapPct', label: 'Gap %', align: 'right', type: 'rate', width: '5%' },
+        { key: 'renewalStatus', label: 'Renewal', type: 'stage', width: '12%' },
       ],
     },
   },
@@ -1000,16 +1011,20 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'portfolio-overview': {
     title: 'Unit Mix',
-    description: 'Your unit mix — one row per property × unit type × bedrooms × layout × size, with the unit count, exactly as the Unit Mix on a property\'s detail page (details only, no amounts). Units of different sizes are listed separately.',
+    description: 'Your unit mix, grouped by building — each building\'s bar totals its units and rooms, and beneath it is one row per unit type × layout × size with the unit count and the rooms behind it: a staff accommodation block is one unit under one lease but holds many rooms, and a room counts as one. Same layouts as the Unit Mix on a property\'s detail page (details only, no amounts). Units of different sizes are listed separately.',
     endpoint: '/api/reports/portfolio-overview',
     buildingLeaseFilter: true,
     unitTypeFilter: true,
+    // One section per building: the bar carries its name, Units and Rooms.
+    tableGroupKey: 'buildingName',
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'unitType', label: 'Unit type', type: 'stage' },
-      { key: 'bedroomsPlan', label: 'Bedrooms · Plan' },
+      { key: 'bedroomsPlan', label: 'Layout' },
       { key: 'sizeSqft', label: 'Sqft', align: 'right' },
       { key: 'units', label: 'Units', align: 'right', type: 'number' },
+      // Staff accommodation: the rooms entered on the block ("—" until entered).
+      { key: 'rooms', label: 'Rooms', align: 'right', type: 'number' },
     ],
     totals: [
       { key: 'properties', label: 'Properties', type: 'number' },
@@ -1024,6 +1039,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
         { key: 'unitLabel', label: 'Unit' },
         { key: 'unitType', label: 'Type', type: 'stage' },
         { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
+        { key: 'rooms', label: 'Rooms', align: 'right', type: 'number' },
         { key: 'sizeSqft', label: 'Sqft', align: 'right' },
       ],
     },
@@ -3865,85 +3881,135 @@ export function ReportDetailView({
       ) : (
         <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
-                <tr>
-                  {visibleColumns.map(c => (
-                    <th
-                      key={c.key}
-                      onClick={() => toggleSort(c.key)}
-                      className={`px-4 py-3 font-semibold cursor-pointer hover:text-[#1a1916] transition-colors select-none ${c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'}`}>
-                      {c.label}
-                      {sortKey === c.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
-                    </th>
-                  ))}
-                  {showDrillCol && <th className="px-3 py-3 print:hidden" aria-hidden />}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((row, i) => {
-                  // Fee & VAT summary rows carry no nested items — synthesise the
-                  // drill from data.items filtered to this period, so clicking a
-                  // period opens the contracts behind it.
-                  const feeSummaryRow = slug === 'fee-taxation' && !feeDetailed;
-                  const feeItems = feeSummaryRow
-                    ? (data?.items ?? []).filter(it => it.periodLabel === row.periodLabel)
-                    : null;
-                  const items = feeSummaryRow ? feeItems : def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
-                  const canDrill = slug === 'manager-performance'
-                    ? true // full-page profile fetches its own paginated feed
-                    : !!def.drilldown && Array.isArray(items) && items.length > 0;
-                  const drillTarget = feeSummaryRow ? { ...row, items: feeItems } : row;
-                  return (
-                    <tr
-                      key={i}
-                      onClick={canDrill ? () => setDrill(drillTarget) : undefined}
-                      className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
-                      {visibleColumns.map(c => {
-                        // Generic row deep-link: this column links to the contract
-                        // (or unit) the row represents. Unit links need a unitsBase.
-                        const rl = def.rowLink;
-                        const rlId = rl && c.key === rl.colKey ? row[rl.idKey] : null;
-                        const rlHref = rlId == null ? null
-                          : rl!.target === 'unit'
-                            ? (unitsBase ?? null)
-                            : `${contractsBase}/${rlId}/v2`;
-                        return (
-                        <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} ${toneText(c.tone, row[c.key])}`}>
-                          {rlHref ? (
-                            <Link
-                              href={rlHref}
-                              onClick={e => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
-                              title={rl!.target === 'unit' ? 'Open in Units' : 'Open contract'}>
-                              <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
-                              <ExternalLink size={12} className="print:hidden" />
-                            </Link>
-                          ) : feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
-                            <Link
-                              href={`${contractsBase}/${row.contractId}/v2`}
-                              onClick={e => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
-                              title="Open contract to cross-verify">
-                              {String(row.contractRef ?? `CID-${row.contractId}`)}
-                              <ExternalLink size={12} className="print:hidden" />
-                            </Link>
-                          ) : (
-                            <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
-                          )}
-                        </td>
-                        );
-                      })}
-                      {showDrillCol && (
-                        <td className="px-3 py-3 text-right text-[#c8c6c0] print:hidden">
-                          {canDrill && <ChevronRight size={15} className="inline" />}
-                        </td>
-                      )}
+            {(() => {
+              // With tableGroupKey the rows read in sections: a bar per group (the
+              // building) with its name over the text columns and the sums of its
+              // number columns under their headings, then its rows. The group
+              // column moves into the bar, so it leaves the table; the CSV keeps it.
+              // Without it nothing changes — one section, no bar.
+              const groupKey = def.tableGroupKey;
+              const cols = groupKey ? visibleColumns.filter(c => c.key !== groupKey) : visibleColumns;
+              const isFigure = (c: Column) => c.type === 'number' || c.type === 'aed';
+              const sections: { name: string | null; rows: Record<string, unknown>[] }[] = [];
+              if (!groupKey) sections.push({ name: null, rows: sorted });
+              else {
+                // In the order the groups first appear, so a column sort still
+                // decides which building comes first and orders rows within each.
+                const byName = new Map<string, Record<string, unknown>[]>();
+                for (const row of sorted) {
+                  const name = String(row[groupKey] ?? '—');
+                  if (!byName.has(name)) { byName.set(name, []); sections.push({ name, rows: byName.get(name)! }); }
+                  byName.get(name)!.push(row);
+                }
+              }
+              const firstFigure = cols.findIndex(isFigure);
+              const nameSpan = firstFigure < 1 ? cols.length : firstFigure;
+              return (
+                <table className="w-full text-xs">
+                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                    <tr>
+                      {cols.map(c => (
+                        <th
+                          key={c.key}
+                          onClick={() => toggleSort(c.key)}
+                          className={`px-4 py-3 font-semibold cursor-pointer hover:text-[#1a1916] transition-colors select-none ${c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'}`}>
+                          {c.label}
+                          {sortKey === c.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                        </th>
+                      ))}
+                      {showDrillCol && <th className="px-3 py-3 print:hidden" aria-hidden />}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {sections.map(section => (
+                      <Fragment key={section.name ?? 'rows'}>
+                        {section.name != null && (
+                          <tr className="bg-[#f0ede8] border-t border-[#e8e6e0] text-[12px] font-bold text-[#1a1916]">
+                            <td colSpan={nameSpan} className="px-4 py-2 text-left">{section.name}</td>
+                            {cols.slice(nameSpan).map(c => {
+                              // A figure no row in the section fills stays "—", not 0.
+                              const vals = isFigure(c) ? section.rows.map(r => r[c.key]).filter(v => v != null && v !== '') : [];
+                              return (
+                                <td key={c.key} className={`px-4 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'}`}>
+                                  {isFigure(c) && (
+                                    <CellValue
+                                      value={vals.length ? vals.reduce<number>((s, v) => s + (Number(v) || 0), 0) : null}
+                                      type={c.type}
+                                      decimals={c.decimals} />
+                                  )}
+                                </td>
+                              );
+                            })}
+                            {showDrillCol && <td className="print:hidden" />}
+                          </tr>
+                        )}
+                        {section.rows.map((row, i) => {
+                          // Fee & VAT summary rows carry no nested items — synthesise the
+                          // drill from data.items filtered to this period, so clicking a
+                          // period opens the contracts behind it.
+                          const feeSummaryRow = slug === 'fee-taxation' && !feeDetailed;
+                          const feeItems = feeSummaryRow
+                            ? (data?.items ?? []).filter(it => it.periodLabel === row.periodLabel)
+                            : null;
+                          const items = feeSummaryRow ? feeItems : def.drilldown ? (row[def.drilldown.childKey] as unknown[] | undefined) : undefined;
+                          const canDrill = slug === 'manager-performance'
+                            ? true // full-page profile fetches its own paginated feed
+                            : !!def.drilldown && Array.isArray(items) && items.length > 0;
+                          const drillTarget = feeSummaryRow ? { ...row, items: feeItems } : row;
+                          return (
+                            <tr
+                              key={i}
+                              onClick={canDrill ? () => setDrill(drillTarget) : undefined}
+                              className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
+                              {cols.map(c => {
+                                // Generic row deep-link: this column links to the contract
+                                // (or unit) the row represents. Unit links need a unitsBase.
+                                const rl = def.rowLink;
+                                const rlId = rl && c.key === rl.colKey ? row[rl.idKey] : null;
+                                const rlHref = rlId == null ? null
+                                  : rl!.target === 'unit'
+                                    ? (unitsBase ?? null)
+                                    : `${contractsBase}/${rlId}/v2`;
+                                return (
+                                <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : c.align === 'center' ? 'text-center' : 'text-left'} ${toneText(c.tone, row[c.key])}`}>
+                                  {rlHref ? (
+                                    <Link
+                                      href={rlHref}
+                                      onClick={e => e.stopPropagation()}
+                                      className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                                      title={rl!.target === 'unit' ? 'Open in Units' : 'Open contract'}>
+                                      <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
+                                      <ExternalLink size={12} className="print:hidden" />
+                                    </Link>
+                                  ) : feeDetailed && c.key === 'contractRef' && row.contractId != null ? (
+                                    <Link
+                                      href={`${contractsBase}/${row.contractId}/v2`}
+                                      onClick={e => e.stopPropagation()}
+                                      className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                                      title="Open contract to cross-verify">
+                                      {String(row.contractRef ?? `CID-${row.contractId}`)}
+                                      <ExternalLink size={12} className="print:hidden" />
+                                    </Link>
+                                  ) : (
+                                    <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
+                                  )}
+                                </td>
+                                );
+                              })}
+                              {showDrillCol && (
+                                <td className="px-3 py-3 text-right text-[#c8c6c0] print:hidden">
+                                  {canDrill && <ChevronRight size={15} className="inline" />}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
           {/* Reconciliation panels — the arithmetic stated under the table, the
               same block the matrix reports carry. Opt-in: only a report that
