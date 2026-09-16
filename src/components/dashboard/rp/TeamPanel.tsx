@@ -43,6 +43,8 @@ interface ManagerPermissions {
   canManageViewings:    boolean;
   canCreateLeads:       boolean;
   canReviewLeadDocuments: boolean;
+  canManageLeadDocuments: boolean;
+  canManageLeaseDocuments: boolean;
   // Customers & contracts
   canManageAgreements:  boolean;
   canCreateContracts:   boolean;
@@ -110,6 +112,7 @@ export const PERM_GROUPS = [
       // own grant — same split as "View & manage leases" vs "Create contracts".
       { key: 'canCreateLeads',       label: 'Add new leads',                meta: 'can_create_leads' },
       { key: 'canReviewLeadDocuments', label: 'Review & request customer documents on leads', meta: 'can_review_lead_documents' },
+      { key: 'canManageLeadDocuments', label: 'Upload, approve & date customer documents on leads', meta: 'can_manage_lead_documents' },
     ],
   },
   {
@@ -119,7 +122,7 @@ export const PERM_GROUPS = [
       { key: 'canListProperties',    label: 'View properties & units',      meta: 'can_list_properties' },
       { key: 'canEditProperties',    label: 'Edit property & unit details', meta: 'can_edit_properties' },
       { key: 'canPublishListings',   label: 'Publish / unpublish listings', meta: 'can_publish_listings' },
-      { key: 'canManageDocuments',   label: 'Upload & manage documents',    meta: 'can_manage_documents' },
+      { key: 'canManageDocuments',   label: 'Upload & manage property & unit documents', meta: 'can_manage_documents' },
       // Separate from the row above on purpose: attaching a document and
       // destroying one are different authorities, and the landlord grants the
       // second deliberately. Applies everywhere documents are listed, not just
@@ -132,6 +135,7 @@ export const PERM_GROUPS = [
     description: 'Also unlocks the Customers, Operations & Ended-Leases sections',
     perms: [
       { key: 'canManageAgreements',  label: 'View & manage leases + customers', meta: 'can_manage_agreements' },
+      { key: 'canManageLeaseDocuments', label: 'Upload & manage lease, customer & deposit documents', meta: 'can_manage_lease_documents' },
       { key: 'canCreateContracts',   label: 'Create new contracts',         meta: 'can_create_contracts' },
       { key: 'canManageContractLifecycle', label: 'Issue / activate / cancel leases', meta: 'can_manage_contract_lifecycle' },
       { key: 'canManageRenewals',    label: 'Manage contract renewals',     meta: 'can_manage_renewals' },
@@ -203,6 +207,8 @@ export const metaDefaults = {
   can_manage_viewings:    true,
   can_create_leads:       false,
   can_review_lead_documents: true,
+  can_manage_lead_documents: false,
+  can_manage_lease_documents: false,
   // Customers & contracts
   can_manage_agreements:  true,
   can_create_contracts:   false,
@@ -236,7 +242,7 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'leasing_agent',
     label: 'Leasing Agent',
-    keys: ['canListProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageAgreements', 'canCreateContracts', 'canCommunicateTenants'],
+    keys: ['canListProperties', 'canPublishListings', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageLeadDocuments', 'canManageAgreements', 'canManageLeaseDocuments', 'canCreateContracts', 'canCommunicateTenants'],
   },
   {
     id: 'accountant',
@@ -246,7 +252,7 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'operations',
     label: 'Operations / Property Manager',
-    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageAgreements', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canManageLegal', 'canViewFinancials', 'canViewReports'],
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageLeadDocuments', 'canManageAgreements', 'canManageLeaseDocuments', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canManageLegal', 'canViewFinancials', 'canViewReports'],
   },
   {
     id: 'maintenance',

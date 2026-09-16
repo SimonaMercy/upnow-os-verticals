@@ -297,11 +297,10 @@ export default function NewContractPage() {
     commission: '',
   });
 
-  // Load preferred start days from RP profile (RP only — managers have no RP profile;
-  // cheque dates just won't pre-snap to preferred days, which is a non-blocking nicety).
+  // Load preferred start / cheque days + instalment counts from the landlord's
+  // profile — the manager-aware mirror for a manager, so the same rules apply.
   useEffect(() => {
-    if (isManager) return;
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+    fetch(isManager ? `/api/manager/landlord-profile?rp=${rpParam}` : '/api/profiles/rental-provider/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: { profile?: { preferredStartDays?: number[] | null; preferredChequeDays?: number[] | null; allowedInstallments?: number[] | null; rentVatMode?: 'annual' | 'installment' | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {

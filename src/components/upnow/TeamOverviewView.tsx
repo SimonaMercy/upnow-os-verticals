@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Users, ArrowUpRight, RefreshCw, Info, ClipboardList, CheckCircle2, CalendarDays,
+  Users, ArrowUpRight, RefreshCw, Info, ClipboardList, CheckCircle2, CalendarDays, UserPlus,
   ChevronDown, ChevronLeft, ChevronRight, MapPin, Monitor, ArrowLeft, ExternalLink,
 } from 'lucide-react';
 import {
@@ -39,9 +39,11 @@ interface Person {
   userId: number; name: string; email: string | null; jobTitle: string | null; avatarUrl: string | null;
   access: boolean; status: Status;
   lastAt: string | null; lastChangeAt: string | null; lastPageAt: string | null; last: Last | null;
-  today: { changes: number; pages: number; minutes: number };
+  today: { changes: number; pages: number; minutes: number; leadsCreated: number };
   period: {
     changes: number; stepsDone: number; responses: number;
+    /** Leads this person entered (creation-note author) in the window. */
+    leadsCreated: number;
     /** Journey steps completed — what "Activity by step" totals for them. */
     tasksDone: number;
     avgResponseHours: number | null; onTimePct: number | null; slaPct: number | null;
@@ -109,6 +111,12 @@ interface Payload {
     /** Whole leases that left the Operations board in the window. */
     leasesClosed: { v: number; prev: number | null; setup: number; ended: number };
     openWork: { v: number; setup: number; windDown: number; leads: number; byPerson: Array<{ name: string; count: number }> };
+    /** Leads CREATED in the window and by whom — manager, landlord or the customer themselves. */
+    leadsCreated: {
+      v: number; prev: number; today: number;
+      byPerson: Array<{ name: string; count: number; userId: number | null; role: string }>;
+      list: Array<{ id: number; at: string; customer: string | null; source: string | null; by: string; byUserId: number | null; byRole: string }>;
+    };
     avgResponseHours: { v: number | null; prev: number | null };
     onTimePct: { v: number | null; prev: number | null };
     slaPct: { v: number | null; prev: number | null };
@@ -495,9 +503,12 @@ function RangePicker({ range, onChange, open, setOpen }: {
 
 // ── The page ────────────────────────────────────────────────────────────────
 
-export function TeamOverviewView({ endpoint, manageHref, reportsHref, operationsHref }: {
+export function TeamOverviewView({ endpoint, manageHref, reportsHref, operationsHref, leadsHref: leadsHrefProp }: {
   endpoint: string; manageHref: string; reportsHref: string; operationsHref: string;
+  /** Leads page of the same portal — defaults to the Operations href's sibling. */
+  leadsHref?: string;
 }) {
+  const leadsHref = leadsHrefProp ?? operationsHref.replace(/\/operations(\?.*)?$/, '/leads$1');
   /** ONE filter for the whole page: a from–to range. The presets are shortcuts
    *  that write into it, not a second control with its own state.
    *
@@ -652,7 +663,7 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
       {data && T && data.teamSize > 0 && (
         <>
           {/* KPI tiles */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div className="bg-white rounded-2xl border border-[var(--base-200)] shadow-sm p-4 flex flex-col gap-2 min-w-0">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1">Active now{pastWindow && <NowChip />}</span>
@@ -680,6 +691,13 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
               hint={`Journey steps the team recorded ${P.word} — the same figure Activity by step totals below, so the two always agree. ${data.window.prevComparable
                 ? `${P.vs.replace('vs', 'Compared with')}.`
                 : `No comparison is shown: the period before this one falls before ${fmtDayKey(WORK_LOG_FROM)} ${WORK_LOG_FROM.slice(0, 4)}, where the work log starts. Everything earlier is import history and bulk stamps, so comparing against it would read a gap in the data as a fall in output.`} Separately, ${data.kpis.leasesClosed.v} whole lease${data.kpis.leasesClosed.v === 1 ? '' : 's'} left the Operations board in that time (${data.kpis.leasesClosed.setup} set up, ${data.kpis.leasesClosed.ended} ended) — a coarser unit than a step, which is why it is named apart.`} />
+            <Tile icon={<UserPlus size={14} />} label="Leads created" color="#2563eb"
+              value={<Link href={leadsHref} className="hover:underline">{nfmt(data.kpis.leadsCreated.v)}</Link>}
+              d={delta(data.kpis.leadsCreated.v, data.kpis.leadsCreated.prev)}
+              sub={data.kpis.leadsCreated.byPerson.length
+                ? data.kpis.leadsCreated.byPerson.map((b) => `${b.userId == null ? 'Self-service' : b.name.split(' ')[0]} ${b.count}`).join(' · ')
+                : `No leads created ${P.word}`}
+              hint={`Leads entered ${P.word} and who entered them — a manager or the landlord (the lead's creation note names them), or the customer themselves through a viewing request or Book Now (self-service). ${data.window.days === 1 ? '' : `${nfmt(data.kpis.leadsCreated.today)} of them today. `}${P.vs.replace('vs', 'Compared with')}.`} />
           </div>
 
           {/* Live team activity + idle time */}
@@ -891,7 +909,7 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
                               <span className="tabular-nums text-[12px] text-[var(--neutral-700)] whitespace-nowrap"><span className="font-semibold text-[var(--neutral-900)]">{nfmt(p.period.tasksDone)}</span> {p.period.tasksDone === 1 ? 'task' : 'tasks'} · <span className="font-semibold text-[var(--neutral-900)]">{share}%</span></span>
                             </div>
                             <div className="mt-1 h-1.5 rounded-full bg-[var(--base-100)] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${share}%`, background: 'var(--primary)' }} /></div>
-                            <div className="mt-0.5 text-[11px] text-[var(--neutral-400)] tabular-nums text-right">{nfmt(p.period.changes)} activities · {nfmt(p.period.pages)} page visits · {fmtMin(p.period.minutes)}</div>
+                            <div className="mt-0.5 text-[11px] text-[var(--neutral-400)] tabular-nums text-right">{p.period.leadsCreated ? `${nfmt(p.period.leadsCreated)} lead${p.period.leadsCreated === 1 ? '' : 's'} created · ` : ''}{nfmt(p.period.changes)} activities · {nfmt(p.period.pages)} page visits · {fmtMin(p.period.minutes)}</div>
                           </div>
                         </li>
                       );

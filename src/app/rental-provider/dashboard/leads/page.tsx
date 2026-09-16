@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { LeadsCalendarView } from '@/components/leads/LeadsCalendarView';
+import { rpSettingsUrl } from '@/lib/rpSettingsUrl';
 import { NewLeadModal } from '@/components/leads/NewLeadModal';
 import { getRequiredDocs, type DocReq } from '@/lib/docRequirements';
 import { openDocsTogether } from '@/lib/openDocsTogether';
@@ -627,7 +628,7 @@ function LeadRow({
   // Auto-fill "Cheques payable to" from RP profile when the plan form opens
   useEffect(() => {
     if (panel !== 'plan' || planChequesPayableTo) return;
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+    fetch(rpSettingsUrl('/api/profiles/rental-provider/me', manager), { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: { profile?: { bankAccountName?: string | null; companyName?: string | null; user?: { name?: string | null } } } | null) => {
         if (!data?.profile) return;
@@ -1206,15 +1207,19 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
     return () => window.removeEventListener('focus', onFocus);
   }, [fetchLeads]);
 
+  // Landlord rules — for a manager, the landlord chosen with ?rp= (re-fetched
+  // when they switch landlord), so the New Lead modal offers only that
+  // landlord's move-in days and instalment counts.
+  const settingsRp = manager?.rp ?? null;
   useEffect(() => {
-    fetch('/api/fee-rules', { credentials: 'include' })
+    fetch(rpSettingsUrl('/api/fee-rules', settingsRp ? { rp: settingsRp } : null), { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: FeeRulesMap | null) => { if (data) setFeeRules(data); })
       .catch(() => undefined);
-  }, []);
+  }, [settingsRp]);
 
   useEffect(() => {
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+    fetch(rpSettingsUrl('/api/profiles/rental-provider/me', settingsRp ? { rp: settingsRp } : null), { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: { profile?: { preferredStartDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) {
@@ -1225,7 +1230,7 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
         }
       })
       .catch(() => undefined);
-  }, []);
+  }, [settingsRp]);
   useEffect(() => { setSearch(''); }, [activeTab]);
 
   // Needs-attention triage (derived client-side; see getUrgency)

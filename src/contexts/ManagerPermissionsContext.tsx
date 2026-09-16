@@ -26,8 +26,12 @@ export interface RpPermissions {
     // Leads & viewings
     canManageViewings:    boolean;
     canCreateLeads:       boolean;
-    /** 0292 — view the customer documents attached to a lead (read only). */
+    /** 0292 — view + request the customer documents attached to a lead. */
     canReviewLeadDocuments: boolean;
+    /** 0294 — upload / replace / approve / reject / date a lead customer's documents. */
+    canManageLeadDocuments: boolean;
+    /** 0294 — contract, customer-on-lease and deposit documents. */
+    canManageLeaseDocuments: boolean;
     // Contracts & signing
     canManageAgreements:  boolean;
     canCreateContracts:   boolean;

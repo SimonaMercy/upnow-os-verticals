@@ -18,6 +18,7 @@ import { useState, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { rpSettingsUrl } from '@/lib/rpSettingsUrl';
 import {
   Eye, UserPlus, FolderOpen, Wallet, Receipt, BadgeCheck,
   FileText, Check, X, ArrowRight, ArrowLeft, ChevronRight,
@@ -439,20 +440,22 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void loadNotes(); }, [loadNotes]);
 
-  // RP settings (same endpoints the list page uses at page level).
+  // Landlord settings (same endpoints the list page uses at page level) — for a
+  // manager, the landlord's own via the manager-aware mirrors (rpSettingsUrl).
   useEffect(() => {
-    fetch('/api/fee-rules', { credentials: 'include' })
+    fetch(rpSettingsUrl('/api/fee-rules', manager), { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: FeeRulesMap | null) => { if (data) setFeeRules(data); })
       .catch(() => undefined);
-    fetch('/api/profiles/rental-provider/me', { credentials: 'include' })
+    fetch(rpSettingsUrl('/api/profiles/rental-provider/me', manager), { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then((data: { profile?: { preferredStartDays?: number[] | null; allowedInstallments?: number[] | null } } | null) => {
         if (Array.isArray(data?.profile?.preferredStartDays)) setPreferredStartDays(data!.profile!.preferredStartDays!);
         if (Array.isArray(data?.profile?.allowedInstallments)) setAllowedInstallments(data!.profile!.allowedInstallments!);
       })
       .catch(() => undefined);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manager?.rp]);
 
   /* ── Action runners — each hits the real endpoint then refetches ── */
   async function runAction(fn: () => Promise<Response>) {
@@ -1579,15 +1582,15 @@ function DocsSection({
   onSetOccupants: (occupants: number) => void;
   onApproveDocuments: () => void;
 }) {
-  // A manager acting for a landlord (?rp=): the Leads authority "Review &
-  // request customer documents on leads" covers viewing the files and asking
-  // for missing ones (the customer upload link); touching a file — upload,
-  // replace, approve, reject, expiry date — needs the landlord's "Upload &
-  // manage documents" authority. The server enforces the same split
+  // A manager acting for a landlord (?rp=): two Leads & Viewings authorities.
+  // "Review & request customer documents on leads" covers viewing the files
+  // and asking for missing ones (the customer upload link); "Upload, approve &
+  // date customer documents on leads" covers touching a file — upload,
+  // replace, approve, reject, expiry date. The server enforces the same split
   // (documents.service canAccessOwner: request vs write). RP owners always may.
   const { canForRp } = useManagerPermissions();
   const rpParam = useSearchParams().get('rp');
-  const mgrCanDocs = !rpParam || canForRp('canManageDocuments', Number(rpParam));
+  const mgrCanDocs = !rpParam || canForRp('canManageLeadDocuments', Number(rpParam));
   const mgrCanRequest = mgrCanDocs || (!!rpParam && canForRp('canReviewLeadDocuments', Number(rpParam)));
   const hasCustomer = !!lead.convertedTenant?.id;
   const canUpload = hasCustomer && mgrCanDocs;

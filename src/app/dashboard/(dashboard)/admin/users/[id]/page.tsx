@@ -236,15 +236,17 @@ const PERM_GROUPS: { label: string; perms: { key: string; label: string; money?:
     { key: 'can_manage_viewings', label: 'Manage leads & viewings' },
     { key: 'can_create_leads', label: 'Add new leads' },
     { key: 'can_review_lead_documents', label: 'Review & request customer documents on leads' },
+    { key: 'can_manage_lead_documents', label: 'Upload, approve & date customer documents on leads' },
   ] },
   { label: 'Properties & units', perms: [
     { key: 'can_list_properties', label: 'View properties & units' },
     { key: 'can_edit_properties', label: 'Edit property & unit details' },
     { key: 'can_publish_listings', label: 'Publish / unpublish listings' },
-    { key: 'can_manage_documents', label: 'Upload & manage documents' },
+    { key: 'can_manage_documents', label: 'Upload & manage property & unit documents' },
   ] },
   { label: 'Leases & contracts', perms: [
     { key: 'can_manage_agreements', label: 'View & manage leases + customers' },
+    { key: 'can_manage_lease_documents', label: 'Upload & manage lease, customer & deposit documents' },
     { key: 'can_create_contracts', label: 'Create new contracts' },
     { key: 'can_manage_contract_lifecycle', label: 'Issue / activate / cancel leases' },
     { key: 'can_manage_renewals', label: 'Manage contract renewals' },
