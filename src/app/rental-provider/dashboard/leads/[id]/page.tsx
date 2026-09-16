@@ -17,6 +17,7 @@
 import { useState, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import {
   Eye, UserPlus, FolderOpen, Wallet, Receipt, BadgeCheck,
   FileText, Check, X, ArrowRight, ArrowLeft, ChevronRight,
@@ -1565,7 +1566,16 @@ function DocsSection({
   onSaveDocsNote: (items: string[]) => void;
   onApproveDocuments: () => void;
 }) {
-  const canUpload = !!lead.convertedTenant?.id;
+  // A manager acting for a landlord (?rp=) needs the landlord's "Upload &
+  // manage documents" authority to upload, replace, approve, reject, date or
+  // send the customer an upload link — the server enforces the same flag
+  // (documents.service canAccessOwner, write). Viewing needs only the Leads
+  // authority "View customer documents on leads". RP owners always may.
+  const { canForRp } = useManagerPermissions();
+  const rpParam = useSearchParams().get('rp');
+  const mgrCanDocs = !rpParam || canForRp('canManageDocuments', Number(rpParam));
+  const hasCustomer = !!lead.convertedTenant?.id;
+  const canUpload = hasCustomer && mgrCanDocs;
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   // Camera captures pass through the scan modal (auto-crop + clean-up) first.
   const { scan, scannerModal } = useDocumentScanner();
@@ -1707,7 +1717,7 @@ function DocsSection({
           value={v}
           label={`${label} expiry date`}
           placeholder="DD-MM-YYYY"
-          disabled={busy}
+          disabled={busy || !mgrCanDocs}
           // Picking a day IS the save — there is no separate confirm step.
           onChange={next => { setExpiryDraft(p => ({ ...p, [doc.id]: next })); if (next !== savedExpiry(doc)) onSetDocExpiry(doc.id, next); }}
         />
@@ -1744,12 +1754,12 @@ function DocsSection({
         {/* Approving carries whatever expiry is in the row, so the date is
             recorded in the same click rather than needing a second save — and
             an expiring copy can't be approved until that date is there. */}
-        {doc?.fileUrl && st !== 'approved' && (
+        {mgrCanDocs && doc?.fileUrl && st !== 'approved' && (
           <button className="mini-btn ok" disabled={busy || needsDate(doc, d.key)}
             title={needsDate(doc, d.key) ? 'Add the expiry date before approving' : 'Approve'}
             onClick={() => onVerifyDoc(doc.id, draftExpiry(doc) || undefined)}><Check size={12} /></button>
         )}
-        {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: d.label }); setRejectReason(''); }}><X size={12} /></button>}
+        {mgrCanDocs && doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: d.label }); setRejectReason(''); }}><X size={12} /></button>}
         {canUpload && (
           <label className={`mini-btn view ${uploading ? 'is-busy' : ''}`} style={{ cursor: uploading ? 'progress' : 'pointer' }}>
             {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
@@ -1784,7 +1794,7 @@ function DocsSection({
           </>
         )}
         {uploadError && <div className="errline">{uploadError}</div>}
-        {!canUpload && <div className="note" style={{ marginTop: 6 }}>Convert this lead to a customer to upload documents on their behalf.</div>}
+        {!hasCustomer && <div className="note" style={{ marginTop: 6 }}>Convert this lead to a customer to upload documents on their behalf.</div>}
 
         {/* Customer upload link — the whole checklist above in one no-login link,
             so nothing has to be picked document by document. Same control and
@@ -1852,12 +1862,12 @@ function DocsSection({
                       onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: item, mimeType: doc.mimeType })}><Eye size={12} /> View</button>
                   )}
                   {doc && ExpiryCell(doc, key, item)}
-                  {doc?.fileUrl && st !== 'approved' && (
+                  {mgrCanDocs && doc?.fileUrl && st !== 'approved' && (
                     <button className="mini-btn ok" disabled={busy || needsDate(doc, key)}
                       title={needsDate(doc, key) ? 'Add the expiry date before approving' : 'Approve'}
                       onClick={() => onVerifyDoc(doc.id, draftExpiry(doc) || undefined)}><Check size={12} /></button>
                   )}
-                  {doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
+                  {mgrCanDocs && doc?.fileUrl && st !== 'rejected' && <button className="mini-btn no" disabled={busy} onClick={() => { setRejecting({ id: doc.id, label: item }); setRejectReason(''); }}><X size={12} /></button>}
                   {canUpload && (
                     <label className="mini-btn view" style={{ cursor: uploading ? 'progress' : 'pointer' }}>
                       {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}{doc?.fileUrl ? 'Replace' : 'Upload'}
