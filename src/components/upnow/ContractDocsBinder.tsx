@@ -657,10 +657,23 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     onSetSection && canRefile(d) ? <RefileButton doc={d} to={to} onSetSection={onSetSection} /> : undefined;
 
   const all = documents.filter(d => !!d.fileUrl);
+  // A payment confirmation is ONE lease's cheques, never the customer's. The
+  // customer-scoped rows travel with every contract of the tenant, and the Airtable
+  // import filed a 2025 lease's overflow "Payment Advice" copies on the customer
+  // (keys payment_advice_2/_3, matched here by display name) — so a renewal's card
+  // was showing the old lease's cheques as extra pages. Only lease-owned rows fill
+  // this slot: the uploaded `payment_advice_<chequeId>` rows and the synthetic
+  // lead_cheques rows, both owner tenancy_contract. A row with no owner came from a
+  // surface that doesn't send one and is kept. Anything excluded still lists under
+  // "Other documents", so nothing on file disappears.
+  const LEASE_ONLY_KEYS = new Set(['payment_advice']);
+  const ownedByLease = (d: BinderDoc) => !d.ownerType || d.ownerType === 'tenancy_contract';
   const matchDocs = (key: string): BinderDoc[] => {
     const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
     const base = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
-    return all.filter(d => !isKyc(d) && !isOccupant(d) && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
+    return all.filter(d => !isKyc(d) && !isOccupant(d)
+      && (!LEASE_ONLY_KEYS.has(key) || ownedByLease(d))
+      && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
   };
   const isRenewal = contractType === 'renewal';
   const currentPlan = buildCurrentPlan(planContract, planPayments);
