@@ -95,7 +95,7 @@ const STAGE_PILL: Record<LeadStage, string> = {
 // drives the (only) stage filter. Legacy/never-reached stages (new, contacted,
 // approved, offer_made, applied) are intentionally omitted there; their
 // labels/colors are still defined above so any stray record renders a badge
-// and remains visible under "All".
+// and remains visible under "All" (Rejected is the one stage All excludes).
 
 interface ApiViewing {
   id: number;
@@ -1276,12 +1276,16 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
     );
   }
 
+  // "All" = every live lead. Rejected leads are excluded from it (they have
+  // their own column) so the headline count is the working pipeline only.
   const tabCount = (key: 'all' | LeadStage) =>
-    key === 'all' ? leads.length : leads.filter(l => l.stage === key).length;
+    key === 'all'
+      ? leads.filter(l => l.stage !== 'rejected').length
+      : leads.filter(l => l.stage === key).length;
 
   const filtered = leads.filter(l => {
     if (urgentOnly && !getUrgency(l)) return false;
-    if (activeTab !== 'all' && l.stage !== activeTab) return false;
+    if (activeTab === 'all' ? l.stage === 'rejected' : l.stage !== activeTab) return false;
     if (search) {
       const q    = search.toLowerCase();
       // Search matches the company AND the person who called for a company lead.
@@ -1355,13 +1359,14 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
       {/* Stage filter + search are SHARED across all three views (Row · Grid ·
           Calendar) so switching views keeps the same filter/search context; only
           the body (further below) differs. */}
-      {/* Pipeline strip — every stage (plus All) on a SINGLE line in one
+      {/* Pipeline strip — every stage, then All LAST, on a SINGLE line in one
           bordered card; columns flex to fit so there is no horizontal scroll.
           Always shown once loaded (even at zero leads). Doubles as the stage
-          filter: click a column to filter, click again / click All to clear. */}
+          filter: click a column to filter, click again / click All to clear.
+          All excludes Rejected (Rejected keeps its own column). */}
       {!loading && (
         <div className="bg-white rounded-xl border border-[#e8e6e0] shadow-sm mb-6 flex items-stretch divide-x divide-[#f0ede8] overflow-hidden">
-          {([['all', 'All'], ...FUNNEL_COLS] as ['all' | LeadStage, string][]).map(([s, label]) => {
+          {([...FUNNEL_COLS, ['all', 'All']] as ['all' | LeadStage, string][]).map(([s, label]) => {
             const n = tabCount(s);
             const isActive = activeTab === s;
             return (
