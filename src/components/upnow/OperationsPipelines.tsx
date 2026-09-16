@@ -143,11 +143,15 @@ const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
 interface StageDef { key: string; title: string; keys: string[]; desc?: string }
 
 // Lead lanes match RAW lead stages (interested-onward, pre-contract).
+// Every mid-funnel stage must land in a lane: a stage with no lane is dropped
+// from the board silently (leadStageKey → null). `approved` = documents
+// approved, plan not yet shared → still the documents step; `cheques_collected`
+// = cheques in hand, contract not yet issued → still the confirmation step.
 const LEAD_STAGES: { key: string; title: string; match: string[] }[] = [
   { key: 'interested', title: 'Interested',      match: ['interested'] },
-  { key: 'documents',  title: 'KYC / Documents', match: ['documents_collection'] },
+  { key: 'documents',  title: 'KYC / Documents', match: ['documents_collection', 'approved'] },
   { key: 'plan',       title: 'Payment plan',    match: ['payment_plan_shared'] },
-  { key: 'cheques',    title: 'Payment Confirmation Ready',     match: ['cheques_submitted'] },
+  { key: 'cheques',    title: 'Payment Confirmation Ready',     match: ['cheques_submitted', 'cheques_collected'] },
 ];
 const LEAD_MATCH = new Set(LEAD_STAGES.flatMap(s => s.match));
 
