@@ -67,6 +67,10 @@ export interface ApiViewing {
   declineNote?: string | null;  // customer → RP reason when they marked "not interested"
   preferredChequeCount?: number | null;
   paymentType?: string | null;
+  /** Total occupants INCLUDING the primary customer (the column name is historic). */
+  occupantsAdults?: number | null;
+  occupantsChildren?: number | null;
+  occupantsPets?: number | null;
 }
 
 export type PaymentMethodKind = 'cheque' | 'bank_transfer' | 'card' | 'cash';

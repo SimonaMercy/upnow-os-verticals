@@ -22,8 +22,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, Loader2, CalendarDays, Zap, Search, UserPlus,
-  User, Building2, Check, Home, MessageSquare, MapPin,
+  User, Building2, Check, Home, MessageSquare, MapPin, Users, Minus, Plus,
 } from 'lucide-react';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { toast } from 'sonner';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { useSlideOver } from '@/lib/useSlideOver';
@@ -227,9 +228,14 @@ export function NewLeadModal({
   const [moveIn, setMoveIn] = useState(() => nextAllowedDate(preferredStartDays));
   const [installments, setInstallments] = useState('4');
 
-  // 4 · Notes
+  // 4 · Notes (+ household for a direct booking)
   const [source, setSource] = useState('walk_in');
   const [notes, setNotes] = useState('');
+  // Total occupants INCLUDING the customer — the same number the public "Book
+  // Now" form asks for. Optional: 1 means nobody else; every extra occupant
+  // gets optional Emirates ID / passport / visa slots on the lead's checklist
+  // and on the customer's upload link. Residential only.
+  const [occupants, setOccupants] = useState(1);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -308,6 +314,9 @@ export function NewLeadModal({
 
   const availableCount = unitGroups.reduce((n, g) => n + g.units.length, 0);
   const selectedUnit = units.find(u => String(u.id) === unitId) ?? null;
+  // Unknown type ⇒ treated as residential, same as the customer journey.
+  const residential = isResidentialUnitType(selectedUnit?.unitType ?? null);
+  const asksOccupants = mode === 'interested' && residential;
   const selectedProperty = selectedUnit
     ? properties.find(p => p.id === selectedUnit.propertyId) ?? null
     : null;
@@ -356,7 +365,7 @@ export function NewLeadModal({
         mode,
         ...(mode === 'viewing'
           ? { scheduledAt: new Date(`${date}T${time || '10:00'}:00`).toISOString() }
-          : { desiredMoveIn: moveIn, paymentsCount: Number(installments) }),
+          : { desiredMoveIn: moveIn, paymentsCount: Number(installments), occupantsAdults: residential ? occupants : 1 }),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       };
       const res = await fetch(submitUrl, {
@@ -780,6 +789,33 @@ export function NewLeadModal({
                   />
                 </section>
 
+                {/* Household — direct booking only. The count lands on the viewing
+                    (occupants_adults = total incl. the customer) exactly as the
+                    public Book Now form stores it; the lead's checklist and the
+                    customer upload link then carry optional slots for occupants
+                    2..N, and the customer's own journey shows the same slots. */}
+                {asksOccupants && (
+                  <section className={CARD}>
+                    <h2 className={STAGE_TITLE}>Who will live there? <span className="text-[#9b9890] font-normal text-base">(optional)</span></h2>
+                    <p className={STAGE_SUB}>Total occupants including the customer. Each extra occupant gets optional Emirates ID, passport and visa slots on the lead&rsquo;s document checklist — nothing becomes mandatory.</p>
+                    <div className="inline-flex items-center gap-3">
+                      <span className="w-8 h-8 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><Users size={15} /></span>
+                      <div className="inline-flex items-center rounded-full border border-[#e8e6e0] bg-white overflow-hidden">
+                        <button type="button" aria-label="Remove an occupant" onClick={() => setOccupants(n => Math.max(1, n - 1))} disabled={occupants <= 1}
+                          className="w-9 h-9 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed">
+                          <Minus size={14} />
+                        </button>
+                        <span className="min-w-[2.5rem] text-center text-sm font-semibold text-[#1a1916] tabular-nums">{occupants}</span>
+                        <button type="button" aria-label="Add an occupant" onClick={() => setOccupants(n => Math.min(12, n + 1))} disabled={occupants >= 12}
+                          className="w-9 h-9 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed">
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      <span className="text-sm text-[#6b6860]">{occupants === 1 ? 'Just the customer' : `${occupants - 1} more ${occupants - 1 === 1 ? 'person' : 'people'} with the customer`}</span>
+                    </div>
+                  </section>
+                )}
+
                 {/* Review — exactly what's about to be created */}
                 <section className={CARD}>
                   <h3 className={STAGE_TITLE}>Review</h3>
@@ -800,6 +836,9 @@ export function NewLeadModal({
                           : (moveIn ? new Date(moveIn + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—')],
                       ...(mode === 'interested'
                         ? [['Payment plan', `${installments} payment${installments === '1' ? '' : 's'} per year`] as [string, string]]
+                        : []),
+                      ...(asksOccupants
+                        ? [['Occupants', occupants === 1 ? '1 · just the customer' : `${occupants} incl. the customer`] as [string, string]]
                         : []),
                       ['Enquiry source', SOURCES.find(([v]) => v === source)?.[1] ?? source],
                     ] as [string, string][]).map(([k, v]) => (

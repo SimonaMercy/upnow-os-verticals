@@ -235,7 +235,7 @@ const PERM_GROUPS: { label: string; perms: { key: string; label: string; money?:
   { label: 'Leads & viewings', perms: [
     { key: 'can_manage_viewings', label: 'Manage leads & viewings' },
     { key: 'can_create_leads', label: 'Add new leads' },
-    { key: 'can_view_lead_documents', label: 'View customer documents on leads' },
+    { key: 'can_review_lead_documents', label: 'Review & request customer documents on leads' },
   ] },
   { label: 'Properties & units', perms: [
     { key: 'can_list_properties', label: 'View properties & units' },

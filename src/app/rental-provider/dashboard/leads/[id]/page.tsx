@@ -27,7 +27,7 @@ import {
   ShieldAlert, Send, Copy,
 } from 'lucide-react';
 import { APP_TIME_ZONE } from '@/lib/datetime';
-import { getRequiredDocs, docNeedsExpiry, type DocReq } from '@/lib/docRequirements';
+import { getRequiredDocs, getOccupantDocs, docNeedsExpiry, type DocReq } from '@/lib/docRequirements';
 import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/components/upnow/DocumentReaderModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
@@ -42,7 +42,7 @@ import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
-import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { deriveSpaceCategoryFromUnitType, isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
@@ -574,6 +574,16 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       body: JSON.stringify({ items }),
     }));
 
+  // Household — total occupants incl. the customer, stored on the lead's latest
+  // viewing (same number the direct-booking modal and the public Book Now form
+  // record). The checklist derives occupants 2..N's optional slots from it.
+  const setOccupants = (occupants: number) => runAction(() =>
+    fetch(leadUrl(`/api/leads/${leadId}/occupants`, manager), {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ occupants }),
+    }));
+
   // Issue OR edit the payment plan (same endpoint) — body built by the plan form.
   const issuePlan = (body: Record<string, unknown>) => runAction(() =>
     fetch(leadUrl(`/api/leads/${leadId}/issue-payment-plan`, manager), {
@@ -862,6 +872,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 onRejectDoc={rejectDoc}
                 onUploadDoc={uploadDocForCustomer}
                 onSaveDocsNote={saveDocsNote}
+                onSetOccupants={setOccupants}
                 onIssuePlan={issuePlan}
                 onRecordCheque={recordCheque}
                 onDeleteCheque={deleteCheque}
@@ -1222,6 +1233,7 @@ type StageBodyProps = {
   onRejectDoc: (id: number, reason?: string) => void;
   onUploadDoc: (req: { key: string; label: string; category: string }, file: File) => Promise<void>;
   onSaveDocsNote: (items: string[]) => void;
+  onSetOccupants: (occupants: number) => void;
   onDocsChanged: () => void;
   onIssuePlan: (body: Record<string, unknown>) => Promise<void> | void;
   onRecordCheque: (payload: { chequeSerial: string; bankName: string; amountFils: number; dueDate: string; notes: string }) => Promise<void>;
@@ -1353,7 +1365,7 @@ function StageBody(props: StageBodyProps) {
   const {
     lead, plan, docs, cheques, busy, pendingViewing, latestViewing, annualRentAed,
     feeRules, preferredStartDays, allowedInstallments, rentVatMode,
-    onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected, onDocsChanged,
+    onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected, onDocsChanged, onSetOccupants,
     onReopen, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onIssuePlan,
     onRecordCheque, onDeleteCheque, onSetChequeStatus, onTagCheque, onSetPlanItemMethod,
     onOpenLease,
@@ -1426,7 +1438,7 @@ function StageBody(props: StageBodyProps) {
         <DocsSection
           lead={lead} docs={docs} busy={busy}
           onVerifyDoc={onVerifyDoc} onSetDocExpiry={onSetDocExpiry} onRejectDoc={onRejectDoc}
-          onUploadDoc={onUploadDoc} onSaveDocsNote={onSaveDocsNote}
+          onUploadDoc={onUploadDoc} onSaveDocsNote={onSaveDocsNote} onSetOccupants={onSetOccupants}
           onApproveDocuments={onApproveDocuments}
           onDocsChanged={onDocsChanged}
         />
@@ -1550,7 +1562,7 @@ function StageBody(props: StageBodyProps) {
  *  require-additional-document, RP upload-on-behalf + bulk approve. Ports the
  *  list page's docs panel behaviour into the quest-page design. ────────────── */
 function DocsSection({
-  lead, docs, busy, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onApproveDocuments,
+  lead, docs, busy, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onSetOccupants, onApproveDocuments,
   onDocsChanged,
 }: {
   lead: ApiLead;
@@ -1564,16 +1576,19 @@ function DocsSection({
   onRejectDoc: (id: number, reason?: string) => void;
   onUploadDoc: (req: { key: string; label: string; category: string }, file: File) => Promise<void>;
   onSaveDocsNote: (items: string[]) => void;
+  onSetOccupants: (occupants: number) => void;
   onApproveDocuments: () => void;
 }) {
-  // A manager acting for a landlord (?rp=) needs the landlord's "Upload &
-  // manage documents" authority to upload, replace, approve, reject, date or
-  // send the customer an upload link — the server enforces the same flag
-  // (documents.service canAccessOwner, write). Viewing needs only the Leads
-  // authority "View customer documents on leads". RP owners always may.
+  // A manager acting for a landlord (?rp=): the Leads authority "Review &
+  // request customer documents on leads" covers viewing the files and asking
+  // for missing ones (the customer upload link); touching a file — upload,
+  // replace, approve, reject, expiry date — needs the landlord's "Upload &
+  // manage documents" authority. The server enforces the same split
+  // (documents.service canAccessOwner: request vs write). RP owners always may.
   const { canForRp } = useManagerPermissions();
   const rpParam = useSearchParams().get('rp');
   const mgrCanDocs = !rpParam || canForRp('canManageDocuments', Number(rpParam));
+  const mgrCanRequest = mgrCanDocs || (!!rpParam && canForRp('canReviewLeadDocuments', Number(rpParam)));
   const hasCustomer = !!lead.convertedTenant?.id;
   const canUpload = hasCustomer && mgrCanDocs;
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
@@ -1596,10 +1611,23 @@ function DocsSection({
 
   // A company customer is asked for the company's pack (trade licence +
   // authorised signatory), never the personal one — same rule the customer sees.
-  const reqDocs = getRequiredDocs(
+  const baseReqDocs = getRequiredDocs(
     lead.unit?.unitType,
     lead.convertedTenant?.entityType === 'company' ? 'company' : 'individual',
   );
+  // Household: the direct-booking form (and the public Book Now form) record the
+  // total occupants on the viewing. Occupants 2..N get OPTIONAL identity slots —
+  // Emirates ID, passport, visa — under `occupant_<n>_*`, the same keys the
+  // customer's journey and the Customer page use, so a file uploaded on any of
+  // those surfaces shows up here. Residential only; nothing becomes mandatory.
+  const latestViewing = (lead.viewings ?? []).reduce<ApiViewing | null>((a, v) => (!a || v.id > a.id ? v : a), null);
+  const occupantCount = Math.max(latestViewing?.occupantsAdults ?? 1, 1);
+  const residentialLead = isResidentialUnitType(lead.unit?.unitType);
+  const occupantReqDocs: DocReq[] = residentialLead && occupantCount > 1
+    ? getOccupantDocs(occupantCount).map(d => ({ ...d, required: false }))
+    : [];
+  const isOccupantKey = (k: string) => /^occupant_\d+_/.test(k);
+  const reqDocs: DocReq[] = [...baseReqDocs, ...occupantReqDocs];
   // A requested-but-not-yet-uploaded slot is a real row (status 'pending', no
   // file) — it is the request itself, not a document. Requiring a fileUrl keeps
   // it out of "received", so asking for a document never ticks it off.
@@ -1622,7 +1650,8 @@ function DocsSection({
   const promotedKeys = new Set(noteItems.flatMap(promotedSlots));
   const isRequired = (d: DocReq) => d.required || promotedKeys.has(d.key);
   const required = reqDocs.filter(isRequired);
-  const optional = reqDocs.filter(d => !isRequired(d));
+  const optional = reqDocs.filter(d => !isRequired(d) && !isOccupantKey(d.key));
+  const occupantRows = reqDocs.filter(d => isOccupantKey(d.key));
   const received = required.filter(d => okKeys.has(d.key)).length;
 
   // What the upload link carries: this checklist in FULL — every requirement and
@@ -1651,7 +1680,7 @@ function DocsSection({
   const filesForKey = (key: string) => (docs ?? []).filter(d => d.documentKey === key && d.fileUrl).map(toReaderFile);
   const readerSlots: ReaderSlot[] = [];
   const seenKeys = new Set<string>();
-  for (const d of reqDocs) { seenKeys.add(d.key); readerSlots.push({ key: d.key, label: d.label, group: d.required ? 'Required' : 'Supporting', files: filesForKey(d.key) }); }
+  for (const d of reqDocs) { seenKeys.add(d.key); readerSlots.push({ key: d.key, label: d.label, group: d.required ? 'Required' : isOccupantKey(d.key) ? 'Additional occupants' : 'Supporting', files: filesForKey(d.key) }); }
   for (const item of noteItems) {
     const k = resolveRequestedDocKey(item) ?? additionalDocKey(item);
     if (seenKeys.has(k)) continue;            // already shown as a requirement slot
@@ -1793,13 +1822,41 @@ function DocsSection({
             <div className="doclist">{optional.map(ReqRow)}</div>
           </>
         )}
+        {/* Household — the landlord (or a manager with the Leads authority) sets
+            how many people will live there right here; occupants 2..N then get
+            optional identity slots below. Residential only; the count lives on
+            the lead's latest viewing, where the booking forms put it. */}
+        {residentialLead && latestViewing && (
+          <>
+            <div className="subhead" style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span>Additional occupants{occupantCount > 1 ? ` — ${occupantCount - 1} more ${occupantCount - 1 === 1 ? 'person' : 'people'}` : ''} (optional)</span>
+              {mgrCanRequest && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted, #9b9890)' }}>Occupants incl. the customer</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--line, #e8e6e0)', borderRadius: 999, background: '#fff', overflow: 'hidden' }}>
+                    <button type="button" aria-label="Remove an occupant" className="mini-btn view" style={{ border: 0, borderRadius: 0 }}
+                      disabled={busy || occupantCount <= 1}
+                      onClick={() => onSetOccupants(occupantCount - 1)}><X size={11} /></button>
+                    <span style={{ minWidth: 28, textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--ink, #1a1916)' }}>{occupantCount}</span>
+                    <button type="button" aria-label="Add an occupant" className="mini-btn view" style={{ border: 0, borderRadius: 0 }}
+                      disabled={busy || occupantCount >= 12}
+                      onClick={() => onSetOccupants(occupantCount + 1)}><Plus size={11} /></button>
+                  </span>
+                </span>
+              )}
+            </div>
+            {occupantRows.length > 0
+              ? <div className="doclist">{occupantRows.map(ReqRow)}</div>
+              : <p className="note" style={{ margin: '4px 0 0' }}>Just the customer. Use + to add the people living with them — each gets optional Emirates ID, passport and visa slots, on this checklist and on the customer&rsquo;s upload link.</p>}
+          </>
+        )}
         {uploadError && <div className="errline">{uploadError}</div>}
         {!hasCustomer && <div className="note" style={{ marginTop: 6 }}>Convert this lead to a customer to upload documents on their behalf.</div>}
 
         {/* Customer upload link — the whole checklist above in one no-login link,
             so nothing has to be picked document by document. Same control and
             layout as the signing links on the contract's Signatures step. */}
-        {canUpload && lead.convertedTenant?.id && checklistDocs.length > 0 && (
+        {hasCustomer && mgrCanRequest && lead.convertedTenant?.id && checklistDocs.length > 0 && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
               Customer document upload link
