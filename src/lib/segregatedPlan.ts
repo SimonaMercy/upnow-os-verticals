@@ -415,19 +415,12 @@ export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
     { key: 'third_party', lines: thirdLines },
   ];
 
-  // Fees/charges in a section are collected together, so the plan shows ONE due
-  // date per section (its latest). Rental Income keeps its per-instalment dates.
-  const sectionDate = (ls: SegLine[]): string | null => {
-    const dates = ls.map(l => l.dueDate).filter((d): d is string => !!d).sort();
-    return dates.length ? dates[dates.length - 1] : null;
-  };
+  // Every line keeps its OWN due date, in every section. Collapsing a section to
+  // its latest date hid an edit: a fee moved to 11 Sep still read 14 Sep because
+  // another line in the same section was 14 Sep (CID-409, 17 Sep 2026).
   const groups: SegGroup[] = built
     .filter(g => g.lines.length > 0)
-    .map(g => {
-      const lines = g.key === 'rental' ? g.lines
-        : (() => { const d = sectionDate(g.lines); return g.lines.map(l => ({ ...l, dueDate: d })); })();
-      return { key: g.key, title: GROUP_TITLE[g.key], lines, total: round2(lines.reduce((s, l) => s + l.amount, 0)) };
-    });
+    .map(g => ({ key: g.key, title: GROUP_TITLE[g.key], lines: g.lines, total: round2(g.lines.reduce((s, l) => s + l.amount, 0)) }));
 
   const grandTotal = round2(groups.reduce((s, g) => s + g.total, 0));
   return { groups, grandTotal };

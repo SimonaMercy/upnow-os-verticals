@@ -76,7 +76,7 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
         // control belongs in the heading, not repeated down an identical column.
         const perLineAttach = !!renderAttach && g.key === 'rental';
         const headAttach = renderAttach && g.key !== 'rental'
-          ? renderAttach({ key: g.key, label: g.title, amount: g.total, dueDate: g.lines[0]?.dueDate ?? null })
+          ? renderAttach({ key: g.key, label: g.title, amount: g.total, dueDate: g.lines.map(l => l.dueDate).filter((d): d is string => !!d).sort().pop() ?? null })
           : null;
         // Squeeze the data columns to make room for the attach column, which has
         // to hold View + Replace + delete — at a narrower share the trash icon

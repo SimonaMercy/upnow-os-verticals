@@ -3525,7 +3525,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const paymentSlots = seg.groups.flatMap(g =>
     g.key === 'rental'
       ? g.lines.map((l, i) => ({ key: `rent-${i}`, label: `Rent — ${l.item}`, amount: l.amount, dueDate: l.dueDate }))
-      : [{ key: g.key, label: g.title, amount: g.total, dueDate: g.lines[0]?.dueDate ?? null }],
+      : [{ key: g.key, label: g.title, amount: g.total, dueDate: g.lines.map(l => l.dueDate).filter((d): d is string => !!d).sort().pop() ?? null }],
   );
   // Uploads NOT tagged to a specific slot — shown in the "everything together" bucket.
   const bulkUploads = uploads.filter(u => !paymentSlots.some(s => s.label === (u.notes ?? '')));
