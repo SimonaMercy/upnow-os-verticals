@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature, Scale } from 'lucide-react';
+import { MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature, Scale } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { EmailSettingsPanel } from '@/components/email/EmailSettingsPanel';
+import { WhatsAppSettingsPanel } from '@/components/whatsapp/WhatsAppSettingsPanel';
+import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { JurisdictionSettingsForm } from '@/components/legal/JurisdictionSettingsForm';
 import { FeeBookEditor } from '@/components/legal/FeeBookEditor';
@@ -510,7 +512,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'email' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'email' | 'whatsapp' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -663,7 +665,7 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
 
 // Settings tabs (owner, 12 Sep: the profile moved OUT to its own page; the
 // Maintenance List, Restoration List and AMC categories moved IN).
-const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'email', 'notifications'];
+const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'email', 'whatsapp', 'notifications'];
 /** The left-hand settings menu, grouped by what the landlord is doing. */
 const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   { title: 'Leasing', tabs: ['fee_rules'] },
@@ -672,20 +674,23 @@ const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   // The landlord's own notice periods, appeal window and filing-fee rule (0286) — the platform default applies until saved.
   { title: 'Legal', tabs: ['legal'] },
   // Email = the landlord's own mailbox, used to write to customers and leads (17 Sep).
-  { title: 'Account', tabs: ['team', 'email', 'notifications'] },
+  // WhatsApp = the landlord's own numbers, next to their own mailbox: both are connected once, here.
+  { title: 'Account', tabs: ['team', 'email', 'whatsapp', 'notifications'] },
 ];
 const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }> }> = {
   // Two maintenance tabs read as one thing to the owner (12 Sep) — say what each is:
   // coverage = what is offered per property type and who does it; items = what a customer can raise.
   general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
   maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
-  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, email: { label: 'Email', Icon: Mail }, notifications: { label: 'Notifications', Icon: Bell },
+  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, email: { label: 'Email', Icon: Mail }, whatsapp: { label: 'WhatsApp', Icon: MessageCircle }, notifications: { label: 'Notifications', Icon: Bell },
 };
 
 /** One component, two pages: /settings (tabs) and /profile (the business profile alone). */
 export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile' }) {
   const { user, refresh } = useAuth();
   const [mainTab, setMainTab] = useState<MainTab>(view === 'profile' ? 'general' : 'fee_rules');
+  // No WhatsApp tab where the environment has no WhatsApp.
+  const waOn = useWhatsappEnabled();
 
   // Persist the active tab in the URL (?tab=) so it survives a page refresh and
   // stays shareable. Restore from the query param on mount.
@@ -1420,7 +1425,7 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
           {SETTINGS_MENU.map(group => (
             <div key={group.title} className="mb-2 last:mb-0">
               <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#9b9890]">{group.title}</div>
-              {group.tabs.map(t => { const { label, Icon } = TAB_META[t]; const on = mainTab === t; return (
+              {group.tabs.filter(t => t !== 'whatsapp' || waOn).map(t => { const { label, Icon } = TAB_META[t]; const on = mainTab === t; return (
                 <button key={t} onClick={() => selectTab(t)}
                   className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer ${on ? 'bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'text-[#4a4842] hover:bg-[#f4f3ef]'}`}>
                   <Icon size={15} /> {label}
@@ -1462,6 +1467,9 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
 
       {/* ── Email tab — the landlord's own mailbox ── */}
       {mainTab === 'email' && <EmailSettingsPanel />}
+
+      {/* ── WhatsApp tab — the landlord's own numbers (only where WhatsApp is switched on) ── */}
+      {mainTab === 'whatsapp' && waOn && <WhatsAppSettingsPanel />}
 
       {/* ── Notifications tab ──────────────────────────────────── */}
       {mainTab === 'notifications' && (

@@ -43,6 +43,7 @@ import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight, UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid, BarChart3, Info, Wrench, Scale, ShieldAlert, Gavel, ClipboardCheck, Mail, MessageCircle } from 'lucide-react';
 import { apiGet } from '@/lib/api';
+import { whatsappEnabled } from '@/lib/whatsappApi';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { maintenancePlace } from '@/lib/maintenanceScope';
@@ -663,7 +664,8 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     let alive = true;
     const q = rpFilter != null ? `?rp=${rpFilter}` : '';
     const get = (path: string) => apiGet<UnreadByRecord>(`${path}${q}`).then((d) => ({ customers: d?.customers ?? {}, leads: d?.leads ?? {} })).catch(() => NO_UNREAD);
-    const pull = () => Promise.all([get('/email/unread-by-record'), get('/whatsapp/unread-by-record')]).then(([email, whatsapp]) => { if (alive) setUnread({ email, whatsapp }); });
+    // WhatsApp is only asked where it is switched on — elsewhere it would just be refused.
+    const pull = () => Promise.all([get('/email/unread-by-record'), whatsappEnabled().then((on) => (on ? get('/whatsapp/unread-by-record') : NO_UNREAD))]).then(([email, whatsapp]) => { if (alive) setUnread({ email, whatsapp }); });
     void pull();
     const t = window.setInterval(() => { if (document.visibilityState === 'visible') void pull(); }, 120_000);
     return () => { alive = false; window.clearInterval(t); };

@@ -7,15 +7,18 @@
  * on the right. Serves both portals: the landlord (`rp` null) and a manager
  * acting for a landlord (`rp` set).
  */
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, MessageCircle, Plus, Search, Settings2, User, Users } from 'lucide-react';
 import {
   KIND_CHIP, KIND_LABEL, errorText, prettyPhone, waListWhen, whatsappApi,
   type Rp, type WaChatList, type WaChatRow, type WaLines, type WaTab,
 } from '@/lib/whatsappApi';
-import { WaLinesDialog } from './WaLinesDialog';
 import { WaNewChat } from './WaNewChat';
 import { WaThread } from './WaThread';
+
+/** Numbers are linked in Settings → WhatsApp, next to the mailbox in Settings → Email (the landlord only). */
+const SETTINGS_HREF = '/rental-provider/dashboard/settings?tab=whatsapp';
 
 const TABS: Array<{ key: WaTab; label: string }> = [
   { key: 'all', label: 'All' }, { key: 'customer', label: 'Customers' }, { key: 'lead', label: 'Leads' }, { key: 'vendor', label: 'Vendors' },
@@ -42,7 +45,6 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
   const [lineId, setLineId] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [composing, setComposing] = useState(false);
-  const [managing, setManaging] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const filter = useRef({ tab, q, unreadOnly, lineId });
   useEffect(() => { filter.current = { tab, q, unreadOnly, lineId }; }, [tab, q, unreadOnly, lineId]);
@@ -113,7 +115,7 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
           </p>
         </div>
         {lines.canConfigure && (
-          <button type="button" onClick={() => setManaging(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer"><Settings2 size={14} /> Numbers</button>
+          <Link href={SETTINGS_HREF} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer"><Settings2 size={14} /> Numbers</Link>
         )}
         {connected.length > 0 && lines.canSend && (
           <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer"><Plus size={14} /> New message</button>
@@ -126,7 +128,7 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
           <div className="flex-1 min-w-[220px] text-sm text-[#4a4842]">
             {isManager ? 'The landlord has not linked a WhatsApp number yet. Once they do, their conversations appear here.' : 'Link the WhatsApp number your team already uses with customers. Every conversation appears here, and you can answer from the platform.'}
           </div>
-          {lines.canConfigure && <button type="button" onClick={() => setManaging(true)} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">Link a number</button>}
+          {lines.canConfigure && <Link href={SETTINGS_HREF} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d]">Link a number in Settings</Link>}
         </div>
       )}
       {down.map((l) => (
@@ -220,7 +222,6 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
       </div>
 
       {composing && <WaNewChat rp={rp} lines={lines.lines} onClose={() => setComposing(false)} onStarted={(id) => { void load(); setOpenId(id); }} />}
-      {managing && <WaLinesDialog lines={lines.lines} onClose={() => setManaging(false)} onChanged={() => { void loadLines(true); void load(); }} />}
     </div>
   );
 }

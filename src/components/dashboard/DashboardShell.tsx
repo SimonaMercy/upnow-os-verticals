@@ -13,6 +13,7 @@ import { getSpOnboardingReady, subscribeSpOnboardingReady } from './shellChrome'
 import { apiGet } from '@/lib/api';
 import { EMAILS_SYNCED_EVENT, useEmailSyncOnLogin } from '@/lib/useEmailSyncOnLogin';
 import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
+import { whatsappEnabled } from '@/lib/whatsappApi';
 
 // ── Manager permission cache (loaded once per session) ──────────────────────
 // Keeps the FULL per-landlord permission set so the nav can re-scope to the
@@ -351,7 +352,8 @@ function useNavBadgeCounts(role: UserRole): NavCounts {
         fetch('/api/properties/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
         fetch('/api/contracts/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
         fetch('/api/email/unread-count', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
-        fetch('/api/whatsapp/unread-count', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+        // Not asked at all where WhatsApp is switched off — it would only be refused.
+        whatsappEnabled().then(on => (on ? fetch('/api/whatsapp/unread-count', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)) : null)).catch(() => null),
       ])
         .then(([p, c, e, w]: [NavCounts | null, { leases?: number; operations?: number } | null, { unread?: number } | null, { unread?: number } | null]) => {
           if (cancelled || (!p && !c)) return;
@@ -398,7 +400,7 @@ function Sidebar({
   counts?: NavCounts;
 }) {
   const managerPerms = useManagerNavPerms(role);
-  const waOn = useWhatsappEnabled();
+  const waOn = useWhatsappEnabled(role);
   const navSearchParams = useSearchParams();
   // Carry the manager's chosen landlord (?rp=) onto every sidebar link so
   // navigating between sections keeps the same landlord in view instead of

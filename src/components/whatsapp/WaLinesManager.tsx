@@ -1,13 +1,17 @@
 'use client';
 
 /**
- * The landlord's WhatsApp numbers. Each number is served by a small bridge
- * program that stays signed in to WhatsApp (like WhatsApp Web on a computer).
- * Linking a number here issues a delivery key — shown once — that the bridge
- * uses to hand every message to the platform.
+ * The landlord's WhatsApp numbers — the list, "link a number", its delivery key.
+ * Each number is served by a small bridge program that stays signed in to
+ * WhatsApp (like WhatsApp Web on a computer). Linking a number issues a delivery
+ * key — shown once — that the bridge uses to hand every message to the platform.
+ *
+ * Shown in Settings → WhatsApp, next to Settings → Email: connecting a number is
+ * set up once, like a mailbox, so it lives with the settings and not on the page
+ * the team works in (owner, 19 Sep 2026: "why is the number not in Settings?").
  */
-import { useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { useState } from 'react';
+import { Check, Copy, Loader2, Plus, Trash2 } from 'lucide-react';
 import { errorText, prettyPhone, whatsappApi, type WaLine } from '@/lib/whatsappApi';
 
 const STATE: Record<string, { label: string; tone: string }> = {
@@ -16,7 +20,7 @@ const STATE: Record<string, { label: string; tone: string }> = {
   disconnected: { label: 'Not connected', tone: 'text-[#b42318] bg-red-50' },
 };
 
-export function WaLinesDialog({ lines, onClose, onChanged }: { lines: WaLine[]; onClose: () => void; onChanged: () => void }) {
+export function WaLinesManager({ lines, onChanged }: { lines: WaLine[]; onChanged: () => void }) {
   const [adding, setAdding] = useState(lines.length === 0);
   const [label, setLabel] = useState('');
   const [bridgeUrl, setBridgeUrl] = useState('');
@@ -26,12 +30,6 @@ export function WaLinesDialog({ lines, onClose, onChanged }: { lines: WaLine[]; 
   const [issued, setIssued] = useState<{ label: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const save = async () => {
     if (!label.trim() || !bridgeUrl.trim() || busy) return;
@@ -54,13 +52,7 @@ export function WaLinesDialog({ lines, onClose, onChanged }: { lines: WaLine[]; 
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 grid place-items-center p-4" role="dialog" aria-modal="true" aria-label="WhatsApp numbers" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-[560px] max-h-[88vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-[#e8e6e0] shrink-0">
-          <h2 className="text-base font-semibold text-[#1a1916] flex-1">WhatsApp numbers</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer"><X size={16} /></button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
+        <div className="space-y-3 max-w-2xl">
           {issued && (
             <div className="rounded-xl bg-[#eef9f4] border border-[#d7ede5] px-4 py-3">
               <div className="text-sm font-semibold text-[#1a7a5a]">Delivery key for “{issued.label}” — shown only once</div>
@@ -123,7 +115,5 @@ export function WaLinesDialog({ lines, onClose, onChanged }: { lines: WaLine[]; 
           )}
           {error && <div className="text-sm text-[#b42318]">{error}</div>}
         </div>
-      </div>
-    </div>
   );
 }
