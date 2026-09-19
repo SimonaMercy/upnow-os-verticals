@@ -41,8 +41,7 @@ import {
   User, Building2, Calendar, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
   UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
-  Trash2, Plus, Link2, Scale,
-} from 'lucide-react';
+  Trash2, Plus, Link2, Scale, Mail, MessageCircle } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
@@ -71,10 +70,13 @@ import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { recomputeSubleaseCharges, classifySubleaseCharge } from '@/lib/subleaseCharges';
 import { configuredFeeFromRules, feeVatFromRules, type FeeRuleLite } from '@/lib/feeRules';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
+import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
 import { BreachesSection } from '@/components/legal/BreachesSection';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
+import { EmailsCard } from '@/components/email/EmailsCard';
+import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -2161,7 +2163,7 @@ function MissingStrip({
 // Detail cards row
 // ────────────────────────────────────────────────────────────────────────────
 
-type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses' | 'notes' | 'breaches';
+type DrawerTab = 'property' | 'payments' | 'documents' | 'clauses' | 'notes' | 'emails' | 'whatsapp' | 'breaches';
 
 /** One entry in the tenancy's running notes log (newest first). */
 type ContractNote = {
@@ -2249,6 +2251,8 @@ const DRAWER_TABS: { key: DrawerTab; label: string; icon: React.ComponentType<{ 
   { key: 'documents', label: 'Documents', icon: Paperclip },
   { key: 'clauses',   label: 'Clauses',   icon: ClipboardList },
   { key: 'notes',     label: 'Notes',     icon: StickyNote },
+  { key: 'emails',    label: 'Emails',    icon: Mail },
+  { key: 'whatsapp',  label: 'WhatsApp',  icon: MessageCircle },
   { key: 'breaches',  label: 'Breaches',  icon: Scale },
 ];
 
@@ -2660,8 +2664,12 @@ function DetailsDrawer({
   // onDeletePayment is intentionally not destructured — fee rows are corrected
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal,
+  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal, emails,
 }: {
+  /** Email module scope — the manager's landlord (`rp`, null for the landlord themselves). */
+  /** Email and WhatsApp on this lease. A team member sees each only with that channel's "read" authority;
+   *  the landlord sees both. (The server refuses the rest either way — this keeps empty tabs off the screen.) */
+  emails?: { rp: number | null; isManager: boolean; showEmails: boolean; showWhatsapp: boolean };
   /** Legal & Breach module scope — base path ('/legal' | '/manager/legal'), manager `rp`, and where a dispute page lives. */
   legal?: { base: string; rp?: number; disputeHrefOf: (disputeId: number) => string };
   /** Refetch after a document is removed — the list must come from the server. */
@@ -3648,7 +3656,7 @@ function DetailsDrawer({
         )}
         {!inline && (
           <div className="dtabs">
-            {DRAWER_TABS.map(({ key, label, icon: Ic }) => (
+            {DRAWER_TABS.filter(({ key }) => (key !== 'emails' || !!emails?.showEmails) && (key !== 'whatsapp' || !!emails?.showWhatsapp)).map(({ key, label, icon: Ic }) => (
               <button key={key} className={'dtab ' + (tab === key ? 'on' : '')} onClick={() => setTab(key)}>
                 <Ic size={13} /> {label}
               </button>
@@ -5306,6 +5314,34 @@ function DetailsDrawer({
               </div>
             </div>
           )}
+          {/* ── Emails with this lease's customer — the landlord's own mailbox
+              (Settings → Email). Renders nothing for a manager without the
+              "Email customers and leads" authority. */}
+          {(inline || tab === 'emails') && emails?.showEmails && contract.tenant.id != null && (
+            <div id="sec-emails" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
+              <EmailsCard
+                rp={emails.rp}
+                tenantId={contract.tenant.id}
+                isManager={emails.isManager}
+                to={contract.tenant.email && !/@(import\.upnow\.ae|.*upnow\.local)$/i.test(contract.tenant.email)
+                  ? { tenantId: contract.tenant.id, name: (contract.tenant.entityType === 'company' && contract.tenant.companyName) || contract.tenant.name || contract.tenant.email, email: contract.tenant.email }
+                  : null}
+              />
+            </div>
+          )}
+          {/* ── WhatsApp with this lease's customer — the conversation(s) matched to
+              their number on the landlord's linked numbers (or linked by hand).
+              Same authority as Emails; renders nothing when no number is linked. */}
+          {(inline || tab === 'whatsapp') && emails?.showWhatsapp && contract.tenant.id != null && (
+            <div id="sec-whatsapp" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
+              <WhatsAppCard
+                rp={emails.rp}
+                tenantId={contract.tenant.id}
+                isManager={emails.isManager}
+                person={{ name: (contract.tenant.entityType === 'company' && contract.tenant.companyName) || contract.tenant.name || 'Customer', phone: contract.tenant.phone }}
+              />
+            </div>
+          )}
           {(inline || tab === 'breaches') && legal && (
             <div className="sec" id="sec-breaches">
               <BreachesSection leaseId={contract.id} leaseStatus={contract.status} base={legal.base} rp={legal.rp} disputeHrefOf={legal.disputeHrefOf} />
@@ -6480,6 +6516,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // Manager permission gate for the Edit affordance — RP owners always see it,
   // managers only when they hold canManageAgreements for this contract's landlord.
   const { canForRp: managerCanForRp } = useManagerPermissions();
+  const waOn = useWhatsappEnabled();
   const { user: authUser } = useAuth();
   const [contract, setContract] = useState<ContractDetail | null>(null);
   const [signatures, setSignatures] = useState<{ role: string; signedAt?: string; method?: string }[]>([]);
@@ -8121,6 +8158,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             perms={perms}
             paymentRefs={paymentRefs}
             showExtras={view !== 'record'}
+            emails={{
+              rp: isManagerView ? (rpScope !== '' ? Number(rpScope) : null) : null, isManager: isManagerView,
+              showEmails: !isManagerView || (rpScope !== '' && managerCanForRp('canReadEmails', Number(rpScope))),
+              showWhatsapp: waOn && (!isManagerView || (rpScope !== '' && managerCanForRp('canReadWhatsapp', Number(rpScope)))),
+            }}
             legal={!mgrCan('canManageLegal') ? undefined : {
               base: isManagerView ? '/manager/legal' : '/legal',
               rp: isManagerView && rpScope !== '' ? Number(rpScope) : undefined,

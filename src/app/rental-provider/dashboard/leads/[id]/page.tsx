@@ -32,6 +32,8 @@ import { getRequiredDocs, getOccupantDocs, docNeedsExpiry, type DocReq } from '@
 import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot, type ReaderFile } from '@/components/upnow/DocumentReaderModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
+import { EmailsCard } from '@/components/email/EmailsCard';
+import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 import { ExpiryDatePicker } from '@/components/upnow/ExpiryDatePicker';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
@@ -898,6 +900,23 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         {/* Notes log — an internal running journal for the RP/manager team, the
             same way a tenancy has one. The customer never sees it. */}
         <LeadNotesSection notes={notes} onAdd={addNote} />
+
+        {/* Emails with this lead — written from the landlord's own mailbox,
+            replies filed back here (Settings → Email). */}
+        <EmailsCard
+          rp={manager ? manager.rp : null}
+          leadId={lead.id}
+          isManager={!!manager}
+          to={lead.leadEmail ? { leadId: lead.id, name: lead.customerName ?? lead.leadEmail, email: lead.leadEmail } : null}
+        />
+
+        {/* WhatsApp with this lead — matched by the lead's phone number. */}
+        <WhatsAppCard
+          rp={manager ? manager.rp : null}
+          leadId={lead.id}
+          isManager={!!manager}
+          person={{ name: lead.customerName ?? 'Lead', phone: lead.leadPhone ?? null }}
+        />
       </div>
 
       {/* Reopen-with-note modal — the note is carried to the customer (e.g. a

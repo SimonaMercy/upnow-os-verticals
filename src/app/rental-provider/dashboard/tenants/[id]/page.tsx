@@ -20,6 +20,8 @@ import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/Documen
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
+import { EmailsCard } from '@/components/email/EmailsCard';
+import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { useCanDeleteDocuments } from '@/lib/useCanDeleteDocuments';
 import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTAL_DOCS, type DocReq } from '@/lib/docRequirements';
@@ -1217,6 +1219,28 @@ export default function CustomerDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Emails with this customer — written from the landlord's own mailbox,
+          replies filed back here (Settings → Email). */}
+      <div className="mb-6">
+        <EmailsCard
+          rp={isManager ? (rpScope || null) : null}
+          tenantId={Number(params?.id)}
+          isManager={isManager}
+          to={c.email && !/@(import\.upnow\.ae|.*upnow\.local)$/i.test(c.email) ? { tenantId: Number(params?.id), name: displayName, email: c.email } : null}
+        />
+      </div>
+
+      {/* WhatsApp with this customer — the conversation(s) on the landlord's
+          linked numbers, matched by phone or linked by hand. */}
+      <div className="mb-6">
+        <WhatsAppCard
+          rp={isManager ? (rpScope || null) : null}
+          tenantId={Number(params?.id)}
+          isManager={isManager}
+          person={{ name: displayName, phone: c.phone ?? null }}
+        />
+      </div>
 
       {/* Lease notes — the running operational journal across EVERY lease this
           customer holds, in one chronological stream so the next person picking

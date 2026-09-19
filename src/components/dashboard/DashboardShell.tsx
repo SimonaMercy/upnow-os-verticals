@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, MessageSquare, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale } from 'lucide-react';
+import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, Mail, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale, MessageCircle } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
@@ -11,6 +11,8 @@ import { cn } from '@/lib/utils';
 import shell from './DashboardShell.module.css';
 import { getSpOnboardingReady, subscribeSpOnboardingReady } from './shellChrome';
 import { apiGet } from '@/lib/api';
+import { EMAILS_SYNCED_EVENT, useEmailSyncOnLogin } from '@/lib/useEmailSyncOnLogin';
+import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 
 // ── Manager permission cache (loaded once per session) ──────────────────────
 // Keeps the FULL per-landlord permission set so the nav can re-scope to the
@@ -49,7 +51,7 @@ function useManagerNavPerms(role: UserRole): Record<string, boolean> {
    Nav definitions per role
 ───────────────────────────────────────────── */
 /** Keys for the cheap sidebar count badges (GET /api/properties/nav-counts). */
-type NavBadgeKey = 'leads' | 'properties' | 'units' | 'operations';
+type NavBadgeKey = 'leads' | 'properties' | 'units' | 'operations' | 'emails' | 'whatsapp';
 type NavCounts = Partial<Record<NavBadgeKey, number>>;
 
 /** Entries the team is still working on: shown in local development, parked
@@ -144,7 +146,10 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
-    { label: 'Communications',   href: '/rental-provider/dashboard/communications', icon: MessageSquare, hidden: true },
+    // Un-parked 17 Sep: the page is now the landlord's email inbox (their own
+    // mailbox, Settings → Email). The badge is unread replies.
+    { label: 'Emails',           href: '/rental-provider/dashboard/communications', icon: Mail, badgeKey: 'emails' },
+    { label: 'WhatsApp',         href: '/rental-provider/dashboard/whatsapp',       icon: MessageCircle, badgeKey: 'whatsapp' },
     { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
     { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
     // What the managers are doing — the visual overview built on the activity
@@ -200,6 +205,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { section: 'More' },
     { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
+    { label: 'Emails',           href: '/dashboard/manager/communications', icon: Mail, requirePerm: 'canReadEmails' },
+    { label: 'WhatsApp',         href: '/dashboard/manager/whatsapp',       icon: MessageCircle, requirePerm: 'canReadWhatsapp' },
     { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
     { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
@@ -343,26 +350,33 @@ function useNavBadgeCounts(role: UserRole): NavCounts {
       Promise.all([
         fetch('/api/properties/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
         fetch('/api/contracts/nav-counts', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+        fetch('/api/email/unread-count', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+        fetch('/api/whatsapp/unread-count', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).catch(() => null),
       ])
-        .then(([p, c]: [NavCounts | null, { leases?: number; operations?: number } | null]) => {
+        .then(([p, c, e, w]: [NavCounts | null, { leases?: number; operations?: number } | null, { unread?: number } | null, { unread?: number } | null]) => {
           if (cancelled || (!p && !c)) return;
           setCounts({
             leads:      Number(p?.leads ?? 0),
             properties: Number(p?.properties ?? 0),
             units:      Number(p?.units ?? 0),
             operations: Number(c?.operations ?? 0),
+            emails:     Number(e?.unread ?? 0),
+            whatsapp:   Number(w?.unread ?? 0),
           });
         })
         .catch(() => { /* keep last-known / empty */ });
     };
     load();
+    // Mail just came in (the login sync, or the look every few minutes): the badge follows.
+    const onSynced = () => load();
+    window.addEventListener(EMAILS_SYNCED_EVENT, onSynced);
     const onFocus = () => {
       if (document.visibilityState !== 'visible') return;
       if (Date.now() - last < 30_000) return;   // throttle re-fetch on focus churn
       load();
     };
     window.addEventListener('focus', onFocus);
-    return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
+    return () => { cancelled = true; window.removeEventListener('focus', onFocus); window.removeEventListener(EMAILS_SYNCED_EVENT, onSynced); };
   }, [role]);
   return counts;
 }
@@ -384,6 +398,7 @@ function Sidebar({
   counts?: NavCounts;
 }) {
   const managerPerms = useManagerNavPerms(role);
+  const waOn = useWhatsappEnabled();
   const navSearchParams = useSearchParams();
   // Carry the manager's chosen landlord (?rp=) onto every sidebar link so
   // navigating between sections keeps the same landlord in view instead of
@@ -399,7 +414,9 @@ function Sidebar({
   // vendor gets its own nav.
   const spTier = useSpTier();
   const baseNav = role === 'service_provider' && spTier === 'landlord_vendor' ? SP_LIGHT_NAV : (NAV[role] ?? []);
-  const rawNav = baseNav.filter(item => !('hidden' in item && item.hidden));
+  // WhatsApp has no entry where the environment has no bridge to run it through.
+  const rawNav = baseNav.filter(item => !('hidden' in item && item.hidden))
+    .filter(item => waOn || !('href' in item && typeof item.href === 'string' && item.href.endsWith('/whatsapp')));
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
   // withholds, say, all Finance permissions doesn't leave an empty "Finance").
@@ -714,6 +731,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       body.style.height = prev.bodyHeight;
     };
   }, []);
+
+  // Mailboxes are read when somebody arrives in the portal — not on a server timer.
+  useEmailSyncOnLogin(loading || !user ? null : user.role);
 
   if (loading || !user) {
     return (

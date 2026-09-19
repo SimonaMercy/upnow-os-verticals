@@ -12,6 +12,7 @@ import { apiGet, apiPost, apiDelete, apiPatch } from '@/lib/api';
 import { useBackClose } from '@/lib/useSlideOver';
 import { SectionHeader } from '@/components/dashboard/DashboardWidgets';
 import { REPORT_TILES, GROUPS } from '@/components/upnow/reportCatalog';
+import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 
 /** Reports a manager can be granted access to — the live ones a manager can
  *  actually open (rpOnly reports 403 in the manager portal, so granting them
@@ -72,6 +73,10 @@ interface ManagerPermissions {
   canManageAmc:         boolean;
   canManageLegal:       boolean;
   canCommunicateTenants: boolean;
+  canReadEmails: boolean;
+  canSendEmails: boolean;
+  canReadWhatsapp: boolean;
+  canSendWhatsapp: boolean;
   // Per-report access — report slugs (empty = all reports)
   reportAccess:         string[];
 }
@@ -176,11 +181,24 @@ export const PERM_GROUPS = [
       { key: 'canManageLegal',       label: 'Handle breaches & legal cases', meta: 'can_manage_legal' },
     ],
   },
+  // Email and WhatsApp: reading and sending are granted apart, per channel. Without
+  // "read" the team member sees nothing of it — not the menu entry, not the inbox,
+  // not the Emails / WhatsApp section of a lead, lease, customer or vendor, not the
+  // unread icon on Operations. "Send" needs "read", so the two move together.
   {
-    label: 'Communications',
-    description: 'The Communications section',
+    label: 'Emails',
+    description: 'Your mailbox — the Emails page, and the Emails section of leads, leases, customers and vendors',
     perms: [
-      { key: 'canCommunicateTenants', label: 'Communicate with tenants (coming soon)', meta: 'can_communicate_tenants' },
+      { key: 'canReadEmails', label: 'Read emails', meta: 'can_read_emails' },
+      { key: 'canSendEmails', label: 'Send emails — write, reply, reply all and forward from your mailbox', meta: 'can_send_emails', requires: 'canReadEmails' },
+    ],
+  },
+  {
+    label: 'WhatsApp',
+    description: 'Your WhatsApp numbers — the WhatsApp page, and the WhatsApp section of leads, leases, customers and vendors',
+    perms: [
+      { key: 'canReadWhatsapp', label: 'Read WhatsApp conversations', meta: 'can_read_whatsapp' },
+      { key: 'canSendWhatsapp', label: 'Send on WhatsApp — answer, start a chat, send files and voice notes', meta: 'can_send_whatsapp', requires: 'canReadWhatsapp' },
     ],
   },
   {
@@ -233,6 +251,11 @@ export const metaDefaults = {
   // Maintenance & communication
   can_manage_maintenance: false,
   can_communicate_tenants: false,
+  // Email and WhatsApp start off: a customer's whole trail is granted, never assumed.
+  can_read_emails:        false,
+  can_send_emails:        false,
+  can_read_whatsapp:      false,
+  can_send_whatsapp:      false,
 };
 
 // ─── Role presets (editable starting templates) ──────────────────────────────
@@ -392,7 +415,21 @@ function ReportAccessChecklist({
   );
 }
 
-type PermEntry = { key: string; label: string; meta: string };
+/** `requires`: an authority that means nothing without another — "send" without "read". */
+type PermEntry = { key: string; label: string; meta: string; requires?: string };
+
+/**
+ * One switch can move another: turning "send" ON turns its "read" on too, and
+ * turning "read" OFF turns the "send" that needs it off. Returns every switch
+ * that changes, the one pressed included.
+ */
+function withLinked(perm: PermEntry, value: boolean): Array<[PermEntry, boolean]> {
+  const all: PermEntry[] = PERM_GROUPS.flatMap((g) => [...(g.perms as readonly PermEntry[])]);
+  const out: Array<[PermEntry, boolean]> = [[perm, value]];
+  if (value && perm.requires) { const need = all.find((p) => p.key === perm.requires); if (need) out.push([need, true]); }
+  if (!value) for (const p of all) if (p.requires === perm.key) out.push([p, false]);
+  return out;
+}
 
 /** Collapsible, nav-aligned permission sections shared by the invite modal and
  *  the edit panel. Each section shows a granted-count badge and a select-all. */
@@ -405,10 +442,11 @@ function PermissionSections({
   onToggle: (perm: PermEntry, v: boolean) => void;
   onToggleGroup: (perms: PermEntry[], v: boolean) => void;
 }) {
+  const waOn = useWhatsappEnabled();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   return (
     <div className="space-y-2">
-      {PERM_GROUPS.map((group) => {
+      {PERM_GROUPS.filter((group) => waOn || group.label !== 'WhatsApp').map((group) => {
         const perms = group.perms as readonly PermEntry[];
         const granted = perms.filter((p) => getValue(p)).length;
         const total = perms.length;
@@ -594,7 +632,7 @@ export function InviteManagerModal({ onClose, initialValues, title = 'Invite Man
             />
             <PermissionSections
               getValue={(p) => !!md[p.meta]}
-              onToggle={(p, v) => setValue(`metadata.${p.meta}`, v, { shouldDirty: true })}
+              onToggle={(p, v) => withLinked(p, v).forEach(([x, on]) => setValue(`metadata.${x.meta}`, on, { shouldDirty: true }))}
               onToggleGroup={(perms, v) =>
                 perms.forEach((p) => setValue(`metadata.${p.meta}`, v, { shouldDirty: true }))
               }
@@ -823,7 +861,7 @@ function PermissionsPanel({
           />
           <PermissionSections
             getValue={(p) => !!perms[p.key as keyof ManagerPermissions]}
-            onToggle={(p, v) => updateMutation.mutate({ [p.key]: v })}
+            onToggle={(p, v) => updateMutation.mutate(Object.fromEntries(withLinked(p, v).map(([x, on]) => [x.key, on])) as Partial<ManagerPermissions>)}
             onToggleGroup={(gp, v) =>
               updateMutation.mutate(
                 Object.fromEntries(gp.map((p) => [p.key, v])) as Partial<ManagerPermissions>,

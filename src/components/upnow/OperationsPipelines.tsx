@@ -41,11 +41,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import {
-  Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight,
-  UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid,
-  BarChart3, Info, Wrench, Scale, ShieldAlert, Gavel, ClipboardCheck,
-} from 'lucide-react';
+import { Search, X, RefreshCw, ClipboardList, CheckCircle2, ArrowRight, UserPlus, FileText, RefreshCcw, LogOut, LayoutList, Columns3, LayoutGrid, BarChart3, Info, Wrench, Scale, ShieldAlert, Gavel, ClipboardCheck, Mail, MessageCircle } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
@@ -270,6 +266,10 @@ const LEGAL_STAGES: StageDef[] = [
 export const LEGAL_TAB_ONLY = new Set(['notice_sent', 'case_filed', 'settlement', 'decision', 'enforcement']);
 
 /* ── Unified card view-model ───────────────────────────────────────────────── */
+/** Unread count by record id — the shape of `/email/unread-by-record` (and WhatsApp's, when that module is present). */
+interface UnreadByRecord { customers: Record<number, number>; leads: Record<number, number> }
+const NO_UNREAD: UnreadByRecord = { customers: {}, leads: {} };
+
 interface CardVM {
   key: string;
   name: string;
@@ -288,6 +288,9 @@ interface CardVM {
   handler: StageHandler[];
   /** Per-stage handler breakdown (stages present on this contract) for the tooltip. */
   handlerBreakdown: { stage: string; name: string; inferred: boolean; done: boolean }[];
+  /** Who the card is about — what unread emails and WhatsApp messages are counted by. */
+  tenantId?: number | null;
+  leadId?: number | null;
   /** Breach cards only: the one action the board offers inline — a deep link
    *  that opens the lease's Breaches section with the Escalate dialog up. */
   escalateHref?: string | null;
@@ -398,6 +401,7 @@ function contractToCard(c: OpsContract, stages: StageDef[], href: string, nowMs:
     .filter((x): x is { stage: string; name: string; inferred: boolean; done: boolean } => x != null);
   return {
     key: `c-${c.id}`,
+    tenantId: c.tenant.id,
     name: tenantDisplayName(c.tenant) ?? '—',
     sub: `${unitLabel(c.unit)} · ${c.property.buildingName ?? '—'}`,
     ref: c.ref,
@@ -425,6 +429,8 @@ function leadToCard(l: OpsLead, href: string | null, nowMs: number): CardVM | nu
   const rentFils = l.paymentPlan?.rentFils ?? (l.unit?.rentalPrice != null ? Number(l.unit.rentalPrice) * 100 : null);
   return {
     key: `l-${l.id}`,
+    leadId: l.id,
+    tenantId: l.convertedTenant?.id ?? null,
     /* The party, not the signatory. Converting a lead attaches the customer
      * record, and reading the person's name off it put the man who signs for
      * API Energy on the board where the company belongs — the same rule the
@@ -646,6 +652,69 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const selectTab = (k: TabKey) => { didAutoTab.current = true; setTab(k); syncUrl({ tab: k }); };
   const selectView = (v: 'kanban' | 'list' | 'grid') => { setView(v); syncUrl({ view: v }); };
 
+  /**
+   * Something waiting to be read — unread emails and WhatsApp messages, per
+   * customer and per lead — shown as a small icon with a number on the card. It
+   * loads on its own: a team member without the email (or WhatsApp) authority,
+   * or a backend without that module, simply shows no icon.
+   */
+  const [unread, setUnread] = useState<Record<'email' | 'whatsapp', UnreadByRecord>>({ email: NO_UNREAD, whatsapp: NO_UNREAD });
+  useEffect(() => {
+    let alive = true;
+    const q = rpFilter != null ? `?rp=${rpFilter}` : '';
+    const get = (path: string) => apiGet<UnreadByRecord>(`${path}${q}`).then((d) => ({ customers: d?.customers ?? {}, leads: d?.leads ?? {} })).catch(() => NO_UNREAD);
+    const pull = () => Promise.all([get('/email/unread-by-record'), get('/whatsapp/unread-by-record')]).then(([email, whatsapp]) => { if (alive) setUnread({ email, whatsapp }); });
+    void pull();
+    const t = window.setInterval(() => { if (document.visibilityState === 'visible') void pull(); }, 120_000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [rpFilter]);
+  const unreadFor = (c: CardVM, of: UnreadByRecord) => (c.tenantId != null ? of.customers[c.tenantId] ?? 0 : 0) + (c.leadId != null ? of.leads[c.leadId] ?? 0 : 0);
+  const portalBase = rpFilter != null ? '/dashboard/manager' : '/rental-provider/dashboard';
+  const inboxHref = (page: 'communications' | 'whatsapp', c: CardVM) => {
+    const who = c.tenantId != null ? `customer=${c.tenantId}` : `lead=${c.leadId}`;
+    return `${portalBase}/${page}?${rpFilter != null ? `rp=${rpFilter}&` : ''}${who}&unread=1`;
+  };
+  const waitingCount = (c: CardVM) => unreadFor(c, unread.email) + unreadFor(c, unread.whatsapp);
+  /**
+   * What is waiting across a set of cards — for a pipeline tile or a lane header,
+   * so an unread message is seen from the top of the page, not found by scrolling.
+   * One customer on two cards is still one customer's messages.
+   */
+  const waitingAcross = (cards: CardVM[]) => {
+    const seen = new Set<string>();
+    let email = 0, wa = 0;
+    for (const c of cards) {
+      const id = c.tenantId != null ? `c${c.tenantId}` : c.leadId != null ? `l${c.leadId}` : null;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      email += unreadFor(c, unread.email); wa += unreadFor(c, unread.whatsapp);
+    }
+    return { email, wa };
+  };
+  /** The same pair of numbers, not clickable — on a tile or a lane header. */
+  const waitingSummary = (cards: CardVM[]) => {
+    const { email, wa } = waitingAcross(cards);
+    if (!email && !wa) return null;
+    return (
+      <span className="act-wrap" title={[email ? `${email} unread email${email === 1 ? '' : 's'}` : '', wa ? `${wa} unread WhatsApp message${wa === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}>
+        {email > 0 && <span className="act mail"><Mail size={11} />{email}</span>}
+        {wa > 0 && <span className="act wa"><MessageCircle size={11} />{wa}</span>}
+      </span>
+    );
+  };
+  /** On a card: "✉ 1 unread email" — each opens that person's unread conversations. Nothing unread: nothing drawn. */
+  const waiting = (c: CardVM, words = false) => {
+    const email = unreadFor(c, unread.email);
+    const wa = unreadFor(c, unread.whatsapp);
+    if (!email && !wa) return null;
+    return (
+      <span className="act-wrap">
+        {email > 0 && <Link href={inboxHref('communications', c)} className="act mail" title="Open the unread emails" aria-label={`${email} unread emails`}><Mail size={12} />{email}{words ? ` unread email${email === 1 ? '' : 's'}` : ''}</Link>}
+        {wa > 0 && <Link href={inboxHref('whatsapp', c)} className="act wa" title="Open the unread WhatsApp messages" aria-label={`${wa} unread WhatsApp messages`}><MessageCircle size={12} />{wa}{words ? ' on WhatsApp' : ''}</Link>}
+      </span>
+    );
+  };
+
   const load = useMemo(() => () => Promise.all([
     apiGet<OpsContract[]>(contractsPath).then(d => Array.isArray(d) ? d : []).catch(() => []),
     apiGet<OpsLead[]>(leadsPath).then(d => Array.isArray(d) ? d : []).catch(() => []),
@@ -821,17 +890,20 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const byStage = useMemo(() => {
     const m = new Map<string, CardVM[]>();
     for (const c of activeCards) { const a = m.get(c.stageKey) ?? []; a.push(c); m.set(c.stageKey, a); }
-    for (const a of m.values()) a.sort((x, y) => (y.done / y.total) - (x.done / x.total));
+    // Someone waiting for an answer comes first; then the furthest along.
+    for (const a of m.values()) a.sort((x, y) => (Number(waitingCount(y) > 0) - Number(waitingCount(x) > 0)) || ((y.done / y.total) - (x.done / x.total)));
     return m;
-  }, [activeCards]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCards, unread]);
 
   // Flat, stage-ordered list for the List + Grid views (kanban uses byStage).
   const orderIndex = new Map(stages.map((s, i) => [s.key, i]));
   const sortedCards = useMemo(() =>
     [...activeCards].sort((a, b) =>
-      ((orderIndex.get(a.stageKey) ?? 0) - (orderIndex.get(b.stageKey) ?? 0)) || ((b.done / b.total) - (a.done / a.total))),
+      ((orderIndex.get(a.stageKey) ?? 0) - (orderIndex.get(b.stageKey) ?? 0))
+      || (Number(waitingCount(b) > 0) - Number(waitingCount(a) > 0)) || ((b.done / b.total) - (a.done / a.total))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeCards, tab]);
+    [activeCards, tab, unread]);
   const stageTitleOf = (key: string) => stages.find(s => s.key === key)?.title ?? key;
   // Full details for the hover tooltip — so anything clipped in the compact
   // cards (name, unit, building, term) is still readable on hover.
@@ -851,7 +923,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   // Shared vertical card (kanban lanes + grid). showStage adds a stage badge
   // (kanban implies stage by lane, so it hides it).
   const vcard = (c: CardVM, showStage: boolean) => (
-    <article key={c.key} className={'card' + (c.key === focusKey ? ' focused' : '')}
+    <article key={c.key} className={'card' + (c.key === focusKey ? ' focused' : '') + (waitingCount(c) > 0 ? ' waiting' : '')}
       ref={c.key === focusKey ? (focusElRef as React.RefObject<HTMLElement>) : undefined} title={cardTitle(c)}>
       {c.handler.length > 0 && (
         <div className="c-handler-top" title={`${stageTitleOf(c.stageKey)}: ${c.handler.map(h => h.name).join(', ')}`}>
@@ -874,6 +946,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
           <span className={'age ' + ageTone(c.ageDays)} title={`${c.ageDays} day${c.ageDays === 1 ? '' : 's'} since last activity`}>{c.ageDays}d</span>
         )}
       </div>
+      {waitingCount(c) > 0 && <div className="c-wait">{waiting(c, true)}</div>}
       <div className="c-unit">{c.sub}</div>
       <div className="c-foot">
         <span className="rent">{c.rentAed != null ? `AED ${fmtAed(c.rentAed)}` : '—'}</span>
@@ -896,7 +969,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
       ref={c.key === focusKey ? (focusElRef as React.RefObject<HTMLDivElement>) : undefined} title={cardTitle(c)}>
       <span className="av">{initials(c.name)}</span>
       <div className="r-id">
-        <div className="c-name">{c.name}</div>
+        <div className="c-name">{c.name}{waiting(c)}</div>
         <div className="c-ref">{c.ref ?? 'Lead'}</div>
       </div>
       <div className="r-sub">{c.sub}</div>
@@ -967,6 +1040,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
               >
                 <span className="pc-ic"><Icon size={14} /></span>
                 <span className="pc-label">{t.label}</span>
+                {waitingSummary(cardsByTab[t.key])}
                 <span className="pc-val">{cardsByTab[t.key].length}</span>
               </button>
             );
@@ -1010,6 +1084,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
                 <section key={s.key} className="lane">
                   <header className="lane-head" title={s.desc}>
                     <span className="lane-title">{s.title}</span>
+                    {waitingSummary(cards)}
                     <span className="lane-count">{cards.length}</span>
                   </header>
                   <div className="lane-body">
@@ -1176,6 +1251,22 @@ export function OpsPipelineStyle() {
          crowds the name; stays inline within list rows. */
       .opsp-page .card .age{ position:absolute; top:6px; right:6px; z-index:2; }
       .opsp-page .age{ flex:0 0 auto; font-size:9px; font-weight:700; padding:2px 6px; border-radius:99px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+      .opsp-page .act-wrap{ display:inline-flex; align-items:center; gap:4px; margin-left:auto; flex:0 0 auto; }
+      .opsp-page .lane-head .act-wrap{ margin-left:6px; }
+      /* On a tile it is a corner badge — the tile's own label and number keep their room. */
+      .opsp-page .pcard{ position:relative; }
+      .opsp-page .pcard .act-wrap{ position:absolute; top:-8px; right:10px; margin:0; }
+      .opsp-page .pcard .act-wrap .act.mail{ box-shadow:0 0 0 2px #fff; background:#2e9f82; color:#fff; }
+      .opsp-page .pcard .act-wrap .act.wa{ box-shadow:0 0 0 2px #fff; background:#128c4a; color:#fff; }
+      .opsp-page .card.waiting{ border-color:#2e9f82; box-shadow:0 0 0 1px #2e9f82 inset; }
+      .opsp-page .c-wait{ margin:6px 0 2px; }
+      .opsp-page .c-wait .act-wrap{ margin-left:0; flex-wrap:wrap; }
+      .opsp-page .c-wait .act{ font-size:11px; padding:4px 9px; }
+      .opsp-page .c-name .act-wrap{ margin-left:8px; vertical-align:middle; }
+      .opsp-page .act{ display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; line-height:1; padding:3px 7px; border-radius:99px; font-variant-numeric:tabular-nums; text-decoration:none; }
+      .opsp-page .act.mail{ background:#eef9f4; color:#1a7a5a; }
+      .opsp-page .act.wa{ background:#e6f7ec; color:#128c4a; }
+      .opsp-page .act:hover{ filter:brightness(.95); }
       .opsp-page .age.fresh{ background:var(--paper-2); color:var(--mute); }
       .opsp-page .age.warn{ background:#fef3c7; color:#92400e; }
       .opsp-page .age.stale{ background:#fee2e2; color:#991b1b; }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature, Scale } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
+import { EmailSettingsPanel } from '@/components/email/EmailSettingsPanel';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { JurisdictionSettingsForm } from '@/components/legal/JurisdictionSettingsForm';
 import { FeeBookEditor } from '@/components/legal/FeeBookEditor';
@@ -509,7 +510,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'email' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -662,7 +663,7 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
 
 // Settings tabs (owner, 12 Sep: the profile moved OUT to its own page; the
 // Maintenance List, Restoration List and AMC categories moved IN).
-const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'notifications'];
+const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'email', 'notifications'];
 /** The left-hand settings menu, grouped by what the landlord is doing. */
 const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   { title: 'Leasing', tabs: ['fee_rules'] },
@@ -670,14 +671,15 @@ const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   { title: 'Contracts', tabs: ['categories'] },
   // The landlord's own notice periods, appeal window and filing-fee rule (0286) — the platform default applies until saved.
   { title: 'Legal', tabs: ['legal'] },
-  { title: 'Account', tabs: ['team', 'notifications'] },
+  // Email = the landlord's own mailbox, used to write to customers and leads (17 Sep).
+  { title: 'Account', tabs: ['team', 'email', 'notifications'] },
 ];
 const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }> }> = {
   // Two maintenance tabs read as one thing to the owner (12 Sep) — say what each is:
   // coverage = what is offered per property type and who does it; items = what a customer can raise.
   general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
   maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
-  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, notifications: { label: 'Notifications', Icon: Bell },
+  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, email: { label: 'Email', Icon: Mail }, notifications: { label: 'Notifications', Icon: Bell },
 };
 
 /** One component, two pages: /settings (tabs) and /profile (the business profile alone). */
@@ -1457,6 +1459,9 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
       )}
 
       {mainTab === 'team' && <TeamPanel />}
+
+      {/* ── Email tab — the landlord's own mailbox ── */}
+      {mainTab === 'email' && <EmailSettingsPanel />}
 
       {/* ── Notifications tab ──────────────────────────────────── */}
       {mainTab === 'notifications' && (

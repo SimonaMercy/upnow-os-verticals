@@ -19,6 +19,8 @@ const url = (base: string, rp: number | null | undefined, path: string) => rp !=
 import { openDocViewer } from '@/lib/docViewer';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { KIND_META, chip, type VendorRow } from '@/components/vendors/VendorsListView';
+import { EmailsCard } from '@/components/email/EmailsCard';
+import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 import { VendorForm } from '@/components/vendors/VendorForm';
 
 interface Tech { id: number; name: string; phone: string | null; status: string; isLeadCapable: boolean }
@@ -482,6 +484,18 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
           </div>
         </div>
       </div>
+
+      {/* ── Emails with this vendor — the landlord's own mailbox (Settings → Email).
+             Matched by the vendor's exact address on file. ── */}
+      <EmailsCard
+        rp={rp}
+        vendorId={spId}
+        isManager={rp != null}
+        to={v.email && !/@(import\.upnow\.ae|.*upnow\.local)$/i.test(v.email) ? { vendorId: spId, name: v.name, email: v.email } : null}
+      />
+
+      {/* ── WhatsApp with this vendor — matched by the vendor's phone number. ── */}
+      <WhatsAppCard rp={rp} vendorId={spId} isManager={rp != null} person={{ name: v.name, phone: v.phone ?? null }} />
 
       {/* ── Maintenance history — only when there is any (owner, 12 Sep) ── */}
       {jobs.length > 0 && <div className="bg-white rounded-2xl shadow-sm p-5">

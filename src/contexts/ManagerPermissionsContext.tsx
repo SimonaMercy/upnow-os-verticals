@@ -66,6 +66,11 @@ export interface RpPermissions {
     canManageLegal:       boolean;
     // Communication & admin
     canCommunicateTenants:boolean;
+    /** Email and WhatsApp — read and send granted apart, per channel. Send already counts only with read. */
+    canReadEmails:boolean;
+    canSendEmails:boolean;
+    canReadWhatsapp:boolean;
+    canSendWhatsapp:boolean;
     canEscalateToAdmin:   boolean;
     canInviteManager:     boolean;
   };
