@@ -909,6 +909,8 @@ function StatusChip({ status }: { status: string }) {
 export function TeamPanel() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedManager, setSelectedManager] = useState<ManagerMember | null>(null);
+  // Deactivated managers stay folded away until the landlord asks to see them.
+  const [showDeactivated, setShowDeactivated] = useState(false);
   const qc = useQueryClient();
 
   const { data: managers = [], isLoading: loadingManagers } = useQuery<ManagerMember[]>({
@@ -930,6 +932,9 @@ export function TeamPanel() {
     mutationFn: (id: number) => apiPost(`/invitations/${id}/resend`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['rp-invites'] }),
   });
+
+  const activeManagers = managers.filter((m) => m.active !== false);
+  const deactivatedManagers = managers.filter((m) => m.active === false);
 
   const daysLeft = (expiresAt: string) => {
     const diff = new Date(expiresAt).getTime() - Date.now();
@@ -962,56 +967,26 @@ export function TeamPanel() {
 
       {/* Active Managers */}
       <section className="mb-8">
-        <SectionHeader title={`Active Managers (${managers.length})`} />
+        <SectionHeader title={`Active Managers (${activeManagers.length})`} />
         {loadingManagers ? (
           <div className="rounded-2xl p-8 text-center text-sm bg-white" style={{ boxShadow: 'var(--shadow-sm)', color: 'var(--color-neutral-400)' }}>Loading…</div>
-        ) : managers.length === 0 ? (
+        ) : activeManagers.length === 0 ? (
           <div
             className="rounded-2xl p-8 flex flex-col items-center justify-center gap-3 text-center bg-white"
             style={{ boxShadow: 'var(--shadow-sm)' }}
           >
             <Users className="w-8 h-8" style={{ color: 'var(--color-neutral-300)' }} />
             <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-neutral-600)' }}>No managers yet</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-400)' }}>Invite your first manager to help manage your properties</p>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-neutral-600)' }}>{managers.length === 0 ? 'No managers yet' : 'No active managers'}</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-neutral-400)' }}>
+                {managers.length === 0 ? 'Invite your first manager to help manage your properties' : 'Everyone on your team is deactivated — re-activate a manager below or invite a new one'}
+              </p>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
-            {managers.map((mgr) => (
-              <button
-                key={mgr.id}
-                onClick={() => setSelectedManager(mgr)}
-                className="w-full flex items-center gap-4 px-5 py-4 text-left bg-white rounded-2xl transition-shadow hover:shadow-md"
-                style={{ boxShadow: 'var(--shadow-sm)', opacity: mgr.active === false ? 0.6 : 1 }}
-              >
-                <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: 'color-mix(in srgb, var(--color-primary) 15%, white)', color: 'var(--color-primary)' }}
-                >
-                  {mgr.user.name.slice(0, 1).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">
-                    {mgr.user.name}
-                    {mgr.jobTitle && (
-                      <span className="ml-2 font-normal text-xs" style={{ color: 'var(--color-neutral-400)' }}>{mgr.jobTitle}</span>
-                    )}
-                  </p>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-                      <Mail className="w-3 h-3" />{mgr.user.email}
-                    </span>
-                    {mgr.user.phone && (
-                      <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-                        <Phone className="w-3 h-3" />{mgr.user.phone}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <StatusChip status={mgr.status} />
-                <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
-              </button>
+            {activeManagers.map((mgr) => (
+              <ManagerRow key={mgr.id} mgr={mgr} onSelect={setSelectedManager} />
             ))}
           </div>
         )}
@@ -1019,7 +994,7 @@ export function TeamPanel() {
 
       {/* Pending Invites */}
       {(loadingInvites || invites.length > 0) && (
-        <section>
+        <section className={deactivatedManagers.length > 0 ? 'mb-8' : undefined}>
           <SectionHeader title={`Pending Invites (${invites.length})`} />
           <div className="space-y-3">
             {invites.map((inv) => (
@@ -1068,6 +1043,71 @@ export function TeamPanel() {
           </div>
         </section>
       )}
+
+      {/* Deactivated — kept apart, at the bottom, so the working team reads clean */}
+      {deactivatedManagers.length > 0 && (
+        <section>
+          <button
+            type="button"
+            onClick={() => setShowDeactivated((v) => !v)}
+            aria-expanded={showDeactivated}
+            className="w-full flex items-center justify-between gap-3 px-5 py-3 bg-white rounded-2xl text-left transition-shadow hover:shadow-md"
+            style={{ boxShadow: 'var(--shadow-sm)' }}
+          >
+            <span className="font-semibold text-sm" style={{ color: 'var(--color-neutral-600)' }}>
+              Deactivated ({deactivatedManagers.length})
+            </span>
+            <ChevronRight
+              className="w-4 h-4 flex-shrink-0 transition-transform"
+              style={{ color: 'var(--color-neutral-400)', transform: showDeactivated ? 'rotate(90deg)' : undefined }}
+            />
+          </button>
+          {showDeactivated && (
+            <div className="space-y-3 mt-3">
+              {deactivatedManagers.map((mgr) => (
+                <ManagerRow key={mgr.id} mgr={mgr} onSelect={setSelectedManager} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
+  );
+}
+
+function ManagerRow({ mgr, onSelect }: { mgr: ManagerMember; onSelect: (mgr: ManagerMember) => void }) {
+  return (
+    <button
+      onClick={() => onSelect(mgr)}
+      className="w-full flex items-center gap-4 px-5 py-4 text-left bg-white rounded-2xl transition-shadow hover:shadow-md"
+      style={{ boxShadow: 'var(--shadow-sm)', opacity: mgr.active === false ? 0.6 : 1 }}
+    >
+      <div
+        className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+        style={{ background: 'color-mix(in srgb, var(--color-primary) 15%, white)', color: 'var(--color-primary)' }}
+      >
+        {mgr.user.name.slice(0, 1).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold truncate">
+          {mgr.user.name}
+          {mgr.jobTitle && (
+            <span className="ml-2 font-normal text-xs" style={{ color: 'var(--color-neutral-400)' }}>{mgr.jobTitle}</span>
+          )}
+        </p>
+        <div className="flex items-center gap-3 mt-0.5">
+          <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+            <Mail className="w-3 h-3" />{mgr.user.email}
+          </span>
+          {mgr.user.phone && (
+            <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+              <Phone className="w-3 h-3" />{mgr.user.phone}
+            </span>
+          )}
+        </div>
+      </div>
+      <StatusChip status={mgr.status} />
+      <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
+    </button>
   );
 }
