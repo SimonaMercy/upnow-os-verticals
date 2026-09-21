@@ -14,11 +14,12 @@
  * The server judges every stage rule (§5.3) and answers 400 with a
  * plain-language reason — shown inline where the action was taken.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, X, UploadCloud, FileText, Printer } from 'lucide-react';
+import { Loader2, X, UploadCloud, FileText, Printer, ChevronDown } from 'lucide-react';
 import { apiGet, apiPatch } from '@/lib/api';
 import { openDocViewerByIds } from '@/lib/docViewer';
+import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import {
   legalApi, legalUrl, daysFromToday, disputeStageTone, DISPUTE_STAGES, DISPUTE_STAGE_LABELS, DISPUTE_OUTCOME_LABELS, CASE_EVENT_TYPE_LABELS, BREACH_EVENT_TYPE_LABELS, BREACH_REPORTED_BY_LABELS, PAYMENT_HELD_BY_LABELS, type DisputeDetail, type DisputeStage, type DisputeOutcome, type CaseEventType, type CaseEvent, type DisputePayment, type LegalDoc, type PaymentHeldBy, NOTICE_TYPE_LABELS, NOTICE_TEMPLATE_KIND, type NoticeType,
@@ -131,10 +132,20 @@ const FilePick = ({ file, onPick, label }: { file: File | null; onPick: (f: File
   </label>
 );
 
-const DocLink = ({ d, caption }: { d: LegalDoc; caption?: string }) => (
-  <button type="button" onClick={() => void openDocViewerByIds([{ id: d.id, caption: caption ?? d.name, mimeType: d.mimeType }], caption ?? d.name)}
-    className="text-[11.5px] font-semibold text-[#1a7a52] hover:text-[#125a3c] underline cursor-pointer inline-flex items-center gap-1"><FileText size={12} /> {d.name}</button>
-);
+/** A long list keeps its card a fixed height and scrolls INSIDE it — the page itself stays short.
+ *  The title row (count + buttons) sits above and never scrolls away. */
+const lockedList = 'overflow-y-auto overscroll-contain pr-1 -mr-1 [scrollbar-width:thin]';
+
+/** The page's document gallery, when there is one: every document link opens it AT that document. */
+const OpenDocCtx = createContext<((docId: number) => void) | null>(null);
+
+const DocLink = ({ d, caption }: { d: LegalDoc; caption?: string }) => {
+  const openInGallery = useContext(OpenDocCtx);
+  return (
+    <button type="button" onClick={() => (openInGallery ? openInGallery(d.id) : void openDocViewerByIds([{ id: d.id, caption: caption ?? d.name, mimeType: d.mimeType }], caption ?? d.name))}
+      className="text-[12px] font-semibold text-[#1c1f1d] hover:text-[#1a7a52] hover:underline cursor-pointer flex items-start gap-1.5 text-left leading-snug"><FileText size={13} className="shrink-0 mt-[2px] text-[#1a7a52]" /> <span className="min-w-0 break-words">{d.name}</span></button>
+  );
+};
 
 /* ── Advance stage: only that stage's fields ─────────────────────────────── */
 function AdvanceModal({ base, rp, d, to, onClose, onDone }: { base: string; rp?: number | null; d: DisputeDetail; to: DisputeStage; onClose: () => void; onDone: (text: string) => void }) {
@@ -361,6 +372,9 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
   leaseHrefOf?: (leaseId: number) => string;
   breachHrefOf?: (leaseId: number, breachId: number) => string;
 }) {
+  const [gallery, setGallery] = useState<{ initialKey?: string } | null>(null);
+  const [openDocGroup, setOpenDocGroup] = useState<string | null>(null); // one folded group open at a time
+  const fetchDocBlob = useMemo(() => async (f: { id: string | number }) => { const r = await fetch(`/api/documents/${f.id}/file`, { credentials: 'include', cache: 'no-store' }); if (!r.ok) throw new Error(String(r.status)); return URL.createObjectURL(await r.blob()); }, []);
   const [d, setD] = useState<DisputeDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
@@ -450,7 +464,35 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
   const nextN = daysFromToday(d.nextDate);
   const lease = d.lease;
   const proofDoc = d.noticeProofDocument;
-  const eventDocIds = new Set(d.events.map(e => e.documentId).filter((x): x is number => x != null));
+  const eventDateOf = new Map(d.events.filter(e => e.documentId != null).map(e => [e.documentId as number, e.date] as const));
+  const eventTypeOf = new Map(d.events.filter(e => e.documentId != null).map(e => [e.documentId as number, e.type] as const));
+  // PRIMARY = the case's own formal papers: the notice proof and whatever sits on a formal step of
+  // the timeline (notice, filed, hearing, settlement, decision, appeal, enforcement). They stay in view.
+  // SUPPORTING papers (registration certificate, licence, bank transfers…) stay in view under them —
+  // they are evidence too. Only the long run of emails and notes on the timeline folds away, so the
+  // papers the case turns on are never lost among thirty.
+  const byEventDate = (x: LegalDoc, y: LegalDoc) => (eventDateOf.get(x.id) ?? '').localeCompare(eventDateOf.get(y.id) ?? '') || x.id - y.id;
+  const isProof = (x: LegalDoc) => x.id === d.noticeProofDocumentId;
+  const isFormal = (x: LegalDoc) => eventTypeOf.has(x.id) && eventTypeOf.get(x.id) !== 'note';
+  const onDate = (x: LegalDoc) => (eventDateOf.get(x.id) ? fmtD(eventDateOf.get(x.id)!) : `added ${fmtD(x.createdAt)}`);
+  const docGroups = [
+    { title: 'Primary documents', primary: true, docs: [...d.documents.filter(isProof), ...d.documents.filter(x => !isProof(x) && isFormal(x)).sort(byEventDate)],
+      meta: (x: LegalDoc) => `${onDate(x)}${isProof(x) ? ' · notice proof' : ''}` },
+    { title: 'Emails & messages on the timeline', primary: false, docs: d.documents.filter(x => !isProof(x) && eventDateOf.has(x.id) && !isFormal(x)).sort(byEventDate), meta: onDate },
+    // By name, numbers in order (…AED 51,715 before …51,716). No date line: the day a paper was ADDED says nothing
+    // about the paper — where its own date matters it is in the label.
+    { title: 'Supporting papers', primary: true, docs: d.documents.filter(x => !isProof(x) && !eventDateOf.has(x.id)).sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: 'base' })), meta: () => '' },
+  ].filter(g => g.docs.length > 0);
+
+  // ONE gallery for the case — the portal's shared reader (list on the left, big preview, next / previous),
+  // opened wide, with Download and Print: a case file is the landlord's own working file.
+  const kycName = (x: { key: string; name: string }) => (x.key.startsWith('emirates_id') && !/emirates/i.test(x.name) ? `Emirates ID — ${x.name}` : x.name);
+  const gallerySlots: ReaderSlot[] = [
+    ...(d.breach?.documents ?? []).map(x => ({ key: `doc-${x.id}`, label: x.name, group: `From breach #${d.breach!.id}`, note: fmtD(x.createdAt), files: [{ id: x.id, name: x.name, url: '', mimeType: x.mimeType }] })),
+    ...docGroups.flatMap(g => g.docs.map(x => ({ key: `doc-${x.id}`, label: x.name, group: g.title, note: g.meta(x) || null, files: [{ id: x.id, name: x.name, url: '', mimeType: x.mimeType }] }))),
+    ...(d.customerDocuments ?? []).map(x => ({ key: `doc-${x.id}`, label: kycName(x), group: 'Customer KYC', note: x.expired ? `expired ${fmtD(x.expiryDate!)}` : x.expiryDate ? `valid to ${fmtD(x.expiryDate)}` : 'no expiry date on file', files: [{ id: x.id, name: kycName(x), url: '', mimeType: x.mimeType }] })),
+  ];
+  const openGalleryAt = (docId: number) => (gallerySlots.some(sl => sl.key === `doc-${docId}`) ? setGallery({ initialKey: `doc-${docId}` }) : void openDocViewerByIds([{ id: docId }]));
   const isLandlord = d.filedBy === 'landlord';
   const appealN = daysFromToday(d.appealDeadline);
 
@@ -470,6 +512,7 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
   const eventTone = (t: CaseEventType) => t === 'resolved' ? { bg: '#e7f4ee', fg: '#1a7a52' } : t === 'decision' || t === 'filed' ? { bg: '#e0f2fe', fg: '#0369a1' } : t === 'appeal' || t === 'enforcement_action' ? { bg: '#fdecea', fg: '#b42318' } : t === 'settlement_agreed' ? { bg: '#ece9fd', fg: '#5b3fbf' } : t === 'notice' || t === 'hearing' ? { bg: '#fdf3e3', fg: '#c47a00' } : undefined;
 
   return (
+    <OpenDocCtx.Provider value={openGalleryAt}>
     <div className="max-w-6xl mx-auto px-4 py-6 text-[#1c1f1d]">
       {advanceTo && <AdvanceModal base={base} rp={rp} d={d} to={advanceTo} onClose={() => setAdvanceTo(null)} onDone={t => { setAdvanceTo(null); refresh(t); }} />}
       {eventOpen && <EventModal base={base} rp={rp} d={d} onClose={() => setEventOpen(false)} onDone={t => { setEventOpen(false); refresh(t); }} />}
@@ -499,7 +542,7 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
             )}
             {d.actions.resolve && <button type="button" onClick={() => setResolving(o => !o)} className={btn}>Mark as resolved</button>}
             {d.actions.nextStages.map(s => (
-              <button key={s} type="button" onClick={() => setAdvanceTo(s)} className={btnPrimary}>Advance → {DISPUTE_STAGE_LABELS[s]}</button>
+              <button key={s} type="button" onClick={() => setAdvanceTo(s)} className={btnPrimary} title={`Move the case to “${DISPUTE_STAGE_LABELS[s]}”`}>{DISPUTE_STAGE_LABELS[s]}</button>
             ))}
           </div>
         </div>
@@ -547,7 +590,7 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
           <div className="sm:pr-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{claimLabel(d.filedBy).toUpperCase()}</div><div className="text-[13px] font-semibold mt-[3px] inline-flex items-center gap-1"><DirhamSign size={13} className="text-[#8a8f8c]" />{money(d.claimAmount)}</div></div>
           <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>LEGAL COSTS PAID</div><div className="text-[13px] font-semibold mt-[3px]">{money(d.costTotals?.paid ?? 0)}<span className="text-[11px] font-normal text-[#8a8f8c]"> · {money(d.costTotals?.expected ?? 0)} expected</span></div></div>
           <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>AUTHORITY CASE NO.</div><div className="text-[13px] font-semibold mt-[3px]">{d.authorityCaseNumber ?? '—'}{d.filingDate ? <span className="font-normal text-[#8a8f8c]"> · filed {fmtD(d.filingDate)}</span> : null}</div></div>
-          <div className="sm:pl-[18px]"><div className={lbl}>CONTACT</div><div className="text-[13px] font-semibold mt-[3px] truncate">{d.contactName ?? '—'}{d.contactPhone ? <span className="font-normal text-[#8a8f8c]"> · {d.contactPhone}</span> : null}</div></div>
+          <div className="sm:pl-[18px]"><div className={lbl}>CONTACT</div>{/* a representative's name and firm is often long — it wraps, it is never cut */}<div className="text-[13px] font-semibold mt-[3px] leading-snug break-words">{d.contactName ?? '—'}</div>{d.contactPhone ? <div className="text-[12px] text-[#8a8f8c] mt-0.5">{d.contactPhone}</div> : null}</div>
         </div>
         {(d.nextHearingDate || d.decisionDate) && (
           <div className="mt-2 text-[11.5px] text-[#5b615e] flex gap-4 flex-wrap">
@@ -616,7 +659,7 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
               <h2 className="text-[14px] font-bold">Timeline · {d.events.length + (d.breach?.events.length ?? 0)}</h2>
               {!closed && <button type="button" onClick={() => setEventOpen(true)} className={btnGreenSm}>+ Add note / event</button>}
             </div>
-            <div className="mt-2">
+            <div className={'mt-2 max-h-[520px] ' + lockedList}>
               {(() => {
                 const merged: Array<{ key: string; date: string; created: string; node: React.ReactNode }> = [
                   ...d.events.map(e => ({ key: `c-${e.id}`, date: e.date, created: e.createdAt, node: <EventRow key={`c-${e.id}`} e={e} tone={eventTone(e.type)} /> })),
@@ -639,6 +682,15 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
                 return merged.length === 0 ? <p className="text-[12px] text-[#8a8f8c] py-3">Nothing on the timeline yet.</p> : merged.map(m => m.node);
               })()}
             </div>
+          </div>
+
+          {/* notes — under the timeline, in the wide column: the case's standing facts are read here, not squeezed into the rail */}
+          <div className={card + ' px-4 sm:px-[22px] pt-[18px] pb-5'}>
+            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+              <h2 className="text-[14px] font-bold">Notes</h2>
+              <button type="button" disabled={!notesDirty || busy === 'notes'} onClick={() => void saveNotes()} className={btnGreenSm}>{busy === 'notes' ? 'Saving…' : 'Save notes'}</button>
+            </div>
+            <textarea rows={14} value={notes} onChange={e => { setNotes(e.target.value); setNotesDirty(true); }} className={field + ' mt-3 text-[13px] leading-relaxed min-h-[340px] resize-y'} placeholder="Internal notes on the case…" />
           </div>
 
         </div>
@@ -709,34 +761,92 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
               )}
             </div>
             {d.documents.length === 0 && !(d.breach?.documents.length) ? <p className="text-[11.5px] text-[#8a8f8c] mt-2">No documents on the case yet.</p> : (
-              <div className="mt-2 divide-y divide-[#f1f3f1]">
-                {(d.breach?.documents ?? []).map(x => (
-                  <div key={`b-${x.id}`} className="py-2 flex items-center justify-between gap-2" style={{ background: '#faf9fe' }}>
-                    <div className="min-w-0"><DocLink d={x} /><div className="text-[10.5px]" style={{ color: '#5b3fbf' }}>from breach #{d.breach!.id} · {fmtD(x.createdAt)}</div></div>
-                  </div>
-                ))}
-                {d.documents.map(x => (
-                  <div key={x.id} className="py-2 flex items-center justify-between gap-2">
-                    <div className="min-w-0"><DocLink d={x} /><div className="text-[10.5px] text-[#8a8f8c]">{fmtD(x.createdAt)}{x.id === d.noticeProofDocumentId ? ' · notice proof' : eventDocIds.has(x.id) ? ' · on the timeline' : ''}</div></div>
-                  </div>
-                ))}
+              <div className="mt-2">
+                {(() => {
+                  const row = (x: LegalDoc, meta: string, tint?: string) => (
+                    <div key={x.id} className="py-2" style={tint ? { background: tint } : undefined}>
+                      <DocLink d={x} />
+                      {meta && <div className="text-[10.5px] text-[#8a8f8c] pl-[19px] mt-0.5">{meta}</div>}
+                    </div>
+                  );
+                  const folded = [
+                    ...((d.breach?.documents.length ?? 0) > 0 ? [{ title: `From breach #${d.breach!.id}`, rows: d.breach!.documents.map(x => row(x, fmtD(x.createdAt), '#faf9fe')) }] : []),
+                    ...docGroups.filter(g => !g.primary).map(g => ({ title: g.title, rows: g.docs.map(x => row(x, g.meta(x))) })),
+                  ];
+                  return (
+                    <>
+                      {docGroups.filter(g => g.primary).map((g, gi) => (
+                        <div key={g.title} className={gi > 0 ? 'mt-3 pt-3 border-t border-[#eef0ee]' : ''}>
+                          <div className="text-[10px] font-bold tracking-[0.08em] uppercase text-[#8a8f8c] pb-0.5">{g.title} · {g.docs.length}</div>
+                          <div className={'divide-y divide-[#f1f3f1] max-h-[300px] ' + lockedList}>{g.docs.map(x => row(x, g.meta(x)))}</div>
+                        </div>
+                      ))}
+                      {folded.map(f => {
+                        const open = openDocGroup === f.title;
+                        return (
+                          <div key={f.title} className="mt-2 border border-[#e9ece9] rounded-lg overflow-hidden">
+                            <button type="button" aria-expanded={open} onClick={() => setOpenDocGroup(open ? null : f.title)}
+                              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left cursor-pointer bg-[#fafbfa] hover:bg-[#f3f6f4]">
+                              <span className="text-[11.5px] font-bold text-[#2b342e]">{f.title} <span className="font-semibold text-[#8a8f8c]">· {f.rows.length}</span></span>
+                              <ChevronDown size={14} className={'shrink-0 text-[#8a8f8c] transition-transform ' + (open ? 'rotate-180' : '')} />
+                            </button>
+                            {open && <div className={'px-3 divide-y divide-[#f1f3f1] max-h-[300px] ' + lockedList}>{f.rows}</div>}
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </div>
             )}
+            <div className="mt-2.5">
+              {d.documents.length + (d.breach?.documents.length ?? 0) > 1 && (
+                <button type="button" onClick={() => setGallery({})} className="text-[11.5px] font-semibold text-[#1a7a52] hover:text-[#125a3c] hover:underline cursor-pointer">View all {d.documents.length + (d.breach?.documents.length ?? 0)} documents →</button>
+              )}
+            </div>
             <Link href={caseFileHref} className={btnGreenSm + ' mt-3 inline-flex items-center gap-1.5 no-underline'}><Printer size={12} /> Export case file</Link>
             <p className="text-[10.5px] text-[#8a8f8c] mt-1.5">Lease, registration, notice + proof, statement of account, payments, breach history and every document — as one print-ready file.</p>
           </div>
 
-          {/* notes */}
+          {/* the customer's own KYC papers — read from the customer record, not copied onto the case */}
           <div className={card + ' px-4 pt-4 pb-4'}>
-            <h2 className="text-[13px] font-bold">Notes</h2>
-            <textarea rows={4} value={notes} onChange={e => { setNotes(e.target.value); setNotesDirty(true); }} className={field + ' mt-2 text-[12px]'} placeholder="Internal notes on the case…" />
-            <div className="flex items-center justify-end mt-2">
-              <button type="button" disabled={!notesDirty || busy === 'notes'} onClick={() => void saveNotes()} className={btnGreenSm}>{busy === 'notes' ? 'Saving…' : 'Save notes'}</button>
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-[13px] font-bold">Customer KYC documents · {(d.customerDocuments ?? []).length}</h2>
+              <span className="text-[10.5px] text-[#8a8f8c]">{d.lease?.customerType === 'company' ? 'Company' : 'Individual'}</span>
             </div>
+            <p className="text-[11px] text-[#5b615e] mt-0.5 truncate">{d.lease?.customerName ?? '—'}</p>
+            {(d.customerDocuments ?? []).length === 0 ? <p className="text-[11.5px] text-[#8a8f8c] mt-2">No KYC documents on the customer record.</p> : (
+              <div className={'mt-2 divide-y divide-[#f1f3f1] max-h-[240px] ' + lockedList}>
+                {(d.customerDocuments ?? []).map(x => (
+                  <div key={x.id} className="py-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      {/* "Front side" alone says nothing — name the paper it is a side of. */}
+                      <DocLink d={x.key.startsWith('emirates_id') && !/emirates/i.test(x.name) ? { ...x, name: `Emirates ID — ${x.name}` } : x} />
+                      <div className="text-[10.5px] text-[#8a8f8c]">{x.documentNumber ? `No. ${x.documentNumber} · ` : ''}{x.expiryDate ? `valid to ${fmtD(x.expiryDate)}` : 'no expiry date on file'}</div>
+                    </div>
+                    {x.expired && <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: '#fdecec', color: '#b42318' }}>expired</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-2.5">
+              {(d.customerDocuments ?? []).length > 1 && (
+                <button type="button" onClick={() => setGallery({ initialKey: `doc-${d.customerDocuments![0].id}` })} className="text-[11.5px] font-semibold text-[#1a7a52] hover:text-[#125a3c] hover:underline cursor-pointer">View all {(d.customerDocuments ?? []).length} KYC documents →</button>
+              )}
+            </div>
+            <p className="text-[10.5px] text-[#8a8f8c] mt-2">From the customer record — a renewed paper filed there shows here at once.</p>
           </div>
+
         </div>
       </div>
     </div>
+    {gallery && (
+      <DocumentReaderModal wide title={`Case #${d.id} · ${d.lease?.unitNumber ? `Unit ${d.lease.unitNumber} · ` : ''}documents`}
+        summary={`${d.lease?.customerName ?? ''}${d.authorityCaseNumber ? ` · ${d.authorityCaseNumber}` : ''} · ${gallerySlots.length} files`}
+        slots={gallerySlots} initialKey={gallery.initialKey} onClose={() => setGallery(null)}
+        fileActions={{ download: true, print: true }} resolveUrl={fetchDocBlob} />
+    )}
+    </OpenDocCtx.Provider>
   );
 }
 

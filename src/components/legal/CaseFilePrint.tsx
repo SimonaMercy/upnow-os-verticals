@@ -98,6 +98,7 @@ export function CaseFilePrint({ disputeId, base, rp, backHref }: { disputeId: nu
             </div>
           </div>
           <div className="mt-3"><div className="text-[11px] font-bold text-[#5b615e] mb-1">Lease documents (contract, registration certificate)</div><DocList docs={cf.leaseDocuments} empty="No lease documents on record." /></div>
+          <div className="mt-3"><div className="text-[11px] font-bold text-[#5b615e] mb-1">Customer KYC documents ({cf.lease?.customerType === 'company' ? 'company' : 'individual'})</div><DocList docs={d.customerDocuments ?? []} empty="No KYC documents on the customer record." /></div>
 
           <H>2 · Notice</H>
           <Row k="Notice type" v={d.noticeTypeLabel} />

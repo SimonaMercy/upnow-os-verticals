@@ -14,6 +14,29 @@
  * Pass `portalToken` to use the no-login magic-link endpoint (landlord / tenant),
  * which only ever serves the link's own contract documents.
  */
+/**
+ * Print a STORED document by id: its bytes come same-origin through the API
+ * (documents/:id/file), go into a hidden frame, and the browser's own print
+ * dialog opens on it — the clean file, not the watermarked on-screen canvas.
+ * Only offered where a surface has opted in (see DocumentReaderModal `fileActions`).
+ */
+export async function printStoredDoc(documentId: number): Promise<void> {
+  const res = await fetch(`/api/documents/${documentId}/file`, { credentials: 'include', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not open the file to print (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  if (blob.type.startsWith('image/')) {
+    frame.srcdoc = `<html><body style="margin:0"><img src="${url}" style="max-width:100%" onload="setTimeout(function(){window.focus();window.print()},50)"></body></html>`;
+  } else {
+    frame.src = url;
+    frame.onload = () => { try { frame.contentWindow?.focus(); frame.contentWindow?.print(); } catch { window.open(url, '_blank', 'noopener'); } };
+  }
+  document.body.appendChild(frame);
+  setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60_000);
+}
+
 export async function downloadStoredDoc(documentId: number, portalToken?: string | null): Promise<void> {
   const endpoint = portalToken
     ? `/api/portal/${portalToken}/documents/${documentId}/download`

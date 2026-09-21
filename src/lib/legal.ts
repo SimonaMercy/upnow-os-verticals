@@ -68,9 +68,13 @@ export const BREACH_EVENT_TYPE_LABELS: Record<BreachEventType, string> = {
 export interface LeaseSummary {
   id: number; status: string; startDate: string; endDate: string; annualRent: number | null; registrationNumber: string | null;
   customerName: string | null; customerUserId: number | null; unitId: number | null; unitNumber: string | null;
+  /** The customer record and whether it is a company or a person. */
+  customerId?: number | null; customerType?: string | null;
   propertyId: number | null; buildingName: string | null;
 }
 export interface LegalDoc { id: number; key: string; name: string; fileUrl: string; mimeType: string | null; category: string; createdAt: string }
+/** One of the customer's own KYC papers, read live from the customer record. */
+export interface CustomerKycDoc extends LegalDoc { documentNumber: string | null; expiryDate: string | null; expired: boolean }
 export interface LegalAlert { key: string; text: string }
 
 export interface BreachRow {
@@ -163,7 +167,7 @@ export interface RenderQuery { breachId?: number; disputeId?: number; leaseId?: 
 
 export interface DisputeDetail extends DisputeRow {
   config: { authorityDisplayName: string; mediationRequired: boolean; registrationRequiredToFile: boolean; appealWindowDays: number };
-  noticeProofDocument: LegalDoc | null; events: CaseEvent[]; documents: LegalDoc[]; payments: DisputePayment[];
+  noticeProofDocument: LegalDoc | null; events: CaseEvent[]; documents: LegalDoc[]; customerDocuments?: CustomerKycDoc[]; payments: DisputePayment[];
   bouncedSettlementOffer: 'enforcement' | null; breach: BreachDetail | null;
   costs: CaseCost[]; costTotals: CostTotals;
   missingCosts: MissingCost[]; missingCostsTotal: number;

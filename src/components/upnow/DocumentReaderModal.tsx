@@ -10,7 +10,8 @@
  * by design: documents are previewed in-portal, never downloaded.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { FileText, X, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { FileText, X, ChevronLeft, ChevronRight, Upload, Download, Printer, Loader2 } from 'lucide-react';
+import { downloadStoredDoc, printStoredDoc } from '@/lib/downloadDoc';
 import { DeleteDocumentButton } from './DeleteDocumentButton';
 import { SecureDocCanvas } from './SecureDocCanvas';
 import { currentDocWatermark } from '@/lib/docViewer';
@@ -18,7 +19,11 @@ import { useBackClose } from '@/lib/useSlideOver';
 
 export type ReaderFile = { id: string | number; name: string; url: string; mimeType?: string | null };
 /** group → optional section heading in the sidebar (e.g. a lease ref). */
-export type ReaderSlot = { key: string; label: string; group?: string | null; files: ReaderFile[] };
+export type ReaderSlot = {
+  key: string; label: string; group?: string | null; files: ReaderFile[];
+  /** A line under the label in place of "Uploaded" — e.g. the document's own date. */
+  note?: string | null;
+};
 
 const C = {
   ink: '#1a1916', ink2: '#2b342e', body: '#5a635c', mute: '#9aa39c',
@@ -30,7 +35,21 @@ const C = {
 const isImage = (f: ReaderFile) =>
   (f.mimeType ?? '').startsWith('image/') || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(f.url);
 
-export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose, deletableDocId, onDeleted }: {
+export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose, deletableDocId, onDeleted, wide = false, fileActions, resolveUrl }: {
+  /** A bigger window and a wider list whose labels wrap — for a long set read at length (a legal case file). */
+  wide?: boolean;
+  /**
+   * Download / Print for the file being viewed. OFF unless a surface opts in:
+   * customer documents stay view-only everywhere else. Needs a real document id
+   * (a numeric `ReaderFile.id`); the server still decides who may read the file.
+   */
+  fileActions?: { download?: boolean; print?: boolean };
+  /**
+   * Where a file's bytes come from when `ReaderFile.url` cannot be opened directly
+   * (a private-bucket URL). Called once per file, when it is first shown — a long
+   * set opens at once and loads each file as it is reached.
+   */
+  resolveUrl?: (f: ReaderFile) => Promise<string>;
   title?: string;
   summary?: string | null;
   slots: ReaderSlot[];
@@ -105,9 +124,35 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
 
   const select = (key: string) => { setActiveKey(key); setFileIdx(0); };
 
+  // Resolved file URLs, kept for as long as the reader is open.
+  const [resolved, setResolved] = useState<Record<string, string>>({});
+  const activeId = rActive ? String(rActive.id) : null;
+  useEffect(() => {
+    if (!resolveUrl || !rActive || !activeId || resolved[activeId]) return;
+    let alive = true;
+    resolveUrl(rActive).then(u => { if (alive) setResolved(m => ({ ...m, [activeId]: u })); })
+      .catch(() => { if (alive) setResolved(m => ({ ...m, [activeId]: 'failed' })); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, resolveUrl]);
+  const shownUrl = !rActive ? null : !resolveUrl ? rActive.url : (activeId && resolved[activeId] && resolved[activeId] !== 'failed' ? resolved[activeId] : null);
+  const loadFailed = !!(resolveUrl && activeId && resolved[activeId] === 'failed');
+
+  const actionDocId = rActive && typeof rActive.id === 'number' ? rActive.id : null;
+  const [acting, setActing] = useState<'download' | 'print' | null>(null);
+  const [actError, setActError] = useState<string | null>(null);
+  const act = async (what: 'download' | 'print') => {
+    if (actionDocId == null) return;
+    setActing(what); setActError(null);
+    try { await (what === 'download' ? downloadStoredDoc(actionDocId) : printStoredDoc(actionDocId)); }
+    catch { setActError(what === 'download' ? 'Could not download this file.' : 'Could not print this file.'); }
+    finally { setActing(null); }
+  };
+  const actionBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '7px 11px', borderRadius: 9, border: `1px solid ${C.line}`, background: '#fff', color: C.ink2, cursor: 'pointer', flex: '0 0 auto' };
+
   return (
     <div onClick={dismiss} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,18,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 70 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 940, height: isTight ? '100%' : '90vh', maxHeight: isTight ? '100%' : '90vh', background: '#fff', borderRadius: isTight ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 70px rgba(15,30,22,.42)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: wide ? 1400 : 940, height: isTight ? '100%' : (wide ? '94vh' : '90vh'), maxHeight: isTight ? '100%' : (wide ? '94vh' : '90vh'), background: '#fff', borderRadius: isTight ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 70px rgba(15,30,22,.42)' }}>
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '15px 18px', borderBottom: `1px solid ${C.line2}`, flex: '0 0 auto' }}>
           <span style={{ width: 32, height: 32, flex: '0 0 32px', borderRadius: 9, background: C.greenBg, color: C.greenT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={16} /></span>
@@ -120,7 +165,7 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: isTight ? 'column' : 'row' }}>
           {/* sidebar — document list */}
-          <aside style={{ width: isTight ? 'auto' : 250, flex: '0 0 auto', maxHeight: isTight ? 150 : 'none', overflowY: 'auto', borderRight: isTight ? 'none' : `1px solid ${C.line2}`, borderBottom: isTight ? `1px solid ${C.line2}` : 'none', padding: 10, display: 'flex', flexDirection: 'column', gap: 3, background: C.soft }}>
+          <aside style={{ width: isTight ? 'auto' : (wide ? 330 : 250), flex: '0 0 auto', maxHeight: isTight ? 150 : 'none', overflowY: 'auto', borderRight: isTight ? 'none' : `1px solid ${C.line2}`, borderBottom: isTight ? `1px solid ${C.line2}` : 'none', padding: 10, display: 'flex', flexDirection: 'column', gap: 3, background: C.soft }}>
             {slots.map((s, i) => {
               const attached = s.files.length > 0;
               const selected = s.key === activeKey;
@@ -131,8 +176,8 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                   <div onClick={() => attached && select(s.key)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 11px', borderRadius: 10, cursor: attached ? 'pointer' : 'default', border: `1px solid ${selected ? C.greenBd : 'transparent'}`, background: selected ? C.greenBg : 'transparent' }}>
                     <span style={{ width: 30, height: 30, flex: '0 0 30px', borderRadius: 8, background: selected ? C.green : (attached ? C.greenBg2 : C.line4), color: selected ? '#fff' : (attached ? C.greenT : '#aab2ab'), display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={15} /></span>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: attached ? C.greenT : C.amber }}>{attached ? (s.files.length > 1 ? `${s.files.length} files` : 'Uploaded') : 'Not uploaded'}</div>
+                      <div style={wide ? { fontSize: 12.5, fontWeight: 700, color: C.ink2, lineHeight: 1.3, overflowWrap: 'anywhere' } : { fontSize: 12.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: attached ? (s.note ? C.mute : C.greenT) : C.amber }}>{attached ? (s.note ?? (s.files.length > 1 ? `${s.files.length} files` : 'Uploaded')) : 'Not uploaded'}</div>
                     </div>
                   </div>
                 </div>
@@ -150,6 +195,16 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
               {/* Removing the file you are looking at. Deliberately here rather
                   than on the sidebar rows: the sidebar names a SLOT, and a slot
                   can hold several files. */}
+              {rActive && actionDocId != null && fileActions?.download && (
+                <button type="button" onClick={() => void act('download')} disabled={acting != null} style={actionBtn} title="Download this file">
+                  {acting === 'download' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Download
+                </button>
+              )}
+              {rActive && actionDocId != null && fileActions?.print && (
+                <button type="button" onClick={() => void act('print')} disabled={acting != null} style={actionBtn} title="Print this file">
+                  {acting === 'print' ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Print
+                </button>
+              )}
               {rActive && deleteId != null && (
                 <DeleteDocumentButton
                   docId={deleteId}
@@ -181,7 +236,12 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
             )}
 
             {/* preview body */}
-            {rActive ? (
+            {actError && <div style={{ padding: '7px 18px', fontSize: 11.5, fontWeight: 600, color: '#b42318', background: '#fdecec', flex: '0 0 auto' }}>{actError}</div>}
+            {rActive && !shownUrl ? (
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.soft, color: C.mute, fontSize: 12.5, gap: 8 }}>
+                {loadFailed ? 'This file could not be opened.' : <><Loader2 size={16} className="animate-spin" /> Opening…</>}
+              </div>
+            ) : rActive ? (
               <div
                 onContextMenu={e => e.preventDefault()}
                 onDragStart={e => e.preventDefault()}
@@ -189,7 +249,7 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
               >
                 <SecureDocCanvas
                   key={`${rActive.id}-${rf}`}
-                  fileUrl={rActive.url}
+                  fileUrl={shownUrl as string}
                   isImage={isImage(rActive)}
                   caption={rActive.name}
                   watermark={watermark}
