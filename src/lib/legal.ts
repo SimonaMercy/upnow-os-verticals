@@ -222,11 +222,11 @@ export const legalApi = {
   breach: (base: string, rp: number | undefined, id: number) => apiGet<BreachDetail>(legalUrl(base, rp, `/breaches/${id}`)),
   reportBreach: (base: string, rp: number | undefined, body: { leaseId: number; category: BreachCategory; description?: string; reportedBy?: BreachReportedBy; openedDate?: string; documentId?: number | null }) =>
     apiPost<BreachDetail>(legalUrl(base, rp, '/breaches'), body),
-  updateBreach: (base: string, rp: number | undefined, id: number, body: { notes?: string | null; description?: string | null }) =>
+  updateBreach: (base: string, rp: number | undefined, id: number, body: { notes?: string | null; description?: string | null; correctionDeadline?: string; finalDeadline?: string }) =>
     apiPatch<BreachDetail>(legalUrl(base, rp, `/breaches/${id}`), body),
-  breachWarning: (base: string, rp: number | undefined, id: number, body: { date?: string; description?: string | null; documentId?: number | null }) =>
+  breachWarning: (base: string, rp: number | undefined, id: number, body: { date?: string; deadline?: string | null; description?: string | null; documentId?: number | null }) =>
     apiPost<BreachDetail>(legalUrl(base, rp, `/breaches/${id}/warning`), body),
-  breachFinalWarning: (base: string, rp: number | undefined, id: number, body: { date?: string; description?: string | null; documentId?: number | null }) =>
+  breachFinalWarning: (base: string, rp: number | undefined, id: number, body: { date?: string; deadline?: string | null; description?: string | null; documentId?: number | null }) =>
     apiPost<BreachDetail>(legalUrl(base, rp, `/breaches/${id}/final-warning`), body),
   breachResolve: (base: string, rp: number | undefined, id: number, body: { date?: string; description?: string | null } = {}) =>
     apiPost<BreachDetail>(legalUrl(base, rp, `/breaches/${id}/resolve`), body),

@@ -30,7 +30,7 @@ export default function ManagerLegalCasePage() {
           listHref={`/dashboard/manager/legal?rp=${effectiveRp}`}
           caseFileHref={`/dashboard/manager/legal/${id}/case-file?rp=${effectiveRp}`}
           leaseHrefOf={(leaseId) => `/dashboard/manager/operations/${leaseId}?rp=${effectiveRp}`}
-          breachHrefOf={(leaseId) => `/dashboard/manager/operations/${leaseId}?rp=${effectiveRp}#sec-breaches`}
+          breachHrefOf={(_leaseId, breachId) => `/dashboard/manager/breaches/${breachId}?rp=${effectiveRp}`}
         />
       )}
     </div>

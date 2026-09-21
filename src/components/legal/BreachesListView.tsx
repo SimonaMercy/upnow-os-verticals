@@ -11,6 +11,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Gavel, Loader2, Search, ShieldAlert } from 'lucide-react';
 import { ReportBreachDialog } from '@/components/legal/ReportBreachDialog';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -24,14 +25,17 @@ const pillCls = 'text-[10px] font-bold px-[7px] py-[2px] rounded-full';
 const OPEN_STAGES: BreachStage[] = ['reported', 'warning_sent', 'final_warning'];
 const chipStyle = (on: boolean) => on ? { background: '#1c1f1d', color: '#fff' } : { background: '#fff', color: '#5b615e', border: '1px solid #e6e8e6' };
 
-export function BreachesListView({ base, rp, leaseHrefOf, caseHrefOf, legalHref }: {
+export function BreachesListView({ base, rp, leaseHrefOf, caseHrefOf, legalHref, breachHrefOf }: {
   base: string; rp?: number | null;
   /** The Legal (cases) page, for the cross-link in the intro. */
   legalHref: string;
   /** The lease page; rows add `#sec-breaches` (and `?escalate=<id>` for the Escalate link). */
   leaseHrefOf: (leaseId: number) => string;
+  /** The breach's own page. A breach used to open only inside its lease; without this prop it still does. */
+  breachHrefOf?: (breachId: number) => string;
   caseHrefOf: (caseId: number) => string;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<BreachRow[] | null>(null);
   const [caseByLease, setCaseByLease] = useState<Map<number, number>>(new Map());
   const [err, setErr] = useState<string | null>(null);
@@ -139,17 +143,24 @@ export function BreachesListView({ base, rp, leaseHrefOf, caseHrefOf, legalHref 
             const t = breachStageTone(b.stage);
             const days = daysFromToday(b.nextDate);
             const caseId = caseByLease.get(b.leaseId) ?? (b.disputeId ?? undefined);
+            // The WHOLE row opens the breach. The links inside it (lease, case, Escalate) keep
+            // their own targets — they stop the click from reaching the row.
+            const openHref = breachHrefOf ? breachHrefOf(b.id) : `${leaseHrefOf(b.leaseId)}#sec-breaches`;
+            const own = (e: React.MouseEvent) => e.stopPropagation();
             return (
-              <div key={b.id} className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_130px_minmax(0,1.3fr)_150px] items-center px-[18px] py-3.5 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#fafbfa]">
+              <div key={b.id} role="link" tabIndex={0} aria-label={`Open breach #${b.id}`}
+                onClick={() => router.push(openHref)}
+                onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) router.push(openHref); }}
+                className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_130px_minmax(0,1.3fr)_150px] items-center px-[18px] py-3.5 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#f3f8f5] cursor-pointer focus:outline-none focus-visible:bg-[#f3f8f5]">
                 <div className="min-w-0">
                   <div className="font-semibold truncate">Unit {b.lease?.unitNumber ?? '—'} <span className="font-normal text-[#5b615e]">{b.lease?.customerName ?? ''}</span></div>
-                  <div className="text-[11px] text-[#8a8f8c] truncate">Breach #{b.id} · {b.lease?.buildingName ?? ''} · <Link href={leaseHrefOf(b.leaseId)} className="text-[#1a7a52] hover:underline">CID-{b.leaseId}</Link> · opened {fmtD(b.openedDate)}</div>
+                  <div className="text-[11px] text-[#8a8f8c] truncate">Breach #{b.id} · {b.lease?.buildingName ?? ''} · <Link href={leaseHrefOf(b.leaseId)} onClick={own} className="text-[#1a7a52] hover:underline">CID-{b.leaseId}</Link> · opened {fmtD(b.openedDate)}</div>
                 </div>
                 <div className="min-w-0"><div className="font-semibold truncate">{b.categoryLabel}</div>{b.description && <div className="text-[11px] text-[#8a8f8c] truncate">{b.description}</div>}</div>
                 <div className="flex flex-col items-start gap-1">
                   <span className={pillCls} style={{ background: t.bg, color: t.fg }}>{b.stageLabel}</span>
                   {caseId != null && (
-                    <Link href={caseHrefOf(caseId)} className={pillCls + ' no-underline'} style={{ background: '#ece9fd', color: '#5b3fbf' }} title={b.stage === 'escalated' ? 'The case this breach opened' : 'This lease is already in legal'}>
+                    <Link href={caseHrefOf(caseId)} onClick={own} className={pillCls + ' no-underline'} style={{ background: '#ece9fd', color: '#5b3fbf' }} title={b.stage === 'escalated' ? 'The case this breach opened' : 'This lease is already in legal'}>
                       {b.stage === 'escalated' ? 'case' : 'also case'} #{caseId}
                     </Link>
                   )}
@@ -162,11 +173,11 @@ export function BreachesListView({ base, rp, leaseHrefOf, caseHrefOf, legalHref 
                 </div>
                 <div className="text-right flex items-center justify-end gap-3">
                   {b.actions.escalate && (
-                    <Link href={withQuery(leaseHrefOf(b.leaseId), `escalate=${b.id}`)} className="inline-flex items-center gap-1 text-[11px] font-semibold no-underline" style={{ color: '#5b3fbf' }} title="Opens the lease with the Escalate dialog">
+                    <Link href={breachHrefOf ? `${breachHrefOf(b.id)}${breachHrefOf(b.id).includes('?') ? '&' : '?'}escalate=1` : withQuery(leaseHrefOf(b.leaseId), `escalate=${b.id}`)} onClick={own} className="inline-flex items-center gap-1 text-[11px] font-semibold no-underline" style={{ color: '#5b3fbf' }} title="Opens the breach with the Escalate dialog">
                       <Gavel size={12} /> Escalate
                     </Link>
                   )}
-                  <Link href={`${leaseHrefOf(b.leaseId)}#sec-breaches`} className="text-[12px] font-semibold text-[#1a7a52] hover:text-[#125a3c] no-underline">Open →</Link>
+                  <Link href={openHref} onClick={own} className="text-[12px] font-semibold text-[#1a7a52] hover:text-[#125a3c] no-underline">Open →</Link>
                 </div>
               </div>
             );

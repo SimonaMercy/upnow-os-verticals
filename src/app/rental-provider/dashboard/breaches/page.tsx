@@ -11,6 +11,7 @@ export default function BreachesPage() {
         leaseHrefOf={(leaseId) => `/rental-provider/dashboard/operations/${leaseId}`}
         legalHref={'/rental-provider/dashboard/legal'}
         caseHrefOf={(id) => `/rental-provider/dashboard/legal/${id}`}
+        breachHrefOf={(id) => `/rental-provider/dashboard/breaches/${id}`}
       />
     </div>
   );

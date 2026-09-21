@@ -112,7 +112,7 @@ const STAGE_HINT: Record<DisputeStage, string> = {
   enforcement: 'The decision is being enforced — record each action taken.', closed: '',
 };
 
-const Modal = ({ title, sub, onClose, children, footer, wide }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode; wide?: boolean }) => (
+export const Modal = ({ title, sub, onClose, children, footer, wide }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode; wide?: boolean }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
     <div className={`bg-white rounded-2xl w-full ${wide ? 'max-w-2xl' : 'max-w-md'} max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between px-5 py-4 border-b border-[#f1f3f1]">
@@ -125,7 +125,7 @@ const Modal = ({ title, sub, onClose, children, footer, wide }: { title: string;
   </div>
 );
 
-const FilePick = ({ file, onPick, label }: { file: File | null; onPick: (f: File | null) => void; label: string }) => (
+export const FilePick = ({ file, onPick, label }: { file: File | null; onPick: (f: File | null) => void; label: string }) => (
   <label className="flex items-center gap-2 text-xs text-[#5b615e] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f9f8f6]">
     <UploadCloud size={14} className="text-[#1a7a52]" />{file ? file.name : label}
     <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,image/*,application/pdf" onChange={e => { onPick(e.target.files?.[0] ?? null); e.target.value = ''; }} />
@@ -134,12 +134,12 @@ const FilePick = ({ file, onPick, label }: { file: File | null; onPick: (f: File
 
 /** A long list keeps its card a fixed height and scrolls INSIDE it — the page itself stays short.
  *  The title row (count + buttons) sits above and never scrolls away. */
-const lockedList = 'overflow-y-auto overscroll-contain pr-1 -mr-1 [scrollbar-width:thin]';
+export const lockedList = 'overflow-y-auto overscroll-contain pr-1 -mr-1 [scrollbar-width:thin]';
 
 /** The page's document gallery, when there is one: every document link opens it AT that document. */
-const OpenDocCtx = createContext<((docId: number) => void) | null>(null);
+export const OpenDocCtx = createContext<((docId: number) => void) | null>(null);
 
-const DocLink = ({ d, caption }: { d: LegalDoc; caption?: string }) => {
+export const DocLink = ({ d, caption }: { d: LegalDoc; caption?: string }) => {
   const openInGallery = useContext(OpenDocCtx);
   return (
     <button type="button" onClick={() => (openInGallery ? openInGallery(d.id) : void openDocViewerByIds([{ id: d.id, caption: caption ?? d.name, mimeType: d.mimeType }], caption ?? d.name))}
@@ -648,7 +648,7 @@ export function DisputeDetailView({ disputeId, base, rp, listHref, caseFileHref,
                     <span>{d.breach.events.length} breach event{d.breach.events.length === 1 ? '' : 's'} and {d.breach.documents.length} attachment{d.breach.documents.length === 1 ? '' : 's'} carried into this case (purple rows below)</span>
                   </div>
                 </div>
-                {breachHrefOf && <Link href={breachHrefOf(d.breach.leaseId, d.breach.id)} className="text-[11px] font-semibold text-[#5b3fbf] underline shrink-0">Open the breach on the lease</Link>}
+                {breachHrefOf && <Link href={breachHrefOf(d.breach.leaseId, d.breach.id)} className="text-[11px] font-semibold text-[#5b3fbf] underline shrink-0">Open the breach</Link>}
               </div>
             </div>
           )}

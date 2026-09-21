@@ -40,6 +40,7 @@ export default function ManagerBreachesPage() {
           leaseHrefOf={(leaseId) => `/dashboard/manager/operations/${leaseId}?rp=${effectiveRp}`}
           legalHref={`/dashboard/manager/legal?rp=${effectiveRp}`}
           caseHrefOf={(id) => `/dashboard/manager/legal/${id}?rp=${effectiveRp}`}
+          breachHrefOf={(id) => `/dashboard/manager/breaches/${id}?rp=${effectiveRp}`}
         />
       )}
     </div>

@@ -13,7 +13,7 @@ export default function LegalCasePage() {
       listHref="/rental-provider/dashboard/legal"
       caseFileHref={`/rental-provider/dashboard/legal/${id}/case-file`}
       leaseHrefOf={(leaseId) => `/rental-provider/dashboard/operations/${leaseId}`}
-      breachHrefOf={(leaseId) => `/rental-provider/dashboard/operations/${leaseId}#sec-breaches`}
+      breachHrefOf={(_leaseId, breachId) => `/rental-provider/dashboard/breaches/${breachId}`}
     />
   );
 }
