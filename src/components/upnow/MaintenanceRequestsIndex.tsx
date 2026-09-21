@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Wrench, ImageIcon, Search, Plus, X } from 'lucide-react';
+import { Wrench, ImageIcon, Search, X, Loader2 } from 'lucide-react';
 import { apiGet, apiPost, apiPut } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { tenantDisplayName } from '@/lib/tenantName';
@@ -45,6 +45,13 @@ const STAGE: Record<string, string> = {
   sign_off: 'Sign-off', close_out: 'Close-out', closed: 'Closed', declined: 'Declined', cancelled: 'Cancelled',
 };
 const COVER: Record<string, string> = { covered: 'Landlord pays', chargeable: 'Customer pays', not_offered: 'Not offered' };
+/** Who raised it, in words — never the raw role key. */
+const RAISED_BY: Record<string, string> = { rental_provider: 'the landlord', manager: 'a manager', customer: 'the customer', tenant: 'the customer', system: 'the system' };
+const STAGE_CHIP: Record<string, { bg: string; fg: string }> = {
+  requested: { bg: '#f1f3f1', fg: '#5b615e' }, awaiting_approval: { bg: '#fdf3dc', fg: '#8a5a00' }, in_progress: { bg: '#e9effc', fg: '#2a5bd7' },
+  sign_off: { bg: '#ede9fe', fg: '#5b21b6' }, close_out: { bg: '#ede9fe', fg: '#5b21b6' }, closed: { bg: '#e7f4ee', fg: '#1a7a52' },
+  declined: { bg: '#fdecec', fg: '#b42318' }, cancelled: { bg: '#f1f3f1', fg: '#5b615e' },
+};
 const ALLOC: Record<string, string> = { owner: 'Owner', tenant: 'Customer (lease charge)', property_expense: 'Property expense' };
 const fmt = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const aed = (n?: number | null) => n != null ? `AED ${Number(n).toLocaleString('en-AE')}` : '—';
@@ -61,7 +68,9 @@ export function MaintenanceRequestsIndex({ base, rp, detailHref, boardHref }: {
   const [bucket, setBucket] = useState<Bucket>('open');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
   const [q, setQ] = useState('');
+  const [propFilter, setPropFilter] = useState('');
   const [creating, setCreating] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     const path = `${base}/requests?scope=all${rp != null ? `&rp=${rp}` : ''}`;
@@ -89,118 +98,159 @@ export function MaintenanceRequestsIndex({ base, rp, detailHref, boardHref }: {
     return c;
   }, [rows, bucket]);
 
-  const spent = useMemo(() => list.reduce((s, r) => s + (r.invoiceTotalAed ?? 0), 0), [list]);
 
-  const tab = (k: Bucket, label: string) => (
-    <button key={k} type="button" onClick={() => setBucket(k)}
-      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${bucket === k ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
-      {label} <span className={bucket === k ? 'opacity-80' : 'text-[#9b9890]'}>· {counts[k]}</span>
-    </button>
-  );
+  // ── the page follows its neighbours in the Maintenance section (AMC Contracts, Vendors):
+  //    title + one line · main button top-right · four tiles · ONE filter row · compact table.
+  const needsYou = (r: Row) => bucketOf(r) === 'open' && (r.stage === 'awaiting_approval' || r.stage === 'sign_off' || r.stage === 'close_out' || (r.stage === 'requested' && !!r.holdReason));
+  const kpi = useMemo(() => {
+    const all = rows ?? [];
+    return {
+      open: all.filter(r => bucketOf(r) === 'open').length,
+      needsYou: all.filter(needsYou).length,
+      completed: all.filter(r => bucketOf(r) === 'completed').length,
+      spent: all.filter(r => bucketOf(r) === 'completed').reduce((n, r) => n + (r.invoiceTotalAed ?? 0), 0),
+    };
+  }, [rows]);
+  const propOptions = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of rows ?? []) if (r.property) m.set(r.property.id, r.property.buildingName ?? `Property #${r.property.id}`);
+    return [...m.entries()].sort((x, y) => x[1].localeCompare(y[1]));
+  }, [rows]);
+  const shown = useMemo(() => list.filter(r => !propFilter || String(r.property?.id ?? '') === propFilter), [list, propFilter]);
+  const loading = rows == null && !err;
+  const GRID = 'grid grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,.9fr)_70px] gap-3 items-center px-[18px]';
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+    <div className="max-w-5xl mx-auto px-4 py-8 text-[#1c1f1d]">
+      <div className="flex items-start justify-between gap-5 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1916] flex items-center gap-2"><Wrench size={20} /> Maintenance requests</h1>
-          <p className="text-sm text-[#6b6860] max-w-2xl mt-1">
-            Everything raised on your buildings — a unit (occupied or vacant), a common area, a building system. Open work is worked on the <Link href={boardHref} className="text-[#1a7a5a] font-semibold underline">Operations board</Link>;
-            a request leaves the board when it is closed out and lives here — what was fixed, by whom, and where the cost landed.
+          <h1 className="text-2xl font-bold tracking-[-.01em]">Maintenance requests</h1>
+          <p className="text-[12.5px] text-[#5b615e] mt-1">
+            Every repair and restoration job on your buildings — open, completed and cancelled. Open work is also on the{' '}
+            <Link href={boardHref} className="text-[#1a7a52] hover:text-[#125a3c] underline font-semibold">Operations board</Link>.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="relative">
-            <Search size={13} className="absolute left-2.5 top-2.5 text-[#9b9890]" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref, place, item, provider, customer…"
-              className="pl-8 pr-3 py-2 border border-[#e8e6e0] rounded-lg text-sm bg-white focus:outline-none focus:border-[#2e9f82] w-72" />
-          </label>
-          <button type="button" onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-bold text-white cursor-pointer" style={{ background: '#2e9f82' }}>
-            <Plus size={14} /> New request
-          </button>
-        </div>
+        <button type="button" onClick={() => setCreating(true)}
+          className="text-[12px] font-semibold px-3.5 py-[9px] rounded-lg border border-[#1a7a52] bg-[#1a7a52] text-white hover:bg-[#156643] whitespace-nowrap cursor-pointer">+ New request</button>
       </div>
       {creating && (
         <NewRequestModal base={base} rp={rp} detailHref={detailHref} onClose={() => setCreating(false)} />
       )}
 
-      <div className="flex items-center gap-1 mb-3 flex-wrap">
-        {tab('open', 'Open')}{tab('completed', 'Completed')}{tab('ended', 'Declined & cancelled')}
-        {bucket === 'completed' && list.length > 0 && (
-          <span className="ml-auto text-xs text-[#6b6860]">{list.length} closed · invoices {aed(spent)}</span>
-        )}
-      </div>
-      {/* 0267 — where: every scope, one list */}
-      <div className="flex items-center gap-1 mb-3 flex-wrap text-xs">
-        <span className="text-[#9b9890] mr-1">Where</span>
-        {(['all', 'unit', 'common_area', 'building_system'] as ScopeFilter[]).map(k => (
-          <button key={k} type="button" onClick={() => setScopeFilter(k)}
-            className={`px-2.5 py-1 rounded-full font-semibold cursor-pointer border ${scopeFilter === k ? 'bg-[#1a1916] text-white border-[#1a1916]' : 'text-[#6b6860] border-[#e8e6e0] bg-white hover:border-[#c9c6be]'}`}>
-            {k === 'all' ? 'All' : k === 'unit' ? 'Units' : k === 'common_area' ? 'Common areas' : 'Building systems'}
-            <span className={scopeFilter === k ? 'opacity-70' : 'text-[#9b9890]'}> · {scopeCounts[k]}</span>
-          </button>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-[22px]">
+        {[
+          { label: 'Open', value: String(kpi.open), color: '#1a7a52' },
+          { label: 'Waiting on you', value: String(kpi.needsYou), color: kpi.needsYou ? '#b42318' : '#1c1f1d' },
+          { label: 'Completed', value: String(kpi.completed), color: '#1c1f1d' },
+          { label: 'Spent on completed work', value: aed(kpi.spent), color: '#1c1f1d' },
+        ].map(k => (
+          <div key={k.label} className="bg-white border border-[#e6e8e6] rounded-xl px-4 py-3.5">
+            <p className="text-[11px] text-[#5b615e]">{k.label}</p>
+            <p className="text-[22px] font-extrabold mt-1 leading-none" style={{ color: k.color }}>{loading ? '…' : k.value}</p>
+          </div>
         ))}
       </div>
 
-      {err && <p className="text-sm text-red-700 bg-[#fef2f2] border border-[#fecaca] rounded-xl px-4 py-2.5 mb-3">{err}</p>}
-      {rows == null && !err && <p className="text-sm text-[#9b9890]">Loading…</p>}
+      <div className="flex items-center gap-2.5 mt-5 flex-wrap">
+        <label className="relative w-full sm:w-[260px]">
+          <Search size={13} className="absolute left-3 top-[10px] text-[#8a8f8c]" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ref, unit, item, provider…"
+            className="pl-8 pr-3 py-2 border border-[#e6e8e6] rounded-lg text-[12px] bg-white focus:outline-none focus:border-[#1a7a52] w-full" />
+        </label>
+        <select value={propFilter} onChange={e => setPropFilter(e.target.value)} title="Filter by property"
+          className="py-2 pl-3 pr-8 border border-[#e6e8e6] rounded-lg text-[12px] bg-white focus:outline-none focus:border-[#1a7a52] w-full sm:w-auto max-w-[240px]"
+          style={propFilter ? { borderColor: '#1a7a52', color: '#1a7a52', fontWeight: 600 } : undefined}>
+          <option value="">All properties</option>
+          {propOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        {/* 0267 — where the work is: one list, every scope */}
+        <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value as ScopeFilter)} title="Where the work is"
+          className="py-2 pl-3 pr-8 border border-[#e6e8e6] rounded-lg text-[12px] bg-white focus:outline-none focus:border-[#1a7a52] w-full sm:w-auto"
+          style={scopeFilter !== 'all' ? { borderColor: '#1a7a52', color: '#1a7a52', fontWeight: 600 } : undefined}>
+          <option value="all">All places · {scopeCounts.all}</option>
+          <option value="unit">Units · {scopeCounts.unit}</option>
+          <option value="common_area">Common areas · {scopeCounts.common_area}</option>
+          <option value="building_system">Building systems · {scopeCounts.building_system}</option>
+        </select>
+        <div className="flex gap-1.5 ml-auto">
+          {([['open', `Open · ${counts.open}`], ['completed', `Completed · ${counts.completed}`], ['ended', `Declined & cancelled · ${counts.ended}`]] as ReadonlyArray<readonly [Bucket, string]>).map(([key, label]) => (
+            <button key={key} type="button" onClick={() => setBucket(key)}
+              className="text-[11px] px-3 py-1.5 rounded-full font-semibold transition-colors cursor-pointer"
+              style={bucket === key ? { background: '#1c1f1d', color: '#fff' } : { background: '#fff', color: '#5b615e', border: '1px solid #e6e8e6' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {rows != null && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-[#9b9890] border-b border-[#f0eeea]">
-                <th className="text-left px-4 py-2.5 font-semibold">Request</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Where</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Customer</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Provider</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Who pays</th>
-                <th className="text-left px-4 py-2.5 font-semibold">{bucket === 'completed' ? 'Closed · cost' : 'Stage'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map(r => (
-                <tr key={r.id} className="border-b border-[#f9f8f6] last:border-0 hover:bg-[#fafaf8]">
-                  <td className="px-4 py-2.5">
-                    <Link href={detailHref(r.id)} className="block">
-                      <span className="font-mono text-[10px] text-[#9b9890]">{r.ref}</span>
-                      <span className="block font-semibold text-[#1a1916]">{r.title}</span>
-                      <span className="block text-[11px] text-[#6b6860]">{r.category?.name ?? '—'} · raised {fmt(r.createdAt)} by {r.raisedByRole ?? '—'}
-                        {(r.photoCount ?? 0) > 0 && <> · <ImageIcon size={10} className="inline -mt-0.5" /> {r.photoCount}</>}</span>
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5 text-[#1a1916]">
-                    {maintenancePlace(r)}
-                    {(r.scope ?? 'unit') !== 'unit' && <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#eef3f1] text-[#2e6f5e]">{SCOPE_LABEL[r.scope as MaintenanceScope]}</span>}
-                    <span className="block text-[11px] text-[#6b6860]">{r.property?.buildingName ?? ''}</span>
-                  </td>
-                  <td className="px-4 py-2.5 text-[#1a1916]">{tenantDisplayName({ name: r.customer?.name ?? null, entityType: r.customer?.entityType, companyName: r.customer?.companyName }) ?? <span className="text-[#9b9890]">{maintenanceNoCustomerLabel(r.scope)}</span>}</td>
-                  <td className="px-4 py-2.5 text-[#1a1916]">{r.provider ? `${r.provider.name}${r.provider.relationship === 'internal_team' ? ' · own team' : ''}` : '—'}</td>
-                  <td className="px-4 py-2.5 text-[#1a1916]">{r.coverage ? COVER[r.coverage] ?? r.coverage : <span className="text-[#9b9890]">undecided</span>}</td>
-                  <td className="px-4 py-2.5">
-                    {bucket === 'completed' ? (
-                      <>
-                        <span className="text-[#1a1916]">{fmt(r.closedAt)}</span>
-                        <span className="block text-[11px] text-[#6b6860]">{aed(r.invoiceTotalAed)}{r.costAllocation ? ` · ${ALLOC[r.costAllocation] ?? r.costAllocation}` : ''}</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-[#1a1916]">{STAGE[r.stage] ?? r.stage}</span>
-                        {r.stageNote && <span className="block text-[11px] text-[#92400e]">{r.stageNote}</span>}
-                        {bucket === 'ended' && <span className="block text-[11px] text-[#6b6860]">{fmt(r.declinedAt ?? r.cancelledAt)}</span>}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {list.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[#9b9890]">
-                  {bucket === 'completed' ? 'Nothing closed out yet — completed requests appear here once you close them out on the board.'
-                    : bucket === 'open' ? (scopeFilter === 'all' ? 'No open requests.' : 'No open requests here.') : 'Nothing declined or cancelled.'}
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+      {err && <p className="text-sm text-red-700 bg-[#fef2f2] border border-[#fecaca] rounded-xl px-4 py-2.5 mt-3.5">{err}</p>}
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#8a8f8c]"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+      ) : rows != null && shown.length === 0 ? (
+        <div className="bg-white border border-[#e6e8e6] rounded-[14px] mt-3.5 px-6 py-12 text-center">
+          <Wrench size={22} className="mx-auto text-[#b9bdba]" />
+          <p className="text-[12.5px] text-[#8a8f8c] mt-2">
+            {q.trim() || propFilter || scopeFilter !== 'all' ? 'Nothing matches these filters.'
+              : bucket === 'completed' ? 'Nothing completed yet — a request lands here once it is closed.'
+              : bucket === 'open' ? 'No open requests.' : 'Nothing declined or cancelled.'}
+          </p>
+        </div>
+      ) : rows != null && (
+        <div className="bg-white border border-[#e6e8e6] rounded-[14px] mt-3.5 overflow-hidden">
+          <div className="overflow-x-auto">
+            <div className="min-w-[860px]">
+              <div className={`${GRID} py-2.5 text-[10px] font-bold tracking-[.08em] text-[#8a8f8c] border-b border-[#eef0ee]`}>
+                <span>REQUEST</span><span>WHERE</span><span>PROVIDER</span><span>{bucket === 'completed' ? 'CLOSED · COST' : bucket === 'ended' ? 'ENDED' : 'COST SO FAR'}</span><span />
+              </div>
+              {shown.map(r => {
+                const st = STAGE_CHIP[r.stage] ?? STAGE_CHIP.requested;
+                const who = tenantDisplayName({ name: r.customer?.name ?? null, entityType: r.customer?.entityType, companyName: r.customer?.companyName });
+                return (
+                  <div key={r.id} onClick={() => router.push(detailHref(r.id))}
+                    className={`${GRID} py-3.5 text-[12.5px] border-b border-[#f1f3f1] last:border-0 cursor-pointer hover:bg-[#fafbfa]`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold">{r.title}</span>
+                        <span className="text-[10.5px] font-semibold px-2 py-[2px] rounded-full whitespace-nowrap" style={{ background: st.bg, color: st.fg }}>{STAGE[r.stage] ?? r.stage}</span>
+                        {needsYou(r) && <span className="text-[10.5px] font-semibold px-2 py-[2px] rounded-full whitespace-nowrap" style={{ background: '#fdecec', color: '#b42318' }}>Waiting on you</span>}
+                      </div>
+                      <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">
+                        {r.ref} · {r.category?.name ?? 'Maintenance'} · raised {fmt(r.createdAt)}{r.raisedByRole ? ` by ${RAISED_BY[r.raisedByRole] ?? r.raisedByRole}` : ''}
+                        {(r.photoCount ?? 0) > 0 && <> · <ImageIcon size={10} className="inline -mt-0.5" /> {r.photoCount}</>}
+                        {r.stageNote && r.stageNote !== 'Own team' && <span className="text-[#c47a00]"> · {r.stageNote}</span>}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold truncate">
+                        {maintenancePlace(r)}
+                        {(r.scope ?? 'unit') !== 'unit' && <span className="ml-1.5 text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[#eef3f1] text-[#2e6f5e]">{SCOPE_LABEL[r.scope as MaintenanceScope]}</span>}
+                      </div>
+                      <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">{[r.property?.buildingName, who ?? maintenanceNoCustomerLabel(r.scope)].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate">{r.provider ? r.provider.name : <span className="text-[#c47a00] font-semibold">Not assigned</span>}</div>
+                      <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">
+                        {[r.provider?.relationship === 'internal_team' ? 'Own team' : r.provider ? 'Vendor' : null, r.coverage ? COVER[r.coverage] ?? r.coverage : 'Who pays — undecided'].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <div className="min-w-0 whitespace-nowrap">
+                      {bucket === 'completed' ? (
+                        <>
+                          <div className="font-semibold">{aed(r.invoiceTotalAed)}</div>
+                          <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">closed {fmt(r.closedAt)}{r.costAllocation ? ` · ${ALLOC[r.costAllocation] ?? r.costAllocation}` : ''}</div>
+                        </>
+                      ) : bucket === 'ended' ? (
+                        <div className="text-[#5b615e]">{fmt(r.declinedAt ?? r.cancelledAt)}</div>
+                      ) : (
+                        <div className={r.invoiceTotalAed ? 'font-semibold' : 'text-[#b9bdba]'}>{r.invoiceTotalAed ? aed(r.invoiceTotalAed) : '—'}</div>
+                      )}
+                    </div>
+                    <div className="text-right text-[12px] font-semibold text-[#1a7a52] whitespace-nowrap">View →</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

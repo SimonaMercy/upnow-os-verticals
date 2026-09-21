@@ -31,6 +31,8 @@ interface DashboardStats {
   maintenance: number;
   reserved: number;
   occupancyRate: number;
+  /** Of `occupied`: units on a confirmed lease that has not started yet — leased, nobody in yet. */
+  leasedAhead?: number;
   /** Σ every unit's ASKING price — what the book would ask if it re-let today.
    *  `pricedUnits` must be shown with it: an unpriced unit contributes 0, so on
    *  a portfolio with any of those the total is a floor, not the answer. */
@@ -1635,7 +1637,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
                   described the scope without ever saying what it was, so the
                   percentage had no total to be read against. */}
               <p className="text-xs text-[var(--neutral-400)] mt-0.5">
-                {totalUnits ? `${occupied} of ${totalUnits} units let` : 'Across all units in your portfolio'}
+                {totalUnits ? `${occupied} of ${totalUnits} units let${stats?.leasedAhead ? ` · ${stats.leasedAhead} ${stats.leasedAhead === 1 ? 'starts' : 'start'} later` : ''}` : 'Across all units in your portfolio'}
               </p>
             </div>
           </div>

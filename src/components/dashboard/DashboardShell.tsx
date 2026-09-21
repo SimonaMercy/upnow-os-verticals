@@ -55,9 +55,9 @@ function useManagerNavPerms(role: UserRole): Record<string, boolean> {
 type NavBadgeKey = 'leads' | 'properties' | 'units' | 'operations' | 'emails' | 'whatsapp';
 type NavCounts = Partial<Record<NavBadgeKey, number>>;
 
-/** Entries the team is still working on: shown in local development, parked
- *  (hidden: true) on PRODUCTION builds — the routes stay reachable (owner, 10 Sep). */
-const DEV_ONLY = process.env.NODE_ENV === 'production' ? ({ hidden: true } as const) : ({} as const);
+// Maintenance → Requests was hidden on PRODUCTION builds while it was being built (owner, 10 Sep 2026).
+// Switched on everywhere on 21 Sep 2026 (owner: "let's enable the tabs that we hide for production") —
+// the restoration / own-team jobs, the Units page and the Vacant Units report all lead to it.
 
 type NavItem =
   // `match` lists extra path prefixes that also activate the item — for sections
@@ -132,7 +132,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     // catalogue, and the landlord's own vendor roster (which also highlights for
     // the AMC contracts page until that folds in fully).
     { section: 'Maintenance' },
-    { label: 'Requests',         href: '/rental-provider/dashboard/maintenance',      icon: ClipboardList, match: ['/rental-provider/dashboard/maintenance/'], ...DEV_ONLY },
+    { label: 'Requests',         href: '/rental-provider/dashboard/maintenance',      icon: ClipboardList, match: ['/rental-provider/dashboard/maintenance/'] },
     { label: 'Vendors',          href: '/rental-provider/dashboard/vendors',          icon: Users },
     // AMC contracts — destined to fold into the vendor pages as the
     // commitments layer lands; until then it lives here under Maintenance.
@@ -196,7 +196,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     // Mirrors the landlord rail's Maintenance section; the header drops on its
     // own when canManageMaintenance empties it (see sectionsKept).
     { section: 'Maintenance' },
-    { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'], ...DEV_ONLY },
+    { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'] },
     { label: 'Vendors',          href: '/dashboard/manager/vendors',          icon: Users, requirePerm: 'canManageVendors' },
     { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: 'canManageAmc' },
     { divider: true },

@@ -14,14 +14,14 @@ import { Loader2, Download } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { kindMeta, kindMetaFromRow, type KindMeta } from './AmcView';
 
-interface MonthCell { due: number; paid: number; count: number; unbilled: number; overdue: number; paidCount: number }
+interface MonthCell { due: number; paid: number; /** 0299 — the VAT inside due / paid. */ dueVat?: number; paidVat?: number; count: number; unbilled: number; overdue: number; paidCount: number }
 interface Row {
   contractId: number; kind: string; categoryLabel: string | null; vendorName: string; propertyName: string | null;
   startDate: string | null; endDate: string | null; annualValueAed: number | null; frequency: string | null; cancelled: boolean;
   spread?: boolean; recoverable?: boolean;
   months: MonthCell[]; ytdDue: number; ytdPaid: number;
 }
-interface Report { year: number; categories?: Array<{ id: number; name: string; defaultKind: string; sortOrder: number; isActive: boolean }>; kinds?: Array<{ key: string; label: string; color: string | null; hasVisits: boolean; schedule: string; isActive: boolean }>; rows: Row[]; totals: { due: number[]; paid: number[]; recoverableDue?: number[]; recoverablePaid?: number[] } }
+interface Report { year: number; categories?: Array<{ id: number; name: string; defaultKind: string; sortOrder: number; isActive: boolean }>; kinds?: Array<{ key: string; label: string; color: string | null; hasVisits: boolean; schedule: string; isActive: boolean }>; rows: Row[]; totals: { due: number[]; paid: number[]; dueVat?: number[]; paidVat?: number[]; recoverableDue?: number[]; recoverablePaid?: number[] } }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtN = (n: number) => n === 0 ? '' : n.toLocaleString('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -56,6 +56,9 @@ export function AmcExpensesReport({ base, rp, listHref, detailHrefOf }: { base: 
   // The landlord's own kind labels and colours, when the report carries them.
   const kindOf = (k: string): KindMeta => { const r = data?.kinds?.find(x => x.key === k); return r ? kindMetaFromRow({ id: 0, key: r.key, label: r.label, hint: null, color: r.color, hasVisits: r.hasVisits, schedule: r.schedule, sortOrder: 0, isActive: r.isActive, isBuiltin: false }) : kindMeta(k); };
   const grandYtd = grand.reduce((n, x) => n + x, 0);
+  // 0299 — the VAT inside the totals (amounts stay VAT-inclusive): the figure VAT filing needs.
+  const grandVat: number[] = data ? ((basis === 'due' ? data.totals.dueVat : data.totals.paidVat) ?? Array(12).fill(0)) : [];
+  const grandVatYtd = Math.round(grandVat.reduce((n, x) => n + x, 0) * 100) / 100;
   // Recoverable rows (rebilled to tenants) are split out so they never mix with the landlord's own cost.
   const grandRec = data ? ((basis === 'due' ? data.totals.recoverableDue : data.totals.recoverablePaid) ?? Array(12).fill(0)) : [];
   const grandRecYtd = grandRec.reduce((n, x) => n + x, 0);
@@ -81,6 +84,7 @@ export function AmcExpensesReport({ base, rp, listHref, detailHrefOf }: { base: 
       lines.push([`${g.name} — subtotal`, '', '', '', '', '', '', '', ...g.sub.map(x => x || ''), g.ytd].map(v => `"${v}"`).join(','));
     }
     lines.push(['Total', '', '', '', '', '', '', '', ...grand.map(x => x || ''), grandYtd].map(v => `"${v}"`).join(','));
+    if (grandVatYtd > 0) lines.push(['of which VAT', '', '', '', '', '', '', '', ...grandVat.map(x => x || ''), grandVatYtd].map(v => `"${v}"`).join(','));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `expenses-${year}-${basis}.csv`; a.click(); URL.revokeObjectURL(a.href);
   };
@@ -156,6 +160,20 @@ export function AmcExpensesReport({ base, rp, listHref, detailHrefOf }: { base: 
                   {grand.map((x, i) => <td key={i} className={td + ' text-right font-extrabold'}>{fmtN(x)}</td>)}
                   <td className={td + ' text-right font-extrabold'}>{fmtN(grandYtd)}</td>
                 </tr>
+                {grandVatYtd > 0 && (
+                  <>
+                    <tr className="bg-[#f6f7f6]">
+                      <td className={td + ' font-bold text-[#5b615e] sticky left-0 bg-[#f6f7f6] z-10'} colSpan={3}>of which VAT</td>
+                      {grandVat.map((x, i) => <td key={i} className={td + ' text-right font-bold text-[#5b615e]'}>{fmtN(x)}</td>)}
+                      <td className={td + ' text-right font-bold text-[#5b615e]'}>{fmtN(grandVatYtd)}</td>
+                    </tr>
+                    <tr className="bg-[#f6f7f6]">
+                      <td className={td + ' font-bold text-[#5b615e] sticky left-0 bg-[#f6f7f6] z-10'} colSpan={3}>Before VAT</td>
+                      {grand.map((x, i) => <td key={i} className={td + ' text-right font-bold text-[#5b615e]'}>{fmtN(Math.round((x - (grandVat[i] ?? 0)) * 100) / 100)}</td>)}
+                      <td className={td + ' text-right font-bold text-[#5b615e]'}>{fmtN(Math.round((grandYtd - grandVatYtd) * 100) / 100)}</td>
+                    </tr>
+                  </>
+                )}
               </tbody>
             </table>
           </div>

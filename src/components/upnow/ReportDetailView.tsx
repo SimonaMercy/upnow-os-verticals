@@ -1047,14 +1047,17 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
 
   'vacancy-analysis': {
     title: 'Vacant Units',
-    description: 'Vacant units to action — each available unit with its Market Rent (units.rental_price, the asking rent · revenue at stake) and the Annual Rent it last let for (latest lease, net of discount), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
+    description: 'Vacant units to action — each empty unit with its status (Available for rent, Under maintenance while a restoration job is open, or Let — not started when a confirmed lease that has not begun already holds it; those are left out of the rent at stake), its size, its Market Rent (units.rental_price, the asking rent · revenue at stake) and the Annual Rent it last let for (latest lease, net of discount), plus listing status and overall portfolio occupancy. A current snapshot; time-on-market is not tracked yet.',
     endpoint: '/api/reports/vacancy-analysis',
     buildingLeaseFilter: true,
     columns: [
       { key: 'buildingName', label: 'Property' },
       { key: 'unitLabel', label: 'Unit' },
+      { key: 'status', label: 'Status', type: 'stage' },
       { key: 'unitType', label: 'Type', type: 'stage' },
       { key: 'bedrooms', label: 'Beds', align: 'right', type: 'number' },
+      { key: 'sizeSqft', label: 'Size (sqft)', align: 'right', type: 'number' },
+      { key: 'nextLeaseStart', label: 'Lease starts', type: 'date' },
       { key: 'listingStatus', label: 'Listing', type: 'stage' },
       { key: 'askingRentFils', label: 'Market Rent', align: 'right', type: 'aed' },
       { key: 'lastAnnualRentFils', label: 'Annual Rent', align: 'right', type: 'aed' },
@@ -1062,6 +1065,9 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     rowLink: { idKey: 'unitId', colKey: 'unitLabel', target: 'unit' },
     totals: [
       { key: 'vacant', label: 'Vacant units', type: 'number' },
+      { key: 'availableForRent', label: 'Available for rent', type: 'number' },
+      { key: 'underMaintenance', label: 'Under maintenance', type: 'number' },
+      { key: 'letNotStarted', label: 'Let — not started', type: 'number' },
       { key: 'occupancyRate', label: 'Occupancy', type: 'rate' },
       { key: 'listed', label: 'Listed', type: 'number' },
       { key: 'unlisted', label: 'Unlisted', type: 'number' },
@@ -1564,6 +1570,10 @@ const STAGE_TEXT: Record<string, string> = {
   bounced_replaced: 'Bounced · replaced',
   bounced_part_replaced: 'Bounced · part replaced',
   bounced_not_replaced: 'Bounced · not replaced',
+  available_for_rent: 'Available for rent',
+  under_maintenance: 'Under maintenance',
+  let_not_started: 'Let — not started',
+  off_market_let: 'Off market — let',
 };
 const STAGE_STYLE: Record<string, string> = {
   not_started: 'bg-[#f4f3ef] text-[#6b6860]',
@@ -1634,6 +1644,11 @@ const STAGE_STYLE: Record<string, string> = {
   sent:               'bg-[#dbeafe] text-[#1e40af]',
   agreed:             'bg-[#fef3c7] text-[#854d0e]',
   paid:               'bg-[#dcfce7] text-[#166534]',
+  // vacant unit status (vacancy-analysis)
+  available_for_rent: 'bg-[#dcfce7] text-[#166534]',  // green — ready to let
+  under_maintenance:  'bg-[#ffedd5] text-[#9a3412]',  // orange — restoration job open
+  let_not_started:    'bg-[#e0e7ff] text-[#3730a3]',  // indigo — a confirmed lease that has not begun holds it
+  off_market_let:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — de-listed because it was let (never the raw 'expired')
   // listing-status lifecycle (vacancy-analysis)
   draft:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — not yet live
   pending:   'bg-[#fef3c7] text-[#854d0e]',  // amber — awaiting review

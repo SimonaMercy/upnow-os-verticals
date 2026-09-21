@@ -18,16 +18,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  ArrowLeft, Wrench, CheckCircle2, XCircle, RefreshCw, ShieldCheck,
-  Clock, Building2, User, FileText, AlertTriangle,
+  ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck,
+  Clock, FileText, AlertTriangle,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
+import { InHouseJobPanel, type InHouseBill, type InHouseTask } from './InHouseJobPanel';
+import { PhotoLightbox, type GalleryPhoto } from './PhotoGallery';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { SCOPE_LABEL, maintenanceLocation, maintenanceNoCustomerLabel, type MaintenanceScope } from '@/lib/maintenanceScope';
 
 interface Cat { id: number; name: string }
-interface LinkRow { serviceProviderId: number; name: string; relationship: string; isDefault: boolean }
+interface LinkRow {
+  serviceProviderId: number; name: string; relationship: string; isDefault: boolean;
+  /** The backend's own routing rule — a vendor takes jobs only once it accepted the invite. */
+  assignable?: boolean; kind?: string; inviteStatus?: string;
+}
 interface Detail {
   id: number; ref: string; title: string; description: string | null;
   stage: string; stageNote: string | null; holdReason: string | null;
@@ -54,7 +60,13 @@ interface Detail {
   cancelledAt: string | null; closedAt: string | null;
   createdAt: string; updatedAt: string;
   timeline: { id: number; type: string; actorRole: string | null; payload: Record<string, unknown> | null; at: string }[];
-  photos?: { id: number; caption: string | null; viewUrl: string; createdAt: string }[];
+  photos?: { id: number; kind?: string; caption: string | null; viewUrl: string; createdAt: string }[];
+  /** 0298 — the landlord's own team's job: run from this page (photos, bills, mark done). */
+  inHouse?: boolean;
+  bills?: InHouseBill[];
+  /** 0301 — a restoration job's task list. */
+  tasks?: InHouseTask[];
+  billCategories?: string[];
 }
 
 const STAGE_META: Record<string, { label: string; bg: string; fg: string }> = {
@@ -80,6 +92,17 @@ const EVENT_LABEL: Record<string, string> = {
   reassigned: 'Reassigned', provider_declined: 'Provider declined',
   verified: 'Work signed off', closed: 'Closed out', cancelled: 'Cancelled', note: 'Note',
   own_team_engaged: 'Own team — engaged on routing, no quote needed',
+  own_team_assigned: 'Given to your own team — no routing or quote needed',
+  photo_removed: 'Photo removed',
+  bill_added: 'Bill recorded',
+  bill_removed: 'Bill removed',
+  task_done: 'Task marked done',
+  task_reopened: 'Task opened again',
+  task_added: 'Task added',
+  task_items_added: 'Items added under a task',
+  task_item_removed: 'Item removed from a task',
+  task_removed: 'Task removed',
+  bill_file_attached: 'Bill attachment added',
   vendor_engaged: 'Vendor engaged — their rate card needs no quote',
   en_route: 'Technician on the way', work_started: 'Work started on site',
   work_completed: 'Work completed — awaiting sign-off', photo_added: 'Photo added',
@@ -114,6 +137,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [gallery, setGallery] = useState<{ photos: GalleryPhoto[]; start: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // triage form
   // Coverage rules live per PROPERTY TYPE (owner, 31 Aug) — a triage answer is
@@ -165,6 +189,13 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
   const needsRouting = open && ['no_provider', 'provider_declined', 'vacant_unit', 'amc_vendor'].includes(d.holdReason ?? '');
   const canChangeProvider = open && !needsRouting && !!d.provider && d.booking?.status === 'booked';
   const showReassign = needsRouting || (canChangeProvider && changingProvider);
+  // Only vendors the backend will accept (linkActive). `assignable` absent = an
+  // older payload — offer the row rather than hide it.
+  const assignable = links.filter(l => l.assignable !== false);
+  const serviceVendors = links.filter(l => (l.kind ?? 'service') === 'service');
+  const invited = serviceVendors.filter(l => l.inviteStatus === 'invited');
+  const notInvited = serviceVendors.filter(l => l.inviteStatus === 'not_invited');
+  const vendorsHref = rp != null ? `/dashboard/manager/vendors?rp=${rp}` : '/rental-provider/dashboard/vendors';
   const showApprove = open && d.stage === 'awaiting_approval' && d.coverage === 'covered';
   // Phase B: priced at intake from the provider's own catalog — no quote exists.
   const prePriced = !!d.booking && d.booking.pricingMode === 'fixed' && d.booking.totalAed != null && !d.quote;
@@ -172,67 +203,121 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
   const showClose = open && d.stage === 'close_out';
   const canCancel = open && !['en_route', 'in_progress'].includes(d.booking?.status ?? '');
 
-  const card = 'bg-white rounded-2xl border border-[#e8e6e0] p-5';
-  const btn = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold cursor-pointer disabled:opacity-50';
-  const field = 'border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+  // The page follows its neighbour, the AMC contract page: ONE header card (back, title + chips, actions,
+  // a fact strip), then the work in a main column and the closing + timeline in a side column.
+  const card = 'bg-white border border-[#e6e8e6] rounded-[14px] p-[18px]';
+  const btn = 'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold cursor-pointer disabled:opacity-50';
+  const btnLine = 'text-[12px] font-semibold px-3 py-2 rounded-lg border border-[#d9ddda] bg-white text-[#1c1f1d] hover:bg-[#f6f7f6] cursor-pointer disabled:opacity-40';
+  const field = 'border border-[#e6e8e6] rounded-lg px-3 py-2 text-[12.5px] bg-white focus:outline-none focus:border-[#1a7a52]';
+  const lbl = 'text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]';
+  const RAISED_BY: Record<string, string> = { rental_provider: 'the landlord', manager: 'a manager', customer: 'the customer', tenant: 'the customer', system: 'the system' };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-      <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916]">
-        <ArrowLeft size={14} /> Operations · Maintenance
-      </Link>
-
+    <div className="max-w-[1040px] mx-auto px-4 sm:px-7 py-6 pb-10 text-[#1c1f1d]">
       {/* ── header ── */}
-      <div className={card}>
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-xs text-[#9b9890]">{d.ref}</span>
-              <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: stage.bg, color: stage.fg }}>{stage.label}</span>
-              {cover && <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: cover.bg, color: cover.fg }}>{cover.label}</span>}
-            </div>
-            <h1 className="text-lg font-bold text-[#1a1916] mt-1.5">{d.title}</h1>
-            {d.description && <p className="text-sm text-[#6b6860] mt-1 whitespace-pre-wrap">{d.description}</p>}
-            {d.stageNote && (
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-[#92400e] bg-[#fef3c7] rounded-lg px-2.5 py-1.5 mt-2 w-fit">
-                <AlertTriangle size={12} /> {d.stageNote}
+      <div className="bg-white border border-[#e6e8e6] rounded-[14px] px-5 py-[18px]">
+        <div className="flex items-start justify-between gap-4 flex-wrap lg:flex-nowrap">
+          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+            <Link href={backHref} title="Back to maintenance requests"
+              className="w-9 h-9 rounded-full border border-[#e6e8e6] flex items-center justify-center text-[#5b615e] hover:bg-[#f6f7f6] shrink-0"><ArrowLeft size={15} /></Link>
+            <div className="min-w-0">
+              <p className="text-[11px] text-[#8a8f8c]">Maintenance requests › {d.ref}</p>
+              <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                <h1 className="text-[19px] font-bold tracking-[-.01em]">{d.title}</h1>
+                <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: stage.bg, color: stage.fg }}>{stage.label}</span>
+                {cover && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: cover.bg, color: cover.fg }}>{cover.label}</span>}
+                {d.inHouse && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap bg-[#e7f4ee] text-[#1a7a52]">Own team</span>}
+              </div>
+              <p className="text-[12px] text-[#5b615e] mt-1">
+                {[d.category?.name, custName ?? maintenanceNoCustomerLabel(d.scope)].filter(Boolean).join(' · ')}
               </p>
-            )}
+            </div>
           </div>
-          <button type="button" onClick={load} className="text-[#9b9890] hover:text-[#1a1916]" title="Refresh"><RefreshCw size={15} /></button>
+          <div className="flex gap-2 items-center shrink-0">
+            {canCancel && (
+              <button type="button" disabled={!!busy}
+                onClick={() => { if (window.confirm('Cancel this maintenance request?')) void act('cancel', '/cancel'); }}
+                className={btnLine + ' text-[#b42318] border-[#f1c8c4] hover:bg-[#fff8f7]'}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel request'}</button>
+            )}
+            {/* "Send to a vendor" on an own-team job is REMOVED for now (owner, 21 Sep 2026). As built it was a one-way
+                door: the task list, before/after photos and bills vanished from this page, the job could not come back
+                in-house, and the vendor close-out overwrote the bills' total. To bring it back: keep those sections on
+                a vendor job, add the vendor's invoice as a bill, and offer "Take back in-house". */}
+            <button type="button" onClick={load} className={btnLine + ' !px-2.5'} title="Refresh"><RefreshCw size={13} /></button>
+          </div>
         </div>
-        <div className="grid sm:grid-cols-3 gap-x-6 gap-y-2.5 mt-4 text-sm">
-          <div><p className="text-[11px] text-[#9b9890] flex items-center gap-1"><Building2 size={11} /> {(d.scope ?? 'unit') === 'unit' ? 'Unit' : SCOPE_LABEL[d.scope as MaintenanceScope]}</p>
-            <p className="text-[#1a1916] font-medium">{maintenanceLocation(d)}</p></div>
-          <div><p className="text-[11px] text-[#9b9890] flex items-center gap-1"><User size={11} /> Customer</p>
-            <p className="text-[#1a1916] font-medium">{custName ?? <span className="text-[#6b6860]">{maintenanceNoCustomerLabel(d.scope)}</span>}</p></div>
-          <div><p className="text-[11px] text-[#9b9890] flex items-center gap-1"><Wrench size={11} /> Provider</p>
-            <p className="text-[#1a1916] font-medium">{d.provider ? `${d.provider.name}${d.provider.relationship === 'internal_team' ? ' · own team' : ''}` : '—'}</p></div>
-          <div><p className="text-[11px] text-[#9b9890]">Category</p><p className="text-[#1a1916] font-medium">{d.category?.name ?? '—'}</p></div>
-          <div><p className="text-[11px] text-[#9b9890]">Raised</p><p className="text-[#1a1916] font-medium">{fmtDt(d.createdAt)} · {d.raisedByRole ?? '—'}</p></div>
-          <div><p className="text-[11px] text-[#9b9890]">Preferred visit</p><p className="text-[#1a1916] font-medium">{d.preferredAt ? fmtDt(d.preferredAt) : 'Any time'}</p></div>
-          <div><p className="text-[11px] text-[#9b9890]">Job</p>
-            <p className="text-[#1a1916] font-medium">{d.booking ? `BK-${d.booking.id} · ${d.booking.status}` : 'not dispatched'}</p></div>
+        {d.stageNote && !d.inHouse && (
+          <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#8a5a00] bg-[#fdf3dc] rounded-lg px-2.5 py-1.5 mt-3 w-fit">
+            <AlertTriangle size={12} /> {d.stageNote}
+          </p>
+        )}
+        {/* A restoration's description opens with an auto-written "Tasks: …" line — the task list below says it better. */}
+        {(() => {
+          const note = (d.tasks?.length ? (d.description ?? '').replace(/^Tasks:[^\n]*\n*/, '') : (d.description ?? '')).trim();
+          return note ? <p className="text-[12px] text-[#5b615e] mt-3 whitespace-pre-wrap">{note}</p> : null;
+        })()}
+        {/* fact strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 mt-[18px] border-t border-[#eef0ee] pt-3.5 gap-y-3">
+          <div className="sm:pr-[18px] sm:border-r border-[#eef0ee]">
+            <div className={lbl}>{(d.scope ?? 'unit') === 'unit' ? 'UNIT' : SCOPE_LABEL[d.scope as MaintenanceScope].toUpperCase()}</div>
+            <div className="text-[13px] font-semibold mt-[3px]">{maintenanceLocation(d)}</div>
+          </div>
+          <div className="sm:px-[18px] sm:border-r border-[#eef0ee]">
+            <div className={lbl}>PROVIDER</div>
+            <div className="text-[13px] font-semibold mt-[3px]">{d.provider ? d.provider.name : <span className="text-[#c47a00]">Not assigned</span>}</div>
+            <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{d.provider?.relationship === 'internal_team' ? 'Own team — no routing or quotation' : d.booking ? `Job BK-${d.booking.id} · ${d.booking.status.replace(/_/g, ' ')}` : d.provider ? 'Vendor' : 'Waiting to be routed'}</div>
+          </div>
+          <div className="sm:px-[18px] sm:border-r border-[#eef0ee]">
+            <div className={lbl}>RAISED</div>
+            <div className="text-[13px] font-semibold mt-[3px]">{fmtDt(d.createdAt)}</div>
+            <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{d.raisedByRole ? `by ${RAISED_BY[d.raisedByRole] ?? d.raisedByRole.replace(/_/g, ' ')}` : ''}{d.preferredAt ? ` · visit ${fmtDt(d.preferredAt)}` : ''}</div>
+          </div>
+          <div className="sm:px-[18px]">
+            <div className={lbl}>{d.closedAt ? 'COST' : 'COST SO FAR'}</div>
+            <div className="text-[13px] font-semibold mt-[3px]">{d.invoiceTotalAed ? aed(d.invoiceTotalAed) : <span className="text-[#8a8f8c] font-normal">No bills yet</span>}</div>
+            {!!d.invoiceVatAed && <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">incl. VAT {aed(d.invoiceVatAed)}</div>}
+          </div>
         </div>
       </div>
 
-      {err && <p className="text-sm text-red-700 bg-[#fef2f2] border border-[#fecaca] rounded-xl px-4 py-2.5">{err}</p>}
+      {err && <p className="text-[12.5px] text-red-700 bg-[#fef2f2] border border-[#fecaca] rounded-xl px-4 py-2.5 mt-4">{err}</p>}
 
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 mt-5 items-start">
+      <div className="space-y-4 min-w-0">
       {/* ── photos from the customer ── */}
-      {(d.photos?.length ?? 0) > 0 && (
+      {!d.inHouse && (d.photos?.length ?? 0) > 0 && (
         <div className={card}>
-          <h2 className="text-sm font-bold text-[#1a1916]">Photos from the customer · {d.photos!.length}</h2>
+          <h2 className="text-[14px] font-bold text-[#1c1f1d]">Photos from the customer · {d.photos!.length}</h2>
           <p className="text-xs text-[#6b6860] mt-1">The same pictures brief the provider on their job page.</p>
           <ul className="flex gap-2 flex-wrap mt-3">
-            {d.photos!.map(p => (
+            {d.photos!.map((p, k) => (
               <li key={p.id}>
-                <a href={p.viewUrl} target="_blank" rel="noopener noreferrer" title={p.caption ?? 'Open photo'}>
+                <button type="button" title={p.caption ?? 'View photo'} className="block cursor-pointer"
+                  onClick={() => setGallery({ photos: d.photos!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? 'Customer photo' })), start: k })}>
                   <img src={p.viewUrl} alt={p.caption ?? 'Customer photo'} className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
-                </a>
+                </button>
               </li>
             ))}
           </ul>
         </div>
+      )}
+
+      {/* ── own-team job: before/after photos, bills, mark done ── */}
+      {d.inHouse && (
+        <InHouseJobPanel
+          url={(path) => scoped(base, rp, `/requests/${id}${path}`)}
+          open={open}
+          photos={d.photos ?? []}
+          bills={d.bills ?? []}
+          tasks={d.tasks ?? []}
+          canAddTasks={(d.scope ?? 'unit') === 'unit' && !!d.unit}
+          billCategories={d.billCategories ?? []}
+          totalAed={d.invoiceTotalAed}
+          vatAed={d.invoiceVatAed}
+          onChanged={load}
+          onError={setErr}
+          section="work"
+        />
       )}
 
       {/* ── quote — presented as the quotation document it is ── */}
@@ -308,10 +393,11 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
             <div className="mt-3">
               <p className="text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Attached quotations · {d.quoteAttachments!.length}</p>
               <div className="flex gap-2 flex-wrap mt-1.5">
-                {d.quoteAttachments!.map(a => (
-                  <a key={a.id} href={a.viewUrl} target="_blank" rel="noopener noreferrer" title={a.caption ?? 'Open quotation'}>
+                {d.quoteAttachments!.map((a, k) => (
+                  <button key={a.id} type="button" title={a.caption ?? 'View quotation'} className="block cursor-pointer"
+                    onClick={() => setGallery({ photos: d.quoteAttachments!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? 'Supplier quotation' })), start: k })}>
                     <img src={a.viewUrl} alt={a.caption ?? 'Supplier quotation'} className="w-20 h-20 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
-                  </a>
+                  </button>
                 ))}
               </div>
             </div>
@@ -320,7 +406,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           {showApprove && !rejecting && (
             <>
               <div className="flex items-center gap-2 mt-4">
-                <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#2e9f82' }}>
+                <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                   <CheckCircle2 size={14} /> {busy === 'approve' ? 'Approving…' : `Approve — ${aed(d.quote.totalAed)}`}
                 </button>
                 <button type="button" disabled={!!busy} onClick={() => { setRejecting(true); setRejectReason(''); }} className={btn + ' border border-[#e8e6e0] text-[#b91c1c] bg-white'}>
@@ -373,7 +459,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           </p>
           {showApprove && (
             <div className="flex items-center gap-2 mt-4">
-              <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#2e9f82' }}>
+              <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                 <CheckCircle2 size={14} /> {busy === 'approve' ? 'Approving…' : 'Approve price'}
               </button>
               <button type="button" disabled={!!busy} onClick={() => act('reject', '/reject-quote')} className={btn + ' border border-[#e8e6e0] text-[#b91c1c] bg-white'}>
@@ -387,7 +473,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {/* ── triage ── */}
       {showTriage && (
         <div className={card}>
-          <h2 className="text-sm font-bold text-[#1a1916]">No coverage rule for {d.category?.name ?? 'this category'} — your call</h2>
+          <h2 className="text-[14px] font-bold text-[#1c1f1d]">No coverage rule for {d.category?.name ?? 'this category'} — your call</h2>
           <div className="flex items-center gap-3 mt-3 flex-wrap text-sm">
             <label className="flex items-center gap-1.5">Save as
               <select value={saveAsRule} onChange={e => setSaveAsRule(e.target.value as typeof saveAsRule)} className={field}>
@@ -429,18 +515,31 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {showReassign && (
         <div className={card}>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-[#1a1916]">{needsRouting ? 'Route to a linked provider' : 'Change provider'}</h2>
+            <h2 className="text-[14px] font-bold text-[#1c1f1d]">{needsRouting ? 'Route to a linked provider' : 'Change provider'}</h2>
             {!needsRouting && (
               <button type="button" onClick={() => setChangingProvider(false)} className="text-xs text-[#9b9890] hover:text-[#1a1916] cursor-pointer">Keep {d.provider?.name}</button>
             )}
           </div>
-          {links.length === 0 ? (
-            <p className="text-sm text-[#6b6860] mt-2">No providers are linked for maintenance routing yet — link one on the AMC &amp; Vendors page.</p>
+          {assignable.length === 0 ? (
+            <div className="mt-2">
+              <p className="text-sm text-[#6b6860]">
+                {serviceVendors.length === 0
+                  ? 'You have no service vendor yet. Add your own team or a contractor on the Vendors page, then send them the invite.'
+                  : 'None of your vendors can take a job yet — a vendor receives jobs only after accepting your invite.'}
+              </p>
+              {serviceVendors.length > 0 && (
+                <p className="text-xs text-[#9b9890] mt-1.5">
+                  {invited.length > 0 && <>Invite sent, waiting: {invited.map(l => l.name).join(', ')}. </>}
+                  {notInvited.length > 0 && <>Not invited yet: {notInvited.map(l => l.name).join(', ')}.</>}
+                </p>
+              )}
+              <Link href={vendorsHref} className={btn + ' text-white mt-3'} style={{ background: '#1a7a52' }}>Open Vendors</Link>
+            </div>
           ) : (
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               <select value={reassignTo} onChange={e => setReassignTo(e.target.value)} className={field}>
                 <option value="">Choose a provider…</option>
-                {links.map(l => (
+                {assignable.map(l => (
                   <option key={l.serviceProviderId} value={l.serviceProviderId}>
                     {l.name}{l.relationship === 'internal_team' ? ' · own team' : ''}{l.isDefault ? ' · default' : ''}
                   </option>
@@ -448,7 +547,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
               </select>
               <button type="button" disabled={!!busy || !reassignTo}
                 onClick={() => act('reassign', '/reassign', { serviceProviderId: Number(reassignTo) })}
-                className={btn + ' text-white'} style={{ background: '#2e9f82' }}>
+                className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                 {busy === 'reassign' ? 'Routing…' : 'Route job'}
               </button>
             </div>
@@ -459,9 +558,9 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {/* ── sign-off ── */}
       {showSignOff && (
         <div className={card}>
-          <h2 className="text-sm font-bold text-[#1a1916]">Provider marked the job complete</h2>
+          <h2 className="text-[14px] font-bold text-[#1c1f1d]">Provider marked the job complete</h2>
           <p className="text-xs text-[#6b6860] mt-1">{d.customer ? 'The customer normally confirms from their portal; sign off here on their behalf.' : 'No occupant on this request — you confirm the work yourself.'}</p>
-          <button type="button" disabled={!!busy} onClick={() => act('sign-off', '/sign-off')} className={btn + ' text-white mt-3'} style={{ background: '#2e9f82' }}>
+          <button type="button" disabled={!!busy} onClick={() => act('sign-off', '/sign-off')} className={btn + ' text-white mt-3'} style={{ background: '#1a7a52' }}>
             <ShieldCheck size={14} /> {busy === 'sign-off' ? 'Signing…' : 'Sign work off'}
           </button>
         </div>
@@ -470,7 +569,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {/* ── close-out ── */}
       {showClose && (
         <div className={card}>
-          <h2 className="text-sm font-bold text-[#1a1916]">Close out — where does the cost land?</h2>
+          <h2 className="text-[14px] font-bold text-[#1c1f1d]">Close out — where does the cost land?</h2>
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             <select value={allocation} onChange={e => setAllocation(e.target.value as typeof allocation)} className={field}>
               <option value="property_expense">Property expense</option>
@@ -485,7 +584,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
             )}
             <button type="button" disabled={!!busy}
               onClick={() => act('close', '/close', { costAllocation: allocation, ...(invoiceRef.trim() ? { invoiceRef: invoiceRef.trim() } : {}) })}
-              className={btn + ' text-white'} style={{ background: '#2e9f82' }}>
+              className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
               {busy === 'close' ? 'Closing…' : `Close out${d.quote ? ` · ${aed(d.quote.totalAed)}` : d.booking?.totalAed != null ? ` · ${aed(d.booking.totalAed)}` : ''}`}
             </button>
           </div>
@@ -510,16 +609,35 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
         </div>
       )}
 
+      </div>
+
+      {/* ── side column: closing the job, then what happened ── */}
+      <div className="space-y-4 min-w-0">
+        {d.inHouse && (
+          <InHouseJobPanel
+            url={(path) => scoped(base, rp, `/requests/${id}${path}`)}
+            open={open}
+            photos={d.photos ?? []}
+            bills={d.bills ?? []}
+            tasks={d.tasks ?? []}
+            billCategories={d.billCategories ?? []}
+            totalAed={d.invoiceTotalAed}
+            vatAed={d.invoiceVatAed}
+            onChanged={load}
+            onError={setErr}
+            section="finish"
+          />
+        )}
       {/* ── timeline ── */}
       <div className={card}>
-        <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2"><Clock size={14} /> Timeline</h2>
+        <h2 className="text-[14px] font-bold text-[#1c1f1d] flex items-center gap-2"><Clock size={14} /> Timeline</h2>
         <ol className="mt-3 space-y-2">
           {d.timeline.map(e => (
-            <li key={e.id} className="flex items-start gap-2.5 text-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#2e9f82] mt-1.5 shrink-0" />
+            <li key={e.id} className="flex items-start gap-2.5 text-[12px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1a7a52] mt-[5px] shrink-0" />
               <div className="min-w-0">
                 <span className="font-medium text-[#1a1916]">{EVENT_LABEL[e.type] ?? e.type}</span>
-                <span className="text-[#9b9890]"> · {fmtDt(e.at)}{e.actorRole ? ` · ${e.actorRole.replace(/_/g, ' ')}` : ''}</span>
+                <span className="block text-[10.5px] text-[#8a8f8c]">{fmtDt(e.at)}{e.actorRole ? ` · ${RAISED_BY[e.actorRole]?.replace(/^(the|a) /, '') ?? e.actorRole.replace(/_/g, ' ')}` : ''}</span>
                 {e.payload?.reason != null && <p className="text-xs text-[#6b6860]">{HOLD_TEXT[String(e.payload.reason)] ?? String(e.payload.reason)}{e.payload?.vendorName ? ` — ${String(e.payload.vendorName)}` : ''}</p>}
                 {e.type === 'cost_recovered' && e.payload?.amountAed != null && (
                   <p className="text-xs text-[#6b6860]">{aed(Number(e.payload.amountAed))} · payment #{String(e.payload.paymentId)}</p>
@@ -531,13 +649,9 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
         </ol>
       </div>
 
-      {canCancel && (
-        <button type="button" disabled={!!busy}
-          onClick={() => { if (window.confirm('Cancel this maintenance request?')) void act('cancel', '/cancel'); }}
-          className="text-xs font-semibold text-[#b91c1c] hover:underline cursor-pointer">
-          {busy === 'cancel' ? 'Cancelling…' : 'Cancel this request'}
-        </button>
-      )}
+      </div>
+      </div>
+      {gallery && <PhotoLightbox photos={gallery.photos} start={gallery.start} onClose={() => setGallery(null)} />}
     </div>
   );
 }

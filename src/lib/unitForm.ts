@@ -57,6 +57,8 @@ export interface UnitRecord {
   currentLeaseRent?: number | null;
   /** Has a current lease (backend UNIT_IS_LET_SQL) — the occupancy every page shows. */
   occupiedByLease?: boolean | null;
+  /** Start date (YYYY-MM-DD) of a confirmed lease that has not begun — the unit is let, though empty today. */
+  nextLeaseStart?: string | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;

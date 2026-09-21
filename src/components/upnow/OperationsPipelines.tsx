@@ -112,12 +112,9 @@ interface Props {
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
 type TabKey = 'lead' | 'new' | 'renewal' | 'terminated' | 'maintenance' | 'amc' | 'breach' | 'legal';
-/** Breach and Legal are workflow-only (no records until the Violations module
- *  and the lease legal-case record land) — hidden on PRODUCTION builds, shown
- *  in local development where the team keeps working on them (owner, 10 Sep).
- *  NEXT_PUBLIC_OPS_BREACH_LEGAL=1 forces them on for a production build (e.g.
- *  a review deploy). */
-const SHOW_BREACH_LEGAL = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_OPS_BREACH_LEGAL === '1';
+/** Breach and Legal were hidden on PRODUCTION builds from 10 Sep 2026, while they had no records behind them.
+ *  The Legal & Breach module went live on 15 Sep, and the owner switched the tabs on everywhere on 21 Sep 2026
+ *  ("let's enable the tabs that we hide for production"). */
 /** The former combined board's deep link (?tab=breach_legal) lands on Breach. */
 const LEGACY_TAB: Record<string, TabKey> = { breach_legal: 'breach' };
 const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
@@ -127,10 +124,8 @@ const TABS: { key: TabKey; label: string; icon: typeof UserPlus }[] = [
   { key: 'terminated',  label: 'Terminated',  icon: LogOut },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'amc',         label: 'AMC',         icon: ClipboardCheck },
-  ...(SHOW_BREACH_LEGAL ? [
-    { key: 'breach' as TabKey, label: 'Breach', icon: ShieldAlert },
-    { key: 'legal'  as TabKey, label: 'Legal',  icon: Scale },
-  ] : []),
+  { key: 'breach',      label: 'Breach',      icon: ShieldAlert },
+  { key: 'legal',       label: 'Legal',       icon: Scale },
 ];
 
 /* ── Stage definitions per pipeline (fixed lanes, in order) ────────────────────
@@ -626,7 +621,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
   const [showStartNotice, setShowStartNotice] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>(() => {
-    const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return SHOW_BREACH_LEGAL ? LEGACY_TAB[t] : 'lead'; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
+    const t = sp.get('tab'); if (t && LEGACY_TAB[t]) return LEGACY_TAB[t]; return TABS.some(x => x.key === t) ? (t as TabKey) : 'lead';
   });
   // Guards the one-shot "land on a pipeline that actually has records" hop below;
   // a manual tab click sets it so an empty pipeline the RP chose is never overridden.

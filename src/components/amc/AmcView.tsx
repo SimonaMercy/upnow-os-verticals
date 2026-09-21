@@ -1,4 +1,6 @@
 'use client';
+import { splitVat, typedFromStored, aed2, type VatMode } from '@/lib/vatSplit';
+import { AmountWithVat } from '@/components/upnow/VatChoice';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /**
@@ -67,6 +69,8 @@ export interface AmcContract {
   startDate: string | null; endDate: string | null; status: Status;
   propertyId: number | null; propertyName: string | null; notes: string | null;
   renewalOfId: number | null; renewedById: number | null; annualValueAed?: number | null;
+  /** 0299 — annualValueAed is the VAT-INCLUSIVE total; annualVatAed the VAT inside it. */
+  vatMode?: VatMode; annualVatAed?: number | null;
   cancelledAt?: string | null; cancelReason?: string | null;
   kind?: ContractKind | string; categoryLabel?: string | null; expenseCategoryId?: number | null;
   payments?: { count: number; paid: number; overdue: number; unbilled?: number; nextDue: string | null; receivedAed: number; totalAed: number } | null;
@@ -91,6 +95,8 @@ const addMonths = (iso: string, n: number) => { const d = new Date(iso + 'T00:00
 const addYears = (iso: string, n: number) => addMonths(iso, n * 12);
 export interface PayRow {
   id?: number | null; dueDate: string; amountAed: string; status?: string; reference?: string | null;
+  /** 0299 — the row as it is stored (total + the VAT inside it): shown as-is until the amount is edited. */
+  storedAmountAed?: number | null; storedVatAed?: number | null;
   /** Add form only (owner, 10 Sep: "while adding AMC there is payment proof with cheque details, then in the
    *  detail page again I have to attach?"): a row already paid carries its cheque / transfer details and proof
    *  here, and is marked paid the moment the contract is created. */
@@ -129,8 +135,10 @@ export function buildPayRows(start: string, end: string, count: number, annualVa
 export const PAY_PRESETS = [1, 2, 3, 4, 6, 12];
 
 /** The flexible payment plan editor — shared by the Add/Renew form and the detail page. */
-export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, onChange, dirty, setDirty, onCount, proofs, modeOfPayment }: {
+export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, onChange, dirty, setDirty, onCount, proofs, modeOfPayment, vatInside }: {
   start: string; end: string; frequency: string; annualValue: string;
+  /** 0299 — the contract carries VAT: every amount here is what is PAID (VAT included) and each row shows its split. */
+  vatInside?: boolean;
   rows: PayRow[]; onChange: (rows: PayRow[]) => void; dirty: boolean; setDirty: (d: boolean) => void;
   /** The split the user CHOSE (null = follow the frequency). The owner keeps it so
    *  re-splitting on a value/date change honours it instead of snapping back. */
@@ -142,6 +150,14 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
   const count = rows.length || def;
   const presets = Array.from(new Set([def, ...PAY_PRESETS])).sort((a, b) => a - b);
   const total = rows.reduce((n, r) => n + (Number(r.amountAed) || 0), 0);
+  // The VAT inside one row: the stored figure while the amount is untouched (it may be the supplier's own), else 5/105.
+  const rowVat = (r: PayRow): number => {
+    const amt = Number(r.amountAed) || 0;
+    if (r.storedAmountAed != null && r.storedVatAed != null && Number(r.storedAmountAed) === amt) return Number(r.storedVatAed);
+    return vatInside ? splitVat(amt, 'inclusive').vat : 0;
+  };
+  const totalVat = Math.round(rows.reduce((n, r) => n + rowVat(r), 0) * 100) / 100;
+  const showVat = !!vatInside || totalVat > 0;
   const months = start && end ? termMonthsOf(start, end) : 12;
   const expected = annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Math.round(Number(annualValue) * (months / 12) * 100) / 100 : null;
   const regen = (n: number) => { setDirty(false); onCount?.(n === def ? null : n); onChange(buildPayRows(start, end, n, annualValue)); };
@@ -168,7 +184,10 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] text-[#9b9890] w-6 shrink-0">#{i + 1}</span>
                   <input type="date" className={field + ' w-[138px]'} value={r.dueDate} disabled={locked} onChange={e => setRow(i, { dueDate: e.target.value })} />
-                  <input type="number" min="0" step="0.01" placeholder="AED" className={field + ' w-[100px]'} value={r.amountAed} disabled={locked} onChange={e => setRow(i, { amountAed: e.target.value })} />
+                  <input type="number" min="0" step="0.01" placeholder={showVat ? 'AED incl. VAT' : 'AED'} title={showVat ? 'What is paid — VAT included' : undefined} className={field + ' w-[110px]'} value={r.amountAed} disabled={locked} onChange={e => setRow(i, { amountAed: e.target.value })} />
+                  {showVat && Number(r.amountAed) > 0 && (
+                    <span className="text-[10.5px] text-[#6b6860] whitespace-nowrap">{aed2(Math.round((Number(r.amountAed) - rowVat(r)) * 100) / 100)} + VAT {aed2(rowVat(r))}</span>
+                  )}
                   {proofs && !locked && (
                     <label className="text-[11px] text-[#6b6860] flex items-center gap-1 whitespace-nowrap cursor-pointer" title="Already paid — record the cheque / transfer details now">
                       <input type="checkbox" checked={!!r.paid} onChange={e => setRow(i, { paid: e.target.checked, paidAt: r.paidAt || r.dueDate || new Date().toISOString().slice(0, 10) })} /> paid
@@ -199,7 +218,7 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
       )}
       {rows.length > 0 && (
         <p className={`text-[11px] mt-1 ${expected != null && Math.abs(total - expected) > 0.5 ? 'text-[#b45309]' : 'text-[#9b9890]'}`}>
-          {rows.length} installment{rows.length === 1 ? '' : 's'} · total AED {total.toLocaleString('en-AE')}{expected != null ? ` · contract value for the term AED ${expected.toLocaleString('en-AE')}${Math.abs(total - expected) > 0.5 ? ' — does not match' : ''}` : ''}{proofs && rows.some(r => r.paid) ? ` · ${rows.filter(r => r.paid).length} already paid — recorded on creation` : ''}
+          {rows.length} installment{rows.length === 1 ? '' : 's'} · total AED {total.toLocaleString('en-AE')}{showVat ? ` (before VAT ${aed2(Math.round((total - totalVat) * 100) / 100)} + VAT ${aed2(totalVat)})` : ''}{expected != null ? ` · contract value for the term AED ${expected.toLocaleString('en-AE')}${Math.abs(total - expected) > 0.5 ? ' — does not match' : ''}` : ''}{proofs && rows.some(r => r.paid) ? ` · ${rows.filter(r => r.paid).length} already paid — recorded on creation` : ''}
         </p>
       )}
     </div>
@@ -393,7 +412,11 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                       <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">{subline(c)}</div>
                     </div>
                     <div className="whitespace-nowrap">{fmt(c.startDate)} → {fmt(c.endDate)}</div>
-                    <div className="font-semibold whitespace-nowrap">{money(c.annualValueAed)}</div>
+                    {/* ONE grid cell: the value with its VAT beneath — a second sibling would become a column of its own and shift the row. */}
+                    <div className="whitespace-nowrap">
+                      <div className="font-semibold">{money(c.annualValueAed)}</div>
+                      {!!c.annualVatAed && <div className="text-[10.5px] text-[#8a8f8c]">incl. VAT {aed2(c.annualVatAed)}</div>}
+                    </div>
                     <div className="flex justify-between gap-2 text-[12px]">
                       <span>{cell.left}</span>
                       <span className="font-bold whitespace-nowrap" style={{ color: cell.color }}>{cell.text}</span>
@@ -426,7 +449,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                 </div>
                 <div className="grid grid-cols-2 gap-2.5 text-[12px]">
                   <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">PERIOD</div><div className="mt-0.5">{fmt(c.startDate)} → {fmt(c.endDate)}</div></div>
-                  <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">VALUE / YR</div><div className="mt-0.5 font-semibold">{money(c.annualValueAed)}</div></div>
+                  <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">VALUE / YR</div><div className="mt-0.5 font-semibold">{money(c.annualValueAed)}</div>{!!c.annualVatAed && <div className="text-[10.5px] text-[#8a8f8c]">incl. VAT {aed2(c.annualVatAed)}</div>}</div>
                 </div>
                 <div className="flex justify-between items-center text-[12px]">
                   <span>{cell.left}</span>
@@ -502,7 +525,12 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const [payDirty, setPayDirty] = useState(false);
   // The split the landlord picked in the dropdown; null = one per frequency period.
   const [payCount, setPayCount] = useState<number | null>(from?.numberOfPayments ?? null);
-  const [annualValue, setAnnualValue] = useState(from?.annualValueAed != null ? String(from.annualValueAed) : '');
+  // The box holds the amount AS TYPED; VAT choice beside it (stored total → what was typed).
+  const [vatMode, setVatMode] = useState<VatMode>(from?.vatMode ?? 'none');
+  const [annualValue, setAnnualValue] = useState(typedFromStored(from?.annualValueAed, from?.annualVatAed, from?.vatMode ?? 'none'));
+  const [annualVat, setAnnualVat] = useState('');
+  // The payment plan is what gets PAID — built from the VAT-inclusive total.
+  const annualTotal = annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? String(splitVat(Number(annualValue), vatMode, annualVat.trim() !== '' ? Number(annualVat) : null).total) : '';
   const [notes, setNotes] = useState(from?.notes ?? '');
   const [plan, setPlan] = useState<PlanRow[]>([]);
   const [planDirty, setPlanDirty] = useState(false);
@@ -544,11 +572,11 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (payDirty) return;
-    const rows = buildPayRows(startDate, endDate, payCount ?? defaultPayCount(frequency, startDate, endDate), annualValue);
+    const rows = buildPayRows(startDate, endDate, payCount ?? defaultPayCount(frequency, startDate, endDate), annualTotal);
     // Bill-type kinds: one row per period with NO amount — the bill fills it in when it arrives.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPayRows(km.schedule === 'bills' && annualValue.trim() === '' ? rows.map(r => ({ ...r, amountAed: '' })) : rows);
-  }, [startDate, endDate, frequency, annualValue, payDirty, payCount, kind, km.schedule]);
+  }, [startDate, endDate, frequency, annualValue, annualTotal, payDirty, payCount, kind, km.schedule]);
   // Picking a bill-type kind defaults the cadence to monthly; ad-hoc has no schedule.
   const pickKind = (k: ContractKind) => { setKind(k); setPayDirty(false); if (kindOf(k).schedule === 'bills') setFrequency('monthly'); };
 
@@ -571,6 +599,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
         contractType, startDate, endDate: endDate || null, frequency,
         renewalOfId: contractType === 'renewal' ? renewalOfId : null,
         annualValueAed: annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Number(annualValue) : null,
+        vatMode, annualVatAed: annualVat.trim() !== '' ? Number(annualVat) : null,
         modeOfPayment: modeOfPayment || null,
         numberOfPayments: km.schedule === 'none' ? null : payRows.length || null,
         installments: km.schedule === 'none' ? [] : payRows.filter(r => r.dueDate).map(r => ({ dueDate: r.dueDate, amountAed: r.amountAed.trim() === '' ? null : Number(r.amountAed) || 0 })),
@@ -626,7 +655,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef] sticky top-0 bg-white z-10">
           <div>
             <h2 className="text-sm font-bold text-[#1a1916]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : 'Add a contract or expense'}</h2>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{annualValue.trim() ? ` · AED ${Number(annualValue).toLocaleString('en-AE')}/yr` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>
+            <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>
           </div>
           <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916]"><X size={18} /></button>
         </div>
@@ -694,7 +723,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
                   </select>
                 </div>
                 <div><span className={lbl}>{kind === 'policy' ? 'Annual premium (AED)' : km.schedule === 'bills' ? 'Annual value (AED, optional)' : 'Annual value (AED)'}</span>
-                  <input type="number" min="0" step="0.01" className={field} placeholder={km.schedule === 'bills' ? 'leave empty for variable bills' : 'e.g. 25200'} value={annualValue} onChange={e => setAnnualValue(e.target.value)} /></div>
+                  <AmountWithVat accent="#2e9f82" placeholder={km.schedule === 'bills' ? 'leave empty for variable bills' : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} vatOverride={annualVat} onVatOverride={setAnnualVat} /></div>
                 <div><span className={lbl}>Mode of payment</span>
                   <select className={field} value={modeOfPayment} onChange={e => setModeOfPayment(e.target.value)}>
                     <option value="">—</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option><option value="online">Online</option>
@@ -706,6 +735,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
                   </select>
                 </div>}
               </div>
+              {annualValue.trim() !== '' && vatMode !== 'none' && km.schedule !== 'none' && <p className="text-[11px] text-[#9b9890] mt-2">The payment plan shows what you pay — VAT included.</p>}
             </Section>
           </div>
 
@@ -713,7 +743,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
           <div className="space-y-4 min-w-0">
             <Section n={4} title={km.schedule === 'bills' ? 'Bills' : km.schedule === 'none' ? 'Spend' : 'Payments'}
               hint={km.schedule === 'none' ? 'No schedule — each spend is recorded on the contract page as it happens.' : km.schedule === 'bills' ? `One row per ${frequency === 'monthly' ? 'month' : 'period'}, amount left empty — enter each bill when it arrives.` : 'Tick “already paid” to record the cheque / transfer details and proof now — nothing to re-enter later.'}>
-              {km.schedule !== 'none' && <PaymentPlanEditor start={startDate} end={endDate} frequency={frequency} annualValue={annualValue} rows={payRows} onChange={setPayRows} dirty={payDirty} setDirty={setPayDirty} onCount={setPayCount} proofs modeOfPayment={modeOfPayment} />}
+              {km.schedule !== 'none' && <PaymentPlanEditor start={startDate} end={endDate} frequency={frequency} annualValue={annualTotal} rows={payRows} onChange={setPayRows} dirty={payDirty} setDirty={setPayDirty} onCount={setPayCount} proofs modeOfPayment={modeOfPayment} vatInside={vatMode !== 'none'} />}
             </Section>
 
             {km.visits && (
@@ -780,13 +810,16 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
   const oldEnd = from.endDate ?? '';
   const [startDate, setStartDate] = useState(oldEnd);
   const [endDate, setEndDate] = useState(oldEnd ? addYears(oldEnd, 1) : '');
-  const [annualValue, setAnnualValue] = useState(from.annualValueAed != null ? String(from.annualValueAed) : '');
+  const [vatMode, setVatMode] = useState<VatMode>(from.vatMode ?? 'none');
+  const [annualValue, setAnnualValue] = useState(typedFromStored(from.annualValueAed, from.annualVatAed, from.vatMode ?? 'none'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const oldVal = from.annualValueAed ?? null;
   const newVal = annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Number(annualValue) : null;
-  const delta = oldVal != null && newVal != null ? newVal - oldVal : null;
+  // Like for like: both sides VAT-inclusive (oldVal is the stored total).
+  const newTotal = newVal != null ? splitVat(newVal, vatMode).total : null;
+  const delta = oldVal != null && newTotal != null ? Math.round((newTotal - oldVal) * 100) / 100 : null;
 
   async function submit() {
     setError(null);
@@ -802,7 +835,7 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
         frequency: from.frequency,
         modeOfPayment: from.modeOfPayment,
         numberOfPayments: from.numberOfPayments,
-        annualValueAed: newVal,
+        annualValueAed: newVal, vatMode,
       });
       onSaved();
     } catch (e) { setError((e as Error)?.message || 'Could not renew the contract.'); }
@@ -832,7 +865,7 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
           </div>
           <div>
             <span className={lbl}>Annual value (AED) — pricing revision</span>
-            <input type="number" min="0" step="0.01" className={field} placeholder={oldVal != null ? String(oldVal) : 'e.g. 25200'} value={annualValue} onChange={e => setAnnualValue(e.target.value)} />
+            <AmountWithVat accent="#2e9f82" placeholder={oldVal != null ? String(oldVal) : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} />
             {delta != null && delta !== 0 && (
               <p className={`text-[11.5px] font-semibold mt-1 ${delta > 0 ? 'text-[#b45309]' : 'text-[#15803d]'}`}>
                 {delta > 0 ? '▲' : '▼'} AED {Math.abs(delta).toLocaleString('en-AE')} ({Math.round(Math.abs(delta) / (oldVal || 1) * 100)}%) vs last term

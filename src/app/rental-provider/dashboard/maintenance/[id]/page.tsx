@@ -15,7 +15,7 @@ export default function RpMaintenanceRequestPage() {
     <MaintenanceRequestView
       base="/maintenance"
       id={Number(params.id)}
-      backHref="/rental-provider/dashboard/operations?tab=maintenance&view=kanban"
+      backHref="/rental-provider/dashboard/maintenance"
     />
   );
 }

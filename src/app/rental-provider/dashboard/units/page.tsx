@@ -29,6 +29,7 @@ import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
+import { StartRestorationDialog } from '@/components/upnow/StartRestorationDialog';
 import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
 import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
@@ -60,6 +61,17 @@ interface ContractSummary {
 
 // Plans are unique per (property, plan_label) — labels can repeat across
 // buildings in "all properties" mode, so edit/upload state keys on both.
+// Restoration per unit, from the API (`/maintenance/restoration/units`): a vacant
+// unit with an OPEN job in the "Restoration & make-ready" group is UNDER
+// RESTORATION — read off the work itself, never a flag someone has to set —
+// and the closed jobs are its history: how many times, and what they cost.
+const RESTORATION_GROUP = 'Restoration & make-ready';
+interface RestorationJob { id: number; ref: string; title?: string; stage: string; type: string | null; inHouse?: boolean; costAed?: number | null }
+interface RestorationRow { unitId: number; open: RestorationJob[]; completed: RestorationJob[]; timesRestored: number; totalCostAed: number; lastCompletedAt: string | null }
+const RESTORATION_STAGE: Record<string, string> = {
+  requested: 'Requested', awaiting_approval: 'Quote awaiting approval', in_progress: 'Work in progress',
+  sign_off: 'Awaiting sign-off', close_out: 'Invoice & close-out',
+};
 const planKey = (p: { propertyId: number; planLabel: string }) => `${p.propertyId}::${p.planLabel}`;
 const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
 const bedLabel = (b: number | null) => (b == null ? 'Unit' : b === 0 ? 'Studio' : `${b} Bed`);
@@ -227,6 +239,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const [unitsByProperty, setUnitsByProperty] = useState<Record<number, UnitRecord[]>>({});
   const [loadingUnits, setLoadingUnits] = useState<Set<number>>(new Set());
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  const [restoration, setRestoration] = useState<Record<number, RestorationRow>>({});
+  const [restorationTypes, setRestorationTypes] = useState<{ id: number; name: string }[]>([]);
+  // "Start restoration" dialog — the unit it was opened on.
+  const [startRestoration, setStartRestoration] = useState<{ plan: Plan; unit: UnitRecord } | null>(null);
   // Legal & breach flags keyed by lease id (spec §7.5) — fetched once for the
   // in-force leases the rows already resolve, chunked like the Leases register.
   const [leaseFlags, setLeaseFlags] = useState<LeaseFlags>({});
@@ -261,7 +277,52 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       .then(parts => { if (!cancelled) setLeaseFlags(Object.assign({}, ...parts)); });
     return () => { cancelled = true; };
   }, [contracts, manager]);
+  const canMaintain = !manager || canForRp('canManageMaintenance', manager.rp);
+  const maintBase = manager ? '/manager/maintenance' : '/maintenance';
+  const maintQ = manager ? `rp=${manager.rp}` : '';
+  const loadRestoration = useCallback(() => {
+    if (!canMaintain) return;
+    apiGet<RestorationRow[]>(`${maintBase}/restoration/units${maintQ ? `?${maintQ}` : ''}`)
+      .then(rows => setRestoration(Object.fromEntries(rows.map(r => [r.unitId, r]))))
+      .catch(() => {});
+  }, [canMaintain, maintBase, maintQ]);
+  useEffect(() => { loadRestoration(); }, [loadRestoration]);
+  // The kinds of restoration work — the landlord's own list under the group.
+  useEffect(() => {
+    if (!canMaintain) return;
+    apiGet<{ id: number; name: string; parentId: number | null }[]>(`${maintBase}/categories${maintQ ? `?${maintQ}` : ''}`)
+      .then(cats => {
+        const groupId = cats.find(c => c.parentId == null && c.name === RESTORATION_GROUP)?.id;
+        setRestorationTypes(cats.filter(c => groupId != null && c.parentId === groupId).map(c => ({ id: c.id, name: c.name })));
+      }).catch(() => {});
+  }, [canMaintain, maintBase, maintQ]);
   const router = useRouter();
+  // One pill per open restoration job — "Painting & wall repairs · Awaiting approval".
+  const restorationPills = (u: UnitRecord, small = false) => {
+    const jobs = restoration[u.id]?.open;
+    if (!jobs?.length || someoneInIt(u)) return null;
+    const href = (id: number) => (manager ? `/dashboard/manager/maintenance/${id}?rp=${manager.rp}` : `/rental-provider/dashboard/maintenance/${id}`);
+    return jobs.map(j => (
+      <span key={j.id} role="link" tabIndex={0} title={`Open ${j.ref} — quotation, vendor, photos and cost`}
+        style={{ fontSize: small ? 10 : 10.5, fontWeight: 700, color: '#9a3412', background: '#ffedd5', padding: small ? '3px 8px' : '4px 9px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap' }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(href(j.id)); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); router.push(href(j.id)); } }}>
+        {/* A job covering several kinds of work is titled "Restoration — Unit …" and files under its first kind. */}
+        {j.title?.startsWith('Restoration —') ? 'Restoration' : (j.type ?? 'Restoration')} · {RESTORATION_STAGE[j.stage] ?? j.stage}
+      </span>
+    ));
+  };
+  // The unit's restoration history — how many times, and what it has cost so far.
+  const restorationHistory = (u: UnitRecord) => {
+    const r = restoration[u.id];
+    if (!r?.timesRestored) return null;
+    const last = r.lastCompletedAt ? new Date(r.lastCompletedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, month: 'short', year: 'numeric' }) : null;
+    return (
+      <div className="truncate" style={{ fontSize: 11.5, color: '#9a3412', marginTop: 6, fontWeight: 600 }}>
+        Restored {r.timesRestored === 1 ? 'once' : `${r.timesRestored} times`} · {r.totalCostAed > 0 ? `AED ${aed(r.totalCostAed)} spent` : 'no bills recorded'}{last ? ` · last ${last}` : ''}
+      </div>
+    );
+  };
   // The two pills a lease can carry — a breach and a legal case are independent.
   // The unit row/card is itself clickable (opens the preview), so each pill
   // swallows the click and routes on its own.
@@ -356,22 +417,33 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // Occupied = has a current lease (server-derived), falling back to the flag only
   // on an older payload — so this page and the dashboard count the same units.
   const isOccupied = (u: UnitRecord) => u.occupiedByLease ?? u.availability === 'occupied';
+  // LEASED AHEAD (owner, 21 Sep 2026: "we received the PDC, so no need to show it as vacant"):
+  // a confirmed lease that has not started counts the unit as occupied everywhere; nobody is
+  // in it yet, so the row says from when — and make-ready work can still be raised on it.
+  const letNotStarted = (u: UnitRecord) => !!u.nextLeaseStart;
+  const someoneInIt = (u: UnitRecord) => isOccupied(u) && !letNotStarted(u);
+  const fmtShort = (d: string) => new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' });
+  // The STATE of the unit — what a landlord asks first: is it let, being worked on, or ready?
+  // (Owner, 21 Sep 2026, on a room whose restoration had just closed and that read "Draft":
+  // "it should show ready to lease, right?") The marketplace listing is a separate fact — see listingChip.
   const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
+    if (letNotStarted(u)) return { label: `Leased · from ${fmtShort(u.nextLeaseStart!)}`, bg: '#e0e7ff', fg: '#3730a3' };
     if (isOccupied(u))    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
+    if (restoration[u.id]?.open.length) return { label: 'Under restoration', bg: '#ffedd5', fg: '#9a3412' };
     if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
-    // Reserved is the fourth availability state and had no case here, so it fell
-    // through to the LISTING status below and rendered "Expired" — which on a let
-    // unit means de-listed-because-it-was-taken, not a lapsed anything. Listing
-    // status only describes a unit that is on the market; anything else has to be
-    // answered by availability or not at all.
     if (u.availability === 'reserved')    return { label: 'Reserved',   bg: '#fef3c7', fg: '#92400e' };
+    return { label: 'Ready to lease', bg: '#d8f2e8', fg: '#1a7a5a' };
+  };
+  // Listing status only describes a unit that is on the market — so it shows only on one that is
+  // ready to lease, and never as the raw 'expired' (which means "taken off because it was let").
+  const listingChip = (u: UnitRecord): { label: string; bg: string; fg: string } | null => {
+    if (statusPill(u).label !== 'Ready to lease') return null;
     switch (u.listingStatus) {
-      case 'published': return { label: 'Published', bg: '#d8f2e8', fg: '#1a7a5a' };
-      case 'pending':   return { label: 'Pending',   bg: '#fef3c7', fg: '#92400e' };
-      case 'in_review': return { label: 'In review', bg: '#dbeafe', fg: '#1e40af' };
-      case 'expired':   return { label: 'Expired',   bg: '#fef3c7', fg: '#92400e' };
-      case 'rejected':  return { label: 'Rejected',  bg: '#fee2e2', fg: '#b91c1c' };
-      default:          return { label: 'Draft',     bg: '#f1efe9', fg: '#6b6860' };
+      case 'published': return { label: 'Listed',            bg: '#eef7f2', fg: '#1a7a5a' };
+      case 'pending':   return { label: 'Listing pending',   bg: '#fef3c7', fg: '#92400e' };
+      case 'in_review': return { label: 'Listing in review', bg: '#dbeafe', fg: '#1e40af' };
+      case 'rejected':  return { label: 'Listing rejected',  bg: '#fee2e2', fg: '#b91c1c' };
+      default:          return { label: 'Not listed',        bg: '#f1efe9', fg: '#6b6860' };
     }
   };
 
@@ -731,16 +803,23 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // "View" button; the mock leads with the "Edit" pill.)
   const unitActions = (p: Plan, u: UnitRecord, busy: boolean) => (
     <>
-      {canPublish && u.availability === 'available' && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
+      {canPublish && u.availability === 'available' && !letNotStarted(u) && !restoration[u.id]?.open.length && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'submit-listing'); }}
           className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '7px 11px', borderRadius: 9 }}>
           {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
         </button>
       )}
-      {canPublish && u.availability === 'available' && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
+      {canPublish && u.availability === 'available' && !letNotStarted(u) && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
         <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'withdraw-listing'); }}
           className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 11px', borderRadius: 9 }}>
           Withdraw
+        </button>
+      )}
+      {canMaintain && !someoneInIt(u) && !restoration[u.id]?.open.length && restorationTypes.length > 0 && (
+        <button onClick={(e) => { e.stopPropagation(); setStartRestoration({ plan: p, unit: u }); }}
+          title="Raise a restoration job on this vacant unit" className="shrink-0"
+          style={{ fontSize: 11.5, fontWeight: 700, color: '#9a3412', background: '#ffedd5', padding: '7px 11px', borderRadius: 9 }}>
+          Start restoration
         </button>
       )}
       {canEdit && (
@@ -790,6 +869,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</span>
             <span style={{ fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '5px 11px', borderRadius: 8 }}>{pill.label}</span>
+            {listingChip(u) && <span style={{ fontSize: 10.5, fontWeight: 700, color: listingChip(u)!.fg, background: listingChip(u)!.bg, padding: '4px 9px', borderRadius: 7 }}>{listingChip(u)!.label}</span>}
+            {restorationPills(u)}
             {legalPills(leaseId, flag)}
           </div>
           <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
@@ -799,6 +880,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             {size && <span className="inline-flex items-center gap-1.5"><Maximize2 size={14} style={{ color: ICON_MUTE }} />{size}</span>}
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11.5, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
+          {restorationHistory(u)}
         </div>
         {/* Market Rent (asking) + contracted Annual Rent (latest lease) —
             mirrors the portfolio's per-property pairing. */}
@@ -838,6 +920,9 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           {(flag?.breach || flag?.dispute) && (
             <div className="flex items-center gap-1.5 flex-wrap" style={{ marginTop: 6 }}>{legalPills(leaseId, flag, true)}</div>
           )}
+          {!!restoration[u.id]?.open.length && !someoneInIt(u) && (
+            <div className="flex items-center gap-1.5 flex-wrap" style={{ marginTop: 6 }}>{restorationPills(u, true)}</div>
+          )}
           <div className="truncate" style={{ fontSize: 12, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
           <div className="flex items-center gap-3.5" style={{ marginTop: 11, fontSize: 12, color: '#6b756f', fontWeight: 600 }}>
             {u.bedrooms != null && <span className="inline-flex items-center gap-1"><BedDouble size={13} style={{ color: ICON_MUTE }} />{u.bedrooms === 0 ? 'Studio' : `${u.bedrooms} BR`}</span>}
@@ -845,6 +930,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             {size && <span className="inline-flex items-center gap-1"><Maximize2 size={13} style={{ color: ICON_MUTE }} />{size}</span>}
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
+          {restorationHistory(u)}
           <div className="mt-auto flex items-end justify-between gap-2" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
             {/* Market Rent (asking) + contracted Annual Rent (latest lease). */}
             <div>
@@ -1151,6 +1237,16 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
               : <img src={viewer.url} alt="Floor plan" className="w-full h-full object-contain" />}
           </div>
         </div>
+      )}
+
+      {/* Start restoration — ONE job, its task list pre-filled from the last move-out form. */}
+      {startRestoration && (
+        <StartRestorationDialog
+          unit={{ id: startRestoration.unit.id, unitNumber: startRestoration.unit.unitNumber ?? null }}
+          maintBase={maintBase} maintQ={maintQ}
+          onClose={() => setStartRestoration(null)}
+          onStarted={id => { setStartRestoration(null); router.push(manager ? `/dashboard/manager/maintenance/${id}?rp=${manager.rp}` : `/rental-provider/dashboard/maintenance/${id}`); }}
+        />
       )}
 
       {/* Per-unit add / edit. The modal closes itself on save. */}

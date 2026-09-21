@@ -40,7 +40,7 @@ export default function ManagerMaintenanceRequestPage() {
           base="/manager/maintenance"
           rp={effectiveRp}
           id={Number(params.id)}
-          backHref={`/dashboard/manager/operations?tab=maintenance&view=kanban&rp=${sp.get('rp') ?? effectiveRp}`}
+          backHref={`/dashboard/manager/maintenance?rp=${sp.get('rp') ?? effectiveRp}`}
         />
       )}
     </div>

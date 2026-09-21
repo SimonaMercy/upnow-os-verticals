@@ -20,6 +20,8 @@ import { ArrowLeft, Loader2, X } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiPut } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { openDocViewer } from '@/lib/docViewer';
+import { splitVat, typedFromStored, aed2, type VatMode } from '@/lib/vatSplit';
+import { AmountWithVat } from '@/components/upnow/VatChoice';
 import { AddAmcModal, PaymentPlanEditor, useKinds, type AmcContract, type ContractKind, type PayRow, type CategoryOpt } from '@/components/amc/AmcView';
 
 interface VendorInfo {
@@ -38,14 +40,15 @@ interface Task {
   inspectedAt?: string | null; inspectedByName?: string | null;
   /** The vendor's quotation for fixes found on the visit — kept with the visit. */
   quotation?: { id: number; fileUrl: string; displayName: string | null } | null;
-  quotationAmountAed?: number | null; quotationNotes?: string | null; quotationAt?: string | null;
+  quotationAmountAed?: number | null; quotationVatMode?: VatMode; quotationVatAed?: number; quotationNotes?: string | null; quotationAt?: string | null;
   /** pending | approved | declined | completed — "either processed or still pending". */
   quotationStatus?: string | null; quotationStatusAt?: string | null;
 }
 interface Visit { t: Task; n: number; stages: [boolean, boolean]; done: number; overdueDays: number; state: 'done' | 'overdue' | 'next' | 'upcoming' | 'closed' }
 interface InstDoc { id: number; fileUrl: string; displayName: string | null; documentKey: string }
 /** 0281 — `bill` is the vendor's bill copy; `proof` is the proof of PAYMENT; `paymentMethod` how it was settled. */
-interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null }
+/** 0299 — amountAed is the VAT-INCLUSIVE total; vatAed the VAT inside it. */
+interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; vatMode?: VatMode; vatAed?: number; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null }
 const PAY_METHODS = ['cheque', 'bank_transfer', 'cash', 'card', 'online'] as const;
 interface InstPayload { derived: boolean; defaultCount: number; installments: Inst[] }
 
@@ -114,10 +117,11 @@ const QUOTE_STATUS: Record<string, { label: string; bg: string; fg: string; hint
 const QUOTE_ORDER = ['pending', 'approved', 'completed', 'declined'] as const;
 
 /** The vendor's quotation for fixes found on the visit — file, amount, note, and whether it was processed. Kept with the visit (owner, 10 Sep). */
-function QuotationBlock({ t, n, busy, onSave, onAttach }: { t: Task; n: number; busy: boolean; onSave: (f: File | null, amount: string) => Promise<void>; onAttach: (f: File) => Promise<void> }) {
+function QuotationBlock({ t, n, busy, onSave, onAttach }: { t: Task; n: number; busy: boolean; onSave: (f: File | null, amount: string, vatMode: VatMode) => Promise<void>; onAttach: (f: File) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [amount, setAmount] = useState(t.quotationAmountAed != null ? String(t.quotationAmountAed) : '');
+  const [vatMode, setVatMode] = useState<VatMode>(t.quotationVatMode ?? 'none');
+  const [amount, setAmount] = useState(typedFromStored(t.quotationAmountAed, t.quotationVatAed, t.quotationVatMode ?? 'none'));
   const has = !!(t.quotation || t.quotationAmountAed != null);
   const close = () => { setOpen(false); setFile(null); };
   const stMeta = QUOTE_STATUS[t.quotationStatus ?? 'pending'] ?? QUOTE_STATUS.pending;
@@ -128,7 +132,7 @@ function QuotationBlock({ t, n, busy, onSave, onAttach }: { t: Task; n: number; 
         <>
           {/* details only — the status is changed under Payments (owner, 10 Sep) */}
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: stMeta.bg, color: stMeta.fg }} title={stMeta.hint}>{stMeta.label}</span>
-          {t.quotationAmountAed != null && <span className="font-semibold">{aed(t.quotationAmountAed)}</span>}
+          {t.quotationAmountAed != null && <span className="font-semibold">{aed(t.quotationAmountAed)}{t.quotationVatAed ? <span className="font-normal text-[#8a8f8c]"> incl. VAT {aed2(t.quotationVatAed)}</span> : null}</span>}
           {t.quotation
             ? <button type="button" onClick={() => openDocViewer({ fileUrl: t.quotation!.fileUrl, caption: `Quotation — Visit ${n}`, documentKey: 'quotation' })} className="font-semibold text-[#1a7a52] underline cursor-pointer">View quotation</button>
             : <label className={`font-bold text-[#c47a00] underline cursor-pointer ${busy ? 'opacity-50' : ''}`}>{busy ? 'Uploading…' : 'Attach quotation'}
@@ -151,10 +155,9 @@ function QuotationBlock({ t, n, busy, onSave, onAttach }: { t: Task; n: number; 
         <label className={btnSm + ' inline-block'}>{file ? file.name : t.quotation ? 'Replace file' : 'Choose file'}
           <input type="file" accept="image/*,application/pdf" className="hidden" onChange={e => { setFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
         </label>
-        <input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" placeholder="Amount (AED)"
-          className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#1a7a52] w-32" />
+        <AmountWithVat size="sm" className="w-48" placeholder="Amount (AED)" amount={amount} onAmount={setAmount} mode={vatMode} onMode={setVatMode} />
         <button type="button" disabled={busy || (!file && !amount.trim() && !has)}
-          onClick={() => void onSave(file, amount).then(close)} className={btnGreenSm}>{busy ? 'Saving…' : 'Save quotation'}</button>
+          onClick={() => void onSave(file, amount, vatMode).then(close)} className={btnGreenSm}>{busy ? 'Saving…' : 'Save quotation'}</button>
         <button type="button" onClick={close} className="text-[11px] text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer">Cancel</button>
       </div>
     </div>
@@ -182,7 +185,10 @@ function AttendChooser({ busy, onPick, onCancel, label }: { busy: boolean; onPic
 function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: number | null; c: Contract; onClose: () => void; onSaved: () => void }) {
   const [startDate, setStartDate] = useState(c.startDate ? isoDay(c.startDate) : '');
   const [endDate, setEndDate] = useState(c.endDate ? isoDay(c.endDate) : '');
-  const [annual, setAnnual] = useState(c.annualValueAed != null ? String(c.annualValueAed) : '');
+  const [vatMode, setVatMode] = useState<VatMode>(c.vatMode ?? 'none');
+  const [annual, setAnnual] = useState(typedFromStored(c.annualValueAed, c.annualVatAed, c.vatMode ?? 'none'));
+  // Blank = our 5%; filled = the supplier's own VAT figure. Starts from what is stored so an unchanged save keeps it to the fil.
+  const [annualVat, setAnnualVat] = useState(c.annualVatAed ? String(c.annualVatAed) : '');
   const [mode, setMode] = useState(c.modeOfPayment ?? '');
   const [notes, setNotes] = useState(c.notes ?? '');
   // Same fields, same order, same words as the Add form (owner, 12 Sep: "are Add and Edit aligned?").
@@ -207,6 +213,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
       await apiPatch(scoped(base, rp, `/contracts/${c.id}`), {
         startDate: startDate || null, endDate: endDate || null,
         annualValueAed: annual.trim() !== '' ? Number(annual) : null,
+        vatMode, annualVatAed: vatMode !== 'none' && annualVat.trim() !== '' ? Number(annualVat) : null,
         modeOfPayment: mode || null, notes: notes.trim() || null,
         propertyId: propertyId ? Number(propertyId) : null,
         kind, categoryLabel: categoryLabel.trim() || null, expenseCategoryId: newCat ? null : categoryId,
@@ -270,7 +277,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
             <div><span className={l}>{kindOf(kind).schedule === 'bills' ? 'Billing cycle' : kindOf(kind).visits ? 'Visit & payment cadence' : 'Payment cadence'}</span>
               <div className="text-[13px] font-semibold px-1 py-2">{cap(frequency)}<span className="block text-[11px] font-normal text-[#8a8f8c]">Set when the contract was added. {kindOf(kind).visits ? 'Re-date or add visits on the contract page; ' : ''}edit the payment schedule under Payments.</span></div>
             </div>
-            <div><span className={l}>{kind === 'policy' ? 'Annual premium (AED)' : kindOf(kind).schedule === 'bills' ? 'Annual value (AED, optional)' : 'Annual value (AED)'}</span><input type="number" min="0" step="0.01" className={field} value={annual} onChange={e => setAnnual(e.target.value)} /></div>
+            <div><span className={l}>{kind === 'policy' ? 'Annual premium (AED)' : kindOf(kind).schedule === 'bills' ? 'Annual value (AED, optional)' : 'Annual value (AED)'}</span><AmountWithVat amount={annual} onAmount={setAnnual} mode={vatMode} onMode={setVatMode} vatOverride={annualVat} onVatOverride={setAnnualVat} /></div>
             <div><span className={l}>Mode of payment</span>
               <select className={field} value={mode} onChange={e => setMode(e.target.value)}>
                 <option value="">—</option>
@@ -279,6 +286,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
             </div>
             <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.numberOfPayments ?? '—'} on the schedule · edit them on the contract page</div></div>
           </div>
+
           <div><span className={l}>Notes</span><textarea rows={3} className={field} value={notes} onChange={e => setNotes(e.target.value)} /></div>
           <p className="text-[11px] text-[#8a8f8c]">{kindOf(kind).visits ? 'The visit plan stays as scheduled — edit visits from the Visits card.' : 'No visit plan for this kind — bills and payments are worked on the contract page.'}</p>
           {error && <p className="text-xs text-[#b42318]">{error}</p>}
@@ -320,6 +328,11 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const [payDate, setPayDate] = useState('');
   const [payMethod, setPayMethod] = useState('');
   const [payAmount, setPayAmount] = useState('');
+  // 0299 — VAT choice on each amount keyed here; pay* remembers what the row opened with, so an untouched row is not re-split.
+  const [payVat, setPayVat] = useState<VatMode>('none');
+  const [payOpened, setPayOpened] = useState<{ amount: string; vat: VatMode }>({ amount: '', vat: 'none' });
+  const [billVat, setBillVat] = useState<VatMode>('none');
+  const [spendVat, setSpendVat] = useState<VatMode>('none');
   const [payFile, setPayFile] = useState<File | null>(null);
   const [spendMethod, setSpendMethod] = useState('');
   const [payBusy, setPayBusy] = useState(false);
@@ -395,8 +408,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     try {
       let proofDocId: number | null = null;
       if (f) proofDocId = await uploadContractFile(cid, f, `sp_bill_inst_${r.id}`, 'payment', billRef.trim() ? `Bill · ${billRef.trim()}` : `Bill · #${r.seq}`);
-      await apiPatch(scoped(base, rp, `/installments/${r.id}/bill`), { amountAed: Number(v), reference: billRef.trim() || null, billDocId: proofDocId });
-      setBillingId(null); setBillAmount(''); setBillRef(''); load(); say(`Bill #${r.seq} recorded — AED ${Number(v).toLocaleString('en-AE')}.`);
+      await apiPatch(scoped(base, rp, `/installments/${r.id}/bill`), { amountAed: Number(v), vatMode: billVat, reference: billRef.trim() || null, billDocId: proofDocId });
+      setBillingId(null); setBillAmount(''); setBillRef(''); load(); say(`Bill #${r.seq} recorded — ${aed2(splitVat(Number(v), billVat).total)}${billVat !== 'none' ? ' incl. VAT' : ''}.`);
     } catch { say('Could not record the bill.', 'warn'); }
     finally { setPayBusy(false); }
   };
@@ -411,7 +424,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
       let docId: number | null = null;
       if (f) docId = await uploadContractFile(cid, f, `sp_${spendPaid ? 'payment_proof' : 'bill'}_spend_${Date.now()}`, 'payment', spendRef.trim() ? `${spendPaid ? 'Proof of Payment' : 'Bill'} · ${spendRef.trim()}` : (spendPaid ? 'Proof of Payment' : 'Bill'));
       await apiPost<{ id: number }>(scoped(base, rp, `/contracts/${cid}/installments`), {
-        dueDate: spendDate, amountAed: v === '' ? null : Number(v), reference: spendRef.trim() || null,
+        dueDate: spendDate, amountAed: v === '' ? null : Number(v), vatMode: spendVat, reference: spendRef.trim() || null,
         paidAt: spendPaid ? spendDate : null, paymentMethod: spendMethod || null,
         proofDocId: spendPaid ? docId : null, billDocId: spendPaid ? null : docId,
       });
@@ -431,7 +444,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     const v = quoteAmount.trim();
     if (v !== '' && (!Number.isFinite(Number(v)) || Number(v) < 0)) { say('Enter a valid amount.', 'warn'); return; }
     setBusy(t.id);
-    try { await apiPatch(scoped(base, rp, `/tasks/${t.id}/quotation`), { amountAed: v === '' ? null : Number(v) }); setEditingQuoteId(null); load(); say(`Quotation amount on visit ${n} updated.`); }
+    try { await apiPatch(scoped(base, rp, `/tasks/${t.id}/quotation`), { amountAed: v === '' ? null : Number(v), vatMode: t.quotationVatMode ?? 'none' }); setEditingQuoteId(null); load(); say(`Quotation amount on visit ${n} updated.`); }
     catch { say('Could not update the amount.', 'warn'); }
     finally { setBusy(null); }
   };
@@ -447,10 +460,10 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     finally { setBusy(null); }
   };
   /** The vendor's quotation for fixes — file (optional), amount, note — saved on the visit. */
-  const saveQuotation = async (t: Task, n: number, f: File | null, amount: string) => {
+  const saveQuotation = async (t: Task, n: number, f: File | null, amount: string, vatMode: VatMode) => {
     setBusy(t.id);
     try {
-      const body: { documentId?: number; amountAed: number | null } = { amountAed: amount.trim() ? Number(amount) : null };
+      const body: { documentId?: number; amountAed: number | null; vatMode: VatMode } = { amountAed: amount.trim() ? Number(amount) : null, vatMode };
       if (f) { const docId = await uploadContractFile(cid, f, `quotation_task_${t.id}`, 'report', `Quotation · Visit ${n}`); if (docId) body.documentId = docId; }
       await apiPatch(scoped(base, rp, `/tasks/${t.id}/quotation`), body);
       load(); say(`Quotation saved with visit ${n}.`);
@@ -473,7 +486,11 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     try {
       let proofDocId: number | null = null;
       if (f) proofDocId = await uploadContractFile(cid, f, `sp_payment_proof_inst_${target.id}`, 'payment', payRef.trim() ? `Proof of Payment · ${payRef.trim()}` : `Proof of Payment · #${target.seq}`);
-      await apiPatch(scoped(base, rp, `/installments/${target.id}/paid`), { reference: payRef.trim() || null, paidAt: payDate || null, proofDocId, paymentMethod: payMethod || null, amountAed: payAmount.trim() !== '' && Number.isFinite(Number(payAmount)) ? Number(payAmount) : null });
+      await apiPatch(scoped(base, rp, `/installments/${target.id}/paid`), { reference: payRef.trim() || null, paidAt: payDate || null, proofDocId, paymentMethod: payMethod || null,
+        // Untouched amount + VAT choice → send the stored total alone, so the row's exact VAT (a supplier's figure) is kept.
+        ...(payAmount.trim() === payOpened.amount && payVat === payOpened.vat
+          ? { amountAed: target.amountAed ?? null }
+          : { amountAed: payAmount.trim() !== '' && Number.isFinite(Number(payAmount)) ? Number(payAmount) : null, vatMode: payVat }) });
       setPaying(null); setPayRef(''); setPayDate(''); setPayFile(null); load();
       say(`Installment #${target.seq} marked paid${f ? ' with proof' : ''}.`);
     } catch { say('Could not mark the installment paid.', 'warn'); }
@@ -493,7 +510,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     finally { setPlanBusy(false); }
   };
   const openPlanEditor = () => {
-    setPlanRows((inst?.installments ?? []).map(r => ({ id: r.id, dueDate: r.dueDate, amountAed: r.amountAed == null ? '' : String(r.amountAed), status: r.status, reference: r.reference })));
+    setPlanRows((inst?.installments ?? []).map(r => ({ id: r.id, dueDate: r.dueDate, amountAed: r.amountAed == null ? '' : String(r.amountAed), status: r.status, reference: r.reference, storedAmountAed: r.amountAed, storedVatAed: r.vatAed ?? 0 })));
     setPlanDirty(true); setPlanOpen(true);
   };
   const uploadContractDoc = async (f: File) => {
@@ -568,6 +585,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const awaitingRows = rows.filter(r => stateOf(r) === 'awaiting');
   const received = paidRows.reduce((n, r) => n + (r.amountAed ?? 0), 0);
   const totalDue = rows.reduce((n, r) => n + (r.amountAed ?? 0), 0);
+  // 0299 — the VAT inside those totals.
+  const vatPaid = Math.round(paidRows.reduce((n, r) => n + (r.vatAed ?? 0), 0) * 100) / 100;
+  const vatTotal = Math.round(rows.reduce((n, r) => n + (r.vatAed ?? 0), 0) * 100) / 100;
   const payWord = c.modeOfPayment === 'cheque' ? 'cheques' : 'payments';
   const lastPaid = [...paidRows].sort((a, b) => (a.paidAt ?? '').localeCompare(b.paidAt ?? '') || a.seq - b.seq).reverse()[0] ?? null;
   const nextUp = rows.find(r => stateOf(r) === 'upcoming') ?? null;
@@ -613,8 +633,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                   {list.map(r => {
                     const st = stateOf(r);
                     return (
-                      <div key={r.seq}>
-                        <div className={`flex justify-between items-center py-2 border-b border-[#f1f3f1] text-[11.5px] gap-2 ${st !== 'overdue' ? 'text-[#5b615e]' : ''}`}>
+                      <div key={r.seq} className="border-b border-[#f1f3f1]">
+                        <div className={`flex justify-between items-center pt-2 ${r.amountAed != null ? 'pb-0.5' : 'pb-2'} text-[11.5px] gap-2 ${st !== 'overdue' ? 'text-[#5b615e]' : ''}`}>
                           <span className="min-w-0 truncate">
                             <span className={st === 'overdue' ? 'text-[#b42318] font-bold' : st === 'awaiting' ? 'text-[#c47a00] font-bold' : ''}>#{r.seq}</span> · {fmtS(r.dueDate)} · {r.amountAed == null ? <span className="text-[#c47a00]">amount on bill</span> : aed(r.amountAed)}{st === 'paid' && r.reference ? ` · ${r.reference}` : ''}
                           </span>
@@ -629,24 +649,30 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                             </span>
                           )}
                           {st === 'awaiting' && (
-                            <button type="button" onClick={() => { setBillingId(r.id); setBillAmount(''); setBillRef(''); setPaying(null); }}
+                            <button type="button" onClick={() => { setBillingId(r.id); setBillAmount(''); setBillRef(''); setBillVat(c.vatMode ?? 'none'); setPaying(null); }}
                               className="text-[10.5px] font-bold px-2 py-[3px] rounded-[5px] border border-[#c47a00] text-[#c47a00] bg-white cursor-pointer shrink-0">
                               {r.dueDate.slice(0, 7) <= today.slice(0, 7) ? 'Enter bill' : 'bill awaited'}
                             </button>
                           )}
                           {st !== 'paid' && st !== 'awaiting' && (
-                            <button type="button" onClick={() => { setPaying(r); setPayRef(''); setPayDate(today); setPayMethod(c.modeOfPayment && (PAY_METHODS as readonly string[]).includes(c.modeOfPayment) ? c.modeOfPayment : ''); setPayAmount(r.amountAed != null ? String(r.amountAed) : ''); setPayFile(null); }}
+                            <button type="button" onClick={() => { setPaying(r); setPayRef(''); setPayDate(today); setPayMethod(c.modeOfPayment && (PAY_METHODS as readonly string[]).includes(c.modeOfPayment) ? c.modeOfPayment : ''); { const vm: VatMode = r.amountAed != null ? (r.vatMode ?? 'none') : (c.vatMode ?? 'none'); const typed = typedFromStored(r.amountAed, r.vatAed, vm); setPayAmount(typed); setPayVat(vm); setPayOpened({ amount: typed, vat: vm }); } setPayFile(null); }}
                               className={`text-[10.5px] font-bold px-2 py-[3px] rounded-[5px] border bg-white cursor-pointer shrink-0 ${st === 'overdue' ? 'border-[#b42318] text-[#b42318]' : 'border-[#d9ddda] text-[#5b615e]'}`}>
                               {st === 'overdue' ? 'Mark paid' : 'upcoming · pay'}
                             </button>
                           )}
                         </div>
+                        {r.amountAed != null && (
+                          <div className="pb-2 text-[10.5px] text-[#8a8f8c]">
+                            {r.vatAed
+                              ? <>Before VAT <span className="font-semibold text-[#5b615e]">{aed2(Math.round((r.amountAed - r.vatAed) * 100) / 100)}</span> + VAT <span className="font-semibold text-[#5b615e]">{aed2(r.vatAed)}</span></>
+                              : 'No VAT'}
+                          </div>
+                        )}
                         {billingId != null && billingId === r.id && (
                           <div className="my-2 p-2 rounded-lg border border-[#f5d9a8] bg-[#fdf8ee]">
                             <div className="text-[11px] font-semibold text-[#5b615e] mb-1.5">Bill #{r.seq} · {fmtS(r.dueDate)} — record the bill as it arrived</div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <input value={billAmount} onChange={e => setBillAmount(e.target.value)} inputMode="decimal" placeholder="Amount (AED)" autoFocus
-                                className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#c47a00] w-32" />
+                              <AmountWithVat size="sm" accent="#c47a00" className="w-48" placeholder="Amount (AED)" autoFocus amount={billAmount} onAmount={setBillAmount} mode={billVat} onMode={setBillVat} />
                               <input value={billRef} onChange={e => setBillRef(e.target.value)} placeholder="Bill / invoice no."
                                 className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#c47a00] flex-1 min-w-[120px]" />
                             </div>
@@ -681,7 +707,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <span className="text-xs font-medium text-[#5b615e] mb-1 block">Amount paid (AED)</span>
-                  <input value={payAmount} onChange={e => setPayAmount(e.target.value)} inputMode="decimal" className="w-full text-[15px] font-semibold px-3 py-2 border border-[#e6e8e6] rounded-lg bg-white focus:outline-none focus:border-[#1a7a52]" placeholder="0.00" />
+                  {/* Untouched, the stored VAT (possibly the supplier's exact figure) is what the split shows and what is kept. */}
+                  <AmountWithVat placeholder="0.00" amount={payAmount} onAmount={setPayAmount} mode={payVat} onMode={setPayVat}
+                    vatOverride={payAmount.trim() === payOpened.amount && payVat === payOpened.vat && paying.vatAed ? String(paying.vatAed) : undefined} />
                 </div>
                 <div>
                   <span className="text-xs font-medium text-[#5b615e] mb-1 block">Paid on</span>
@@ -730,8 +758,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               <button onClick={() => setPlanOpen(false)} className="text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
             <div className="px-5 py-4">
-              <p className="text-[11.5px] text-[#5b615e] mb-3">Term {fmtD(c.startDate)} → {fmtD(c.endDate)} · {c.frequency ? cap(c.frequency) : 'no frequency'} · {aed(c.annualValueAed)}/yr. Pick a preset or shape the plan by hand — any number of installments, any dates and amounts. Paid installments stay as they are.</p>
-              <PaymentPlanEditor start={contractStart} end={contractEnd} frequency={c.frequency ?? ''} annualValue={annualStr} rows={planRows} onChange={setPlanRows} dirty={planDirty} setDirty={setPlanDirty} />
+              <p className="text-[11.5px] text-[#5b615e] mb-3">Term {fmtD(c.startDate)} → {fmtD(c.endDate)} · {c.frequency ? cap(c.frequency) : 'no frequency'} · {aed(c.annualValueAed)}/yr{c.annualVatAed ? ` (incl. VAT ${aed2(c.annualVatAed)})` : ''}. Pick a preset or shape the plan by hand — any number of installments, any dates and amounts. Paid installments stay as they are.</p>
+              <PaymentPlanEditor start={contractStart} end={contractEnd} frequency={c.frequency ?? ''} annualValue={annualStr} rows={planRows} onChange={setPlanRows} dirty={planDirty} setDirty={setPlanDirty} vatInside={(c.vatMode ?? 'none') !== 'none'} />
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#f1f3f1]">
               <button onClick={() => setPlanOpen(false)} className={btn}>Cancel</button>
@@ -794,7 +822,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           {km.visits
             ? <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>INSPECTIONS</div><div className="text-[13px] font-semibold mt-[3px]">{c.frequency ? cap(c.frequency) : 'As scheduled'} · {n} visit{n === 1 ? '' : 's'}</div></div>
             : <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{km.schedule === 'bills' ? 'BILLS' : km.schedule === 'none' ? 'SPEND' : 'PAYMENTS'}</div><div className="text-[13px] font-semibold mt-[3px]">{km.schedule === 'none' ? `${rows.length} recorded` : `${c.frequency ? cap(c.frequency) : 'As set'} · ${rows.length} ${km.schedule === 'bills' ? 'bills' : payWord}`}</div></div>}
-          <div className="sm:px-[18px]"><div className={lbl}>ANNUAL VALUE</div><div className="text-[13px] font-semibold mt-[3px]">{aed(c.annualValueAed)}</div></div>
+          <div className="sm:px-[18px]"><div className={lbl}>ANNUAL VALUE</div><div className="text-[13px] font-semibold mt-[3px]">{aed(c.annualValueAed)}</div>{c.annualValueAed != null && (c.annualVatAed ? <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{aed2(c.annualValueAed - c.annualVatAed)} + VAT {aed2(c.annualVatAed)}</div> : <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">No VAT</div>)}</div>
         </div>
         {/* lineage rail */}
         {(renews || renewedBy || c.notes) && (
@@ -907,7 +935,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                         </div>
                       </div>
                     </div>
-                    <QuotationBlock key={`q-${t.id}-${t.quotationAt ?? ''}-${t.quotationStatus ?? ''}`} t={t} n={x.n} busy={b} onSave={(f, a) => saveQuotation(t, x.n, f, a)} onAttach={f => attachQuotationFile(t, x.n, f)} />
+                    <QuotationBlock key={`q-${t.id}-${t.quotationAt ?? ''}-${t.quotationStatus ?? ''}`} t={t} n={x.n} busy={b} onSave={(f, a, vm) => saveQuotation(t, x.n, f, a, vm)} onAttach={f => attachQuotationFile(t, x.n, f)} />
                     {t.notes && <p className="text-[11px] text-[#5b615e] italic mt-2">{t.notes}</p>}
                   </div>
                 );
@@ -949,7 +977,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                   ) : (
                     <div className="text-[11px] text-[#8a8f8c] mt-0.5">Marked done {t.completedAt ? fmtS(t.completedAt) : ''} — before inspection tracking; no attendance or delivery note on record.</div>
                   )}
-                  {t.attendedAt && <QuotationBlock key={`q-${t.id}-${t.quotationAt ?? ''}-${t.quotationStatus ?? ''}`} t={t} n={x.n} busy={busy === t.id} onSave={(f, a) => saveQuotation(t, x.n, f, a)} onAttach={f => attachQuotationFile(t, x.n, f)} />}
+                  {t.attendedAt && <QuotationBlock key={`q-${t.id}-${t.quotationAt ?? ''}-${t.quotationStatus ?? ''}`} t={t} n={x.n} busy={busy === t.id} onSave={(f, a, vm) => saveQuotation(t, x.n, f, a, vm)} onAttach={f => attachQuotationFile(t, x.n, f)} />}
                 </div>
                 {t.deliveryNote
                   ? <button type="button" onClick={() => openDocViewer({ fileUrl: t.deliveryNote!.fileUrl, caption: `Delivery note — Visit ${x.n}`, documentKey: 'delivery_note' })} className="text-[11px] font-semibold text-[#1a7a52] hover:text-[#125a3c] cursor-pointer">Delivery note</button>
@@ -994,7 +1022,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               <div className="text-[11px] font-semibold text-[#5b615e] mb-1.5">{km.schedule === 'none' ? 'Record a spend' : 'Add a bill to the schedule'}</div>
               <div className="flex items-center gap-2 flex-wrap">
                 <input type="date" value={spendDate} onChange={e => setSpendDate(e.target.value)} className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#1a7a52]" />
-                <input value={spendAmount} onChange={e => setSpendAmount(e.target.value)} inputMode="decimal" placeholder="Amount (AED)" className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#1a7a52] w-32" />
+                <AmountWithVat size="sm" className="w-48" placeholder="Amount (AED)" amount={spendAmount} onAmount={setSpendAmount} mode={spendVat} onMode={setSpendVat} />
                 <input value={spendRef} onChange={e => setSpendRef(e.target.value)} placeholder="Reference / what for" className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#1a7a52] flex-1 min-w-[140px]" />
                 <label className="text-[11px] text-[#5b615e] flex items-center gap-1"><input type="checkbox" checked={spendPaid} onChange={e => setSpendPaid(e.target.checked)} /> already paid</label>
                 {spendPaid && <select value={spendMethod} onChange={e => setSpendMethod(e.target.value)} className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#1a7a52]" title="Paid by which method">
@@ -1070,7 +1098,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                 <div className="flex gap-[2px] mt-2.5">
                   {rows.map(r => { const st = stateOf(r); return <span key={r.seq} className="flex-1 h-1.5 rounded-[2px]" title={`#${r.seq} · ${fmtS(r.dueDate)} · ${st}`} style={{ background: st === 'paid' ? '#1a7a52' : st === 'overdue' ? '#b42318' : st === 'awaiting' ? '#f5d9a8' : '#eef0ee' }} />; })}
                 </div>
-                <div className="text-[10.5px] text-[#8a8f8c] mt-1.5">{aed(received)} paid · {aed(Math.max(0, totalDue - received))} remaining{awaitingRows.length ? ` · ${awaitingRows.length} bill${awaitingRows.length === 1 ? '' : 's'} awaited` : ''}{c.modeOfPayment ? ` · ${cap(c.modeOfPayment)}` : ''}</div>
+                <div className="text-[10.5px] text-[#8a8f8c] mt-1.5">{aed(received)} paid{vatPaid ? ` (VAT ${aed2(vatPaid)})` : ''} · {aed(Math.max(0, totalDue - received))} remaining{vatTotal - vatPaid > 0 ? ` (VAT ${aed2(Math.round((vatTotal - vatPaid) * 100) / 100)})` : ''}{awaitingRows.length ? ` · ${awaitingRows.length} bill${awaitingRows.length === 1 ? '' : 's'} awaited` : ''}{c.modeOfPayment ? ` · ${cap(c.modeOfPayment)}` : ''}</div>
                 {km.visits && paymentRows(shownRows)}
                 {km.visits && <div className="flex items-center gap-3 mt-2.5 flex-wrap">
                   {rows.length > 1 && (
@@ -1111,7 +1139,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                               <button type="button" disabled={busy === t.id} onClick={() => void saveQuotationAmount(t, x.n)} className={btnFillSm}>{busy === t.id ? '…' : 'Save'}</button>
                               <button type="button" onClick={() => setEditingQuoteId(null)} className="text-[10.5px] text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer">Cancel</button>
                             </span>
-                          : <button type="button" title="Click to change the amount" onClick={() => { setEditingQuoteId(t.id); setQuoteAmount(t.quotationAmountAed != null ? String(t.quotationAmountAed) : ''); }}
+                          : <button type="button" title="Click to change the amount" onClick={() => { setEditingQuoteId(t.id); setQuoteAmount(typedFromStored(t.quotationAmountAed, t.quotationVatAed, t.quotationVatMode ?? 'none')); }}
                               className="text-[12px] font-semibold text-[#1c1f1d] hover:text-[#1a7a52] cursor-pointer border-b border-dashed border-[#c9cdca]">
                               {t.quotationAmountAed != null ? aed(t.quotationAmountAed) : <span className="text-[#c47a00] font-bold">Add amount</span>}
                             </button>}
