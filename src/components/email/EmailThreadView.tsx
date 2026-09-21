@@ -136,7 +136,7 @@ function Message({ m, rp, who, open, onToggle, onForward }: { m: EmailMessageRow
       </div>
       <div className="pl-[60px] pr-4 pb-3.5">
         {m.status === 'not_sent' && <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">Not sent — email is switched off on this environment.</div>}
-        <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : '(no text)')}</div>
+        <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : <span className="text-[#9b9890] italic">No text in this email{m.attachments?.length ? ' — see the attachment below' : ''}.</span>)}</div>
         {(parts.signature || parts.quoted) && (
           <div className="mt-2.5 flex flex-wrap gap-2">
             {parts.signature && <button type="button" onClick={() => setShowSignature((v) => !v)} aria-expanded={showSignature} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showSignature ? 'Hide signature' : 'Signature'}</button>}
