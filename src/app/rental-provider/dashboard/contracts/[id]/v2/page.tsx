@@ -49,6 +49,8 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
+import { slotOfDoc, fileNameOfDoc, isPaymentAdviceKey } from '@/lib/planAttach';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
@@ -833,6 +835,15 @@ interface StepHandlers {
   /** Renewal Cheques/PDC step — RP uploads the Payment Advice on the customer's
    *  behalf, or marks the cheques as already on file once it's attached. */
   onUploadCheques: () => void;
+  /** Attach cheque file(s) against one payment slot of the renewal plan — the
+   *  SAME tag the customer's Payments step writes (`<slot> · <file>`), so both
+   *  sides read one attachment per payment. `replaceIds` go only after the new
+   *  files are stored. */
+  onAttachChequeForSlot: (slotLabel: string, files: FileList | null, replaceIds?: number[]) => Promise<void>;
+  /** Remove one cheque file (soft delete). */
+  onRemoveChequeDoc: (docId: number) => Promise<void>;
+  /** Tag a file sent "all together" to the payment it covers. */
+  onTagChequeDoc: (docId: number, slotLabel: string) => Promise<void>;
   onMarkChequesOnFile: () => Promise<void>;
   /** Accept the customer's re-uploaded renewal KYC documents → PATCH
    *  /contracts/:id/renewal/accept-docs. Unlocks the Cheques step (Documents → Cheques). */
@@ -902,6 +913,115 @@ function nextSerial(base: string, offset = 1): string {
   return prefix + (parseInt(digits, 10) + offset).toString().padStart(digits.length, '0');
 }
 
+/** The renewal's Payment Summary with one attach control per payment row — the
+ *  SAME card, rows and tag rule as the customer's Payments step (spaces/v2), so
+ *  the file the customer attached to Instalment 1 is Instalment 1's file here,
+ *  and one the landlord attaches here is the customer's too. Files sent "all
+ *  together" (no tag, or a tag the plan no longer has) list underneath with a
+ *  Tag-to control, the same as the customer's own untagged bucket. */
+function RenewalChequeAttachments({ h, chequeDocs, canEdit }: { h: StepHandlers; chequeDocs: ContractDoc[]; canEdit: boolean }) {
+  const [uploading, setUploading] = useState(0);
+  const [tagBusy, setTagBusy] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const rows = segRowsFromContract(h.contract, h.contract.payments ?? []);
+  const plan = buildCurrentPlan(h.contract, h.contract.payments ?? []);
+  // Every slot label the card will render — rent per instalment, the other
+  // groups once at their heading (SegregatedPlanView's own terms).
+  const slotLabels = buildSegregatedPlan(rows).groups.flatMap(g =>
+    g.key === 'rental' ? g.lines.map(l => `Rent — ${l.item}`) : [g.title],
+  );
+  const untagged = chequeDocs.filter(d => { const t = slotOfDoc(d.displayName); return !t || !slotLabels.includes(t); });
+  const onFiles = async (label: string, files: FileList | null, replaceIds?: number[]) => {
+    setErr(null); setUploading(files?.length ?? 0);
+    try { await h.onAttachChequeForSlot(label, files, replaceIds); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Upload failed'); }
+    finally { setUploading(0); }
+  };
+  const onRemove = async (id: number) => {
+    setErr(null);
+    try { await h.onRemoveChequeDoc(id); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not remove the file'); }
+  };
+  const onTag = async (id: number, label: string) => {
+    setErr(null); setTagBusy(id);
+    try { await h.onTagChequeDoc(id, label); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not tag the file'); }
+    finally { setTagBusy(null); }
+  };
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <PaymentPlanCard
+        plan={plan}
+        rows={rows}
+        refLabel={h.contract.ref}
+        contractType={h.contract.contractType}
+        tenantName={h.contract.tenant.companyName || h.contract.tenant.name}
+        landlordName={h.contract.landlord.bankAccountName || h.contract.landlord.companyName || h.contract.landlord.name}
+        unitNumber={h.contract.unit.number}
+        buildingName={h.contract.property.buildingName}
+        community={h.contract.property.community || h.contract.property.emirate}
+        periodStart={h.contract.startDate}
+        periodEnd={h.contract.endDate}
+        renderAttach={(slot) => (
+          <PlanAttachCell
+            slot={slot}
+            refs={chequeDocs.filter(d => slotOfDoc(d.displayName) === slot.label).map(d => ({ id: d.id, imageUrl: d.fileUrl ?? null }))}
+            uploading={uploading}
+            onFiles={(label, files, replaceIds) => void onFiles(label, files, replaceIds)}
+            onRemove={(id) => void onRemove(id)}
+            readOnly={!canEdit}
+          />
+        )}
+      />
+      {/* Bulk alternative to the per-row controls — the same box the customer has:
+          the whole set at once, untagged, then tagged to its payment here. */}
+      {(canEdit || untagged.length > 0) && (
+        <div className="doclist">
+          <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span>Or send them all together</span>
+            {untagged.length > 0 && <span style={{ color: 'var(--mute)', fontWeight: 600 }}>{untagged.length} file{untagged.length === 1 ? '' : 's'}</span>}
+          </div>
+          <p className="note" style={{ margin: '0 0 6px' }}>Rather hand the whole set over at once? Attach every cheque here instead of row by row, then tag each one to the payment it covers.</p>
+          {canEdit && (
+            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--line-2, #d9d6cf)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep, #1a7a52)' }}>
+              <input type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={e => { void onFiles('', e.target.files); e.target.value = ''; }} style={{ display: 'none' }} />
+              {uploading > 0 ? `Uploading ${uploading} file${uploading === 1 ? '' : 's'}…` : 'Choose files'}
+            </label>
+          )}
+          {untagged.map((doc, i) => {
+            const label = fileNameOfDoc(doc.displayName) || `Cheque ${i + 1}`;
+            const open = () => doc.fileUrl && openDocViewer({ fileUrl: doc.fileUrl, caption: label });
+            return (
+              <div key={doc.id} className="uprow">
+                <button type="button" className="upthumb" onClick={open} disabled={!doc.fileUrl} aria-label={`Preview ${label}`}>
+                  {doc.fileUrl && !doc.fileUrl.toLowerCase().split('?')[0].endsWith('.pdf')
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={doc.fileUrl} alt={label} />
+                    : <FileText size={16} />}
+                </button>
+                <div className="upmeta">
+                  <div className="dn">{label}</div>
+                  <div className="ds">Not tagged to a payment yet</div>
+                  <div className="upctl">
+                    {doc.fileUrl && <button type="button" className="mini-btn view" onClick={open}><Eye size={12} /> View</button>}
+                    {canEdit && (
+                      <select className="qinput" style={{ width: 210 }} aria-label={`Tag ${label} to a payment`} value=""
+                        disabled={tagBusy === doc.id} onChange={e => { if (e.target.value) void onTag(doc.id, e.target.value); }}>
+                        <option value="">Tag to payment…</option>
+                        {slotLabels.map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    )}
+                    {canEdit && <button type="button" className="mini-btn" onClick={() => void onRemove(doc.id)}>Remove</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {err && <div className="errline">{err}</div>}
+    </div>
+  );
+}
+
 /** Renewal Cheques/PDC step body (RP side). Before the customer submits, a waiting
  *  panel. Once submitted: the RP records each cheque against the payment plan
  *  (number / method / date / status via the existing payments PATCH), views the
@@ -914,9 +1034,9 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
     ...(h.contract.payments ?? []).filter(p => (p.paymentType ?? '') !== 'security_deposit'),
     ...(h.contract.fees ?? []),
   ];
-  // The customer's uploaded cheque images/PDFs are filed as Payment Advice.
-  const PA_BASES = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof'];
-  const chequeDocs = (h.contract.documents ?? []).filter(d => PA_BASES.includes((d.documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, '')));
+  // The cheque images / PDFs, filed as Payment Advice — the same set the
+  // customer's Payments step reads (lib/planAttach).
+  const chequeDocs = (h.contract.documents ?? []).filter(d => isPaymentAdviceKey(d.documentKey));
 
   const [err, setErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -927,8 +1047,6 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   const [draft, setDraft] = useState<Record<number, { method?: string; ref?: string }>>({});
   /** Rows the RP re-opened to correct after recording. */
   const [reopened, setReopened] = useState<Set<number>>(new Set());
-  /** The uploaded cheque whose instalment mapping is being saved. */
-  const [attachBusy, setAttachBusy] = useState<number | null>(null);
 
   /** Commit a row. Returns false (and shows the reason) when the PATCH fails, so
    *  the caller doesn't clear the draft the RP would then have to retype. */
@@ -937,21 +1055,6 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
     try { await h.onUpdatePayment(id, patch); return true; }
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed to record'); return false; }
     finally { setBusyId(null); }
-  };
-
-  /** Point an uploaded cheque image at the instalment it pays (or clear it).
-   *  One document belongs to one instalment, so attaching it somewhere new
-   *  detaches it from wherever it was — otherwise two rows would claim the same
-   *  scan and the "Mapped to" line would contradict itself. */
-  const mapAttachment = async (docId: number, paymentId: number | null) => {
-    setAttachBusy(docId); setErr(null);
-    try {
-      const previous = payRows.find(r => r.documentId === docId);
-      if (previous && previous.id !== paymentId) await h.onUpdatePayment(previous.id, { documentId: null });
-      if (paymentId != null) await h.onUpdatePayment(paymentId, { documentId: docId });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to map the attachment');
-    } finally { setAttachBusy(null); }
   };
 
   // Every payment being COLLECTED on this renewal in one numbered series — fees
@@ -981,8 +1084,10 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   // Saying "waiting for the customer" there blames the wrong party and hides the
   // fact that the only outstanding thing is the RP's own confirmation, so the
   // panel names the real gap and points at the action that closes it.
-  const evidenceOnFile = chequeDocs.length > 0
-    || rows.some(p => !!p.chequeNumber || p.chequeStatus === 'cleared');
+  // Only a FILE is evidence. A cheque number typed on the plan used to count
+  // too, so the step said "already on file" over an empty slot (owner, 22 Sep
+  // 2026, lease 379).
+  const evidenceOnFile = chequeDocs.length > 0;
 
   if (!submitted) {
     return (
@@ -992,23 +1097,15 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
             ? <>Cheques for this renewal are already on file, but their collection was never confirmed — so this lease cannot go live. Check them below, then mark them on file to record the collection.</>
             : <>Waiting for {h.contract.tenant.name || 'the customer'} to upload &amp; submit their cheques. Once they do, record each cheque here and mark them collected to unlock signing.</>}
         </div>
-        <button className="ca" style={{ justifySelf: 'start', padding: 0 }} onClick={() => h.openDrawer('payments')}>View the renewal cheque schedule</button>
-        {chequeDocs.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <span className="note" style={{ fontWeight: 600 }}>Payment Confirmation already on file:</span>
-            {chequeDocs.map((d, i) => (
-              <button key={d.id} type="button" className="mini-btn view" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? `Cheque ${i + 1}` })}>
-                <ExternalLink size={12} /> {d.displayName ?? `Cheque ${i + 1}`}
-              </button>
-            ))}
-          </div>
-        )}
-        {canEdit && (
-          <UploadAction
-            fileLabel="Payment-Confirmation.pdf"
-            onUpload={h.onUploadCheques}
-            onMark={() => void h.onMarkChequesOnFile()}
-          />
+        {/* The SAME Payment Summary the customer attaches on — one cheque per
+            payment row, read and written by the same tag on both sides. The
+            landlord can attach on the customer's behalf (cheques handed over at
+            the office) and then mark them on file. */}
+        <RenewalChequeAttachments h={h} chequeDocs={chequeDocs} canEdit={canEdit} />
+        {canEdit && evidenceOnFile && (
+          <button type="button" className="btn btn-jade btn-block" onClick={() => void h.onMarkChequesOnFile()}>
+            <Check size={15} /> Mark cheques as on file
+          </button>
         )}
       </div>
     );
@@ -1016,6 +1113,7 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
+      <RenewalChequeAttachments h={h} chequeDocs={chequeDocs} canEdit={canEdit} />
       {/* The SAME Record-Cheques card the new lease uses on the lead
           (ChequesSection in leads/[id]): Instalment · Method · Reference ·
           Record, one row per planned payment, numbered, with the cheque total in
@@ -1139,63 +1237,6 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
             );
           })}
         </div>
-        {/* Customer-uploaded cheque images — thumbnail + View + map to the
-            instalment each one pays. Same job, same controls as the lead's
-            "Uploaded by customer" list; here the mapping is stored on the
-            payment row (payments.document_id) rather than on a lead cheque. */}
-        {chequeDocs.length > 0 && (
-          <div className="doclist" style={{ marginTop: 12 }}>
-            <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Uploaded by customer ({chequeDocs.length})</span>
-              {chequeDocs.length > 1 && (
-                <button type="button" className="linkbtn"
-                  onClick={() => openDocsTogether(chequeDocs.map(d => ({ fileUrl: d.fileUrl, displayName: d.displayName ?? 'Cheque' })))}>
-                  <Eye size={11} /> View all
-                </button>
-              )}
-            </div>
-            {chequeDocs.map((doc, i) => {
-              const label = doc.displayName || `Cheque ${i + 1}`;
-              const open = () => doc.fileUrl && openDocViewer({ fileUrl: doc.fileUrl, caption: label });
-              // The instalment this scan is currently attached to, if any.
-              const mappedTo = payRows.find(r => r.documentId === doc.id);
-              return (
-                <div key={doc.id} className="uprow">
-                  <button type="button" className="upthumb" onClick={open} disabled={!doc.fileUrl} aria-label={`Preview ${label}`}>
-                    {doc.fileUrl && !doc.fileUrl.toLowerCase().split('?')[0].endsWith('.pdf')
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={doc.fileUrl} alt={label} />
-                      : <FileText size={16} />}
-                  </button>
-                  <div className="upmeta">
-                    <div className="dn">{label}</div>
-                    <div className="ds">
-                      {mappedTo
-                        ? <>Mapped to #{payRows.indexOf(mappedTo) + 1} {mappedTo.description ?? 'Payment'}{mappedTo.chequeNumber ? ` \u00b7 ${mappedTo.chequeNumber}` : ''}</>
-                        : <>Not mapped to an instalment yet</>}
-                    </div>
-                    <div className="upctl">
-                      {doc.fileUrl && <button type="button" className="mini-btn view" onClick={open}><Eye size={12} /> View</button>}
-                      <select
-                        className="qinput"
-                        style={{ width: 190 }}
-                        aria-label={`Map ${label} to an instalment`}
-                        disabled={!canEdit || attachBusy === doc.id}
-                        value={mappedTo ? String(mappedTo.id) : ''}
-                        onChange={e => void mapAttachment(doc.id, e.target.value === '' ? null : Number(e.target.value))}
-                      >
-                        <option value="">Map to instalment&hellip;</option>
-                        {payRows.map((r, k) => (
-                          <option key={r.id} value={r.id}>#{k + 1} {r.description ?? `Payment ${k + 1}`}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
       {canEdit && (
         <button
@@ -6906,6 +6947,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       body: JSON.stringify({ ownerType, ownerId, category, documentKey: docKey, displayName, fileUrl, mimeType: file.type || 'application/octet-stream', s3Key: fileKey, isVisibleToTenant: true }),
     });
     if (!docRes.ok) throw new Error('Failed to record document');
+    return (await docRes.json().catch(() => null)) as { id?: number } | null;
   }
 
   const onUploadEjari = () => ejariInputRef.current?.click();
@@ -6983,6 +7025,50 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       void reload();
     } catch (e) { alert(e instanceof Error ? e.message : 'Payment Confirmation upload failed'); }
     finally { setChequesUploading(false); if (chequesInputRef.current) chequesInputRef.current.value = ''; }
+  };
+  /** The rent payment a `Rent — <instalment>` slot stands for, so the file also
+   *  lands on the row's cheque-image link (payments.document_id) and the
+   *  Payments card shows it after activation. Fee groups are one slot for
+   *  several rows and stay on the tag alone. */
+  const rentRowForSlot = (slotLabel: string): ContractPayment | undefined => {
+    const m = slotLabel.match(/^Rent — (.+)$/);
+    if (!m) return undefined;
+    return (contract?.payments ?? []).find(p => (p.paymentType ?? '') === 'rental_income' && (p.description ?? '') === m[1]);
+  };
+  const onAttachChequeForSlot = async (slotLabel: string, files: FileList | null, replaceIds?: number[]) => {
+    if (!files || files.length === 0) return;
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) { const scanned = await scan(picked); if (scanned) ready.push(scanned); }
+    if (ready.length === 0) return;
+    setChequesUploading(true);
+    try {
+      for (const f of ready) {
+        const doc = await uploadContractDoc(f, slotLabel ? `${slotLabel} · ${f.name}` : f.name, 'payment_advice', { category: 'payment' });
+        const row = rentRowForSlot(slotLabel);
+        if (doc?.id && row) await onUpdatePayment(row.id, { documentId: doc.id });
+      }
+      for (const id of replaceIds ?? []) {
+        await fetch(`/api/documents/${id}`, { method: 'DELETE', credentials: 'include' });
+      }
+      await reload();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Cheque upload failed'); }
+    finally { setChequesUploading(false); }
+  };
+  const onRemoveChequeDoc = async (docId: number) => {
+    const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE', credentials: 'include' });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Could not remove the file (${res.status})`); }
+    const row = (contract?.payments ?? []).find(p => p.documentId === docId);
+    if (row) await onUpdatePayment(row.id, { documentId: null });
+    await reload();
+  };
+  const onTagChequeDoc = async (docId: number, slotLabel: string) => {
+    const doc = (contract?.documents ?? []).find(d => d.id === docId);
+    const file = doc ? fileNameOfDoc(doc.displayName) || 'cheque' : 'cheque';
+    const res = await fetch(`/api/documents/${docId}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName: `${slotLabel} · ${file}` }) });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b?.message ?? `Could not tag the file (${res.status})`); }
+    const row = rentRowForSlot(slotLabel);
+    if (row) await onUpdatePayment(row.id, { documentId: docId });
+    await reload();
   };
   const onMarkChequesOnFile = async () => {
     try {
@@ -7433,7 +7519,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onAttachChequeForSlot, onRemoveChequeDoc, onTagChequeDoc, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     onUnsendSettlement,
     onCancelTermination,

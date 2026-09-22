@@ -47,6 +47,8 @@ import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import type { PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, segRowsFromCustomerPlan, segRowsFromContract } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
+import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
+import { slotOfDoc, fileNameOfDoc, tagFileName, isPaymentAdviceKey } from '@/lib/planAttach';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
@@ -237,10 +239,16 @@ interface ApiContractPayment {
   /** How the landlord expects this line to be paid — feeds the Payment Summary's
    *  "Paid by" column, which hides itself when no row carries a method. */
   paymentMethod?: string | null;
+  /** The cheque number the landlord recorded against this line — the Payment
+   *  Summary's "Payment ref" column, so the customer reads the SAME card the
+   *  landlord does (same columns, same numbers). */
+  chequeNumber?: string | null;
 }
 
 interface ApiContract {
   id: number;
+  /** The lessor, as the landlord's own card names them (bank account name → company → person). */
+  landlord?: { name?: string | null; companyName?: string | null; bankAccountName?: string | null } | null;
   ref?: string | null;
   /** Company tenant party name — set when the tenant is a company, so documents
    *  show the company rather than the individual signatory. */
@@ -3293,73 +3301,6 @@ function PaymentPlanSummary({ plan }: { plan: ApiPaymentPlan }) {
 }
 
 /* ─── PAYMENT PLAN ─────────────────────────────────────────────────── */
-/**
- * The attach control that sits on a payment row / group heading.
- *
- * It is not just an upload button: whatever the customer attached has to be
- * viewable and removable from the same place. Before this, a reference tagged
- * to a payment was write-only — the thumbnail + View + Remove existed only for
- * the untagged "all together" bucket, so once attaching moved onto the rows the
- * customer could no longer see what they had sent.
- */
-function PlanAttachCell({ slot, refs, uploading, onFiles, onRemove }: {
-  slot: PlanAttachSlot;
-  refs: CustomerCheque[];
-  uploading: number;
-  /** `replaceIds` are dropped only AFTER the new files are stored. */
-  onFiles: (label: string, files: FileList | null, replaceIds?: number[]) => void;
-  onRemove: (id: number) => void;
-}) {
-  const viewable = refs.filter(r => !!r.imageUrl);
-  // One line, one control each: open it · add to it · delete it. No thumbnail —
-  // it opened the same viewer "View" does, so the row carried the same action
-  // twice in the width of a table cell.
-  const openAll = () => openDocViewer(
-    viewable.map(r => ({ fileUrl: r.imageUrl as string, caption: slot.label })),
-    slot.label,
-  );
-  return (
-    // Wraps rather than overflows: in a narrow card the three controls don't fit
-    // on one line, and clipping them is what made the row look like it had no
-    // attach option at all.
-    <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 7 }}>
-      {viewable.length > 0 && (
-        <button type="button" onClick={openAll} title={`View what you attached to ${slot.label}`}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', padding: 0, fontSize: 10.5, fontWeight: 700, color: 'var(--jade-deep)', cursor: 'pointer' }}>
-          <ExternalLink size={11} /> View{viewable.length > 1 ? ` (${viewable.length})` : ''}
-        </button>
-      )}
-      {/* "Replace", not "Attached" — every control on this row is an action, and
-          it genuinely replaces: the files picked here become the ONLY ones on
-          this payment. The count moves onto View, which is what it describes. */}
-      <label
-        title={refs.length
-          ? `Replace the ${refs.length > 1 ? `${refs.length} files` : 'file'} attached to this payment`
-          : 'Attach a cheque photo, transfer screenshot, card slip or cash receipt'}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8,
-          border: `1px solid ${refs.length ? 'rgba(46,159,130,0.4)' : 'var(--mist-strong)'}`,
-          background: refs.length ? 'rgba(46,159,130,0.07)' : 'var(--paper)',
-          cursor: uploading ? 'progress' : 'pointer', fontSize: 11, fontWeight: 700,
-          color: refs.length ? 'var(--jade-deep)' : 'var(--ink-2)', whiteSpace: 'nowrap',
-        }}>
-        <input type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0}
-          onChange={(e) => { onFiles(slot.label, e.target.files, refs.map(r => r.id)); e.target.value = ''; }}
-          style={{ display: 'none' }} />
-        <UploadCloud size={12} /> {refs.length ? 'Replace' : 'Attach'}
-      </label>
-      {refs.length > 0 && (
-        <button type="button" onClick={() => refs.forEach(r => onRemove(r.id))}
-          title={refs.length > 1 ? `Delete all ${refs.length} files for this payment` : 'Delete this file'}
-          aria-label={refs.length > 1 ? `Delete all ${refs.length} files for ${slot.label}` : `Delete the file for ${slot.label}`}
-          style={{ display: 'inline-flex', alignItems: 'center', background: 'none', border: 'none', color: 'var(--mute)', cursor: 'pointer', padding: 2, lineHeight: 0 }}>
-          <Trash2 size={13} />
-        </button>
-      )}
-    </div>
-  );
-}
-
 function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const { user } = useAuth();
   // Camera captures pass through the scan modal (auto-crop + clean-up) first.
@@ -4659,6 +4600,7 @@ function renewalSegRows(child: ApiContract | null) {
       transactionDate: p.transactionDate,
       chequeStatus: p.chequeStatus ?? null,
       paymentMethod: p.paymentMethod ?? null,
+      chequeNumber: p.chequeNumber ?? null,
     })),
   );
 }
@@ -4710,7 +4652,7 @@ function RenewalTermsSummary({ parent, child, resolved, renderAttach }: { parent
       refLabel={child?.ref ?? null}
       contractType={child?.contractType ?? 'renewal'}
       tenantName={child?.tenantCompanyName || parent?.tenantCompanyName || personName(user) || null}
-      landlordName={rp?.user?.name?.trim() || rp?.companyName?.trim() || null}
+      landlordName={child?.landlord?.bankAccountName || child?.landlord?.companyName || child?.landlord?.name || rp?.user?.name?.trim() || rp?.companyName?.trim() || null}
       unitNumber={place.unitNumber}
       buildingName={place.buildingName}
       community={place.community}
@@ -5030,26 +4972,6 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
   );
 }
 
-/**
- * Separates the schedule slot a renewal cheque was attached to from the file's
- * own name inside `documents.display_name` ("Rent — Instalment 2 · cheque.jpg").
- *
- * Documents have no free-text column to tag with, and the slot cannot ride on
- * `document_key`: the binder matches Payment Advice by stripping a trailing
- * `_<10+digits>`, so any other suffix would stop the file snapping into the
- * Payment Advice slot the RP reads cheques from. Carrying it in the display name
- * keeps the binder match intact AND tells the RP which instalment each cheque
- * covers. Untagged (bulk-uploaded) files simply have no separator.
- */
-const SLOT_SEP = ' · ';
-function slotOfDoc(displayName?: string | null): string | null {
-  const i = (displayName ?? '').indexOf(SLOT_SEP);
-  return i > 0 ? displayName!.slice(0, i) : null;
-}
-function fileNameOfDoc(displayName?: string | null): string {
-  const i = (displayName ?? '').indexOf(SLOT_SEP);
-  return i > 0 ? displayName!.slice(i + SLOT_SEP.length) : (displayName ?? '');
-}
 
 function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () => void }) {
   const child = resolved.renewalContract;
@@ -5068,7 +4990,6 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const [uploading, setUploading] = useState(0);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const PAYMENT_ADVICE_KEYS = ['payment_advice', 'pdc', 'post_dated_cheques', 'cheque_copies_pdc', 'cheque_copies', 'cheques', 'cheque', 'rent_cheques', 'renewal_payment_proof'];
 
   useEffect(() => {
     if (!child?.id) return;
@@ -5076,7 +4997,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
       .then(r => r.ok ? r.json() : [])
       .then((rows: PdcDoc[]) => {
         if (!Array.isArray(rows)) return;
-        setPdcDocs(rows.filter(d => PAYMENT_ADVICE_KEYS.includes((d.documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, ''))));
+        setPdcDocs(rows.filter(d => isPaymentAdviceKey(d.documentKey)));
       })
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -5111,7 +5032,7 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     if (!putRes.ok) throw new Error('File upload failed');
     const regRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, category: 'payment', displayName: slotLabel ? `${slotLabel}${SLOT_SEP}${file.name}` : file.name, fileUrl, mimeType: mime, s3Key: fileKey, isVisibleToTenant: true }),
+      body: JSON.stringify({ ownerType: 'tenancy_contract', ownerId: child.id, documentKey: key, category: 'payment', displayName: slotLabel ? tagFileName(slotLabel, file.name) : file.name, fileUrl, mimeType: mime, s3Key: fileKey, isVisibleToTenant: true }),
     });
     if (!regRes.ok) { const b = await regRes.json().catch(() => ({})); throw new Error(b?.message ?? 'Reference registration failed'); }
     return (await regRes.json()) as PdcDoc;
