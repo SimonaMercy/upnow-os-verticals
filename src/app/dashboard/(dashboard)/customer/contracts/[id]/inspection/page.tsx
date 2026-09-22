@@ -15,6 +15,7 @@ import { ArrowLeft, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { ReportMeta } from '@/components/contract/InspectionReportView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import type { InspectionDoc, InspectionCategory } from '@/lib/inspectionCatalog';
+import { InspectionPhotosCard } from '@/components/contract/InspectionPhotosCard';
 
 // @react-pdf + pdf.js are browser-only.
 const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
@@ -49,6 +50,9 @@ interface InspectionData {
   moveInDate?: string;
   categories?: InspectionCategory[];
   generalNotes?: string;
+  /** Walk-through photos (re-signed URLs). Per-item evidence is RP-only and never sent here. */
+  photos?: { id: string; url: string; caption?: string }[];
+  moveInPhotos?: { id: string; url: string; caption?: string }[];
   tenantSig: string | null;
   tenantSignedAt?: string | null;
   rpCounterSig?: string | null;
@@ -176,6 +180,16 @@ export default function TenantInspectionPage() {
         moveInDate={meta?.handoverDate ?? null}
         moveOutDate={meta?.contractEndDate ?? null}
       />
+
+      {/* The photos behind the report — the customer sees what was recorded
+          before agreeing to it. Move-out also shows the move-in set as the
+          "before" reference. */}
+      <div className="no-print">
+        <InspectionPhotosCard title={inspType === 'move_out' ? 'Move-out photos' : 'Move-in photos'} photos={data.photos ?? []} />
+        {inspType === 'move_out' && (
+          <InspectionPhotosCard title="Move-in photos" hint="Recorded at move-in, for reference." photos={data.moveInPhotos ?? []} />
+        )}
+      </div>
 
       {!signed && (
         <div className="no-print mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5">

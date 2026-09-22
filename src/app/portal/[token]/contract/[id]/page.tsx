@@ -24,6 +24,7 @@ import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
 import type { ReportMeta } from '@/components/contract/InspectionReportView';
 import type { InspectionDoc } from '@/lib/inspectionCatalog';
+import { InspectionPhotosCard } from '@/components/contract/InspectionPhotosCard';
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
@@ -276,6 +277,18 @@ export default function ContractReviewPage() {
             <EjariInline data={ejari} addendums={addendums} noScroll />
           )}
         </div>
+        )}
+
+        {/* The photos behind the report — the customer sees what was recorded
+             before agreeing to it. On a move-out link the move-in set is shown
+             too, as the "before" reference. */}
+        {inspType && insp?.rpSubmittedAt && (
+          <>
+            <InspectionPhotosCard title={inspType === 'move_out' ? 'Move-out photos' : 'Move-in photos'} photos={insp.photos ?? []} />
+            {inspType === 'move_out' && (
+              <InspectionPhotosCard title="Move-in photos" hint="Recorded at move-in, for reference." photos={insp.moveInPhotos ?? []} />
+            )}
+          </>
         )}
 
         {/* Sign the contract */}

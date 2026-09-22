@@ -24,7 +24,7 @@ import {
   computeInspectionTotals, quantityOf, canonicalKey,
 } from '@/lib/inspectionCatalog';
 import { displayInspectionPhotoUrl } from '@/lib/inspectionPhotos';
-import { openDocViewer } from '@/lib/docViewer';
+import { PhotoLightbox, type GalleryPhoto } from '@/components/upnow/PhotoGallery';
 import s from './InspectionReportView.module.css';
 
 type Phase = 'move_in' | 'move_out';
@@ -412,13 +412,18 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
   onRemove?: (photoId: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [galleryStart, setGalleryStart] = useState<number | null>(null);
   const photos = item.itemAttachments ?? [];
   if (!photos.length && !editable) return null;
+  const label = [item.location, item.componentName].filter(Boolean).join(' — ');
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-      {photos.map((p) => (
-        <PhotoThumb key={p.id} photo={p} removable={editable && !!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
+      {photos.map((p, k) => (
+        <PhotoThumb key={p.id} photo={p} onOpen={() => setGalleryStart(k)} removable={editable && !!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
       ))}
+      {galleryStart !== null && (
+        <PhotoLightbox photos={toGallery(photos, label)} start={galleryStart} onClose={() => setGalleryStart(null)} />
+      )}
       {editable && onAdd && (
         <>
           <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
@@ -447,6 +452,7 @@ function ReportPhotos({ photos, onAdd, onRemove, uploading, progress }: {
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [galleryStart, setGalleryStart] = useState<number | null>(null);
   if (!photos.length && !onAdd) return null;
   const take = (list: FileList | null) => {
     const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/'));
@@ -458,10 +464,13 @@ function ReportPhotos({ photos, onAdd, onRemove, uploading, progress }: {
         <h4><span className={s.ico}><Camera /></span>Photos{photos.length ? ` (${photos.length})` : ''}</h4>
         {!!photos.length && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: onAdd ? 10 : 0 }}>
-            {photos.map((p) => (
-              <PhotoThumb key={p.id} photo={p} removable={!!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
+            {photos.map((p, k) => (
+              <PhotoThumb key={p.id} photo={p} onOpen={() => setGalleryStart(k)} removable={!!onRemove} onRemove={onRemove ? () => onRemove(p.id) : undefined} />
             ))}
           </div>
+        )}
+        {galleryStart !== null && (
+          <PhotoLightbox photos={toGallery(photos, 'Walk-through photo')} start={galleryStart} onClose={() => setGalleryStart(null)} />
         )}
         {onAdd && (
           <>
@@ -497,12 +506,20 @@ function ReportPhotos({ photos, onAdd, onRemove, uploading, progress }: {
   );
 }
 
-/** One inspection-photo thumbnail. Always a button that opens the full photo in
- *  the in-portal viewer (bigger preview). When the image fails to load — e.g. a
- *  private-bucket URL that couldn't be re-signed — it degrades to a labelled,
- *  still-clickable placeholder instead of a broken-image glyph. */
-function PhotoThumb({ photo, removable, onRemove }: {
+/** The lightbox list for a group of inspection photos: fresh (re-signed) view
+ *  URLs, and the photo's own caption or the group label ("Kitchen — Sink"). */
+function toGallery(photos: InspectionPhoto[], fallbackCaption: string): GalleryPhoto[] {
+  return photos.map((p) => ({ id: p.id, url: displayInspectionPhotoUrl(p.url), caption: p.caption || fallbackCaption }));
+}
+
+/** One inspection-photo thumbnail. Always a button that opens the gallery
+ *  preview (full-screen lightbox with previous / next over the whole group).
+ *  When the image fails to load — e.g. a private-bucket URL that couldn't be
+ *  re-signed — it degrades to a labelled, still-clickable placeholder instead
+ *  of a broken-image glyph. */
+function PhotoThumb({ photo, onOpen, removable, onRemove }: {
   photo: { id: string; url: string; caption?: string };
+  onOpen: () => void;
   removable: boolean;
   onRemove?: () => void;
 }) {
@@ -511,8 +528,8 @@ function PhotoThumb({ photo, removable, onRemove }: {
   const caption = photo.caption || 'Inspection photo';
   return (
     <span style={{ position: 'relative', width: 76, height: 76, borderRadius: 8, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
-      {/* Click the thumbnail to open the full photo in the in-portal viewer. */}
-      <button type="button" onClick={() => openDocViewer({ fileUrl: src, caption })}
+      {/* Click the thumbnail to open the gallery preview on this photo. */}
+      <button type="button" onClick={onOpen}
         title="Click to view full photo" aria-label={`View full photo — ${caption}`}
         style={{ display: 'block', width: '100%', height: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', lineHeight: 0 }}>
         {broken ? (
