@@ -14,6 +14,7 @@ import { OperationsByStageReport } from '@/components/upnow/OperationsByStageRep
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
+import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 
 export default function ReportDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -44,6 +45,9 @@ export default function ReportDetailPage() {
   }
   if (params.slug === 'operations-by-stage') {
     return <OperationsByStageReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
+  }
+  if (params.slug === 'operation-plan') {
+    return <OperationPlanReport backHref="/rental-provider/dashboard/reports" />;
   }
   if (params.slug === 'move-out-reasons') {
     return <MoveOutReasonsReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;

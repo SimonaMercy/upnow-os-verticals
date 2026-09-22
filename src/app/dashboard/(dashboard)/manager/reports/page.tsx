@@ -26,6 +26,7 @@ import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
+import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
@@ -140,6 +141,17 @@ export default function ManagerReportsPage() {
         onBack={() => navigate(null)}
         contractsBase="/dashboard/manager/contracts"
         leadsBase="/dashboard/manager/leads"
+      />
+    );
+  }
+  // The Operation Management Plan — its own endpoint (not /reports/:slug), the
+  // same grant: View Reports plus this report on a curated allow-list.
+  if (openSlug === 'operation-plan') {
+    return (
+      <OperationPlanReport
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        managerRp={effectiveRp}
       />
     );
   }
