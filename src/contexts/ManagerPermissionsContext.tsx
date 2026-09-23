@@ -62,6 +62,11 @@ export interface RpPermissions {
     canManageVendors:     boolean;
     /** 0275 — AMC contracts, visits, payables. */
     canManageAmc:         boolean;
+    /** 0319 — record vendor payments (AMC bills, spends, installments paid /
+     *  unpaid, payables due, expenses report) without contract-editing power. */
+    canRecordVendorPayments: boolean;
+    /** 0326 — hands cheques / cash to head office and back; sees the custody trail. */
+    canHandOverCheques: boolean;
     /** Legal & breach — breaches, notices, disputes (spec 2026-09-14). */
     canManageLegal:       boolean;
     // Communication & admin
@@ -74,6 +79,8 @@ export interface RpPermissions {
     canEscalateToAdmin:   boolean;
     canInviteManager:     boolean;
   };
+  /** Report slugs this landlord opened to the manager; empty = every report. */
+  reportAccess?: string[];
 }
 
 interface ManagerPermissionsState {

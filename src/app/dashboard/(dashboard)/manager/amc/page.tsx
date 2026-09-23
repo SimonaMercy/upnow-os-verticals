@@ -3,14 +3,17 @@
 /**
  * Manager — AMC & Vendor Management (mirrors the RP AMC portal).
  * Data is fetched for the landlord chosen in the LandlordSwitcher via
- * /manager/amc/*?rp=<id>, gated on the per-landlord canManageMaintenance flag.
+ * /manager/amc/*?rp=<id>. Opens on canManageAmc (contracts & visits) OR
+ * canRecordVendorPayments (bills, installments, expenses report — 0319); the
+ * contract-editing actions show only with canManageAmc.
  */
 import { Lock, Building2 } from 'lucide-react';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { AmcView } from '@/components/amc/AmcView';
 
 export default function ManagerAmcPage() {
-  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageAmc');
+  const { effectiveRp, allowed, permsLoading, needsLandlord, canForRp } = useManagerLandlordScope(['canManageAmc', 'canRecordVendorPayments']);
+  const canEdit = effectiveRp != null && canForRp('canManageAmc', effectiveRp);
 
   // "Select a landlord" and "Permission required" both keep the switcher visible
   // so the manager can change scope from here (AMC renders its own switcher, not
@@ -31,7 +34,7 @@ export default function ManagerAmcPage() {
             <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]"><Lock size={20} /></div>
             <p className="text-base font-bold text-[#1a1916]">Permission required</p>
             <p className="text-[13.5px] text-[#9b9890] mt-1.5 leading-relaxed">
-              This landlord hasn’t granted you the <strong>Manage Maintenance</strong> permission, so their AMCs aren’t available.
+              This landlord hasn’t granted you the <strong>Handle AMC contracts</strong> or <strong>Record vendor payments</strong> permission, so their AMCs aren’t available.
             </p>
           </div>
         )}
@@ -41,7 +44,7 @@ export default function ManagerAmcPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      {effectiveRp != null && <AmcView base="/manager/amc" rp={effectiveRp} propertiesUrl="/manager/properties" reportHref={`/dashboard/manager/amc/expenses?rp=${effectiveRp}`} categoriesHref={`/dashboard/manager/settings?tab=categories&rp=${effectiveRp}`} />}
+      {effectiveRp != null && <AmcView base="/manager/amc" rp={effectiveRp} canEdit={canEdit} propertiesUrl="/manager/properties" reportHref={`/dashboard/manager/amc/expenses?rp=${effectiveRp}`} categoriesHref={`/dashboard/manager/settings?tab=categories&rp=${effectiveRp}`} />}
     </div>
   );
 }

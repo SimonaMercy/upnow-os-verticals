@@ -140,6 +140,7 @@ const EXCLUDED_WHY: Record<string, string> = {
   // Cash Management reports the same cheque as "bounced, still owed" beside its
   // total rather than inside it; this page now agrees with it.
   'bounced-owed':   'Bounced and not made good — no replacement cheque has been recorded, so the money is still owed and is not counted as collected',
+  upcoming:         'Lease not started yet — the cheques are collected and listed; the money counts from the start date',
 };
 
 // The Contract-Registration (ejari) fee was historically recorded under several
@@ -207,7 +208,7 @@ interface PaymentRow {
   // answer — a ledger that hides rows is not one — but the category subtotals
   // honour it, so they agree with Payment Grouping and Fee & VAT.
   countsTowardTotals?: boolean;
-  excludedReason?: 'cancelled' | 'swapped' | 'bounce-replaced' | 'bounced-owed' | null;
+  excludedReason?: 'cancelled' | 'swapped' | 'bounce-replaced' | 'bounced-owed' | 'upcoming' | null;
   fromYear: number | null;
   toYear: number | null;
   notes: string | null;

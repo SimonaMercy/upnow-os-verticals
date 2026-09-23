@@ -71,6 +71,8 @@ interface ManagerPermissions {
   canManageMaintenance: boolean;
   canManageVendors:     boolean;
   canManageAmc:         boolean;
+  canRecordVendorPayments: boolean;
+  canHandOverCheques:   boolean;
   canManageLegal:       boolean;
   canCommunicateTenants: boolean;
   canReadEmails: boolean;
@@ -162,6 +164,9 @@ export const PERM_GROUPS = [
       { key: 'canClearCheques',      label: 'Change cheque status (cleared / bounced)', meta: 'can_clear_cheques' },
       { key: 'canManageCollections', label: 'Manage rent collections',      meta: 'can_manage_collections' },
       { key: 'canViewFinancials',    label: 'View financial statements',    meta: 'can_view_financials' },
+      // Only for a landlord with a separate head office (0326): the collector
+      // hands cheques / cash in and takes them back, and sees the custody trail.
+      { key: 'canHandOverCheques',   label: 'Hand cheques to head office (landlords with a separate head office)', meta: 'can_hand_over_cheques' },
     ],
   },
   {
@@ -173,11 +178,12 @@ export const PERM_GROUPS = [
   },
   {
     label: 'Maintenance & Legal',
-    description: 'Requests, the vendor roster, AMC contracts, and breaches & legal cases — four switches (0275, 0285)',
+    description: 'Requests, the vendor roster, AMC contracts, vendor payments, and breaches & legal cases (0275, 0285, 0319)',
     perms: [
       { key: 'canManageMaintenance', label: 'Handle maintenance requests & coverage', meta: 'can_manage_maintenance' },
       { key: 'canManageVendors',     label: 'Handle vendors (roster, invites, licences)', meta: 'can_manage_vendors' },
-      { key: 'canManageAmc',         label: 'Handle AMC contracts, visits & payments', meta: 'can_manage_amc' },
+      { key: 'canManageAmc',         label: 'Handle AMC contracts & visits (add, edit, cancel, renew)', meta: 'can_manage_amc' },
+      { key: 'canRecordVendorPayments', label: 'Record vendor payments (AMC bills, installments paid, expenses report)', meta: 'can_record_vendor_payments' },
       { key: 'canManageLegal',       label: 'Handle breaches & legal cases', meta: 'can_manage_legal' },
     ],
   },
@@ -250,6 +256,11 @@ export const metaDefaults = {
   can_view_reports:       true,
   // Maintenance & communication
   can_manage_maintenance: false,
+  can_manage_vendors:     false,
+  can_manage_amc:         false,
+  can_record_vendor_payments: false,
+  can_hand_over_cheques:  false,
+  can_manage_legal:       false,
   can_communicate_tenants: false,
   // Email and WhatsApp start off: a customer's whole trail is granted, never assumed.
   can_read_emails:        false,
@@ -261,7 +272,7 @@ export const metaDefaults = {
 // ─── Role presets (editable starting templates) ──────────────────────────────
 // Each preset pre-selects a sensible bundle of flags; the RP can still adjust
 // individual toggles afterwards. Keyed by the camelCase permission key.
-export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
+export const ROLE_PRESETS: { id: string; label: string; keys: string[]; /** Report slugs the preset opens; omitted = every report. */ reports?: string[] }[] = [
   {
     id: 'leasing_agent',
     label: 'Leasing Agent',
@@ -270,17 +281,25 @@ export const ROLE_PRESETS: { id: string; label: string; keys: string[] }[] = [
   {
     id: 'accountant',
     label: 'Accountant / Finance',
-    keys: ['canListProperties', 'canManageDeposits', 'canSettleDeposits', 'canRecordPayments', 'canClearCheques', 'canManageCollections', 'canViewFinancials', 'canViewReports'],
+    // Finance only — no Properties & Units (owner, 22 Sep 2026: "what will the
+    // accountant do with properties and units?"); vendor payments come with it.
+    // Properties came back on 23 Sep ("see the available properties but not the
+    // market price") — the pages hide asking / market rent for a finance-only
+    // manager and keep them off the Units workspace.
+    keys: ['canListProperties', 'canManageDeposits', 'canSettleDeposits', 'canRecordPayments', 'canClearCheques', 'canManageCollections', 'canViewFinancials', 'canRecordVendorPayments', 'canViewReports'],
+    // Two reports and the dashboard (owner, 23 Sep 2026: "report only for cash
+    // management and cheque management and dashboard for accounts").
+    reports: ['rent-receivable', 'cheques-management'],
   },
   {
     id: 'operations',
     label: 'Operations / Property Manager',
-    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageLeadDocuments', 'canManageAgreements', 'canManageLeaseDocuments', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canManageLegal', 'canViewFinancials', 'canViewReports'],
+    keys: ['canListProperties', 'canEditProperties', 'canPublishListings', 'canManageDocuments', 'canManageViewings', 'canCreateLeads', 'canReviewLeadDocuments', 'canManageLeadDocuments', 'canManageAgreements', 'canManageLeaseDocuments', 'canCreateContracts', 'canManageContractLifecycle', 'canManageRenewals', 'canManageTermination', 'canManageInspections', 'canManageTemplates', 'canManageEjari', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canRecordVendorPayments', 'canManageLegal', 'canViewFinancials', 'canViewReports'],
   },
   {
     id: 'maintenance',
     label: 'Maintenance Coordinator',
-    keys: ['canListProperties', 'canManageMaintenance', 'canManageVendors', 'canManageAmc'],
+    keys: ['canListProperties', 'canManageMaintenance', 'canManageVendors', 'canManageAmc', 'canRecordVendorPayments'],
   },
 ];
 
@@ -333,7 +352,7 @@ function PermToggle({
 
 /** Row of quick role-preset buttons. `onApply` receives the set of camelCase
  *  permission keys the preset turns on (everything else turns off). */
-function RolePresets({ onApply }: { onApply: (keys: Set<string>) => void }) {
+function RolePresets({ onApply }: { onApply: (keys: Set<string>, reports: string[]) => void }) {
   return (
     <div className="flex flex-wrap items-center gap-2 mb-4">
       <span className="text-[11px] font-medium" style={{ color: 'var(--color-neutral-500)' }}>Quick role:</span>
@@ -341,7 +360,7 @@ function RolePresets({ onApply }: { onApply: (keys: Set<string>) => void }) {
         <button
           key={r.id}
           type="button"
-          onClick={() => onApply(new Set(r.keys))}
+          onClick={() => onApply(new Set(r.keys), r.reports ?? [])}
           className="text-[11px] font-medium px-2.5 py-1 rounded-full hover:bg-[var(--color-base-200)]"
           style={{ border: '1px solid var(--color-base-200)', color: 'var(--color-neutral-600)' }}
         >
@@ -624,11 +643,12 @@ export function InviteManagerModal({ onClose, initialValues, title = 'Invite Man
               <p className="text-xs mb-2" style={{ color: 'var(--color-error)' }}>{metaError}</p>
             )}
             <RolePresets
-              onApply={(keys) =>
+              onApply={(keys, reports) => {
                 ALL_PERMS.forEach((p) =>
                   setValue(`metadata.${p.meta}`, keys.has(p.key), { shouldDirty: true }),
-                )
-              }
+                );
+                setValue('reportAccess', reports, { shouldDirty: true });
+              }}
             />
             <PermissionSections
               getValue={(p) => !!md[p.meta]}
@@ -851,12 +871,13 @@ function PermissionsPanel({
               Permissions
             </p>
           <RolePresets
-            onApply={(keys) =>
-              updateMutation.mutate(
-                Object.fromEntries(
+            onApply={(keys, reports) =>
+              updateMutation.mutate({
+                ...(Object.fromEntries(
                   ALL_PERMS.map((p) => [p.key, keys.has(p.key)]),
-                ) as Partial<ManagerPermissions>,
-              )
+                ) as Partial<ManagerPermissions>),
+                reportAccess: reports,
+              })
             }
           />
           <PermissionSections

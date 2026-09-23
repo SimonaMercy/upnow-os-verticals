@@ -6,7 +6,7 @@ import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordS
 import { AmcExpensesReport } from '@/components/amc/AmcExpensesReport';
 
 export default function ManagerAmcExpensesPage() {
-  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageAmc');
+  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope(['canManageAmc', 'canRecordVendorPayments']);
   if (!permsLoading && (needsLandlord || !allowed)) {
     return (
       <div className="p-6">

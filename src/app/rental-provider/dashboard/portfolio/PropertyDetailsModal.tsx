@@ -295,7 +295,16 @@ export function PropertyDetailsModal({
   pricingRp,
   onEdit,
   onClose,
+  showPrices = true,
+  showDocuments = true,
 }: {
+  /** False for a finance-only manager: the property's documents (head-lease,
+   *  title deed, NOCs…) and the Documents grid stay off the popup. */
+  showDocuments?: boolean;
+  /** False for a finance-only manager (owner, 23 Sep 2026: properties yes, market
+   *  price no) — the asking / market rent leaves the KPI strip and the Unit Mix;
+   *  the contracted annual rent stays. */
+  showPrices?: boolean;
   property: Property;
   stats?: { units: number; occupied: number; rentTotal: number } | null;
   /** Units base — RP uses '/properties'; the manager passes '/manager/properties' + 'rp=N'. */
@@ -615,9 +624,11 @@ export function PropertyDetailsModal({
 
   const statCells = stats ? [
     { label: 'UNITS', value: String(stats.units), color: C.ink },
-    { label: 'OCCUPIED', value: String(stats.occupied), color: C.ink },
-    { label: 'VACANT', value: String(vacant), color: C.ink },
-    { label: 'MARKET RENT', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
+    ...(showPrices ? [
+      { label: 'OCCUPIED', value: String(stats.occupied), color: C.ink },
+      { label: 'VACANT', value: String(vacant), color: C.ink },
+      { label: 'MARKET RENT', value: `AED ${Math.round(stats.rentTotal).toLocaleString('en-AE')}`, color: C.greenD },
+    ] : []),
   ] : [];
 
   const hasMapLink = p.latitude != null && p.longitude != null;
@@ -768,7 +779,7 @@ export function PropertyDetailsModal({
                       <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink2, textAlign: 'right' }}>{o.value}</span>
                     </div>
                   ))}
-                  {proof && proof.files.length > 0 && (
+                  {showDocuments && proof && proof.files.length > 0 && (
                     <div onClick={() => { setReader(proof.key); setReaderFile(0); }}
                       style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12, padding: '10px 11px', border: `1px solid ${C.greenBd2}`, background: '#fff', borderRadius: 10, cursor: 'pointer' }}>
                       <span style={{ width: 28, height: 28, flex: '0 0 28px', borderRadius: 7, background: C.greenBg2, color: C.greenT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><FileText size={16} /></span>
@@ -800,7 +811,7 @@ export function PropertyDetailsModal({
                     <div style={{ minWidth: 840 }}>
                       {/* header */}
                       <div style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, padding: '10px 14px', background: C.soft, borderBottom: `1px solid ${C.line}` }}>
-                        {['Unit type', 'Layout', 'Sqft', 'Units', 'Market Rent', 'Annual Rent', ''].map((h, i) => (
+                        {['Unit type', 'Layout', 'Sqft', 'Units', showPrices ? 'Market Rent' : '', showPrices ? 'Annual Rent' : '', ''].map((h, i) => (
                           <div key={i} style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.05em', color: C.mute4, textTransform: 'uppercase', textAlign: i === 3 ? 'center' : (i === 2 || i === 4 || i === 5) ? 'right' : 'left' }}>{h}</div>
                         ))}
                       </div>
@@ -808,8 +819,8 @@ export function PropertyDetailsModal({
                       {/* one flat row per layout — no grouping; click opens the grouped detail popup */}
                       {mix.rows.map((r, i) => (
                         <div key={`${r.unitType}::${r.bedrooms ?? ''}::${r.label}`}
-                          onClick={() => setPreviewLayout(r)}
-                          title="View layout details"
+                          onClick={() => { if (showPrices) setPreviewLayout(r); }}
+                          title={showPrices ? 'View layout details' : undefined}
                           style={{ display: 'grid', gridTemplateColumns: MIX_COLS, gap: 8, alignItems: 'center', padding: '11px 14px', borderTop: i === 0 ? 'none' : `1px solid ${C.line3}`, background: '#fff', cursor: 'pointer' }}
                           onMouseEnter={(e) => { e.currentTarget.style.background = C.soft2; }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}>
@@ -818,14 +829,18 @@ export function PropertyDetailsModal({
                           <div style={{ fontSize: 12.5, color: C.body, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{spanLabel(r.sqftLo, r.sqftHi)}</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: C.ink2, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{r.count}</div>
                           {/* Market Rent — Σ units.rental_price (asking) for the layout */}
+                          {showPrices ? (
                           <div style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: r.marketSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.marketSum > 0 ? `AED ${aed(r.marketSum)}` : '—'}</span>
                             {r.unpriced > 0 && r.marketSum > 0 && <div style={{ fontSize: 9.5, color: C.amber, fontWeight: 600 }}>{r.unpriced} unpriced</div>}
                           </div>
+                          ) : <div />}
                           {/* Annual Rent — Σ annual_rent of the income-counting lease (already net of discount); occupied units only */}
+                          {showPrices ? (
                           <div style={{ textAlign: 'right' }}>
                             <span style={{ fontSize: 13, fontWeight: 700, color: r.leaseSum > 0 ? C.ink2 : C.mute3, fontVariantNumeric: 'tabular-nums' }}>{r.leaseSum > 0 ? `AED ${aed(r.leaseSum)}` : '—'}</span>
                           </div>
+                          ) : <div />}
                           <div style={{ textAlign: 'right' }}>
                             {pricingEditable && r.planLabel && (
                               <button type="button" onClick={(e) => { e.stopPropagation(); setEditLayout({ planLabel: r.planLabel, unitCount: r.count }); }}
@@ -843,8 +858,8 @@ export function PropertyDetailsModal({
                         <div />
                         <div />
                         <div style={{ fontSize: 13, fontWeight: 800, color: C.ink, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{mix.totalUnits}</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandMarket)}</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandLease)}</div>
+                        {showPrices ? <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandMarket)}</div> : <div />}
+                        {showPrices ? <div style={{ fontSize: 14, fontWeight: 800, color: C.ink, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>AED {aed(mix.grandLease)}</div> : <div />}
                         <div />
                       </div>
                     </div>
@@ -856,7 +871,9 @@ export function PropertyDetailsModal({
               {!unitsLoading && units.length > 0 && (
                 <>
                   <div style={{ fontSize: 11.5, color: C.mute2, lineHeight: 1.5, marginBottom: 12 }}>
-                    Tap a layout to see its grouped detail · Market Rent = Σ asking rent · Annual Rent = Σ current lease (running, or next term with cheques collected), net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}
+                    {showPrices
+                      ? <>Tap a layout to see its grouped detail · Market Rent = Σ asking rent · Annual Rent = Σ current lease (running, or next term with cheques collected), net of discount (occupied units only){mix.unpriced > 0 ? ` · ${mix.unpriced} unit${mix.unpriced === 1 ? '' : 's'} not yet priced` : ''}{pricingEditable ? ' · use the Edit button to set a layout’s rent (applies to every unit on that layout).' : '.'}</>
+                      : 'Units on each layout.'}
                   </div>
                 </>
               )}
@@ -903,6 +920,7 @@ export function PropertyDetailsModal({
                 </>
               )}
 
+              {showDocuments && (<>
               {/* DOCUMENTS */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
                 {sectionIcon(FileText)}
@@ -957,6 +975,7 @@ export function PropertyDetailsModal({
                   );
                 })}
               </div>
+              </>)}
 
             </div>
           </main>

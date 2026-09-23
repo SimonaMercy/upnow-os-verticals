@@ -246,7 +246,12 @@ function buildPlan(start: string, end: string, frequency: string, category: stri
   return rows;
 }
 
-export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, categoriesHref }: { base: string; rp?: number | null; propertiesUrl: string; vendorsHref?: string; reportHref?: string; categoriesHref?: string }) {
+export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, categoriesHref, canEdit = true }: {
+  base: string; rp?: number | null; propertiesUrl: string; vendorsHref?: string; reportHref?: string; categoriesHref?: string;
+  /** False for a manager who may only record vendor payments (0319): the list
+   *  is read and the contracts open, but Add / Renew are not offered. */
+  canEdit?: boolean;
+}) {
   const { meta: kindOf } = useKinds(base, rp);
   const [tab, setTab] = useState<'active' | 'expired' | 'cancelled'>('active');
   const [view, setView] = useState<'rows' | 'grid'>('rows');
@@ -338,8 +343,8 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
               : 'Vendor records live on the Vendors page.'}
           </p>
         </div>
-        <button onClick={() => { setRenewFrom(null); setShowAdd(true); }}
-          className="text-[12px] font-semibold px-3.5 py-[9px] rounded-lg border border-[#1a7a52] bg-[#1a7a52] text-white hover:bg-[#156643] whitespace-nowrap cursor-pointer">+ Add AMC</button>
+        {canEdit && <button onClick={() => { setRenewFrom(null); setShowAdd(true); }}
+          className="text-[12px] font-semibold px-3.5 py-[9px] rounded-lg border border-[#1a7a52] bg-[#1a7a52] text-white hover:bg-[#156643] whitespace-nowrap cursor-pointer">+ Add AMC</button>}
       </div>
 
       {showAdd && !renewFrom && <AddAmcModal base={base} rp={rp} propertiesUrl={propertiesUrl} existingContracts={contracts ?? []} onClose={closeModal} onSaved={() => { closeModal(); load(); }} />}
@@ -422,7 +427,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                       <span className="font-bold whitespace-nowrap" style={{ color: cell.color }}>{cell.text}</span>
                     </div>
                     <div className="flex items-center justify-end gap-2 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                      {renewable(c) && (
+                      {canEdit && renewable(c) && (
                         <button type="button" onClick={() => { setRenewFrom(c); setShowAdd(true); }}
                           className="text-[11px] font-bold px-2.5 py-1 rounded-md border border-[#1a7a52] bg-white text-[#1a7a52] hover:bg-[#e7f4ee] cursor-pointer">Renew</button>
                       )}
@@ -454,7 +459,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                 <div className="flex justify-between items-center text-[12px]">
                   <span>{cell.left}</span>
                   <span className="flex items-center gap-2">
-                    {renewable(c) && <button type="button" onClick={e => { e.preventDefault(); setRenewFrom(c); setShowAdd(true); }} className="text-[11px] font-bold px-2.5 py-0.5 rounded-md border border-[#1a7a52] bg-white text-[#1a7a52] hover:bg-[#e7f4ee] cursor-pointer">Renew</button>}
+                    {canEdit && renewable(c) && <button type="button" onClick={e => { e.preventDefault(); setRenewFrom(c); setShowAdd(true); }} className="text-[11px] font-bold px-2.5 py-0.5 rounded-md border border-[#1a7a52] bg-white text-[#1a7a52] hover:bg-[#e7f4ee] cursor-pointer">Renew</button>}
                     <span className="font-bold" style={{ color: cell.color }}>{cell.text}</span>
                   </span>
                 </div>

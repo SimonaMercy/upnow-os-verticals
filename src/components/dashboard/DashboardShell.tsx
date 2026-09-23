@@ -65,7 +65,9 @@ type NavItem =
   // Leases list is /orders but a lease opens at /contracts/:id/v2).
   // `hidden` parks a section: the entry stays here (route, icon, position) but
   // is dropped from the rail. See the HIDDEN note below.
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string; badgeKey?: NavBadgeKey; match?: string[]; hidden?: true }
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string | string[]; badgeKey?: NavBadgeKey; match?: string[]; hidden?: true;
+      /** Dropped for a finance-only manager (money flags, no lease / listing / editing / maintenance authority) — the pricing tool is not theirs. */
+      financeHidden?: true }
   | { divider: true }
   | { section: string };
 
@@ -186,7 +188,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Overview',         href: '/dashboard/manager',            icon: LayoutDashboard },
     { label: 'Leads',            href: '/dashboard/manager/leads',   icon: TrendingUp, requirePerm: 'canManageViewings', match: ['/dashboard/manager/viewings'] },
     { label: 'Properties',       href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
-    { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties' },
+    { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties', financeHidden: true },
     { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
     { label: 'Payments',         href: '/dashboard/manager/payments',  icon: Wallet,  requirePerm: 'canManageDeposits', match: ['/dashboard/manager/deposits'] },
     { label: 'Operations',       href: '/dashboard/manager/operations', icon: ClipboardList, requirePerm: 'canManageAgreements' },
@@ -198,7 +200,9 @@ const NAV: Record<UserRole, NavItem[]> = {
     { section: 'Maintenance' },
     { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'] },
     { label: 'Vendors',          href: '/dashboard/manager/vendors',          icon: Users, requirePerm: 'canManageVendors' },
-    { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: 'canManageAmc' },
+    // Either flag opens AMC: the coordinator (contracts & visits) or the
+    // finance manager (bills, installments, expenses report) — 0319.
+    { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: ['canManageAmc', 'canRecordVendorPayments'] },
     { divider: true },
     { section: 'Legal' },
     { label: 'Breaches',         href: '/dashboard/manager/breaches',         icon: ShieldAlert, requirePerm: 'canManageLegal', match: ['/dashboard/manager/breaches'] },
@@ -212,7 +216,9 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
     { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
     // The lists moved under Settings (owner, 12 Sep) — the page shows only what the landlord delegated.
-    { label: 'Settings',         href: '/dashboard/manager/settings',   icon: Settings, match: ['/dashboard/manager/maintenance-coverage', '/dashboard/manager/maintenance-list', '/dashboard/manager/restoration-list', '/dashboard/manager/amc/categories'] },
+    // Settings holds the delegated lists (maintenance coverage, restoration, AMC
+    // categories) — the property side's; not for a finance-only member (owner, 23 Sep 2026).
+    { label: 'Settings',         href: '/dashboard/manager/settings',   icon: Settings, match: ['/dashboard/manager/maintenance-coverage', '/dashboard/manager/maintenance-list', '/dashboard/manager/restoration-list', '/dashboard/manager/amc/categories'], financeHidden: true },
   ],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
@@ -422,10 +428,17 @@ function Sidebar({
   // For managers: hide nav items whose requirePerm flag isn't granted, then drop
   // any section header left with no visible links under it (so a landlord that
   // withholds, say, all Finance permissions doesn't leave an empty "Finance").
+  // Finance-only = holds a money flag and none of the working flags. Units
+  // (layout pricing) is not on their map (owner, 23 Sep 2026).
+  const financeOnly = role === 'manager'
+    && (managerPerms.canRecordPayments || managerPerms.canClearCheques || managerPerms.canManageCollections)
+    && !managerPerms.canManageAgreements && !managerPerms.canEditProperties && !managerPerms.canManageViewings && !managerPerms.canManageMaintenance;
   const permFiltered = role === 'manager'
     ? rawNav.filter(item => {
+        if ('financeHidden' in item && item.financeHidden && financeOnly) return false;
         if (!('requirePerm' in item)) return true;
-        return managerPerms[(item as { requirePerm?: string }).requirePerm ?? ''] === true;
+        const need = (item as { requirePerm?: string | string[] }).requirePerm ?? '';
+        return (Array.isArray(need) ? need : [need]).some(f => managerPerms[f] === true);
       })
     : rawNav;
   // Drop any section header left with nothing under it. This runs for EVERY

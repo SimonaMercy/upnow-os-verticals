@@ -4,10 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
-  Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight,
+  Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight, Wallet,
   RefreshCw, LogIn, LogOut, XCircle, Clock,
   PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus, IdCard, CalendarOff, FileWarning,
-  Wrench, ClipboardList, CalendarCheck, FileX2,
+  Wrench, ClipboardList, CalendarCheck, FileX2, Landmark,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -39,6 +39,11 @@ interface ActionItem {
   // landlord's Overdue/Bounced KPI counts the rent half only. Which KIND of
   // problem they are is the bucket, not the field.
   rent?: number; fee?: number;
+  // Head-office rows (0323): cheques and cash on this lease still in the
+  // collector's hands, and their total.
+  cheques?: number; cash?: number;
+  // Cheques-to-return rows (accounts dashboard): the cheque and where it is.
+  chequeNumber?: string | null; custody?: string | null;
   deposit?: string | number | null;
   // Maintenance rows: the request title, and the price waiting on approval
   // (a quote total or a catalog pre-price). `reason` above carries the hold.
@@ -52,6 +57,9 @@ interface ActionCenter {
   renewals: Bucket; renewalOffersOut: Bucket;
   terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
   chequesBounced: Bucket; chequesOverdue: Bucket; settlementPending: Bucket;
+  headOfficeDue?: Bucket; headOfficeTotals?: { cheques: number; cash: number; amount: number };
+  /** 0326 — some landlord in scope gave this manager "Hand cheques to head office". */
+  headOfficeEnabled?: boolean;
   amcExpired: Bucket; delayedFollowups: Bucket;
   docsExpired: Bucket; docsNoExpiry: Bucket; docsMissing: Bucket;
   maintenanceApprovals: Bucket; maintenanceHeld: Bucket;
@@ -62,6 +70,7 @@ const BUCKET_WORDS: Record<string, string> = {
   openLeads: 'Leads', awaitingSignature: 'Signatures', moveIns: 'Move-ins', registrationPending: 'Registration',
   renewals: 'Renewals to raise', renewalOffersOut: 'Renewal offers', terminationRequests: 'Terminations',
   moveOuts: 'Move-outs', settlementPending: 'Settlements', chequesBounced: 'Bounced cheques', chequesOverdue: 'Overdue cheques',
+  headOfficeDue: 'To submit to head office', chequesToReturn: 'Cheques to return',
   maintenanceApprovals: 'Maintenance approvals', maintenanceHeld: 'Maintenance held', delayedFollowups: 'Follow-ups',
   amcInspections: 'AMC inspections', amcExpired: 'Expired AMCs', amcPayables: 'Payments due',
   legal: 'Breach & legal',
@@ -120,6 +129,11 @@ const sentence = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice
  *  lease with no rent problem at all is here purely on fee cheques (admin /
  *  Ejari / other) — a different job, so it says so rather than letting the
  *  reader assume rent. */
+/** "2 cheques · 1 cash" on a head-office row. */
+const handOverCount = (i: ActionItem) => [
+  i.cheques ? `${i.cheques} cheque${i.cheques > 1 ? 's' : ''}` : null,
+  i.cash ? `${i.cash} cash` : null,
+].filter(Boolean).join(' · ') || 'to submit';
 const chequeCount = (i: ActionItem, word: string) => {
   if (i.rent) return `${i.rent} ${word}`;
   const fee = i.fee ?? 0;
@@ -150,7 +164,7 @@ interface ExpiredAmcRow { id: number; rpId: number; vendorName: string; property
 
 function ManagerMultiOverview() {
   const { user }                            = useAuth();
-  const { rps, loading: permsLoading } = useManagerPermissions();
+  const { rps, loading: permsLoading, canForRp } = useManagerPermissions();
   const searchParams                        = useSearchParams();
   const [stats, setStats]                   = useState<OverviewStats | null>(null);
   const [statsLoading, setStatsLoading]     = useState(true);
@@ -171,6 +185,33 @@ function ManagerMultiOverview() {
   const scopedRp   = rpParam ? Number(rpParam) : null;
   const scopedName = scopedRp ? rps.find(r => r.rentalProviderId === scopedRp)?.rpName ?? null : null;
   const rpQuery    = scopedRp ? `?rp=${scopedRp}` : '';
+  // Whether the portfolio counts mean anything for this scope: the selected
+  // landlord granted View properties & units, or (All landlords) any did.
+  const hasPortfolio = permsLoading || (scopedRp
+    ? canForRp('canListProperties', scopedRp)
+    : rps.some(r => r.permissions.canListProperties));
+  // A finance-only manager (money flags, no lease authority) gets the money
+  // tiles even once Properties are opened to them (owner, 23 Sep 2026) — the
+  // portfolio counts are on their Properties page, not their dashboard.
+  const financeFirst = !permsLoading && (scopedRp
+    ? (canForRp('canRecordPayments', scopedRp) || canForRp('canClearCheques', scopedRp) || canForRp('canManageCollections', scopedRp)) && !canForRp('canManageAgreements', scopedRp)
+    : rps.some(r => (r.permissions.canRecordPayments || r.permissions.canClearCheques || r.permissions.canManageCollections) && !r.permissions.canManageAgreements));
+  // The accounts dashboard reads the ledger for the failed cheques still to go
+  // back to customers — the one money card the Action Center does not carry.
+  type LedgerLite = { contractId: number | null; currentContractId: number | null; tenant: string; unit: string; building: string; depositRef: string; paymentType: string; custody?: string | null; toReturn?: boolean; rpId?: number };
+  const [toReturnRows, setToReturnRows] = useState<LedgerLite[] | null>(null);
+  const financeRpKey = (scopedRp ? [scopedRp] : rps.filter(r => r.permissions.canManageDeposits).map(r => r.rentalProviderId)).join(',');
+  useEffect(() => {
+    if (!financeFirst || !financeRpKey) { setToReturnRows(null); return; }
+    let alive = true;
+    Promise.all(financeRpKey.split(',').map(async id => {
+      const rows = await apiGet<LedgerLite[]>(`/manager/payments?rp=${id}`).catch(() => [] as LedgerLite[]);
+      return rows.filter(r => r.toReturn && r.paymentType !== 'security_deposit').map(r => ({ ...r, rpId: Number(id) }));
+    })).then(lists => { if (alive) setToReturnRows(lists.flat()); });
+    return () => { alive = false; };
+  }, [financeFirst, financeRpKey]);
+  const vendorPayer = scopedRp ? canForRp('canRecordVendorPayments', scopedRp) || canForRp('canManageAmc', scopedRp)
+    : rps.some(r => r.permissions.canRecordVendorPayments || r.permissions.canManageAmc);
 
   useEffect(() => {
     setStatsLoading(true);
@@ -205,7 +246,11 @@ function ManagerMultiOverview() {
       setInspections(merged);
     });
     // Expired AMCs not yet renewed (nor cancelled) — the manager renews or discontinues them (owner, 10 Sep).
-    Promise.all(targets.map(id =>
+    // Only from landlords that granted canManageAmc: a finance-only manager can
+    // read the contracts (0319) but cannot renew or cancel one, so the card would
+    // be work they cannot do.
+    const amcEditTargets = targets.filter(id => rps.find(r => r.rentalProviderId === id)?.permissions.canManageAmc);
+    Promise.all(amcEditTargets.map(id =>
       apiGet<Omit<ExpiredAmcRow, 'rpId'>[]>(`/manager/amc/contracts?rp=${id}`)
         .then(rows => (Array.isArray(rows) ? rows : []).filter(c => c.status === 'expired' && c.renewedById == null).map(c => ({ ...c, rpId: id })))
         .catch(() => [] as ExpiredAmcRow[]),
@@ -287,7 +332,9 @@ function ManagerMultiOverview() {
       subtitle={
         loading
           ? 'Loading your dashboard…'
-          : scopedRp
+          : financeFirst
+            ? (scopedRp ? `Accounts · acting for ${scopedName ?? 'this landlord'}` : `Accounts · ${rps.length} landlord${rps.length !== 1 ? 's' : ''}`)
+            : scopedRp
             ? `Acting for ${scopedName ?? 'this landlord'}`
             : `Managing properties for ${rps.length} landlord${rps.length !== 1 ? 's' : ''}`
       }
@@ -299,7 +346,32 @@ function ManagerMultiOverview() {
         .mgr-bucket-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
       `}</style>
 
-      {/* Stats */}
+      {/* Stats. The portfolio tiles are keyed on canListProperties — a manager
+          without it (the finance-only accountant, 22 Sep 2026) is not shown
+          four zeros over a portfolio they cannot open; they get the money work
+          instead, counted from the same Action Center buckets as the cards. */}
+      {!hasPortfolio || financeFirst ? (
+      /* The ACCOUNTS dashboard (owner, 23 Sep 2026: "clean the dashboard for
+         the accounts person") — the accountant's own work, nothing else:
+         cheques to submit, to chase, to replace, to return, deposits to settle,
+         and vendor bills where they pay them. Told apart from the property
+         manager's by the permissions the landlord gave, not by a role name. */
+      (() => {
+        const tiles: { label: string; value: string | number; trend?: string; icon: typeof Landmark; color: 'primary' | 'gold' | 'error' | 'neutral' }[] = [
+          ...(action?.headOfficeEnabled ? [{ label: 'To submit to head office', value: actionLoading ? '—' : (action?.headOfficeTotals?.cheques ?? 0) + (action?.headOfficeTotals?.cash ?? 0),
+            trend: actionLoading ? undefined : `${action?.headOfficeTotals?.cheques ?? 0} cheque${(action?.headOfficeTotals?.cheques ?? 0) === 1 ? '' : 's'} · ${action?.headOfficeTotals?.cash ?? 0} cash`, icon: Landmark, color: 'primary' as const }] : []),
+          { label: 'Overdue cheques',  value: actionLoading ? '—' : action?.chequesOverdue?.count ?? 0, trend: 'to chase', icon: Banknote, color: 'gold' as const },
+          { label: 'Bounced cheques',  value: actionLoading ? '—' : action?.chequesBounced?.count ?? 0, trend: 'to replace', icon: AlertTriangle, color: 'error' as const },
+          { label: 'Cheques to return', value: toReturnRows == null ? '—' : toReturnRows.length, trend: toReturnRows == null ? undefined : `${toReturnRows.filter(r => r.custody === 'with_head_office').length} at head office · ${toReturnRows.filter(r => r.custody === 'with_us').length} with us`, icon: Banknote, color: 'error' as const },
+          ...(vendorPayer ? [{ label: 'Vendor payments due', value: payables.length, trend: 'next 30 days', icon: Wallet, color: 'neutral' as const }] : []),
+        ];
+        return (
+          <div className={`grid grid-cols-2 gap-4 mb-8 ${tiles.length >= 6 ? 'lg:grid-cols-6' : tiles.length === 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+            {tiles.map(t => <StatCard key={t.label} label={t.label} value={t.value} trend={t.trend} icon={t.icon} color={t.color} />)}
+          </div>
+        );
+      })()
+      ) : (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Properties"       value={loading ? '—' : stats?.properties      ?? 0} icon={Building2} color="primary" />
         <StatCard label="Units"            value={loading ? '—' : stats?.units           ?? 0} icon={DoorOpen}  color="neutral" />
@@ -310,17 +382,18 @@ function ManagerMultiOverview() {
             no longer exists. */}
         <StatCard label="Open Leads"       value={loading ? '—' : stats?.openLeads       ?? 0} icon={Eye}       color="neutral" />
       </div>
+      )}
 
       {/* Action Center */}
       <div className="flex items-center justify-between mb-3">
         <SectionHeader title="Action Center" />
-        <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
+        {!financeFirst && <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-neutral-500)' }}>
           <span>Renewals window</span>
           <select value={days} onChange={e => setDays(Number(e.target.value))}
             className="border rounded-lg px-2 py-1 text-xs bg-white" style={{ borderColor: 'var(--color-base-200)' }}>
             {[30, 60, 90, 180].map(d => <option key={d} value={d}>{d} days</option>)}
           </select>
-        </div>
+        </div>}
       </div>
       {/* ONE continuous grid, not a stack of per-pipeline grids. Sectioning the
           cards left holes wherever a pipeline had fewer than three of them (Lead
@@ -578,6 +651,19 @@ function ManagerMultiOverview() {
             href: leaseHref(i),
           })} />
         ) },
+        /* Custody (0323): cheques and cash a collector took from a customer and
+           has not handed to head office. The row opens the Payments page on its
+           Head office tab — the screen where the hand-over is recorded. */
+        { key: 'headOfficeDue', count: action?.headOfficeDue?.count ?? 0, el: (
+          <ActionBucket icon={Landmark} color="#0f766e" label="To submit to head office" href={`/dashboard/manager/payments${scopeQ(undefined, 'tab=headoffice')}`}
+          loading={actionLoading} bucket={action?.headOfficeDue}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: handOverCount(i),
+            href: `/dashboard/manager/payments${scopeQ(i.rpId, 'tab=headoffice')}`,
+          })} />
+        ) },
         /* Maintenance (Phase B): the two queues the landlord side owns on the
                       Maintenance board. A price waiting on approval on COVERED work — a
                       provider's quote or a catalog pre-price — and a request held
@@ -692,8 +778,36 @@ function ManagerMultiOverview() {
             })} />
         ) }] : []),
         ];
-        const live = buckets.filter(b => actionLoading || b.count > 0);
-        const clear = buckets.filter(b => !actionLoading && b.count === 0);
+        // Cheques to return — failed cheques not yet handed back, from the ledger.
+        const toReturnBucket: Bucket = {
+          count: toReturnRows?.length ?? 0,
+          // One row per CHEQUE, so the key is the row's place, not the lease
+          // (several cheques on one lease share the lease id).
+          items: (toReturnRows ?? []).map((r, n) => ({
+            id: n + 1, parentId: r.currentContractId ?? r.contractId ?? null, rpId: r.rpId, tenant: r.tenant, unit: r.unit, building: r.building,
+            chequeNumber: r.depositRef, custody: r.custody ?? null,
+          })) as ActionItem[],
+        };
+        const withReturn = [
+          ...buckets,
+          { key: 'chequesToReturn', count: toReturnBucket.count, el: (
+            <ActionBucket icon={Banknote} color="#b42318" label="Cheques to return" href={`/dashboard/manager/payments${scopeQ(undefined, 'tab=to_return')}`}
+              loading={toReturnRows == null} bucket={toReturnBucket}
+              groupBy={buildingOf}
+              compact={i => ({
+                unit: unitOf(i),
+                status: `${i.chequeNumber ?? 'cheque'} · ${i.custody === 'with_head_office' ? 'at head office' : i.custody === 'with_us' ? 'with us' : 'not recorded'}`,
+                href: `/dashboard/manager/payments${scopeQ(i.rpId, 'tab=to_return')}`,
+              })} />
+          ) },
+        ];
+        // Settlements are the lease side's work (owner, 23 Sep 2026: "settlement you can remove").
+        const ACCOUNTS_CARDS = new Set(['headOfficeDue', 'chequesOverdue', 'chequesBounced', 'chequesToReturn', 'amcPayables']);
+        const shownBuckets = financeFirst
+          ? [...ACCOUNTS_CARDS].map(k => withReturn.find(b => b.key === k)).filter((b): b is typeof withReturn[number] => !!b && (b.key !== 'amcPayables' || vendorPayer))
+          : withReturn.filter(b => b.key !== 'chequesToReturn');
+        const live = shownBuckets.filter(b => actionLoading || b.count > 0);
+        const clear = shownBuckets.filter(b => !actionLoading && b.count === 0);
         return (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">

@@ -225,9 +225,9 @@ function LandlordTag({ name }: { name: string }) {
 // annual rent + occupancy · edit. The whole row opens the details popup (units
 // live inside it). Mirrors the RP portfolio ROW VIEW; delete is RP-only.
 function PropertyCard({
-  vm, canEdit, onEdit, onShowDetails,
+  vm, canEdit, onEdit, onShowDetails, showPrices,
 }: {
-  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void;
+  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
 }) {
   return (
     <div onClick={onShowDetails} role="button" title="View property details" className={s.dxRowCard}>
@@ -246,7 +246,7 @@ function PropertyCard({
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#9aa39c', marginTop: 4 }}>
               <MapPin size={13} style={{ flex: '0 0 auto', color: vm.hasPin ? '#1a9a64' : '#9aa39c' }} />
               <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.address}</span>
-              {vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
+              {showPrices && vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
             </div>
           )}
         </div>
@@ -255,6 +255,7 @@ function PropertyCard({
       {/* Tail — market rent / annual rent + occupancy + action (wraps on mobile) */}
       <div className={s.dxRowTail}>
         <div style={{ textAlign: 'right' }}>
+          {showPrices ? (<>
           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
           <div style={{ fontSize: 16, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
             {vm.rentText}<span style={{ fontSize: 11.5, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
@@ -263,6 +264,7 @@ function PropertyCard({
             {vm.annualText ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>{vm.annualText}</span></> : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
           </div>
           <div style={{ fontSize: 11.5, color: '#9aa39c', marginTop: 2 }}>{vm.occText}</div>
+          </>) : null}
         </div>
         {canEdit && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: '0 0 auto' }}>
@@ -280,9 +282,9 @@ function PropertyCard({
 // Cover tile that surfaces the SAME information as the Row view (type tag,
 // address + vacancy, annual rent + occupancy text, landlord tag).
 function PropertyGridCard({
-  vm, canEdit, onEdit, onShowDetails,
+  vm, canEdit, onEdit, onShowDetails, showPrices,
 }: {
-  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void;
+  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
 }) {
   const footBtn: CSSProperties = {
     width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', cursor: 'pointer',
@@ -302,13 +304,14 @@ function PropertyGridCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8a938c', marginTop: 5 }}>
           <MapPin size={13} style={{ color: vm.hasPin ? '#1a9a64' : '#a0a8a1', flex: '0 0 auto' }} />
           <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.address ?? 'No location set'}</span>
-          {vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
+          {showPrices && vm.hasVacancy && <span style={{ color: '#c79a2e', fontWeight: 600, flex: '0 0 auto' }}>· {vm.vacancyLabel}</span>}
         </div>
         {vm.landlord && <div style={{ marginTop: 8 }}><LandlordTag name={vm.landlord} /></div>}
 
         {/* Footer: rent + occupancy + action */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 13, paddingTop: 12, borderTop: '1px solid #f1f3f0' }}>
           <div>
+            {showPrices ? (<>
             <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
             <div style={{ fontSize: 17, fontWeight: 800, color: vm.rentColor, fontVariantNumeric: 'tabular-nums' }}>
               {vm.rentText}<span style={{ fontSize: 11, fontWeight: 600, color: '#9aa39c' }}>{vm.rentUnit}</span>
@@ -317,6 +320,7 @@ function PropertyGridCard({
               {vm.annualText ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>{vm.annualText}</span></> : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
             </div>
             <div style={{ fontSize: 11, color: '#9aa39c', marginTop: 1 }}>{vm.occText}</div>
+            </>) : null}
           </div>
           {canEdit && (
             <div style={{ display: 'flex', gap: 7 }}>
@@ -337,6 +341,12 @@ export default function ManagerPropertiesPage() {
   const params   = useSearchParams();
   const router   = useRouter();
   const rpFilter = params.get('rp') ? Number(params.get('rp')) : null;
+  // Market (asking) rent is for whoever leases or prices units. A finance-only
+  // manager — properties opened to them, no lease / listing / editing authority
+  // — sees the properties and their contracted rent, never the asking price
+  // (owner, 23 Sep 2026: "see the available properties but not the market price").
+  const pricesFor = (rp: number) => canForRp('canEditProperties', rp) || canForRp('canManageAgreements', rp) || canForRp('canManageViewings', rp);
+  const showPrices = permsLoading || (rpFilter ? pricesFor(rpFilter) : can('canEditProperties') || can('canManageAgreements') || can('canManageViewings'));
   const qc = useQueryClient();
 
   const [search, setSearch] = useState('');
@@ -490,8 +500,12 @@ export default function ManagerPropertiesPage() {
   const kpis: Array<{ label: string; value: string; sub: string; icon: ReactNode; iconBg: string; iconColor: string; color: string }> = [
     { label: 'PROPERTIES', value: String(totalProperties), sub: rpFilter ? 'For this landlord' : 'Across your landlords', icon: <Building2 size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
     { label: 'TOTAL UNITS', value: String(totalUnits), sub: 'Across all properties', icon: <DoorClosed size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
-    { label: 'MARKET RENT / ANNUAL RENT', value: fmtRentKpi(totalRent), sub: `Annual rent ${totalAnnualRent ? fmtRentKpi(totalAnnualRent) : '—'} · asking vs contracted`, icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+    // Occupancy and money are for whoever leases — a finance-only manager gets
+    // the two counts only (owner, 23 Sep 2026: "no need for occupancy").
+    ...(showPrices ? [
+      { label: 'OCCUPANCY', value: `${occRate}%`, sub: `${totalOccupied} occupied · ${totalVacant} vacant`, icon: <Gauge size={16} />, iconBg: '#eef6f1', iconColor: '#1a7a4f', color: '#1d2823' },
+      { label: 'MARKET RENT / ANNUAL RENT', value: fmtRentKpi(totalRent), sub: `Annual rent ${totalAnnualRent ? fmtRentKpi(totalAnnualRent) : '—'} · asking vs contracted`, icon: <Coins size={16} />, iconBg: '#f6f3ea', iconColor: '#8a6d2e', color: '#1a6b4d' },
+    ] : []),
   ];
 
   const filtersDirty = !!search || categoryFilter !== 'all' || ownershipFilter !== 'all' || sort !== 'default';
@@ -659,7 +673,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
-                      canEdit={canForRp('canEditProperties', p.rentalProviderId)}
+                      canEdit={canForRp('canEditProperties', p.rentalProviderId)} showPrices={showPrices}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}
                     />
@@ -680,7 +694,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyGridCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
-                      canEdit={canForRp('canEditProperties', p.rentalProviderId)}
+                      canEdit={canForRp('canEditProperties', p.rentalProviderId)} showPrices={showPrices}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}
                     />
@@ -774,6 +788,8 @@ export default function ManagerPropertiesPage() {
           documents live inside it — fetched from the scoped /manager base. */}
       {detailsProperty && (
         <PropertyDetailsModal
+          showPrices={showPrices}
+          showDocuments={showPrices}
           fetchBase="/manager/properties"
           editable={canForRp('canManageDocuments', detailsProperty.rentalProviderId)}
           canEditPricing={canForRp('canEditProperties', detailsProperty.rentalProviderId)}

@@ -300,8 +300,12 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
   );
 }
 
-export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf, vendorHrefOf }: {
+export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf, vendorHrefOf, canEdit = true }: {
   contractId: number;
+  /** False for a manager who may only record vendor payments (0319): bills,
+   *  spends and installments paid / unpaid stay live; editing, cancelling,
+   *  renewing the contract, its schedule, visits and attachments do not. */
+  canEdit?: boolean;
   /** '/amc' for the landlord, '/manager/amc' (+ rp) for a manager. */
   base: string; rp?: number | null;
   listHref: string;
@@ -605,6 +609,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const stageWord = (x: Visit) => !x.stages[0] ? 'awaiting attendance' : 'awaiting delivery note';
   const primaryAction = (x: Visit) => {
     const t = x.t; const b = busy === t.id;
+    if (!canEdit) return null;
     if (!x.stages[0]) return <button type="button" disabled={b} onClick={() => { setExpandedId(t.id); setAttendingId(t.id); }} className={btnGreenSm}>Mark attended</button>;
     return (
       <label className={btnFillSm + (b ? ' opacity-50' : '')}>{b ? 'Uploading…' : 'Upload note'}
@@ -794,9 +799,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            {cancellable && <button type="button" onClick={() => setCancelOpen(o => !o)} className={btn + ' text-[#b42318] border-[#f1c8c4] hover:bg-[#fff8f7]'}>Cancel contract</button>}
-            {!cancelled && <button type="button" onClick={() => setEditing(true)} className={btn}>Edit</button>}
-            {renewable && <button type="button" onClick={() => setRenewing(true)} className={btnPrimary}>Renew contract</button>}
+            {canEdit && cancellable && <button type="button" onClick={() => setCancelOpen(o => !o)} className={btn + ' text-[#b42318] border-[#f1c8c4] hover:bg-[#fff8f7]'}>Cancel contract</button>}
+            {canEdit && !cancelled && <button type="button" onClick={() => setEditing(true)} className={btn}>Edit</button>}
+            {canEdit && renewable && <button type="button" onClick={() => setRenewing(true)} className={btnPrimary}>Renew contract</button>}
           </div>
         </div>
         {cancelOpen && !cancelled && (
@@ -882,7 +887,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                 <div className="text-[12.5px] font-bold flex-1 whitespace-nowrap">Due {fmtD(next.t.dueDate)}{next.t.dueDate && <span className="font-medium text-[#8a8f8c]"> · {daysBetween(today, isoDay(next.t.dueDate)) === 0 ? 'today' : `in ${daysBetween(today, isoDay(next.t.dueDate))} days`}</span>}</div>
                 <StageBars stages={next.stages} tone="neutral" />
                 <span className="text-[11px] text-[#b9bdba] whitespace-nowrap" title="Available after inspection">Report</span>
-                <button type="button" onClick={() => void remind()} disabled={remindBusy} className={btnSm}>{remindBusy ? 'Sending…' : 'Remind vendor'}</button>
+                {canEdit && <button type="button" onClick={() => void remind()} disabled={remindBusy} className={btnSm}>{remindBusy ? 'Sending…' : 'Remind vendor'}</button>}
               </div>
             </>
           )}
@@ -892,7 +897,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <>
               <div className="flex items-center justify-between mt-[22px] gap-2 flex-wrap">
                 <div className="text-[12px] font-bold text-[#b42318]">Needs action · {overdue.length}</div>
-                {toAttend.length > 1 && <button type="button" onClick={() => setBulkAttend(b => !b)} className={btnSm}>Mark all {toAttend.length} attended…</button>}
+                {canEdit && toAttend.length > 1 && <button type="button" onClick={() => setBulkAttend(b => !b)} className={btnSm}>Mark all {toAttend.length} attended…</button>}
               </div>
               {bulkAttend && <div className="mt-2"><AttendChooser busy={busy != null} label={`Applies to visits ${toAttend.map(t => all.find(x => x.t.id === t.id)?.n).join(', ')}`} onPick={who => void attendAll(toAttend, who)} onCancel={() => setBulkAttend(false)} /></div>}
               {overdue.map(x => {
@@ -915,7 +920,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                             ? <div className="text-[10.5px] text-[#5b615e]">{fmtS(t.attendedAt)} · {whoAttended(t)}</div>
                             : attendingId === t.id
                               ? <div className="mt-1"><AttendChooser busy={b} onPick={who => void attend(t, who)} onCancel={() => setAttendingId(null)} /></div>
-                              : <button type="button" disabled={b} onClick={() => setAttendingId(t.id)} className={btnFillSm + ' mt-1'}>Mark attended</button>}
+                              : canEdit ? <button type="button" disabled={b} onClick={() => setAttendingId(t.id)} className={btnFillSm + ' mt-1'}>Mark attended</button> : <div className="text-[10.5px] text-[#5b615e]">Awaiting attendance</div>}
                         </div>
                       </div>
                       {/* 2 delivery note */}
@@ -928,9 +933,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                           {x.stages[1]
                             ? <button type="button" onClick={() => openDocViewer({ fileUrl: t.deliveryNote!.fileUrl, caption: `Delivery note — Visit ${x.n}`, documentKey: 'delivery_note' })} className="text-[10.5px] font-semibold text-[#1a7a52] underline cursor-pointer">View note</button>
                             : x.stages[0]
-                              ? <label className={btnFillSm + ' mt-1 inline-block' + (b ? ' opacity-50' : '')}>{b ? 'Uploading…' : 'Upload note'}
+                              ? canEdit ? <label className={btnFillSm + ' mt-1 inline-block' + (b ? ' opacity-50' : '')}>{b ? 'Uploading…' : 'Upload note'}
                                   <input type="file" accept="image/*,application/pdf" className="hidden" disabled={b} onChange={e => { const f = e.target.files?.[0]; if (f) void uploadNote(t, f); e.target.value = ''; }} />
-                                </label>
+                                </label> : <div className="text-[10.5px] text-[#5b615e]">Delivery note awaited</div>
                               : <div className="text-[10.5px] text-[#5b615e]">After attendance · completes the visit</div>}
                         </div>
                       </div>
@@ -1015,7 +1020,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           {!derived && rows.length > 0 && paymentRows(rows)}
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             {!spendOpen && <button type="button" onClick={() => { setSpendOpen(true); setSpendDate(today); setSpendPaid(km.schedule === 'none'); }} className={btnGreenSm}>{km.schedule === 'none' ? '+ Record a spend' : '+ Add a bill'}</button>}
-            {!derived && km.schedule !== 'none' && <button type="button" onClick={openPlanEditor} className="text-[11px] font-semibold text-[#5b615e] hover:text-[#1c1f1d] cursor-pointer">Edit schedule</button>}
+            {canEdit && !derived && km.schedule !== 'none' && <button type="button" onClick={openPlanEditor} className="text-[11px] font-semibold text-[#5b615e] hover:text-[#1c1f1d] cursor-pointer">Edit schedule</button>}
           </div>
           {spendOpen && (
             <div className="mt-2 p-2.5 rounded-lg border border-[#e6e8e6] bg-[#f6f7f6]">
@@ -1073,7 +1078,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <div className="flex gap-1.5 mt-3">
               {contactPhone ? <a href={`tel:${contactPhone}`} className={btnSm + ' flex-1 text-center no-underline'}>Call</a> : <button type="button" disabled className={btnSm + ' flex-1'} title="No phone on file">Call</button>}
               {contactEmail ? <a href={`mailto:${contactEmail}`} className={btnSm + ' flex-1 text-center no-underline'}>Email</a> : <button type="button" disabled className={btnSm + ' flex-1'} title="No email on file">Email</button>}
-              <button type="button" onClick={() => void remind()} disabled={remindBusy} className={btnSm + ' flex-1'}>{remindBusy ? '…' : 'Remind'}</button>
+              {canEdit && <button type="button" onClick={() => void remind()} disabled={remindBusy} className={btnSm + ' flex-1'}>{remindBusy ? '…' : 'Remind'}</button>}
             </div>
           </div>
 
@@ -1106,7 +1111,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                       {fullSchedule ? 'Fewer rows' : `Full schedule · ${rows.length} ${payWord}${hiddenOverdue ? ` · ${hiddenOverdue} more overdue` : ''}`}
                     </button>
                   )}
-                  <button type="button" onClick={openPlanEditor} className="text-[11px] font-semibold text-[#5b615e] hover:text-[#1c1f1d] cursor-pointer ml-auto">Edit schedule</button>
+                  {canEdit && <button type="button" onClick={openPlanEditor} className="text-[11px] font-semibold text-[#5b615e] hover:text-[#1c1f1d] cursor-pointer ml-auto">Edit schedule</button>}
                 </div>}
               </>
             )}
@@ -1160,9 +1165,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           <div className={card + ' px-[18px] py-4'}>
             <div className="flex justify-between items-baseline">
               <div className="text-[13px] font-bold">Documents</div>
-              <label className={`text-[11px] font-semibold text-[#1a7a52] hover:text-[#125a3c] cursor-pointer ${docBusy ? 'opacity-50' : ''}`}>{docBusy ? 'Uploading…' : '+ Attach'}
+              {canEdit && <label className={`text-[11px] font-semibold text-[#1a7a52] hover:text-[#125a3c] cursor-pointer ${docBusy ? 'opacity-50' : ''}`}>{docBusy ? 'Uploading…' : '+ Attach'}
                 <input type="file" accept="image/*,application/pdf" className="hidden" disabled={docBusy} onChange={e => { const f = e.target.files?.[0]; if (f) void uploadContractDoc(f); e.target.value = ''; }} />
-              </label>
+              </label>}
             </div>
             <div className="mt-1.5">
               {contractDocs.length === 0 && <div className="flex justify-between items-center py-[9px] border-b border-[#f1f3f1] text-[11.5px] text-[#8a8f8c]"><span>Contract attachment</span><span className="text-[10.5px]">none filed</span></div>}

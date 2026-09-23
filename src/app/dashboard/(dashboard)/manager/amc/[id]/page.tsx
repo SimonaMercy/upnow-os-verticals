@@ -1,6 +1,7 @@
 'use client';
 
-/** Manager — one AMC contract for one managed landlord (canManageMaintenance). */
+/** Manager — one AMC contract for one managed landlord. Opens on canManageAmc
+ *  OR canRecordVendorPayments (0319); editing the contract needs canManageAmc. */
 import { useParams } from 'next/navigation';
 import { Lock, Building2 } from 'lucide-react';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
@@ -8,7 +9,8 @@ import { AmcContractDetail } from '@/components/amc/AmcContractDetail';
 
 export default function ManagerAmcDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canManageAmc');
+  const { effectiveRp, allowed, permsLoading, needsLandlord, canForRp } = useManagerLandlordScope(['canManageAmc', 'canRecordVendorPayments']);
+  const canEdit = effectiveRp != null && canForRp('canManageAmc', effectiveRp);
   if (!permsLoading && (needsLandlord || !allowed)) {
     return (
       <div className="p-6">
@@ -26,7 +28,7 @@ export default function ManagerAmcDetailPage() {
       {effectiveRp != null && (
         <AmcContractDetail
           contractId={Number(id)}
-          base="/manager/amc" rp={effectiveRp}
+          base="/manager/amc" rp={effectiveRp} canEdit={canEdit}
           listHref={`/dashboard/manager/amc?rp=${effectiveRp}`}
           detailHrefOf={(cid) => `/dashboard/manager/amc/${cid}?rp=${effectiveRp}`}
         />

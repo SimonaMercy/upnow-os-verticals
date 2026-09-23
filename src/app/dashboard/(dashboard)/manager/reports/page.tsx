@@ -24,6 +24,7 @@ import { useReportsYear, setReportsYear, REPORT_YEARS } from '@/components/upnow
 import DataExports from '@/app/rental-provider/dashboard/reports/DataExports';
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
+import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
 import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
@@ -37,6 +38,11 @@ export default function ManagerReportsPage() {
   // landlords" with several to choose from, prompt for one rather than showing
   // an arbitrary landlord's reports.
   const { effectiveRp, allowed, permsLoading, needsLandlord } = useManagerLandlordScope('canViewReports');
+  // The landlord's per-report grant (Settings → Team). Empty = every report; a
+  // list = only those tiles — the server refuses the rest anyway, but a tile
+  // that opens to an error is not a report the accountant has.
+  const { rps } = useManagerPermissions();
+  const reportAccess = rps.find(r => r.rentalProviderId === effectiveRp)?.reportAccess ?? [];
   const router = useRouter();
   const searchParams = useSearchParams();
   const slugParam = searchParams.get('slug');
@@ -195,6 +201,7 @@ export default function ManagerReportsPage() {
   const filtered = REPORT_TILES.filter(r =>
     !r.rpOnly // landlord-only reports (e.g. Manager Performance) never appear here
     && !r.hidden
+    && (reportAccess.length === 0 || reportAccess.includes(r.slug))
     && (r.title.toLowerCase().includes(search.toLowerCase())
       || r.description.toLowerCase().includes(search.toLowerCase())),
   );

@@ -38,7 +38,10 @@ export interface ManagerLandlordScope {
   canForRp: (flag: Flag, rpId: number) => boolean;
 }
 
-export function useManagerLandlordScope(flag: Flag): ManagerLandlordScope {
+/** `flag` may be a list — the page opens when the landlord granted ANY of them
+ *  (the AMC pages: coordinator OR finance manager, 0319). */
+export function useManagerLandlordScope(flag: Flag | Flag[]): ManagerLandlordScope {
+  const flags = Array.isArray(flag) ? flag : [flag];
   const { canForRp, rps, loading: permsLoading } = useManagerPermissions();
   const raw = useSearchParams().get('rp');
   const selectedRp = raw ? Number(raw) : null;
@@ -46,10 +49,10 @@ export function useManagerLandlordScope(flag: Flag): ManagerLandlordScope {
   // Landlords that granted THIS permission. A manager with a single such
   // landlord has no LandlordSwitcher, so auto-scope to it; with several,
   // require an explicit ?rp= rather than picking one arbitrarily.
-  const eligible = rps.filter(r => r.permissions[flag]);
+  const eligible = rps.filter(r => flags.some(f => r.permissions[f]));
   const soleRp = eligible.length === 1 ? eligible[0].rentalProviderId : null;
   const effectiveRp = selectedRp ?? soleRp;
-  const allowed = effectiveRp != null && canForRp(flag, effectiveRp);
+  const allowed = effectiveRp != null && flags.some(f => canForRp(f, effectiveRp));
   const needsLandlord = effectiveRp == null && eligible.length > 1;
 
   return { effectiveRp, allowed, permsLoading, needsLandlord, canForRp };

@@ -61,6 +61,8 @@ import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequ
 import { buildCurrentPlan } from '@/lib/currentPlan';
 import { fetchPaymentRefs, EMPTY_PAYMENT_REFS, type PaymentRefs } from '@/lib/paymentRefs';
 import { openDocViewer } from '@/lib/docViewer';
+import { ReturnChequeDialog, RETURN_REASON_WORD } from '@/components/upnow/ReturnChequeDialog';
+import { uploadLeaseDocument } from '@/lib/leaseDocumentUpload';
 import { DeleteDocumentButton } from '@/components/upnow/DeleteDocumentButton';
 import { errMessage } from '@/lib/apiError';
 import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
@@ -127,6 +129,19 @@ interface ContractPayment {
    *  'returned_to_customer' / 'lease_cancelled' — genuine voids, nothing came in
    *  its place and nothing may be linked to it. */
   cancellationReason?: string | null;
+  /** Where the paper is (0323 / 0324): with_us · with_head_office · banked ·
+   *  to_return · returned; null for a transfer / card / online payment. */
+  custody?: 'with_us' | 'with_head_office' | 'not_recorded' | 'banked' | 'returned' | null;
+  /** A bounced / cancelled cheque still to go back to the customer, wherever it is. */
+  toReturn?: boolean;
+  handedOverAt?: string | null;
+  handedOverBy?: string | null;
+  returnedToCustomerAt?: string | null;
+  returnedToCustomerBy?: string | null;
+  returnedToCustomerReason?: string | null;
+  returnedToCustomerNote?: string | null;
+  /** The reference image filed when it went back (0328). */
+  returnedToCustomerDocumentId?: number | null;
   /** What this row should READ as. Same as chequeStatus except on a bounce that
    *  has since been covered ('cleared' once the replacement money is banked,
    *  'replaced' while that cheque is still pending) and on a cheque the customer
@@ -807,7 +822,8 @@ interface ActorPerms {
   collections: boolean;
   /** Remove a document → canDeleteDocuments. NOT implied by being able to upload
    *  one: attaching a file and destroying one are different authorities (0247). */
-  deleteDocuments: boolean;
+  deleteDocuments: boolean;  /** 0326 — head-office custody shown and editable. */
+  headOffice: boolean;
 }
 
 interface StepHandlers {
@@ -2644,6 +2660,71 @@ function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amou
  * on its face rather than being hidden, because a customer holding the voided
  * copy needs to be able to tell it apart from the live one.
  */
+type CustodyAction = 'submit' | 'take_back' | 'returned' | 'undo_return';
+type CustodyHandler = (paymentIds: number[], action: CustodyAction, extra?: { reason: string; note?: string; documentId?: number }) => Promise<void>;
+/** Where the cheque / cash is — the same select control the status uses, with
+ *  the dated line under it: when it reached head office and who took it, or
+ *  when it went back to the customer, by whom and why (owner, 23 Sep 2026).
+ *  Nothing for a transfer / card / online row; "Banked" once cleared. Choosing
+ *  "Returned to customer" opens the reason dialog (0325). */
+function CustodyCell({ p, can, headOffice, onCustody, onReturn, proof }: {
+  p: ContractPayment; can: boolean;
+  /** The return's reference image, rendered as a paperclip after the dated line. */
+  proof?: React.ReactNode;
+  /** The landlord gave this manager "Hand cheques to head office" (0326). Without it
+   *  there is no head office in the trail: with us → banked, or → returned. */
+  headOffice: boolean;
+  onCustody?: CustodyHandler; onReturn: (p: ContractPayment) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const c = p.custody;
+  const toReturn = p.toReturn === true;
+  if (!c) return null;
+  // No head office and nothing to return: a live cheque has no custody to show.
+  if (!headOffice && !toReturn && c !== 'returned') return null;
+  if (c === 'banked') return <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>Banked</span>;
+  const tone = c === 'returned' ? 'cancelled' : c === 'not_recorded' ? 'cancelled' : toReturn ? 'bounced' : c === 'with_head_office' ? 'cleared' : 'pending';
+  // Short words — the control sits in the Method column. A failed cheque with us
+  // reads "To return"; at head office it reads "Head office" (the tone says failed).
+  // By LOCATION, failed cheque or not (owner, 23 Sep 2026: "instead of To
+  // return, With us") — the status chip already says it bounced or was cancelled.
+  const label = (v: string) => v === 'with_us' ? 'With us'
+    : v === 'with_head_office' ? 'Head office' : v === 'not_recorded' ? 'Not recorded' : 'Returned';
+  const opts: string[] = [
+    // Collected before custody existed — pick where it is; the option goes once set.
+    ...(c === 'not_recorded' ? ['not_recorded'] : []),
+    'with_us',
+    ...(headOffice ? ['with_head_office'] : []),
+    ...(toReturn || c === 'returned' ? ['returned'] : []),
+  ];
+  const atHeadOffice = c === 'with_head_office';
+  const meta = c === 'with_head_office' && p.handedOverAt
+    ? `${fmtDate(p.handedOverAt)}${p.handedOverBy ? ` · ${p.handedOverBy}` : ''}`
+    : c === 'returned' && p.returnedToCustomerAt
+      ? `${fmtDate(p.returnedToCustomerAt)}${p.returnedToCustomerBy ? ` · ${p.returnedToCustomerBy}` : ''}${p.returnedToCustomerReason ? ` · ${RETURN_REASON_WORD[p.returnedToCustomerReason] ?? p.returnedToCustomerReason}` : ''}${p.returnedToCustomerNote ? ` — ${p.returnedToCustomerNote}` : ''}`
+      : null;
+  const change = async (v: string) => {
+    if (v === c || !onCustody) return;
+    if (v === 'returned') { onReturn(p); return; }
+    const act: CustodyAction = v === 'with_head_office' ? 'submit' : c === 'returned' ? 'undo_return' : 'take_back';   // take_back also settles "not recorded" → with us
+    setBusy(true);
+    try { await onCustody([p.id], act); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ marginTop: 4 }}>
+      {can && onCustody ? (
+        <select className={'cstat ' + tone} style={{ cursor: 'pointer', maxWidth: '100%' }} value={c} disabled={busy} onChange={e => void change(e.target.value)}
+          title={c === 'not_recorded' ? 'Collected before custody was tracked — say where it is' : atHeadOffice && toReturn ? 'At head office — take it back first, then return it to the customer' : 'Where the cheque / cash is'}>
+          {opts.map(v => <option key={v} value={v} disabled={v === 'returned' && atHeadOffice}>{label(v)}</option>)}
+        </select>
+      ) : (
+        <span className={'cstat ' + tone}>{label(c)}</span>
+      )}
+      {meta && <span className="note" style={{ display: 'block', fontSize: 11, marginTop: 2, whiteSpace: 'normal' }}>{meta}{c === 'returned' ? proof : null}</span>}
+    </div>
+  );
+}
+
 function ReceiptDownload({ refs, id, base }: { refs: PaymentRefs; id: number; base: string }) {
   const ref = refs.receiptByPaymentId?.[id];
   if (!ref) return null;
@@ -2705,8 +2786,13 @@ function DetailsDrawer({
   // onDeletePayment is intentionally not destructured — fee rows are corrected
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
-  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal, emails,
+  notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal, emails, financeOnly = false, onCustody,
 }: {
+  /** Hand a cheque to head office / take it back / hand it back to the customer (0323, 0324). */
+  onCustody?: CustodyHandler;
+  /** The accountant's record: payments + deposit only — no documents, notes,
+   *  emails, WhatsApp or breaches (owner, 23 Sep 2026). */
+  financeOnly?: boolean;
   /** Email module scope — the manager's landlord (`rp`, null for the landlord themselves). */
   /** Email and WhatsApp on this lease. A team member sees each only with that channel's "read" authority;
    *  the landlord sees both. (The server refuses the rest either way — this keeps empty tabs off the screen.) */
@@ -2741,7 +2827,7 @@ function DetailsDrawer({
     /** Raise the bounce / replacement charge in the same action, linked to the
      *  same cheque. Omitted or 0 raises nothing. */
     replacementFee?: number;
-  }) => Promise<void>;
+  }) => Promise<number | void>;
   /** PATCH /api/contracts/:id/payments/:paymentId — edit status / amount / VAT / reference / description. */
   onUpdatePayment: (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
@@ -2770,7 +2856,7 @@ function DetailsDrawer({
   /** upload-url → PUT → POST /api/documents — attach a contract document. */
   /** `replaceOf` = the stored row to overwrite in place (binder "Replace");
    *  omitted → a fresh timestamped row is added beside whatever is on file. */
-  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string, replaceOf?: DocReplaceTarget) => Promise<void>;
+  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string, replaceOf?: DocReplaceTarget) => Promise<number | void>;
   /** POST /api/documents/request — request a document from the tenant. */
   onRequestDoc: (label: string, notes: string) => Promise<void>;
   /** Running tenancy notes log (newest first). */
@@ -2798,6 +2884,22 @@ function DetailsDrawer({
   const [showRec, setShowRec] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [recErr, setRecErr] = useState<string | null>(null);
+  /** The cheque copy / transfer receipt the payment is recorded against —
+   *  asked for on every cheque and transfer (owner, 23 Sep 2026). */
+  const [recFile, setRecFile] = useState<File | null>(null);
+  const [feeFile, setFeeFile] = useState<File | null>(null);
+  const needsProof = (method: string) => method === 'cheque' || method === 'bank_transfer';
+  /** Files the cheque copy / transfer slip BEFORE the payment is recorded, so a
+   *  refused upload stops the save rather than leaving a payment with nothing
+   *  behind it; returns the document id to link. */
+  const uploadProof = async (file: File | null, ref: string): Promise<number | undefined> => {
+    if (!file) return undefined;
+    const docId = await onUploadDoc(file, { key: 'payment_advice', label: `Payment Confirmation${ref ? ` · ${ref}` : ''}`, category: 'contract', section: 'tenancy' }, false, '');
+    return typeof docId === 'number' ? docId : undefined;
+  };
+  const linkProof = async (paymentId: number | void, docId: number | undefined) => {
+    if (typeof paymentId === 'number' && docId != null) await onUpdatePayment(paymentId, { documentId: docId });
+  };
   const [rec, setRec] = useState({
     description: '', amount: '', paymentType: 'rental_income',
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
@@ -2883,9 +2985,11 @@ function DetailsDrawer({
   const submitRec = async () => {
     const amt = Number(rec.amount);
     if (!amt || amt <= 0) { setRecErr('Enter a valid amount'); return; }
+    if (needsProof(rec.paymentMethod) && !recFile) { setRecErr('Attach the cheque copy or the transfer receipt'); return; }
     setRecBusy(true); setRecErr(null);
     try {
-      await onRecordPayment({
+      const proofId = await uploadProof(recFile, rec.chequeNumber.trim());
+      const newId = await onRecordPayment({
         description: rec.description.trim() || undefined,
         amount: amt,
         paymentType: rec.paymentType,
@@ -2897,7 +3001,9 @@ function DetailsDrawer({
         replacementFee: rec.replacesPaymentId === '' || !Number(rec.replacementFee)
           ? undefined : Number(rec.replacementFee),
       });
+      await linkProof(newId, proofId);
       setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' });
+      setRecFile(null);
       setShowRec(false);
     } catch (e) {
       setRecErr(e instanceof Error ? e.message : 'Failed to record payment');
@@ -3211,9 +3317,11 @@ function DetailsDrawer({
     const net = Number(feeAdd.amount); const vat = Number(feeAdd.vatAmount || 0);
     if (!Number.isFinite(net) || net <= 0) { setFeeAddErr('Enter a valid amount'); return; }
     if (!Number.isFinite(vat) || vat < 0) { setFeeAddErr('Enter a valid VAT amount'); return; }
+    if (needsProof(feeAdd.paymentMethod) && !feeFile) { setFeeAddErr('Attach the cheque copy or the transfer receipt'); return; }
     setFeeAddBusy(true); setFeeAddErr(null);
     try {
-      await onRecordPayment({
+      const proofId = await uploadProof(feeFile, feeAdd.chequeNumber.trim());
+      const newId = await onRecordPayment({
         paymentType: feeAdd.paymentType,
         amount: Math.round((net + vat) * 100) / 100,   // backend stores GROSS
         vatAmount: vat,
@@ -3223,7 +3331,8 @@ function DetailsDrawer({
         chequeNumber: feeAdd.chequeNumber.trim() || undefined,
         chequeStatus: 'pending',
       });
-      setFeeAdd(emptyFeeForm); setShowAddFee(false);
+      await linkProof(newId, proofId);
+      setFeeAdd(emptyFeeForm); setFeeFile(null); setShowAddFee(false);
     } catch (e) { setFeeAddErr(e instanceof Error ? e.message : 'Failed to add fee'); }
     finally { setFeeAddBusy(false); }
   };
@@ -3642,6 +3751,21 @@ function DetailsDrawer({
   /** "View all" popup — same modal, scoped to THIS contract's documents. */
   const [showContractDocs, setShowContractDocs] = useState(false);
   const [showOffer, setShowOffer] = useState(false);
+  /** The cheque being handed back to the customer — the reason dialog is open. */
+  const [returnFor, setReturnFor] = useState<ContractPayment | null>(null);
+  /** The file a payment was recorded against — a paperclip beside its reference. */
+  const attachmentOf = (docId?: number | null) => {
+    if (docId == null) return null;
+    const d = (contract.documents ?? []).find(x => x.id === docId);
+    if (!d?.fileUrl) return null;
+    return (
+      <button type="button" title={`View attachment${d.displayName ? ` · ${d.displayName}` : ''}`}
+        onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? 'Payment attachment' })}
+        style={{ background: 'none', border: 0, padding: 0, marginLeft: 6, cursor: 'pointer', color: 'var(--jade-deep, #2e9f82)', verticalAlign: 'middle' }}>
+        <Paperclip size={12} />
+      </button>
+    );
+  };
   const addReqDoc = (name: string) => {
     const n = name.trim();
     if (!n) return;
@@ -3733,6 +3857,19 @@ function DetailsDrawer({
                   found first. A deposit is a liability held, not income: it has a
                   settlement, a proof, a held→returned lifecycle and it carries
                   across a renewal, none of which a rent cheque has. */}
+              {returnFor && (
+                <ReturnChequeDialog
+                  what={`${returnFor.chequeNumber ? `Cheque ${returnFor.chequeNumber}` : `Payment #${returnFor.id}`} · ${fmtAed(returnFor.amount)}`}
+                  onClose={() => setReturnFor(null)}
+                  onConfirm={async (reason, note, file) => {
+                    if (!onCustody) return;
+                    const documentId = file
+                      ? await uploadLeaseDocument(contract.id, file, { key: 'cheque_return', label: `Cheque returned${returnFor.chequeNumber ? ` · ${returnFor.chequeNumber}` : ''}` })
+                      : undefined;
+                    await onCustody([returnFor.id], 'returned', { reason, note, documentId });
+                  }}
+                />
+              )}
               <span id="sec-deposit" />
               <ContractDepositSection
                 deposit={contract.securityDeposit ?? null}
@@ -3846,8 +3983,8 @@ function DetailsDrawer({
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
                             )}
                           </td>
-                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
-                          <td>{fmtMethod(p.paymentMethod)}</td>
+                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{attachmentOf(p.documentId)}</td>
+                          <td>{fmtMethod(p.paymentMethod)}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
                             <div style={PAY_STATUS_CELL}>
@@ -4131,8 +4268,8 @@ function DetailsDrawer({
                               {fmtAed(f.amount)}
                               {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
                             </td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{f.chequeNumber ?? '—'}</td>
-                            <td>{f.paymentMethod ? fmtMethod(f.paymentMethod) : '—'}</td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{f.chequeNumber ?? '—'}{attachmentOf(f.documentId)}</td>
+                            <td>{f.paymentMethod ? fmtMethod(f.paymentMethod) : '—'}<CustodyCell p={f} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(f.returnedToCustomerDocumentId)} /></td>
                             <td>{fmtDate(f.transactionDate)}</td>
                             <td>
                               <div style={PAY_STATUS_CELL}>
@@ -4259,8 +4396,8 @@ function DetailsDrawer({
                               {fmtAed(p.amount)}
                               {(p.vatAmount ?? 0) > 0 && <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>}
                             </td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}</td>
-                            <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}</td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{attachmentOf(p.documentId)}</td>
+                            <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                             <td>{fmtDate(p.transactionDate)}</td>
                             <td>
                               <div style={PAY_STATUS_CELL}>
@@ -4385,6 +4522,9 @@ function DetailsDrawer({
                             <input className="input" value={feeAdd.chequeNumber} placeholder="Cheque #, transfer ID…"
                               onChange={e => setFeeAdd(v => ({ ...v, chequeNumber: e.target.value }))} />
                           </div>
+                          <div className="field"><label>Attachment — {feeAdd.paymentMethod === 'cheque' ? 'cheque copy' : feeAdd.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt (optional)'}</label>
+                            <input type="file" className="input" accept="image/*,application/pdf" onChange={e => setFeeFile(e.target.files?.[0] ?? null)} />
+                          </div>
                         </div>
                         <div className="field"><label>Description (optional)</label>
                           <input className="input" value={feeAdd.description} placeholder={feeLabel(feeAdd.paymentType)}
@@ -4466,6 +4606,10 @@ function DetailsDrawer({
                       </div>
                       <div className="field" style={{ margin: 0 }}><label>Date</label>
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
+                      </div>
+                      <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+                        <label>Attachment — {rec.paymentMethod === 'cheque' ? 'cheque copy' : rec.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt (optional)'}</label>
+                        <input type="file" className="input" accept="image/*,application/pdf" onChange={e => setRecFile(e.target.files?.[0] ?? null)} />
                       </div>
                       {/* Offered only when there is a failed cheque left to
                           settle — one that bounced, or one the customer swapped.
@@ -4700,6 +4844,14 @@ function DetailsDrawer({
                     </div>
                   </div>
                 );
+                // The finance-only record neither uploads nor requests — say it is
+                // not there and stop.
+                if (financeOnly) return (
+                  <div key={s.key} className="docitem docmiss">
+                    <FileText size={14} />
+                    <div><div className="dn">{s.label}</div><div className="ds">Not uploaded</div></div>
+                  </div>
+                );
                 return renderMissing(req);
               }
               const multi = docs.length > 1;
@@ -4738,7 +4890,9 @@ function DetailsDrawer({
                     )}
                     {/* One file on the slot → Replace overwrites THAT row in place
                         (same id). Several → Add puts another beside them. */}
+                    {!financeOnly && (
                     <button type="button" className="mini-btn view" title={multi ? `Add another ${s.label}` : `Replace the ${s.label} on file`} onClick={() => prefillUpload(req, multi ? undefined : doc)}><UploadCloud size={12} /> {multi ? 'Add' : 'Replace'}</button>
+                    )}
                     {/* Only when the slot holds ONE file. Several copies have no
                         single "this one" and a guess removes the wrong document;
                         the reader that lists them individually is where those go. */}
@@ -4749,6 +4903,50 @@ function DetailsDrawer({
                 </div>
               );
             };
+            // Payment Summary popup — the contract's current live plan. Hoisted so the
+            // finance-only card can open it too (owner, 23 Sep 2026: "not able to review").
+            const offerModal = showOffer && (
+
+                <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={() => setShowOffer(false)} />
+                  <div style={{ position: 'relative', width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+                    <button type="button" onClick={() => setShowOffer(false)} aria-label="Close"
+                      style={{ position: 'absolute', top: 8, right: 8, zIndex: 1, width: 28, height: 28, display: 'grid', placeItems: 'center', background: '#fff', border: '1px solid #e3e0d9', borderRadius: 999, cursor: 'pointer', color: '#6b6860' }}>✕</button>
+                    <PaymentPlanCard
+                      plan={currentPlan}
+                      rows={segRowsFromContract(contract, payments)}
+                      refLabel={contract.ref}
+                      planRefNo={paymentRefs.planRefNo}
+                      contractType={contract.contractType}
+                      tenantName={contract.tenant.companyName || contract.tenant.name}
+                      landlordName={contract.landlord.bankAccountName || contract.landlord.companyName || contract.landlord.name}
+                      unitNumber={contract.unit.number}
+                      buildingName={contract.property.buildingName}
+                      community={contract.property.community || contract.property.emirate}
+                      periodStart={contract.startDate}
+                      periodEnd={contract.endDate}
+                    />
+                  </div>
+                </div>
+            );
+            if (financeOnly) {
+              // The accountant's documents are the money papers only — the payment
+              // summary, the customer's payment confirmation and the one Receipts
+              // file (owner, 23 Sep 2026: "allow receipts also"). Read-only: no
+              // upload, request, replace or history.
+              const money = binderSeq.filter(b => b.key === 'offer' || b.key === 'payment_advice' || b.key === 'receipts');
+              return (
+                <div className="sec">
+                  <div className="sech"><span className="si"><Paperclip size={16} /></span><span className="st">Payment documents</span></div>
+                  <div className="secb">
+                    <div className="doclist">
+                      {money.map(b => b.kind === 'doc' ? renderDocSlot(b) : b.key === 'offer' ? renderOfferSlot(b) : renderLinkSlot(b))}
+                    </div>
+                  </div>
+                  {offerModal}
+                </div>
+              );
+            }
             return (
               <>
               <div className="sec">
@@ -5083,30 +5281,7 @@ function DetailsDrawer({
                   onClose={() => setShowContractDocs(false)}
                 />
               )}
-              {/* Payment Plan — the contract's current live plan. */}
-              {showOffer && (
-                <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 95, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(26,25,22,.45)' }} onClick={() => setShowOffer(false)} />
-                  <div style={{ position: 'relative', width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
-                    <button type="button" onClick={() => setShowOffer(false)} aria-label="Close"
-                      style={{ position: 'absolute', top: 8, right: 8, zIndex: 1, width: 28, height: 28, display: 'grid', placeItems: 'center', background: '#fff', border: '1px solid #e3e0d9', borderRadius: 999, cursor: 'pointer', color: '#6b6860' }}>✕</button>
-                    <PaymentPlanCard
-                      plan={currentPlan}
-                      rows={segRowsFromContract(contract, payments)}
-                      refLabel={contract.ref}
-                      planRefNo={paymentRefs.planRefNo}
-                      contractType={contract.contractType}
-                      tenantName={contract.tenant.companyName || contract.tenant.name}
-                      landlordName={contract.landlord.bankAccountName || contract.landlord.companyName || contract.landlord.name}
-                      unitNumber={contract.unit.number}
-                      buildingName={contract.property.buildingName}
-                      community={contract.property.community || contract.property.emirate}
-                      periodStart={contract.startDate}
-                      periodEnd={contract.endDate}
-                    />
-                  </div>
-                </div>
-              )}
+              {offerModal}
               {/* Request-a-document popup (Flow 6) */}
               {showReqModal && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} role="dialog" aria-modal="true">
@@ -5305,7 +5480,7 @@ function DetailsDrawer({
               A running, append-only journal staff keep about this tenancy so
               whoever picks it up next sees the full history. Shared across the
               whole renewal chain, and never locks (unlike the clauses note). */}
-          {(inline || tab === 'notes') && (
+          {(inline || tab === 'notes') && !financeOnly && (
             <div className="sec" id="sec-notes">
               <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes</span></div>
               <div className="secb">
@@ -5358,7 +5533,7 @@ function DetailsDrawer({
           {/* ── Emails with this lease's customer — the landlord's own mailbox
               (Settings → Email). Renders nothing for a manager without the
               "Email customers and leads" authority. */}
-          {(inline || tab === 'emails') && emails?.showEmails && contract.tenant.id != null && (
+          {(inline || tab === 'emails') && !financeOnly && emails?.showEmails && contract.tenant.id != null && (
             <div id="sec-emails" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
               <EmailsCard
                 rp={emails.rp}
@@ -5373,7 +5548,7 @@ function DetailsDrawer({
           {/* ── WhatsApp with this lease's customer — the conversation(s) matched to
               their number on the landlord's linked numbers (or linked by hand).
               Same authority as Emails; renders nothing when no number is linked. */}
-          {(inline || tab === 'whatsapp') && emails?.showWhatsapp && contract.tenant.id != null && (
+          {(inline || tab === 'whatsapp') && !financeOnly && emails?.showWhatsapp && contract.tenant.id != null && (
             <div id="sec-whatsapp" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
               <WhatsAppCard
                 rp={emails.rp}
@@ -5383,7 +5558,7 @@ function DetailsDrawer({
               />
             </div>
           )}
-          {(inline || tab === 'breaches') && legal && (
+          {(inline || tab === 'breaches') && !financeOnly && legal && (
             <div className="sec" id="sec-breaches">
               <BreachesSection leaseId={contract.id} leaseStatus={contract.status} base={legal.base} rp={legal.rp} disputeHrefOf={legal.disputeHrefOf} />
             </div>
@@ -6532,8 +6707,6 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
 export function ContractV2View({ contractId: cidProp, view = 'full' }: { contractId?: number; view?: 'full' | 'pipeline' | 'record' }) {
   const params = useParams<{ id: string }>();
   const id = cidProp != null ? String(cidProp) : params?.id;
-  const showPipeline = view !== 'record';
-  const showRecord = view !== 'pipeline';
   const router = useRouter();
   // Context-aware navigation base: this page is reused by the manager route
   // (/dashboard/manager/contracts/[id]) via re-export. When loaded there, all
@@ -6557,6 +6730,16 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // Manager permission gate for the Edit affordance — RP owners always see it,
   // managers only when they hold canManageAgreements for this contract's landlord.
   const { canForRp: managerCanForRp } = useManagerPermissions();
+  // FINANCE-ONLY record (owner, 23 Sep 2026: the accountant "should not be able
+  // to see documents or anything — just payments, security deposit, customer
+  // name and tenancy details, no navigation to different pages"). A manager
+  // who holds no lease authority for this landlord gets the record view with
+  // every link out of it removed: no pipeline, no action row, no property /
+  // unit / customer links, and the drawer reduced to payments + deposit.
+  const rpParam = searchParams.get('rp') ?? '';
+  const financeOnly = isManagerView && rpParam !== '' && !managerCanForRp('canManageAgreements', Number(rpParam));
+  const showPipeline = view !== 'record' && !financeOnly;
+  const showRecord = view !== 'pipeline';
   const waOn = useWhatsappEnabled();
   const { user: authUser } = useAuth();
   const [contract, setContract] = useState<ContractDetail | null>(null);
@@ -7229,9 +7412,30 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       const b = await res.json().catch(() => ({}));
       throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
     }
+    const created = await res.json().catch(() => null) as { id?: number } | null;
     void reload();
+    return created?.id;
   };
   // PATCH /api/contracts/:id/payments/:paymentId — status, or correct amount / VAT / reference / description.
+  /** Custody (0323 / 0324) — the same two routes the Payments page uses,
+   *  landlord's own or scoped to the manager's landlord. */
+  const onCustody: CustodyHandler = async (paymentIds, action, extra) => {
+    const mgrQ = isManagerView ? `?rp=${searchParams.get('rp') ?? ''}` : '';
+    const isReturn = action === 'returned' || action === 'undo_return';
+    const url = isManagerView
+      ? `/api/manager/payments/${isReturn ? 'return-to-customer' : 'hand-over'}${mgrQ}`
+      : `/api/contracts/payments/${isReturn ? 'return-to-customer' : 'hand-over'}`;
+    const body = isReturn
+      ? { paymentIds, returned: action === 'returned', reason: extra?.reason, note: extra?.note, documentId: extra?.documentId }
+      : { paymentIds, handedOver: action === 'submit' };
+    const res = await fetch(url, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      throw new Error((b as { message?: string }).message ?? `Error ${res.status}`);
+    }
+    void reload();
+  };
+
   const onUpdatePayment = async (paymentId: number, patch: {
     chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
@@ -7389,7 +7593,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       const b = await docRes.json().catch(() => ({})) as { message?: string | string[] };
       throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Error ${docRes.status}`));
     }
+    const createdDoc = await docRes.json().catch(() => null) as { id?: number } | null;
     void reload();
+    return createdDoc?.id;
   };
 
   // ── Flow 6: request a document from the tenant ──  POST /api/documents/request
@@ -7493,6 +7699,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     // Record/edit payment + clear-cheque: the backend accepts the granular
     // carve-out flags OR the umbrella, so surface the buttons for any of them.
     collections:   mgrCan('canManageCollections') || mgrCan('canRecordPayments') || mgrCan('canClearCheques'),
+    // Head office is the landlord's choice (0326): a manager sees it only when
+    // granted; the landlord's own page keeps the cheque series without it.
+    headOffice:    isManagerView && rpScope !== '' && managerCanForRp('canHandOverCheques', Number(rpScope)),
     // Deliberately NOT or-ed with anything. Deleting is its own grant, so a
     // manager who can upload documents does not thereby get the delete control.
     deleteDocuments: mgrCan('canDeleteDocuments'),
@@ -7725,17 +7934,17 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // page, so the unit opens the units workspace pre-filtered to that unit
   // number. Mirrors the lead detail page's link block exactly.
   const mgrRpQ = rpScope !== '' ? `rp=${rpScope}` : '';
-  const propertyHref = !contract.property.id ? null
+  const propertyHref = !contract.property.id || financeOnly ? null
     : isManagerView ? (mgrRpQ ? `/dashboard/manager/properties?${mgrRpQ}&property=${contract.property.id}` : null)
     : `/rental-provider/dashboard/portfolio?property=${contract.property.id}`;
   // The Units workspace on THIS unit, in whichever portal is rendering. The
   // manager branch used to search by unit NUMBER, which matches every unit
   // sharing that number across buildings; the id is exact.
-  const unitHref = !contract.unit.id ? null
+  const unitHref = !contract.unit.id || financeOnly ? null
     : isManagerView
       ? (rpScope !== '' ? unitWorkspaceHref(contract.unit.id, { rp: Number(rpScope) }) : null)
       : unitWorkspaceHref(contract.unit.id);
-  const customerHref = !contract.tenant.id ? null
+  const customerHref = !contract.tenant.id || financeOnly ? null
     : isManagerView ? (mgrRpQ ? `/dashboard/manager/tenants/${contract.tenant.id}?${mgrRpQ}` : null)
     : `/rental-provider/dashboard/tenants/${contract.tenant.id}`;
 
@@ -7800,12 +8009,15 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 </Link>
               );
             })()}
+            {/* The contract document itself — not for the finance-only record. */}
+            {!financeOnly && (<>
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Eye size={14} /> Preview
             </Link>
             <Link href={`${contractsBase}/${contract.id}/print`} className="btn btn-ghost btn-sm" target="_blank">
               <Download size={14} /> PDF
             </Link>
+            </>)}
             {/* Unsent renewal DRAFT (child) → send it to the customer directly from
                 here instead of hopping back to the parent lease. Sends via the parent
                 that owns the proposal. */}
@@ -7938,11 +8150,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
             keeps the compact info row instead. */}
-        {view === 'record' && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={customerHref} />}
+        {(view === 'record' || financeOnly) && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={customerHref} />}
 
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}
-        {view !== 'record' && (
+        {view !== 'record' && !financeOnly && (
         <div className="infobar">
           <span className="pitem">
             <span className="pk">Customer</span>
@@ -8243,7 +8455,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             onAddNote={onAddNote}
             perms={perms}
             paymentRefs={paymentRefs}
-            showExtras={view !== 'record'}
+            showExtras={view !== 'record' && !financeOnly}
+            financeOnly={financeOnly}
+            onCustody={onCustody}
             emails={{
               rp: isManagerView ? (rpScope !== '' ? Number(rpScope) : null) : null, isManager: isManagerView,
               showEmails: !isManagerView || (rpScope !== '' && managerCanForRp('canReadEmails', Number(rpScope))),
