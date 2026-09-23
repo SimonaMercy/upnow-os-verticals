@@ -128,6 +128,16 @@ function displayStatusOf(c: Pick<Contract, 'status' | 'contractType' | 'contract
     return 'superseded';
   }
   if (c.status === 'active' && c.termination?.response === 'accepted') return 'terminating';
+  // A lease can be ACTIVE and still start later: "Mark active" is a deliberate
+  // decision the RP has always been able to take ahead of the term, and an
+  // imported lease can be locked on arrival. The platform's current-tenancy rule
+  // (lib/liveLease, mirroring LIVE_LEASE_TIPS_SQL) says a lease that starts later
+  // is NOT current, so such a lease is absent from `liveTenancies` and therefore
+  // from Active Leases — and while it still read as plain 'active' here it matched
+  // no bucket at all and disappeared from the register entirely. CID-409 (Unit
+  // 217, activated 22 Sep 2026 for a 1 Oct term) was on neither Leases nor
+  // Operations. It is signed ahead, so it says so.
+  if (c.status === 'active' && (c.startDate ?? '').slice(0, 10) > TODAY) return 'starts_later';
   // Time-split forward drafts. Renewal children are promoted pending → issued
   // for signing, so an 'issued' renewal whose term hasn't started is still a
   // forward draft (without this it fell through to the raw 'issued' label and
@@ -630,21 +640,29 @@ export function OrdersWorkspace({ manager }: { manager?: { rp: number } }) {
 
   // UPCOMING RENEWALS — signed ahead, term not begun, and ALREADY SET UP.
   //
-  // The locked/Operations test is the point. Without it this listed every
-  // signed-ahead draft, and a draft that has not been blessed is by definition
-  // still in the Operations pre-active pipeline — so the register was showing
-  // Operations' own work back to the user under a different name. On RP 2 that
-  // was all 30 of them (`pending`, locked_at NULL), i.e. the bucket duplicated
-  // Operations exactly and reconciled with nothing.
+  // The Operations test is the point. Without it this listed every signed-ahead
+  // draft, and a draft that has not been blessed is by definition still in the
+  // Operations pre-active pipeline — so the register was showing Operations' own
+  // work back to the user under a different name. On RP 2 that was all 30 of them
+  // (`pending`, locked_at NULL), i.e. the bucket duplicated Operations exactly and
+  // reconciled with nothing.
   //
-  // Same rule as `currentLeases`, only the term has not started yet. Expect 0
-  // until a signed-ahead renewal is marked active — that is correct, not a bug.
+  // Same rule as `currentLeases`, only the term has not started yet.
+  //
+  // `lockedAt` is NOT part of the test, and that is deliberate. A signed-ahead
+  // lease CANNOT be locked before its start date — activation is deliberately
+  // deferred to the start-date cron so two ACTIVE leases never overlap on one
+  // unit — so requiring it here meant this bucket could only ever be empty, and
+  // a renewal that was fully set up (cheques in, both signatures, Ejari
+  // registered) sat on the Operations board with nothing anyone could do to it.
+  // Operations now drops those itself (contracts.service.ts buildOperationsList),
+  // so `!opsIds.has(c.id)` alone still keeps unfinished drafts out of the
+  // register — the two surfaces remain exact complements.
   // One row per lease (no per-unit collapse: two units signed ahead to the same
   // customer are two renewals).
   const startsLaterLeases = useMemo(
     () => yearScoped.filter(c =>
       displayStatusOf(c) === 'starts_later' &&
-      c.lockedAt != null &&
       !opsIds.has(c.id)),
     [yearScoped, opsIds],
   );
