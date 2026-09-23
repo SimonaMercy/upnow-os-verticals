@@ -134,7 +134,7 @@ interface ReportDef {
    *  read from each row (and from `totals` for the footer/tiles) by `key`. When
    *  omitted the matrix keeps its renewal-vacancy default (Renewals · Vacant ·
    *  Total units, with the clickable vacant drill-down). */
-  matrixTrailing?: { key: string; label: string; type?: 'number' | 'aed' }[];
+  matrixTrailing?: { key: string; label: string; type?: 'number' | 'aed'; tone?: 'red' }[];
   /** Group the matrix body by this row field, with a header bar and a subtotal
    *  line per group — the shape the printed sheet uses (property, then its
    *  units, then that property's line). */
@@ -688,9 +688,11 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
       },
       {
         title: 'Rent against cheques',
-        note: 'These two should agree. What is left is a data fault on a lease, not a reporting one — a unit whose cheques do not add up to its rent.',
+        note: 'The months on the grid plus any cheque with no date make Total; Total plus a bounce nobody replaced makes Everything receivable, which should equal the rent contracted. A cheque with no date is money on the book that can sit in no month — open the lease and enter its date. Anything still adrift after that is a lease whose cheques do not add up to its rent.',
         rows: [
           { label: 'Annual rent contracted', key: 'annualRentFils' },
+          { label: 'Months on the grid add up to', key: 'monthsFils' },
+          { label: 'Cheques with no date — on no month', key: 'undatedFils', tone: 'red', note: 'enter the cheque date on the lease' },
           { label: 'Total — collected + pending', key: 'totalFils' },
           { label: 'Bounced, never replaced — still owed', key: 'bouncedOwedFils' },
           { label: 'Everything receivable', key: 'receivableFils', total: true },
@@ -699,6 +701,7 @@ const REPORTS: Record<ReportSlug, ReportDef> = {
     ],
     matrixTrailing: [
       { key: 'totalFils', label: 'Total', type: 'aed' },
+      { key: 'undatedFils', label: 'No date', type: 'aed', tone: 'red' },
       { key: 'clearedFils', label: 'Cleared', type: 'aed' },
       { key: 'pendingFils', label: 'Pending', type: 'aed' },
       { key: 'bouncedOwedFils', label: 'Bounced \u00b7 still owed', type: 'aed' },
@@ -2200,6 +2203,8 @@ export function ReportDetailView({
       receivedToDateFils: receivedToDate,
       lateFils: dueToDate - receivedToDate,
       notYetDueFils: totalFils - dueToDate,
+      // The grid's own sum — with the undated cheques it must give Total.
+      monthsFils: colTotals.reduce((s, v) => s + v, 0),
     };
     // Any trailing column the report declares that isn't one of the above.
     for (const c of def.matrixTrailing ?? []) if (!(c.key in totals)) totals[c.key] = sum(c.key);
@@ -2255,10 +2260,11 @@ export function ReportDetailView({
   // subtotal) and the flat body render identically instead of drifting.
   const renderMatrixRow = (row: Record<string, unknown>, rowKey: string) => {
     const cells = (row.cells as { amountFils: number; status: string | null; chequeNumber?: string | null; dueDate?: string | null; chequeCount?: number; cheques?: Record<string, unknown>[] }[]) ?? [];
-    // Grouped sheets print the property in the group bar and the term is not what
-    // the row is about, so the cell carries the unit alone — "Shed-5", not
-    // "Unit Shed-5 / Avenue Warehouse / 1 Feb 2026 – 31 Jan 2027". The term still
-    // reaches the reader as the link title. Ungrouped reports keep all three lines.
+    // Grouped sheets print the property in the group bar, so the cell drops the
+    // building line — "Shed-5", not "Unit Shed-5 / Avenue Warehouse". The lease
+    // term stays under every unit on both layouts (owner, 23 Sep 2026: "show the
+    // contract duration also with each unit") — the reader needs to see which
+    // months a lease covers to read its cheques.
     const bare = Boolean(def.matrixGroupKey);
     const label = String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '');
     const term = [row.contractStartDate, row.contractEndDate].every(Boolean)
@@ -2275,8 +2281,13 @@ export function ReportDetailView({
             <div className="font-medium text-[#1a1916] leading-tight">{bare ? label : String(row.unitLabel ?? '—')}</div>
           )}
           {!bare && <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>}
-          {!bare && Boolean(row.contractStartDate || row.contractEndDate) && (
-            <div className="text-[11px] text-[#9b9890] leading-tight">
+          {/* Who is on the lease — the accountant reads a cheque against a name,
+              not a unit number (owner, 23 Sep 2026: "also customer name"). */}
+          {Boolean(row.customer) && (
+            <div className="text-[11px] text-[#1a1916] leading-tight max-w-[240px] truncate" title={String(row.customer)}>{String(row.customer)}</div>
+          )}
+          {Boolean(row.contractStartDate || row.contractEndDate) && (
+            <div className="text-[11px] text-[#9b9890] leading-tight whitespace-nowrap">
               {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
             </div>
           )}
@@ -2321,7 +2332,8 @@ export function ReportDetailView({
           </td>
         ))}
         {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-          <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916]' : 'text-[#1a1916]'} ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#f0ede8]' : ''}`}>
+          <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916]' : c.tone === 'red' && Number(row[c.key]) > 0 ? 'font-medium text-[#dc2626]' : 'text-[#1a1916]'} ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#f0ede8]' : ''}`}
+            title={c.tone === 'red' && Number(row[c.key]) > 0 ? 'Recorded without a date — enter the cheque date on the lease' : undefined}>
             {c.type === 'number' ? fmtNumber(Number(row[c.key])) : fmtAmt(Number(row[c.key]))}
           </td>
         )) : (<>
@@ -2684,6 +2696,8 @@ export function ReportDetailView({
             (y.totalFils / 100).toFixed(2),
           ]);
         }
+        const undated = Number(matrixView?.totals?.undatedFils ?? data.totals?.undatedFils ?? 0);
+        if (undated > 0) rows.push(['No date (cheques recorded without a date)', '', '', (undated / 100).toFixed(2)]);
       }
       rows.push(...panelRows());
       downloadCsv(`${slug}-${data.year ?? datestamp}.csv`, headers, rows);
@@ -3652,14 +3666,30 @@ export function ReportDetailView({
                         </td>
                       </tr>
                     ))}
+                    {/* A cheque recorded without a date sits in no year. Named here
+                        so the years plus this line give Total, not 10,050 less
+                        (owner, 23 Sep 2026: "making confusion"). */}
+                    {Number(matrixView?.totals?.undatedFils ?? data?.totals?.undatedFils ?? 0) > 0 && (
+                      <tr className="border-t border-[#f0ede8] text-[#6b6860]">
+                        <td className="px-3 py-2 text-left font-medium text-[#dc2626]">
+                          No date
+                          <span className="block text-[10.5px] font-normal text-[#9b9890]">cheques recorded without a date — enter it on the lease</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">·</td>
+                        <td className="px-3 py-2 text-right tabular-nums">·</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap font-medium text-[#dc2626]">{fmtAmt(matrixView?.totals?.undatedFils ?? data?.totals?.undatedFils)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">·</td>
+                      </tr>
+                    )}
                   </tbody>
                   <tfoot className="bg-[#f4f3ef] font-bold text-[#1a1916]">
                     {(() => {
+                      const undated = Number(matrixView?.totals?.undatedFils ?? data?.totals?.undatedFils ?? 0);
                       const t = yearSummary.reduce((s, y) => ({
                         clearedFils: s.clearedFils + y.clearedFils,
                         pendingFils: s.pendingFils + y.pendingFils,
                         totalFils: s.totalFils + y.totalFils,
-                      }), { clearedFils: 0, pendingFils: 0, totalFils: 0 });
+                      }), { clearedFils: 0, pendingFils: 0, totalFils: undated });
                       return (
                         <tr className="border-t border-[#e8e6e0]">
                           <td className="px-3 py-2 text-left">Total</td>
@@ -3676,7 +3706,7 @@ export function ReportDetailView({
                 </table>
               </div>
               <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">
-                Each year is the rent DATED in it — a lease running across 31 December is split between two years, which is why no year equals the annual rent of any lease. Collected + Pending is the year’s total; a bounced cheque is in neither, on the same rule as the sheet above. The Total line is every column on the sheet and matches Total — collected + pending below.
+                Each year is the rent DATED in it — a lease running across 31 December is split between two years, which is why no year equals the annual rent of any lease. Collected + Pending is the year’s total; a bounced cheque is in neither, on the same rule as the sheet above. A cheque recorded without a date sits in no year and is shown on its own line. The Total line is every column on the sheet plus that line, and matches Total — collected + pending below.
               </p>
             </div>
           )}
