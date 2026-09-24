@@ -81,6 +81,7 @@ import { BreachesSection } from '@/components/legal/BreachesSection';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import { EmailsCard } from '@/components/email/EmailsCard';
 import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
+import RenewalNoticePreviewModal from '@/components/contract/RenewalNoticePreviewModal';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -6896,6 +6897,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [rejectReason, setRejectReason] = useState('');
   const [rejectBusy, setRejectBusy] = useState(false);
   const [rejectErr, setRejectErr] = useState<string | null>(null);
+  // Parent lease whose renewal notice is being reviewed before sending; null = closed.
+  const [renewalPreviewFor, setRenewalPreviewFor] = useState<number | null>(null);
 
   // Loading / error
   if (loading && !contract) {
@@ -7021,11 +7024,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
   // Send the saved renewal draft to the customer (notifies them) or discard it.
   const onRenewalDraft = async (action: 'send' | 'discard') => {
-    if (action === 'discard' && !window.confirm('Discard this renewal draft? Its planned cheques will be voided.')) return;
+    // Sending is not undoable from this side, so it goes through the preview +
+    // consent gate rather than straight to the API. The modal owns the PATCH.
+    if (action === 'send') { setRenewalPreviewFor(contract.id); return; }
+    if (!window.confirm('Discard this renewal draft? Its planned cheques will be voided.')) return;
     try {
-      const res = action === 'send'
-        ? await fetch(`/api/contracts/${contract.id}/renewal/send`, { method: 'PATCH', credentials: 'include' })
-        : await fetch(`/api/contracts/${contract.id}/renewal/draft`, { method: 'DELETE', credentials: 'include' });
+      const res = await fetch(`/api/contracts/${contract.id}/renewal/draft`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         window.alert(body?.message ?? `Could not ${action} the renewal (${res.status}).`);
@@ -7039,20 +7043,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
 
   // Send an unsent renewal DRAFT to the customer directly from the draft (child)
   // contract page. The send endpoint lives on the PARENT lease that owns the proposal.
-  const onSendRenewalDraft = async () => {
+  const onSendRenewalDraft = () => {
+    // Viewed from the draft CHILD, but the renewal — and so the preview and the
+    // send — belong to the parent lease that owns the proposal.
     const pid = contract.parentContractId;
     if (!pid) return;
-    try {
-      const res = await fetch(`/api/contracts/${pid}/renewal/send`, { method: 'PATCH', credentials: 'include' });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        window.alert(b?.message ?? `Could not send the renewal (${res.status}).`);
-        return;
-      }
-      void reload();
-    } catch {
-      window.alert('Could not send the renewal.');
-    }
+    setRenewalPreviewFor(pid);
   };
   // Undo "settlement sent": pull the settlement back to draft so the figures can
   // be corrected and re-sent. Backend rejects once the customer has agreed/paid.
@@ -8473,6 +8469,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         )}
       </div>
 
+      {renewalPreviewFor != null && (
+        <RenewalNoticePreviewModal
+          parentContractId={renewalPreviewFor}
+          open
+          onClose={() => setRenewalPreviewFor(null)}
+          onSent={() => { void reload(); loadNotes(); }}
+        />
+      )}
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}
       {modal === 'terminate' && perms.agreements && <TerminateModal contract={contract} onClose={() => setModal(null)} onSubmitted={() => { setModal(null); void reload(); loadNotes(); }} />}
       {modal === 'direct-terminate' && perms.agreements && <DirectTerminateModal contract={contract} onClose={closeDeepLinkedModal} onSubmitted={() => { closeDeepLinkedModal(); setSelKey('moveout'); void reload(); loadNotes(); }} />}
