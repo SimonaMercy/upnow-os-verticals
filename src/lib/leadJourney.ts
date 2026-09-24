@@ -154,6 +154,11 @@ export interface ApiLead {
   source: string | null;
   notes: string | null;
   additionalDocsNote: string | null;
+  /** What the landlord answered on their no-login review link (migration 0334),
+   *  and when. Never moves the lead's stage — it is the owner's opinion on the
+   *  application, recorded for whoever works the lead. */
+  landlordReviewStatus?: 'approved' | 'declined' | null;
+  landlordReviewedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   viewings?: ApiViewing[];

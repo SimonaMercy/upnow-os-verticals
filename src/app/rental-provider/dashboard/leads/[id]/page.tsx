@@ -25,7 +25,7 @@ import {
   MapPin, Clock, Building2, MessageSquare, RotateCcw,
   TriangleAlert, CircleAlert, Plus, UserX,
   Loader2, Calendar, CreditCard, UploadCloud, Trash2, ClipboardList,
-  ShieldAlert, Send, Copy,
+  ShieldAlert, Send, Copy, Share2,
 } from 'lucide-react';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { getRequiredDocs, getOccupantDocs, docNeedsExpiry, type DocReq } from '@/lib/docRequirements';
@@ -764,6 +764,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               </button>
             ) : null;
           })()}
+          <LandlordReviewLink leadId={lead.id} answered={lead.landlordReviewStatus ?? null} />
           {email && <a className="btn btn-ghost btn-sm" href={`mailto:${email}`}><MessageSquare size={14} /> Message</a>}
           {!email && phone && <a className="btn btn-ghost btn-sm" href={`tel:${phone}`}><MessageSquare size={14} /> Message</a>}
           {/* Lead-reject is REASONLESS — the list page rejects via
@@ -832,6 +833,14 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           {annualRentAed != null && <div className="pitem"><span className="pk">Annual rent</span><span className="pv">{aedWhole(annualRentAed)}</span></div>}
           {planLabel && <div className="pitem"><span className="pk">Plan</span><span className="pv">{planLabel}</span></div>}
           {moveIn && <div className="pitem"><span className="pk">Move-in</span><span className="pv">{fmtDateOnly(moveIn)}</span></div>}
+          {lead.landlordReviewStatus && (
+            <div className="pitem"><span className="pk">Landlord</span>
+              <span className="pv" style={{ color: lead.landlordReviewStatus === 'approved' ? 'var(--jade-ink, #16a34a)' : 'var(--brick, #ef4444)' }}>
+                {lead.landlordReviewStatus === 'approved' ? 'Approved' : 'Declined'}
+                {lead.landlordReviewedAt ? ` · ${fmtDateOnly(String(lead.landlordReviewedAt).slice(0, 10))}` : ''}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Banner — only when real data warrants one */}
@@ -1011,6 +1020,48 @@ function RpRescheduleModal({ busy, currentScheduledAt, onCancel, onConfirm }: { 
 /* ─── LeadNotesSection: the RP/manager running journal for a lead. Append-only,
  *  newest first, mirrors the tenancy contract Notes log. Never shown to the
  *  customer. The "mark visited" outcome is mirrored in here server-side. ─────── */
+/**
+ * "Landlord review link" — mints the no-login link that lets the landlord read
+ * the whole application (applicant, unit, plan, documents) and answer approve or
+ * decline. Copied here and handed over by the RP; nothing is emailed, by the
+ * owner's choice (24 Sep 2026). Mirrors the lease's LandlordLinkButton.
+ */
+function LandlordReviewLink({ leadId, answered }: { leadId: number; answered: 'approved' | 'declined' | null }) {
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [link, setLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const gen = async () => {
+    setState('sending');
+    try {
+      const res = await fetch('/api/portal/generate', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId, purpose: 'lead', signerRole: 'landlord', sendEmail: false }),
+      });
+      if (!res.ok) throw new Error();
+      const d = await res.json() as { link?: string };
+      setLink(d.link ?? ''); setState('done');
+      if (d.link) { try { await navigator.clipboard.writeText(d.link); setCopied(true); } catch { /* clipboard blocked — the field below still holds it */ } }
+    } catch { setState('error'); }
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } };
+  if (state === 'done' && link) {
+    return (
+      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+          style={{ width: 230, fontSize: 11, padding: '5px 8px', border: '1px solid var(--edge, #e3e0d9)', borderRadius: 8, background: 'var(--paper, #fafaf8)' }} />
+        <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? 'Copied ✓' : 'Copy'}</button>
+        <a className="btn btn-ghost btn-sm" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Open ↗</a>
+      </span>
+    );
+  }
+  return (
+    <button className="btn btn-ghost btn-sm" disabled={state === 'sending'} onClick={gen}
+      title="Generate a no-login link for the landlord to review this application and approve or decline it">
+      <Share2 size={14} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : answered ? 'New review link' : 'Landlord review link'}
+    </button>
+  );
+}
+
 function LeadNotesSection({ notes, onAdd }: { notes: LeadNote[]; onAdd: (body: string) => Promise<void> }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);

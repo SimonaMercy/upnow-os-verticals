@@ -2,9 +2,18 @@
 
 /**
  * The shared contract "documents binder" — a full-page, two-pane verification +
- * sign surface used in TWO places so they stay identical:
+ * sign surface used in FOUR places so they stay identical:
  *   • the RP's authenticated "View all" page (/contracts/:id/documents)
  *   • the landlord's no-login magic-link page (/portal/:token/contract/:id)
+ *   • the RP's lead application "View all"
+ *   • the landlord's no-login lead review (/portal/:token/lead/:id)
+ *
+ * LEAD MODE: a lead has no tenancy contract yet, so `ejari` is omitted — the
+ * Agreement and Contract Registration slots drop out, the payment plan comes in
+ * ready-made on `planOverride`, and `footer` replaces the sign bar (a lead is
+ * approved or declined, not signed). Everything else — the identity pane, the
+ * previews, the jump chips — is the same code, so a lead pack reads exactly like
+ * a lease pack.
  *
  * Layout: LEFT pane (fixed) = the tenant identity card + KYC (Emirates ID ·
  * Passport · UAE Visa, then each dependant, then the supporting pack); RIGHT pane (scrolls) = the rental /
@@ -21,6 +30,7 @@ import dynamic from 'next/dynamic';
 import { FileText, AlertTriangle, X } from 'lucide-react';
 import type { ReceiptContract } from '@/components/upnow/PaymentReceiptPdf';
 import type { EjariContractData, EjariAddendum } from '@/components/contract/EjariContractPdf';
+import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { SecureDocCanvas } from '@/components/upnow/SecureDocCanvas';
 import { ContractSignBar } from '@/components/upnow/ContractSignBar';
 import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
@@ -558,10 +568,24 @@ export interface ContractDocsBinderProps {
   ended?: boolean;
   documents: BinderDoc[];
   tenant: { name?: string | null; email?: string | null; phone?: string | null; companyName?: string | null; emiratesId?: string | null; licenseNumber?: string | null };
-  ejari: EjariContractData;
+  /** Omitted in LEAD mode — there is no tenancy contract to render or register. */
+  ejari?: EjariContractData | null;
   addendums?: EjariAddendum[];
   planContract: PlanContract;
   planPayments: PlanPayment[];
+  /** LEAD mode: the plan as already issued on the lead, rendered as-is instead of
+   *  being rebuilt from contract payments. */
+  planOverride?: OfferPlan | null;
+  /** Names for the plan card when there is no `ejari` to read them from. */
+  planMeta?: {
+    landlordName?: string | null; unitNumber?: string | null;
+    buildingName?: string | null; community?: string | null;
+    periodStart?: string | null; periodEnd?: string | null;
+  } | null;
+  /** Header wording — "All documents" for a lease, e.g. "Application" for a lead. */
+  title?: string;
+  /** Replaces the sign bar. LEAD mode passes its approve / decline bar here. */
+  footer?: React.ReactNode;
   /** RP reconciliation references — plan number + per-payment receipt numbers. */
   paymentRefs?: import('@/lib/paymentRefs').PaymentRefs | null;
   /** When provided, the Receipts slot renders; null/omitted hides it. */
@@ -587,19 +611,20 @@ export interface ContractDocsBinderProps {
    *  there is no visible way back. Omitted on the landlord's no-login portal —
    *  that link IS the destination, there is no previous page. */
   onClose?: () => void;
-  signerName: string;
-  signerDefaultName: string;
+  signerName?: string;
+  signerDefaultName?: string;
   /** When the signer acts under POA, the represented landlord — shows an
    *  "on behalf of {B}" line on the sign bar. */
   signerOnBehalfOf?: string | null;
-  landlordSigned: boolean;
+  landlordSigned?: boolean;
   /** Whether the current actor may sign as landlord — needs signing rights AND
    *  power of attorney for a delegated manager. Defaults to true so the no-login
    *  portal (LandlordReview) and RP-owner paths are unaffected; the authed
    *  manager documents page passes the computed value. When false, the sign bar
    *  is hidden (the tenancy contract is landlord/POA-only). */
   canLandlordSign?: boolean;
-  onSign: (p: { signatureImage: string; signatoryName: string }) => Promise<void>;
+  /** Omitted in LEAD mode — nothing is signed there. */
+  onSign?: (p: { signatureImage: string; signatoryName: string }) => Promise<void>;
   /** Re-file a document into the other section (PATCH /documents/:id/section).
    *  Omit on the no-login landlord portal — the lessor reads the pack, they do
    *  not decide how the landlord files it. Provided → each stored document card
@@ -614,7 +639,19 @@ type Slot =
   | { kind: 'doc'; key: string; label: string; pending?: boolean; optional?: boolean };
 
 export function ContractDocsBinder(props: ContractDocsBinderProps) {
-  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, paymentRefs, receipt, watermark, portalToken, profileHref, homeHref, signatureCertificate, headerRight, onClose, signerName, signerDefaultName, signerOnBehalfOf, landlordSigned, canLandlordSign = true, onSign, onSetSection } = props;
+  const { refLabel, contractType, ended, documents, tenant, ejari, addendums = [], planContract, planPayments, planOverride, planMeta, title, footer, paymentRefs, receipt, watermark, portalToken, profileHref, homeHref, signatureCertificate, headerRight, onClose, signerName = '', signerDefaultName = '', signerOnBehalfOf, landlordSigned = false, canLandlordSign = true, onSign, onSetSection } = props;
+  // No tenancy contract on the props = LEAD mode (see the note at the top).
+  const isLead = !ejari;
+  // Who/what the plan card names. From the contract when there is one, from the
+  // lead's own unit and landlord when there is not.
+  const planNames = {
+    landlordName: planMeta?.landlordName ?? (ejari?.landlord?.bankAccountName || ejari?.landlord?.companyName || ejari?.landlord?.name || null),
+    unitNumber:   planMeta?.unitNumber   ?? (ejari?.unit?.number ?? null),
+    buildingName: planMeta?.buildingName ?? (ejari?.property?.buildingName ?? null),
+    community:    planMeta?.community    ?? (ejari?.property?.community || ejari?.property?.emirate || null),
+    periodStart:  planMeta?.periodStart  ?? (ejari?.startDate ?? null),
+    periodEnd:    planMeta?.periodEnd    ?? (ejari?.endDate ?? null),
+  };
   const planRefNo = paymentRefs?.planRefNo ?? null;
   // Enrich the receipt contract so per-payment receipts print their real gapless
   // number and the plan number (see PaymentReceiptPdf).
@@ -676,7 +713,8 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
       && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
   };
   const isRenewal = contractType === 'renewal';
-  const currentPlan = buildCurrentPlan(planContract, planPayments);
+  // A lead's plan is already a plan; a lease's is rebuilt from its payments.
+  const currentPlan = planOverride ?? buildCurrentPlan(planContract, planPayments);
   // Raw rows for the segregated Payment Plan PDF (Security Deposit · Rental Income ·
   // Management Fee · Third Party) — shared by the download and the on-screen card.
   const planRows = segRowsFromContract(planContract, planPayments);
@@ -685,20 +723,30 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const hasReceiptData = planPayments.length > 0 || (planContract.fees?.length ?? 0) > 0;
 
   // RIGHT column order.
-  const seq: Slot[] = [
+  const seq: Slot[] = isLead
+    // A lead has the money on the table and the cheques against it — nothing
+    // else exists yet, and an empty "Agreement" slot would read as a missing
+    // document rather than a stage not reached.
+    ? [
+        { kind: 'plan' },
+        // Optional: a lead that has not collected cheques yet has not REACHED
+        // that step — an empty slot there would read as a missing document.
+        { kind: 'doc', key: 'payment_advice', label: 'Cheques', optional: true },
+      ]
+    : [
     { kind: 'plan' },
     { kind: 'doc', key: 'payment_advice', label: 'Payment Confirmation' },
     ...(showReceipts ? [{ kind: 'receipts' } as Slot] : []),
     { kind: 'agreement' },
     { kind: 'doc', key: 'ejari_certificate', label: 'Contract Registration Certificate' },
   ];
-  if (!isRenewal) {
+  if (!isLead && !isRenewal) {
     // Salary certificate, bank statement and marriage certificate were slots here
     // and are now at the end of the KYC pane — they describe the customer, not
     // the tenancy. Utility proof stays: that IS the lease's paperwork.
     seq.push({ kind: 'doc', key: 'utility_registration', label: 'Utility Proof of Payment' });
   }
-  if (ended) {
+  if (!isLead && ended) {
     seq.push({ kind: 'doc', key: 'move_out_report', label: 'Move-out', pending: true });
     seq.push({ kind: 'doc', key: 'utility_final_bill', label: 'Utility Final Bill' });
     seq.push({ kind: 'doc', key: 'deposit_settlement', label: 'Final Settlement', pending: true });
@@ -852,10 +900,10 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
           return reactPdfBytes(await pdf(
             <PaymentPlanDoc rows={planRows} refLabel={refLabel} planRefNo={planRefNo} meta={{
               contractType, tenantName: tenant.companyName || tenant.name,
-              landlordName: ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name,
-              unitNumber: ejari.unit?.number, buildingName: ejari.property?.buildingName,
-              community: ejari.property?.community || ejari.property?.emirate,
-              periodStart: ejari.startDate, periodEnd: ejari.endDate,
+              landlordName: planNames.landlordName,
+              unitNumber: planNames.unitNumber, buildingName: planNames.buildingName,
+              community: planNames.community,
+              periodStart: planNames.periodStart, periodEnd: planNames.periodEnd,
             }} />,
           ).toBlob());
         },
@@ -870,6 +918,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         },
       });
     } else if (s.kind === 'agreement') {
+      if (!ejari) continue;
       downloadItems.push({
         id: 'g-agreement', label: 'Agreement (tenancy contract)', group: 'Rental documents',
         make: async () => {
@@ -920,7 +969,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
       <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <BrandMark href={homeHref} />
         <span aria-hidden style={{ width: 1, alignSelf: 'stretch', minHeight: 20, background: '#e7e3dc' }} />
-        <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>All documents</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>{title ?? 'All documents'}</span>
         <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
         <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -996,14 +1045,14 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         {/* RIGHT — rental / financial documents. Desktop: its own scrolling
             pane; mobile: continues the single scroll below Tenant & KYC. */}
         <section className={`${ds.pane} ${ds.paneRight}`}>
-          <QuickNav title="Rental documents · in order" items={rightNav} />
+          <QuickNav title={isLead ? 'The offer on the table' : 'Rental documents · in order'} items={rightNav} />
           {seq.map(s => {
             let inner: React.ReactNode;
-            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} rows={planRows} refLabel={refLabel} planRefNo={planRefNo} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={ejari.landlord?.bankAccountName || ejari.landlord?.companyName || ejari.landlord?.name} unitNumber={ejari.unit?.number} buildingName={ejari.property?.buildingName} community={ejari.property?.community || ejari.property?.emirate} periodStart={ejari.startDate} periodEnd={ejari.endDate} /> : <Missing label="Payment plan" />;
+            if (s.kind === 'plan') inner = hasPlan ? <PaymentPlanCard plan={currentPlan} rows={isLead ? undefined : planRows} refLabel={refLabel} planRefNo={planRefNo} contractType={contractType} tenantName={tenant.companyName || tenant.name} landlordName={planNames.landlordName} unitNumber={planNames.unitNumber} buildingName={planNames.buildingName} community={planNames.community} periodStart={planNames.periodStart} periodEnd={planNames.periodEnd} /> : <Missing label="Payment plan" />;
             else if (s.kind === 'receipts') inner = hasReceiptData
               ? <Block label="Receipts"><ReceiptInline contract={receiptWithRefs as ReceiptContract} height={FULL} showDownload /></Block>
               : <Missing label="Receipts" />;
-            else if (s.kind === 'agreement') inner = <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} showDownload /></Block>;
+            else if (s.kind === 'agreement') inner = ejari ? <Block label="Agreement"><EjariInline data={ejari} addendums={addendums} height={FULL} showDownload /></Block> : null;
             else {
               const docs = matchDocs(s.key);
               if (!docs.length) {
@@ -1035,7 +1084,8 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
         </section>
       </div>
 
-      {canLandlordSign && (
+      {footer}
+      {!footer && canLandlordSign && onSign && (
         <ContractSignBar
           signerRole="Landlord"
           signerName={signerName}
