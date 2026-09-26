@@ -70,7 +70,9 @@ export interface PlanViewerContract extends PlanContract {
   property?: { buildingName?: string | null; community?: string | null; emirate?: string | null } | null;
   unit?: { number?: string | null } | null;
   tenant?: { name?: string | null; companyName?: string | null } | null;
-  landlord?: { name?: string | null; companyName?: string | null; bankAccountName?: string | null } | null;
+  landlord?: { name?: string | null; companyName?: string | null; bankAccountName?: string | null;
+    /** Where a bank transfer goes — the landlord's primary account (API: bankDetailsOf). */
+    bankDetails?: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null } | null;
   payments?: PlanPayment[] | null;
 }
 
@@ -223,6 +225,7 @@ export function planFromContract(contract: PlanViewerContract): { rows: SegPayme
       periodEnd: contract.endDate ?? null,
       tenantName: contract.tenant?.companyName || contract.tenant?.name || null,
       landlordName: contract.landlord?.bankAccountName || contract.landlord?.companyName || contract.landlord?.name || null,
+      bankDetails: contract.landlord?.bankDetails ?? null,
     },
   };
 }

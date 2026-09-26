@@ -273,7 +273,9 @@ interface ContractDetail {
     method?: 'mutual' | 'direct' | 'cancelled' | null;
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
-  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null; hasPoa?: boolean; poaPersonName?: string | null };
+  landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null; hasPoa?: boolean; poaPersonName?: string | null;
+    /** Where a bank transfer goes — the landlord's primary account (API: bankDetailsOf). */
+    bankDetails?: { accountName: string | null; bankName: string | null; iban: string | null } | null };
   property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; spaceCategory?: string | null };
   unit: {
     id: number | null; number: string | null; name: string | null; type: string | null;
@@ -979,6 +981,7 @@ function RenewalChequeAttachments({ h, chequeDocs, canEdit }: { h: StepHandlers;
         community={h.contract.property.community || h.contract.property.emirate}
         periodStart={h.contract.startDate}
         periodEnd={h.contract.endDate}
+        bankDetails={h.contract.landlord.bankDetails}
         renderAttach={(slot) => (
           <PlanAttachCell
             slot={slot}
@@ -1938,6 +1941,7 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
             community={h.contract.property.community || h.contract.property.emirate}
             periodStart={h.contract.startDate}
             periodEnd={h.contract.endDate}
+            bankDetails={h.contract.landlord.bankDetails}
           />
           <Link href={h.printUrl} target="_blank" className="btn btn-ghost btn-block" style={{ marginTop: 12 }}>
             <Eye size={14} /> Preview full renewal contract
@@ -4987,6 +4991,7 @@ function DetailsDrawer({
                       community={contract.property.community || contract.property.emirate}
                       periodStart={contract.startDate}
                       periodEnd={contract.endDate}
+                      bankDetails={contract.landlord.bankDetails}
                     />
                   </div>
                 </div>

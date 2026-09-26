@@ -68,6 +68,7 @@ export interface VatPlanHead {
   planDate: string | null;
   contractRef: string | null;
   isRenewal: boolean;
+  bank: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
 }
 
 export function vatPlanFromContract(c: VatPlanContract): { rows: SegPaymentInput[]; head: VatPlanHead } {
@@ -91,6 +92,7 @@ export function vatPlanFromContract(c: VatPlanContract): { rows: SegPaymentInput
       planDate: c.createdAt ?? null,
       contractRef: ref,
       isRenewal: (c.contractType ?? '').toLowerCase() === 'renewal',
+      bank: c.landlord?.bankDetails ?? null,
     },
   };
 }
@@ -120,6 +122,9 @@ const s = StyleSheet.create({
   grand: { flexDirection: 'row', marginTop: 14, paddingVertical: 8, paddingHorizontal: 7, backgroundColor: GREEN, borderRadius: 4 },
   grandTd: { fontSize: 9.5, fontWeight: 700, color: '#ffffff' },
   foot: { fontSize: 8, color: FAINT, marginTop: 10 },
+  payTo: { marginTop: 12, padding: 8, borderWidth: 1, borderColor: HAIR, borderRadius: 4 },
+  payRow: { flexDirection: 'row', marginTop: 4 },
+  payCol: { width: '50%', paddingRight: 10 },
 });
 
 // Item · Payment method · Due date · Net · VAT · Total
@@ -209,6 +214,18 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
           <Text style={[s.grandTd, num, { width: W.total }]}>{aed(plan.grandTotal)}</Text>
         </View>
 
+        {/* Where to transfer — only when a line is actually paid by transfer. */}
+        {plan.groups.some(g => g.lines.some(l => l.method === 'bank_transfer')) && (head.bank?.accountName || head.bank?.bankName || head.bank?.iban) ? (
+          <View style={s.payTo} wrap={false}>
+            <Text style={s.k}>Bank transfer to</Text>
+            <View style={s.payRow}>
+              {head.bank.accountName ? <View style={s.payCol}><Text style={s.k}>Account name</Text><Text style={s.metaV}>{head.bank.accountName}</Text></View> : null}
+              {head.bank.bankName ? <View style={s.payCol}><Text style={s.k}>Bank</Text><Text style={s.metaV}>{head.bank.bankName}</Text></View> : null}
+            </View>
+            {head.bank.iban ? <View style={s.payRow}><View><Text style={s.k}>IBAN</Text><Text style={s.metaV}>{head.bank.iban}</Text></View></View> : null}
+          </View>
+        ) : null}
+
         <Text style={s.foot} wrap={false}>
           {oneMethod ? `Payment method for every line: ${oneMethod}. ` : ''}Amount due: AED {aed(plan.grandTotal)}. System-generated payment plan. Amounts in UAE Dirhams (AED).
         </Text>
@@ -223,6 +240,17 @@ const WRAP = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexD
 const BAR = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd', gap: 12, flexWrap: 'wrap' } as const;
 const CLOSE_BTN = { padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' } as const;
 const DL_BTN = { padding: '6px 16px', background: GREEN, color: '#fff', borderRadius: 6, fontWeight: 700, fontSize: 13, textDecoration: 'none' } as const;
+
+/**
+ * Close. The binder opens this page in a NEW TAB, which has no history, so
+ * history.back() did nothing. Go back when there is somewhere to go; otherwise
+ * close the tab, and if the browser refuses, land on the lease itself.
+ */
+function closeViewer() {
+  if (window.history.length > 1) { window.history.back(); return; }
+  window.close();
+  window.setTimeout(() => { window.location.href = window.location.pathname.replace(/\/print\/vat-plan\/?$/, ''); }, 200);
+}
 
 /** Regenerate whenever anything printed changes (not just the row count). */
 function docKey(rows: SegPaymentInput[], head: VatPlanHead): string {
@@ -244,7 +272,7 @@ export default function VatPlanViewer({ contract }: { contract: VatPlanContract 
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>Net · VAT · Total for every line — system-generated</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button onClick={() => window.history.back()} style={CLOSE_BTN}>✕ Close</button>
+          <button onClick={closeViewer} style={CLOSE_BTN}>✕ Close</button>
           {url
             ? <a href={url} download={fileName} style={DL_BTN}>⬇ Download PDF</a>
             : <span style={{ ...DL_BTN, opacity: 0.6, cursor: 'default' }}>⏳ Preparing…</span>}
