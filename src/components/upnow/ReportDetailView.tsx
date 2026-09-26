@@ -3792,7 +3792,11 @@ export function ReportDetailView({
               </tbody>
               <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
                 <tr>
-                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left" colSpan={2 + (data?.maxCheques ?? 0)}>Total</td>
+                  {/* Only the Unit column is pinned — a sticky cell spanning the
+                      cheque columns too stays that wide and covers the month totals
+                      once the grid scrolls. Same split as the subtotal line. */}
+                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  <td className="px-3 py-3" colSpan={1 + (data?.maxCheques ?? 0)} />
                   {(chequeView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
                     <td key={ti} className="px-3 py-3 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{Number(t) ? fmtNumber(Number(t)) : '·'}</td>
                   ))}
