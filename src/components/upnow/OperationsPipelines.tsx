@@ -749,11 +749,19 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     return [...s].sort();
   }, [contracts, leads, maint, visits, breaches, disputes]);
 
+  // Every word typed must appear somewhere ("unit 8 avenue", "amaraa 10") — not
+  // the whole query as one run of text, which only ever matched a single field.
   const matchSearch = (hay: (string | null | undefined)[]) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return hay.filter((x): x is string => Boolean(x)).join(' ').toLowerCase().includes(q);
+    const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return true;
+    const text = hay.filter((x): x is string => Boolean(x)).join(' ').toLowerCase();
+    return words.every(w => text.includes(w));
   };
+  // Search reads what the card SHOWS — name, ref, "Unit 8 · Building", the
+  // handler — plus the tab's extra fields, so the same name or unit finds a card on
+  // every tab alike. The term dates are left out: a unit typed as "26" must not
+  // match every lease running in 2026.
+  const cardText = (c: CardVM) => [c.name, c.ref, c.sub, ...c.handler.map(h => h.name)];
   const contractInYear = (c: OpsContract) => {
     const jan1 = `${filterYear}-01-01`, dec31 = `${filterYear}-12-31`;
     const st = (c.startDate ?? '').slice(0, 10), en = (c.endDate ?? '').slice(0, 10);
@@ -772,59 +780,64 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
     const passC = (c: OpsContract) =>
       !legalLeaseIds.has(c.id)
       && (filterAsset === 'all' || c.property.buildingName === filterAsset)
-      && contractInYear(c)
-      && matchSearch([c.ref, tenantDisplayName(c.tenant), c.tenant.companyName, c.tenant.email, c.unit.number, c.property.buildingName]);
+      && contractInYear(c);
+    const contractExtra = (c: OpsContract) => [c.tenant.name, c.tenant.companyName, c.tenant.email, c.unit.number, c.unit.name];
     const passL = (l: OpsLead) =>
       (filterAsset === 'all' || l.unit?.property?.buildingName === filterAsset)
-      && (l.createdAt ?? '').slice(0, 4) === filterYear
-      && matchSearch([l.customerName, l.convertedTenant?.companyName, l.convertedTenant?.user?.name,
-                      l.leadEmail, l.unit?.unitNumber, l.unit?.property?.buildingName]);
+      && (l.createdAt ?? '').slice(0, 4) === filterYear;
 
     const leadCards = leads.filter(l => LEAD_MATCH.has(l.stage) && passL(l))
-      .map(l => leadToCard(l, leadHref ? leadHref(l.id) : null, nowMs))
+      .map(l => { const card = leadToCard(l, leadHref ? leadHref(l.id) : null, nowMs);
+        return card && matchSearch([...cardText(card), l.customerName, l.convertedTenant?.companyName,
+          l.convertedTenant?.user?.name, l.leadEmail, l.unit?.unitNumber, l.unit?.unitName]) ? card : null; })
       .filter((x): x is CardVM => x != null);
 
     // Setup = neither winding down nor termination-requested (those belong to Terminated).
     const setup = contracts.filter(c => !c.windDown && !c.terminationRequested && passC(c));
-    const newCards = setup
-      .filter(c => c.contractType !== 'renewal' && !allGatesDone(c, NEW_STAGES))
-      .map(c => contractToCard(c, NEW_STAGES, contractHref(c.id), nowMs));
-    const renewalCards = setup.filter(c => c.contractType === 'renewal').map(c => contractToCard(c, RENEWAL_STAGES, contractHref(c.id), nowMs));
-    const termCards = contracts.filter(c => (c.windDown || c.terminationRequested) && passC(c)).map(c => contractToCard(c, TERM_STAGES, contractHref(c.id), nowMs));
+    const searchC = (rows: OpsContract[], stages: StageDef[]) => rows
+      .map(c => ({ c, card: contractToCard(c, stages, contractHref(c.id), nowMs) }))
+      .filter(({ c, card }) => matchSearch([...cardText(card), ...contractExtra(c)]))
+      .map(({ card }) => card);
+    const newCards = searchC(setup.filter(c => c.contractType !== 'renewal' && !allGatesDone(c, NEW_STAGES)), NEW_STAGES);
+    const renewalCards = searchC(setup.filter(c => c.contractType === 'renewal'), RENEWAL_STAGES);
+    const termCards = searchC(contracts.filter(c => (c.windDown || c.terminationRequested) && passC(c)), TERM_STAGES);
 
     // Maintenance: live requests from maintenancePath. The backend list is
     // open-scoped (terminal stages already dropped), and an open request is
     // relevant whatever year it was raised — so no year gate here.
     const passM = (m: MaintReq) =>
-      (filterAsset === 'all' || m.property?.buildingName === filterAsset)
-      && matchSearch([m.ref, m.title, m.customer?.name, m.customer?.companyName,
-                      m.unit?.unitNumber, m.property?.buildingName, m.category?.name, m.provider?.name]);
+      (filterAsset === 'all' || m.property?.buildingName === filterAsset);
     const maintCards = maint.filter(passM)
-      .map(m => maintToCard(m, maintenanceHref ? maintenanceHref(m.id) : null, nowMs));
+      .map(m => ({ m, card: maintToCard(m, maintenanceHref ? maintenanceHref(m.id) : null, nowMs) }))
+      .filter(({ m, card }) => matchSearch([...cardText(card), m.title, m.customer?.name, m.customer?.companyName,
+        m.unit?.unitNumber, m.provider?.name]))
+      .map(({ card }) => card);
 
     // AMC: open visits from amcPath — open work whenever the visit was due, so
     // no year gate. Search covers the vendor, property, kind and the people on it.
     const passV = (v: AmcVisit) =>
-      (filterAsset === 'all' || v.propertyName === filterAsset)
-      && matchSearch([`VISIT-${v.id}`, v.title, v.vendorName, v.propertyName, v.kindLabel, v.attendedByName, v.inspectedByName, v.supervisedBy]);
+      (filterAsset === 'all' || v.propertyName === filterAsset);
     const amcCards = visits.filter(passV)
-      .map(v => amcToCard(v, amcHref ? amcHref(v.contractId) : null, nowMs));
+      .map(v => ({ v, card: amcToCard(v, amcHref ? amcHref(v.contractId) : null, nowMs) }))
+      .filter(({ v, card }) => matchSearch([...cardText(card), v.attendedByName, v.inspectedByName, v.supervisedBy]))
+      .map(({ card }) => card);
 
     // Breach: open breaches, minus any whose lease is in legal (Legal only).
     // Escalated breaches are not on the open list at all. Legal: open cases.
     // Neither is year-gated — an open case matters whenever it was opened.
     const passB = (b: BreachRow) =>
       !legalLeaseIds.has(b.leaseId)
-      && (filterAsset === 'all' || b.lease?.buildingName === filterAsset)
-      && matchSearch([`BR-${b.id}`, b.lease?.customerName, b.lease?.unitNumber, b.lease?.buildingName, b.categoryLabel]);
+      && (filterAsset === 'all' || b.lease?.buildingName === filterAsset);
     const breachCards = breaches.filter(passB)
       .map(b => breachToCard(b, `${contractHref(b.leaseId)}#sec-breaches`, nowMs,
-        `${contractHref(b.leaseId)}${contractHref(b.leaseId).includes('?') ? '&' : '?'}escalate=${b.id}#sec-breaches`));
+        `${contractHref(b.leaseId)}${contractHref(b.leaseId).includes('?') ? '&' : '?'}escalate=${b.id}#sec-breaches`))
+      .filter(card => matchSearch(cardText(card)));
     const passD = (d: DisputeRow) =>
-      (filterAsset === 'all' || d.lease?.buildingName === filterAsset)
-      && matchSearch([`CASE-${d.id}`, d.lease?.customerName, d.lease?.unitNumber, d.lease?.buildingName, d.typeLabel, d.authorityCaseNumber]);
+      (filterAsset === 'all' || d.lease?.buildingName === filterAsset);
     const legalCards = disputes.filter(passD)
-      .map(d => disputeToCard(d, disputeHref ? disputeHref(d.id) : null, nowMs));
+      .map(d => ({ d, card: disputeToCard(d, disputeHref ? disputeHref(d.id) : null, nowMs) }))
+      .filter(({ d, card }) => matchSearch([...cardText(card), d.authorityCaseNumber]))
+      .map(({ card }) => card);
     return {
       lead: leadCards, new: newCards, renewal: renewalCards, terminated: termCards,
       maintenance: maintCards, amc: amcCards, breach: breachCards, legal: legalCards,
