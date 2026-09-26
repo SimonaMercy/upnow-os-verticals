@@ -264,11 +264,13 @@ export default function RentalProviderOnboardingPage() {
       { key: "emirates_id",     displayName: "Emirates ID",                         required: true,  description: "Emirates ID (both sides) of the authorised signatory / representative." },
       { key: "passport",        displayName: "Passport",                            required: false, description: "Bio-data page of a valid passport. Optional." },
       { key: "visa",            displayName: "UAE Visa",                            required: false, description: "UAE residency or entry visa. Optional." },
+      { key: "vat_certificate", displayName: "VAT Registration Certificate",        required: false, description: "VAT / TRN registration certificate, if the company is VAT-registered. Optional." },
     ];
     if (kind.id === "individual") return [
       { key: "emirates_id", displayName: "Emirates ID",          required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
       { key: "passport",    displayName: "Passport",             required: true,  description: "Bio-data page of your valid passport." },
       { key: "visa",        displayName: "UAE Residency Visa",   required: false, description: "Residency visa page. Required for expatriate residents." },
+      { key: "vat_certificate", displayName: "VAT Registration Certificate", required: false, description: "VAT / TRN registration certificate, if you are VAT-registered. Optional." },
     ];
     return COMPANY_BASE;
   }

@@ -738,6 +738,7 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   // Additional landlord-profile fields (merged from the standalone Profile page)
   const [authorizedSignatoryName, setAuthorizedSignatoryName] = useState('');
   const [legalNoticesAddress, setLegalNoticesAddress] = useState('');
+  const [vatTrn, setVatTrn] = useState('');
   const [hasPoa, setHasPoa]                 = useState(false);
   const [poaPersonPhone, setPoaPersonPhone] = useState('');
   const [poaPersonEmail, setPoaPersonEmail] = useState('');
@@ -886,6 +887,7 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
         if (p.parentBrokerageName) setParentBrokerageName(p.parentBrokerageName as string);
         setAuthorizedSignatoryName((p.authorizedSignatoryName as string) ?? '');
         setLegalNoticesAddress((p.legalNoticesAddress as string) ?? '');
+        setVatTrn((p.vatTrn as string) ?? '');
         setHasPoa(Boolean(p.hasPoa));
         setPoaPersonPhone((p.poaPersonPhone as string) ?? '');
         setPoaPersonEmail((p.poaPersonEmail as string) ?? '');
@@ -1026,6 +1028,8 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
       }
       // Legal notices address stays on the profile form.
       payload.legalNoticesAddress = legalNoticesAddress || null;
+      // TRN applies to either account type (printed on receipts when set).
+      payload.vatTrn = vatTrn.trim() || null;
       // Authorized Signatory & POA are saved from their own card (handleSavePoa).
       // Banking is saved from its own card (handleSaveBank) — not here.
       const res = await fetch('/api/profiles/rental-provider/me', {
@@ -1825,6 +1829,11 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
               {/* Legal Notices Address — general profile field (Authorized
                   Signatory & POA now live in their own card below). */}
               <div className="mt-6 pt-5 border-t border-[#eef0ec]">
+                <label className="text-xs font-medium text-[#6b6860] block mb-1">TRN (Tax Registration Number)</label>
+                <div className="relative mb-4">
+                  <FileText size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+                  <input value={vatTrn} onChange={e => { setVatTrn(e.target.value.replace(/[^0-9]/g, '')); setBizSaved(false); }} inputMode="numeric" maxLength={15} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="15-digit TRN — leave blank if not VAT-registered" />
+                </div>
                 <label className="text-xs font-medium text-[#6b6860] block mb-1">Legal Notices Address</label>
                 <input value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Address where legal correspondence should be sent" />
               </div>

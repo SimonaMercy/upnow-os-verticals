@@ -156,12 +156,14 @@ const RP_COMPANY_BASE: DocReq[] = [
   { key: "emirates_id",     displayName: "Emirates ID of Authorised Signatory", category: "identity",   required: true,  description: "Emirates ID (both sides) of the person authorised to sign on behalf of the company." },
   { key: "passport",        displayName: "Passport",                            category: "identity",   required: false, description: "Bio-data page of the authorised signatory's valid passport. Optional." },
   { key: "visa",            displayName: "UAE Visa",                            category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
+  { key: "vat_certificate", displayName: "VAT Registration Certificate",        category: "compliance", required: false, description: "VAT / TRN registration certificate, if the company is VAT-registered. Optional." },
 ];
 
 const RP_INDIVIDUAL: DocReq[] = [
   { key: "emirates_id", displayName: "Emirates ID",        category: "identity", required: true,  description: "Clear scan of your Emirates ID (both sides). Required for UAE nationals and residents." },
   { key: "passport",    displayName: "Passport",           category: "identity", required: true,  description: "Bio-data page of your valid passport." },
   { key: "visa",        displayName: "UAE Residency Visa", category: "identity", required: false, description: "Residency visa page. Required for expatriate residents." },
+  { key: "vat_certificate", displayName: "VAT Registration Certificate", category: "compliance", required: false, description: "VAT / TRN registration certificate, if you are VAT-registered. Optional." },
 ];
 
 const RP_LANDLORD: DocReq[] = [...RP_COMPANY_BASE];
@@ -181,6 +183,7 @@ const RP_AGENTS: DocReq[] = [
   { key: "visa",                       displayName: "UAE Visa",                               category: "identity",   required: false, description: "UAE residency or entry visa of the authorised signatory. Required only for non-UAE residents." },
   { key: "broker_registration",        displayName: "Agent Registration Certificate", category: "license",    required: true,  description: "Real-estate agent registration certificate issued by the relevant emirate regulator (BRN card or equivalent)." },
   { key: "parent_brokerage_agreement", displayName: "Agency Agreement with Parent Firm", category: "compliance", required: true,  description: "Signed agreement authorising you to operate as an agent under the named parent brokerage firm." },
+  { key: "vat_certificate",            displayName: "VAT Registration Certificate",        category: "compliance", required: false, description: "VAT / TRN registration certificate, if the company is VAT-registered. Optional." },
 ];
 
 const CLIENT_REQUIREMENTS: Partial<Record<string, Partial<Record<"individual" | "company", DocReq[]>>>> = {

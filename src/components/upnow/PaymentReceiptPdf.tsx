@@ -121,6 +121,8 @@ export interface ReceiptContract {
     emiratesId?: string | null;
     licenseNumber?: string | null;
     licenseAuthority?: string | null;
+    /** FTA Tax Registration Number — printed in the issuer band only when set. */
+    vatTrn?: string | null;
     hasPoa?: boolean | null;
     poaPersonName?: string | null;
     poaPersonPhone?: string | null;
@@ -948,6 +950,7 @@ function ReceiptPage({ receipt, contract }: { receipt: Receipt; contract: Receip
   const issuerLines = [
     (contract.landlord?.licenseNumber || contract.landlord?.licenseAuthority)
       ? `Licence ${contract.landlord?.licenseNumber || '—'}${contract.landlord?.licenseAuthority ? ` · ${contract.landlord.licenseAuthority}` : ''}` : null,
+    contract.landlord?.vatTrn ? `TRN ${contract.landlord.vatTrn}` : null,
     lessorPhone ? `Tel ${lessorPhone}` : null,
     contract.landlord?.email,
   ].filter(Boolean) as string[];
