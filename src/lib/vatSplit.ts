@@ -31,3 +31,18 @@ export function typedFromStored(total: number | null | undefined, vat: number | 
 }
 
 export const aed2 = (n: number) => `AED ${Number(n).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * A stored row (gross total + its VAT) as the three things the VAT field edits:
+ * what to put in the amount box, the choice, and an exact-VAT override when the
+ * stored figure is not the plain 5% (a supplier's rounding, a hand-typed VAT).
+ * Stored rows are shown as "+5% on top" — the net is what was agreed.
+ */
+export function vatFormFromStored(total: number | null | undefined, vat: number | null | undefined): { amount: string; vatMode: VatMode; vatOverride: string } {
+  if (total == null) return { amount: '', vatMode: 'none', vatOverride: '' };
+  const v = r2(Number(vat) || 0);
+  if (v <= 0) return { amount: String(r2(Number(total))), vatMode: 'none', vatOverride: '' };
+  const net = r2(Number(total) - v);
+  const plain = r2((net * VAT_RATE) / 100);
+  return { amount: String(net), vatMode: 'exclusive', vatOverride: Math.abs(plain - v) < 0.005 ? '' : String(v) };
+}

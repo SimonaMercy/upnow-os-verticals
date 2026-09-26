@@ -36,6 +36,8 @@ export interface SegLine {
   chequeNo: string | null;
   dueDate: string | null;
   amount: number;                 // AED gross
+  /** VAT inside `amount` (AED). Read by the Net · VAT · Total plan only. */
+  vat?: number;
   method?: string | null;
   status?: string | null;
 }
@@ -369,6 +371,7 @@ function lineOf(p: SegPaymentInput, item: string, amount: number): SegLine {
     chequeNo: p.chequeNumber ?? null,
     dueDate: p.transactionDate ?? null,
     amount: round2(amount),
+    vat: round2(Math.min(Math.max(Number(p.vatAmount) || 0, 0), amount)),
     method: p.paymentMethod ?? null,
     status: p.chequeStatus ?? null,
   };

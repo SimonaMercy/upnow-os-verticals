@@ -54,8 +54,10 @@ import { slotOfDoc, fileNameOfDoc, isPaymentAdviceKey } from '@/lib/planAttach';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
-import { taxPortionOf } from '@/lib/chargeTax';
-import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { isTaxLabel, taxPortionOf } from '@/lib/chargeTax';
+import { AmountWithVat } from '@/components/upnow/VatChoice';
+import { splitVat, vatFormFromStored, type VatMode } from '@/lib/vatSplit';
+import { deriveSpaceCategoryFromUnitType, isRentVatable } from '@/lib/unitTaxonomy';
 import { chequeStatusDisplay } from '@/lib/chequeStatusDisplay';
 import { groupReplacementsUnderBounce, MAX_REPLACEMENT_DEPTH } from '@/lib/chequeReplacementGroups';
 import { buildCurrentPlan } from '@/lib/currentPlan';
@@ -272,7 +274,7 @@ interface ContractDetail {
   } | null;
   tenant: { id: number | null; name: string | null; email: string | null; phone: string | null; entityType?: 'individual' | 'company' | null; companyName?: string | null };
   landlord: { id: number | null; name: string | null; email: string | null; phone: string | null; companyName: string | null; bankAccountName?: string | null; hasPoa?: boolean; poaPersonName?: string | null };
-  property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null };
+  property: { id: number | null; buildingName: string | null; fullAddress: string | null; community: string | null; emirate: string | null; spaceCategory?: string | null };
   unit: {
     id: number | null; number: string | null; name: string | null; type: string | null;
     floor: string | null; bedrooms: number | null; bathrooms: number | null;
@@ -2903,6 +2905,8 @@ function DetailsDrawer({
   };
   const [rec, setRec] = useState({
     description: '', amount: '', paymentType: 'rental_income',
+    // VAT on this rent cheque: none, +5% on top of the typed amount, or inside it.
+    vatMode: 'none' as VatMode, vatOverride: '',
     paymentMethod: 'cheque', chequeNumber: '', transactionDate: '',
     // '' = an ordinary cheque; an id = this one makes good that bounced cheque.
     replacesPaymentId: '' as number | '',
@@ -2921,6 +2925,10 @@ function DetailsDrawer({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({
     amount: '', chequeNumber: '', description: '', paymentMethod: 'cheque', transactionDate: '',
+    vatMode: 'none' as VatMode, vatOverride: '',
+    /** 'split' = the row is a charge that may carry VAT; 'all' = the whole row IS
+     *  VAT ("5% VAT on Rent", a VAT cheque); 'none' = never taxed (deposit). */
+    vatKind: 'split' as 'split' | 'all' | 'none',
     // '' = an ordinary cheque; an id = this row pays off that bounced cheque.
     replacesPaymentId: '' as number | '',
   });
@@ -2950,10 +2958,29 @@ function DetailsDrawer({
       setLinkBusy(false);
     }
   };
+  /** How a row's VAT is edited — see editForm.vatKind. */
+  const vatKindOf = (p: ContractPayment): 'split' | 'all' | 'none' => {
+    const t = (p.paymentType ?? '').toLowerCase();
+    if (t === 'security_deposit') return 'none';
+    const vat = Number(p.vatAmount) || 0;
+    if (t === 'vat' || (t === 'other' && isTaxLabel(p.description) && (vat <= 0 || Math.abs(vat - (p.amount ?? 0)) < 0.01))) return 'all';
+    return 'split';
+  };
+  /** VAT the lease already collects on rent as a row of its own — a rent cheque
+   *  given its own VAT on top of that would be taxed twice. */
+  const rentVatOnOwnRow = payments.some(p => {
+    const t = (p.paymentType ?? '').toLowerCase();
+    return (t === 'vat' && !/fees/i.test(p.description ?? ''))
+      || (t === 'other' && isTaxLabel(p.description) && /\brent/i.test(p.description ?? ''));
+  });
   const startEdit = (p: ContractPayment) => {
     setEditingId(p.id); setEditErr(null);
+    const vatKind = vatKindOf(p);
     setEditForm({
-      amount: p.amount != null ? String(p.amount) : '',
+      ...(vatKind === 'split'
+        ? vatFormFromStored(p.amount ?? 0, p.vatAmount ?? 0)
+        : { amount: p.amount != null ? String(p.amount) : '', vatMode: 'none' as VatMode, vatOverride: '' }),
+      vatKind,
       chequeNumber: p.chequeNumber ?? '',
       description: p.description ?? '',
       paymentMethod: p.paymentMethod ?? 'cheque',
@@ -2962,12 +2989,16 @@ function DetailsDrawer({
     });
   };
   const saveEdit = async (paymentId: number) => {
-    const amt = Number(editForm.amount);
-    if (editForm.amount.trim() === '' || !Number.isFinite(amt) || amt < 0) { setEditErr('Enter a valid amount'); return; }
+    const typed = Number(editForm.amount);
+    if (editForm.amount.trim() === '' || !Number.isFinite(typed) || typed < 0) { setEditErr('Enter a valid amount'); return; }
+    const fig = splitVat(typed, editForm.vatMode, editForm.vatOverride.trim() ? Number(editForm.vatOverride) : null);
+    if (editForm.vatKind === 'split' && (!Number.isFinite(fig.vat) || fig.vat < 0 || fig.vat > fig.total)) { setEditErr('Enter a valid VAT amount'); return; }
     setEditBusy(true); setEditErr(null);
     try {
       await onUpdatePayment(paymentId, {
-        amount: amt,
+        amount: editForm.vatKind === 'split' ? fig.total : typed,
+        // A deposit sends none (never taxed); an all-VAT row is VAT to the fil.
+        ...(editForm.vatKind === 'split' ? { vatAmount: fig.vat } : editForm.vatKind === 'all' ? { vatAmount: typed } : {}),
         chequeNumber: editForm.chequeNumber.trim() || null,
         description: editForm.description.trim() || null,
         paymentMethod: editForm.paymentMethod,
@@ -2984,15 +3015,19 @@ function DetailsDrawer({
     }
   };
   const submitRec = async () => {
-    const amt = Number(rec.amount);
-    if (!amt || amt <= 0) { setRecErr('Enter a valid amount'); return; }
+    const typed = Number(rec.amount);
+    if (!typed || typed <= 0) { setRecErr('Enter a valid amount'); return; }
+    const recTaxed = rec.paymentType === 'rental_income';
+    const fig = splitVat(typed, recTaxed ? rec.vatMode : 'none', rec.vatOverride.trim() ? Number(rec.vatOverride) : null);
+    if (!Number.isFinite(fig.vat) || fig.vat < 0 || fig.vat > fig.total) { setRecErr('Enter a valid VAT amount'); return; }
     if (needsProof(rec.paymentMethod) && !recFile) { setRecErr('Attach the cheque copy or the transfer receipt'); return; }
     setRecBusy(true); setRecErr(null);
     try {
       const proofId = await uploadProof(recFile, rec.chequeNumber.trim());
       const newId = await onRecordPayment({
         description: rec.description.trim() || undefined,
-        amount: amt,
+        amount: fig.total,
+        ...(recTaxed ? { vatAmount: fig.vat } : {}),
         paymentType: rec.paymentType,
         paymentMethod: rec.paymentMethod,
         chequeNumber: rec.chequeNumber.trim() || undefined,
@@ -3003,7 +3038,7 @@ function DetailsDrawer({
           ? undefined : Number(rec.replacementFee),
       });
       await linkProof(newId, proofId);
-      setRec({ description: '', amount: '', paymentType: 'rental_income', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' });
+      setRec({ description: '', amount: '', paymentType: 'rental_income', vatMode: 'none', vatOverride: '', paymentMethod: 'cheque', chequeNumber: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' });
       setRecFile(null);
       setShowRec(false);
     } catch (e) {
@@ -3305,7 +3340,10 @@ function DetailsDrawer({
     if (!basis) return base;
     return amount > 0 ? `${base} · ${basis}` : `${base} · ${basis}`;
   };
-  const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatAmount: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
+  // `amount` is the figure as typed; `vatMode` says whether VAT is on top of it,
+  // inside it, or not charged — the stored row is always gross + its VAT.
+  const emptyFeeForm = { paymentType: 'admin_fee', amount: '', vatMode: 'none' as VatMode, vatOverride: '', transactionDate: '', description: '', paymentMethod: 'cheque', chequeNumber: '' };
+  const feeFig = (f: typeof emptyFeeForm) => splitVat(Number(f.amount) || 0, f.vatMode, f.vatOverride.trim() ? Number(f.vatOverride) : null);
   const [showAddFee, setShowAddFee] = useState(false);
   const [feeAdd, setFeeAdd] = useState(emptyFeeForm);
   const [feeAddBusy, setFeeAddBusy] = useState(false);
@@ -3315,16 +3353,16 @@ function DetailsDrawer({
   const [feeEditBusy, setFeeEditBusy] = useState(false);
   const [feeEditErr, setFeeEditErr] = useState<string | null>(null);
   const submitAddFee = async () => {
-    const net = Number(feeAdd.amount); const vat = Number(feeAdd.vatAmount || 0);
-    if (!Number.isFinite(net) || net <= 0) { setFeeAddErr('Enter a valid amount'); return; }
-    if (!Number.isFinite(vat) || vat < 0) { setFeeAddErr('Enter a valid VAT amount'); return; }
+    const typed = Number(feeAdd.amount); const { vat, total } = feeFig(feeAdd);
+    if (!Number.isFinite(typed) || typed <= 0) { setFeeAddErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0 || vat > total) { setFeeAddErr('Enter a valid VAT amount'); return; }
     if (needsProof(feeAdd.paymentMethod) && !feeFile) { setFeeAddErr('Attach the cheque copy or the transfer receipt'); return; }
     setFeeAddBusy(true); setFeeAddErr(null);
     try {
       const proofId = await uploadProof(feeFile, feeAdd.chequeNumber.trim());
       const newId = await onRecordPayment({
         paymentType: feeAdd.paymentType,
-        amount: Math.round((net + vat) * 100) / 100,   // backend stores GROSS
+        amount: total,   // backend stores GROSS
         vatAmount: vat,
         description: feeAdd.description.trim() || feeLabel(feeAdd.paymentType),
         transactionDate: feeAdd.transactionDate || undefined,
@@ -3339,11 +3377,9 @@ function DetailsDrawer({
   };
   const startFeeEdit = (f: ContractPayment) => {
     setFeeEditId(f.id); setFeeEditErr(null);
-    const vat = f.vatAmount ?? 0;
     setFeeEdit({
       paymentType: f.paymentType ?? 'admin_fee',
-      amount: String(Math.max(Math.round(((f.amount ?? 0) - vat) * 100) / 100, 0)),  // NET
-      vatAmount: vat ? String(vat) : '',
+      ...vatFormFromStored(f.amount ?? 0, f.vatAmount ?? 0),
       transactionDate: f.transactionDate ? f.transactionDate.slice(0, 10) : '',
       description: f.description ?? '',
       paymentMethod: f.paymentMethod ?? 'cheque',
@@ -3351,13 +3387,13 @@ function DetailsDrawer({
     });
   };
   const saveFeeEdit = async (paymentId: number) => {
-    const net = Number(feeEdit.amount); const vat = Number(feeEdit.vatAmount || 0);
-    if (!Number.isFinite(net) || net < 0) { setFeeEditErr('Enter a valid amount'); return; }
-    if (!Number.isFinite(vat) || vat < 0) { setFeeEditErr('Enter a valid VAT amount'); return; }
+    const typed = Number(feeEdit.amount); const { vat, total } = feeFig(feeEdit);
+    if (!Number.isFinite(typed) || typed < 0) { setFeeEditErr('Enter a valid amount'); return; }
+    if (!Number.isFinite(vat) || vat < 0 || vat > total) { setFeeEditErr('Enter a valid VAT amount'); return; }
     setFeeEditBusy(true); setFeeEditErr(null);
     try {
       await onUpdatePayment(paymentId, {
-        amount: Math.round((net + vat) * 100) / 100,
+        amount: total,
         vatAmount: vat,
         description: feeEdit.description.trim() || null,
         transactionDate: feeEdit.transactionDate || null,
@@ -3372,7 +3408,7 @@ function DetailsDrawer({
   // Per-section "Add" → open the right popup pre-typed for that segment. Deposit + rent
   // use the payment popup; management + third-party fees use the fee popup (VAT-aware).
   const openRecordFor = (paymentType: string) => {
-    setRec(v => ({ ...v, paymentType, amount: '', chequeNumber: '', description: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' }));
+    setRec(v => ({ ...v, paymentType, amount: '', vatMode: 'none', vatOverride: '', chequeNumber: '', description: '', transactionDate: '', replacesPaymentId: '', replacementFee: '' }));
     setRecTypes([paymentType]);
     setShowAddFee(false); setRecErr(null); setShowRec(true);
   };
@@ -3390,6 +3426,11 @@ function DetailsDrawer({
       // Pre-fill what is still SHORT, not the face value — on a bounce already
       // part-paid, the face value would over-collect.
       amount: String(shortfallOf(p)),
+      // The replacement carries the bounced cheque's VAT share — "VAT incl." so
+      // the total stays exactly the shortfall the API checks it against.
+      ...((Number(p.vatAmount) || 0) > 0 && (p.amount ?? 0) > 0
+        ? { vatMode: 'inclusive' as VatMode, vatOverride: String(Math.round(shortfallOf(p) * (Number(p.vatAmount) / (p.amount ?? 1)) * 100) / 100) }
+        : { vatMode: 'none' as VatMode, vatOverride: '' }),
       paymentType: p.paymentType ?? 'rental_income',
       paymentMethod: p.paymentMethod ?? 'cheque',
       chequeNumber: '',
@@ -4159,9 +4200,15 @@ function DetailsDrawer({
                                     onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
                                 </div>
                                 <div className="grid2">
-                                  <div className="field"><label>Amount (AED)</label>
-                                    <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
-                                      onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                  <div className="field"><label>{editForm.vatKind === 'split' ? 'Amount (AED) · VAT' : editForm.vatKind === 'all' ? 'Amount (AED) — all VAT' : 'Amount (AED)'}</label>
+                                    {editForm.vatKind === 'split' ? (
+                                      <AmountWithVat amount={editForm.amount} onAmount={a => setEditForm(v => ({ ...v, amount: a }))}
+                                        mode={editForm.vatMode} onMode={m => setEditForm(v => ({ ...v, vatMode: m }))}
+                                        vatOverride={editForm.vatOverride} onVatOverride={o => setEditForm(v => ({ ...v, vatOverride: o }))} />
+                                    ) : (
+                                      <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
+                                        onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                    )}
                                   </div>
                                   <div className="field"><label>Due date</label>
                                     <input type="date" className="input" value={editForm.transactionDate}
@@ -4330,15 +4377,10 @@ function DetailsDrawer({
                                     </select>
                                     {feeAutoAmount(feeEdit.paymentType) && <p className="note" style={{ marginTop: 2 }}>Amount auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeEdit.paymentType)))}). Editable.</p>}
                                   </div>
-                                  <div className="grid2">
-                                    <div className="field"><label>Amount (excl. VAT, AED)</label>
-                                      <input type="number" min="0" step="0.01" className="input" value={feeEdit.amount}
-                                        onChange={e => setFeeEdit(v => ({ ...v, amount: e.target.value }))} />
-                                    </div>
-                                    <div className="field"><label>VAT (AED, optional)</label>
-                                      <input type="number" min="0" step="0.01" className="input" value={feeEdit.vatAmount} placeholder="0.00"
-                                        onChange={e => setFeeEdit(v => ({ ...v, vatAmount: e.target.value }))} />
-                                    </div>
+                                  <div className="field"><label>Amount (AED) · VAT</label>
+                                    <AmountWithVat amount={feeEdit.amount} onAmount={a => setFeeEdit(v => ({ ...v, amount: a }))}
+                                      mode={feeEdit.vatMode} onMode={m => setFeeEdit(v => ({ ...v, vatMode: m }))}
+                                      vatOverride={feeEdit.vatOverride} onVatOverride={o => setFeeEdit(v => ({ ...v, vatOverride: o }))} />
                                   </div>
                                   <div className="grid2">
                                     <div className="field"><label>Payment method</label>
@@ -4362,7 +4404,7 @@ function DetailsDrawer({
                                         onChange={e => setFeeEdit(v => ({ ...v, description: e.target.value }))} />
                                     </div>
                                   </div>
-                                  <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeEdit.amount) || 0) + (Number(feeEdit.vatAmount) || 0))}</strong></p>
+                                  <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed(feeFig(feeEdit).total)}</strong></p>
                                   {feeEditErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeEditErr}</p>}
                                   <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                                     <button className="btn btn-jade btn-sm" disabled={feeEditBusy} onClick={() => void saveFeeEdit(f.id)}>
@@ -4437,9 +4479,15 @@ function DetailsDrawer({
                                       onChange={e => setEditForm(v => ({ ...v, description: e.target.value }))} />
                                   </div>
                                   <div className="grid2">
-                                    <div className="field"><label>Amount (AED)</label>
-                                      <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
-                                        onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                    <div className="field"><label>{editForm.vatKind === 'split' ? 'Amount (AED) · VAT' : editForm.vatKind === 'all' ? 'Amount (AED) — all VAT' : 'Amount (AED)'}</label>
+                                      {editForm.vatKind === 'split' ? (
+                                        <AmountWithVat amount={editForm.amount} onAmount={a => setEditForm(v => ({ ...v, amount: a }))}
+                                          mode={editForm.vatMode} onMode={m => setEditForm(v => ({ ...v, vatMode: m }))}
+                                          vatOverride={editForm.vatOverride} onVatOverride={o => setEditForm(v => ({ ...v, vatOverride: o }))} />
+                                      ) : (
+                                        <input type="number" min="0" step="0.01" className="input" value={editForm.amount}
+                                          onChange={e => setEditForm(v => ({ ...v, amount: e.target.value }))} />
+                                      )}
                                     </div>
                                     <div className="field"><label>Due date</label>
                                       <input type="date" className="input" value={editForm.transactionDate}
@@ -4498,16 +4546,13 @@ function DetailsDrawer({
                             </select>
                             {feeAutoAmount(feeAdd.paymentType) && <p className="note" style={{ marginTop: 2 }}>Auto-filled from Settings → Rules ({fmtAed(Number(feeAutoAmount(feeAdd.paymentType)))}). Editable.</p>}
                           </div>
-                          <div className="field"><label>Amount (excl. VAT, AED)</label>
-                            <input type="number" min="0" step="0.01" className="input" value={feeAdd.amount} placeholder="e.g. 750"
-                              onChange={e => setFeeAdd(v => ({ ...v, amount: e.target.value }))} />
+                          <div className="field"><label>Amount (AED) · VAT</label>
+                            <AmountWithVat amount={feeAdd.amount} placeholder="e.g. 750" onAmount={a => setFeeAdd(v => ({ ...v, amount: a }))}
+                              mode={feeAdd.vatMode} onMode={m => setFeeAdd(v => ({ ...v, vatMode: m }))}
+                              vatOverride={feeAdd.vatOverride} onVatOverride={o => setFeeAdd(v => ({ ...v, vatOverride: o }))} />
                           </div>
                         </div>
                         <div className="grid2">
-                          <div className="field"><label>VAT (AED, optional)</label>
-                            <input type="number" min="0" step="0.01" className="input" value={feeAdd.vatAmount} placeholder="0.00"
-                              onChange={e => setFeeAdd(v => ({ ...v, vatAmount: e.target.value }))} />
-                          </div>
                           <div className="field"><label>Due date</label>
                             <input type="date" className="input" value={feeAdd.transactionDate}
                               onChange={e => setFeeAdd(v => ({ ...v, transactionDate: e.target.value }))} />
@@ -4531,7 +4576,7 @@ function DetailsDrawer({
                           <input className="input" value={feeAdd.description} placeholder={feeLabel(feeAdd.paymentType)}
                             onChange={e => setFeeAdd(v => ({ ...v, description: e.target.value }))} />
                         </div>
-                        <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed((Number(feeAdd.amount) || 0) + (Number(feeAdd.vatAmount) || 0))}</strong></p>
+                        <p className="note" style={{ marginTop: 2 }}>Total charged: <strong>{fmtAed(feeFig(feeAdd).total)}</strong></p>
                         {feeAddErr && <p className="note" style={{ color: 'var(--brick)', marginTop: 8 }}>{feeAddErr}</p>}
                           </div>
                           <div className="mf">
@@ -4598,8 +4643,17 @@ function DetailsDrawer({
                         <input className="input" value={rec.description} placeholder={`Instalment ${rentRows.length + 1}`} onChange={e => setRec(v => ({ ...v, description: e.target.value }))} />
                       </div>
                       <div className="grid2">
-                        <div className="field"><label>Amount (AED)</label>
-                          <input type="number" min="0" step="0.01" className="input" value={rec.amount} onChange={e => setRec(v => ({ ...v, amount: e.target.value }))} />
+                        <div className="field"><label>{rec.paymentType === 'rental_income' ? 'Amount (AED) · VAT' : 'Amount (AED)'}</label>
+                          {rec.paymentType === 'rental_income' ? (
+                            <AmountWithVat amount={rec.amount} onAmount={a => setRec(v => ({ ...v, amount: a }))}
+                              mode={rec.vatMode} onMode={m => setRec(v => ({ ...v, vatMode: m }))}
+                              vatOverride={rec.vatOverride} onVatOverride={o => setRec(v => ({ ...v, vatOverride: o }))} />
+                          ) : (
+                            <input type="number" min="0" step="0.01" className="input" value={rec.amount} onChange={e => setRec(v => ({ ...v, amount: e.target.value }))} />
+                          )}
+                          {rec.paymentType === 'rental_income' && rec.vatMode !== 'none' && rentVatOnOwnRow && (
+                            <p className="note" style={{ marginTop: 4, color: 'var(--brick)' }}>This lease already collects rent VAT on its own row — adding VAT here charges it twice.</p>
+                          )}
                         </div>
                         <div className="field"><label>Cheque / reference no.</label>
                           <input className="input" value={rec.chequeNumber} placeholder="Cheque #, transfer ID…" onChange={e => setRec(v => ({ ...v, chequeNumber: e.target.value }))} />
@@ -4778,6 +4832,13 @@ function DetailsDrawer({
             const showGovtVat = payments.some(p => (p.paymentType ?? '').toLowerCase() === 'vat');
             const binderSeq: BinderSlot[] = [
               { kind: 'link', key: 'offer',          label: 'Payment Summary', sub: 'Current payment summary', href: null },
+              // The same summary with every line split Net · VAT · Total, VAT on
+              // the charge it is levied on (rent VAT under Rental Income). Only
+              // where VAT is the customer's concern: a company, or a commercial /
+              // industrial lease (owner, 26 Sep 2026).
+              ...((contract.tenant.entityType === 'company' || isRentVatable(contract.unit.type, contract.property.spaceCategory))
+                ? [{ kind: 'link' as const, key: 'vat_plan', label: 'Payment Summary with VAT', sub: 'Net, VAT and total for every line', href: currentPlan.totalAmountFils > 0 ? `${contractBase}/print/vat-plan` : null }]
+                : []),
               { kind: 'doc',  key: 'payment_advice', label: 'Payment Confirmation' },
               // One file → all receipts inside (Rental Income · Security Deposit · Management Fee · Government fee).
               { kind: 'link', key: 'receipts',       label: 'Receipts', sub: [isRenewal ? 'Rental income' : 'Rental income, security deposit', 'management fee', showGovtVat ? 'Government fee' : null].filter(Boolean).join(', '), href: receiptsReady ? receiptBase : null },
@@ -4935,7 +4996,7 @@ function DetailsDrawer({
               // summary, the customer's payment confirmation and the one Receipts
               // file (owner, 23 Sep 2026: "allow receipts also"). Read-only: no
               // upload, request, replace or history.
-              const money = binderSeq.filter(b => b.key === 'offer' || b.key === 'payment_advice' || b.key === 'receipts');
+              const money = binderSeq.filter(b => b.key === 'offer' || b.key === 'vat_plan' || b.key === 'payment_advice' || b.key === 'receipts');
               return (
                 <div className="sec">
                   <div className="sech"><span className="si"><Paperclip size={16} /></span><span className="st">Payment documents</span></div>
