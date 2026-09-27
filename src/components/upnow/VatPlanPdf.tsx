@@ -49,22 +49,27 @@ const METHOD: Record<string, string> = { cheque: 'Cheque', bank_transfer: 'Bank 
 /** Contract fields this document reads beyond the Payment Summary's. */
 export interface VatPlanContract extends PlanViewerContract {
   createdAt?: string | null;
-  landlord?: PlanViewerContract['landlord'] & { email?: string | null; phone?: string | null; vatTrn?: string | null };
-  tenant?: PlanViewerContract['tenant'] & { vatTrn?: string | null };
+  landlord?: PlanViewerContract['landlord'] & {
+    email?: string | null; phone?: string | null; vatTrn?: string | null; address?: string | null;
+    hasPoa?: boolean | null; poaPersonPhone?: string | null;
+  };
+  tenant?: PlanViewerContract['tenant'] & { vatTrn?: string | null; email?: string | null; phone?: string | null };
   property?: PlanViewerContract['property'] & { fullAddress?: string | null };
 }
 
 export interface VatPlanHead {
-  supplierName: string | null;
-  supplierTrn: string | null;
-  supplierContact: string | null;
+  providerName: string | null;
+  providerAddress: string | null;
+  providerTrn: string | null;
+  providerContact: string | null;
   customerName: string | null;
+  customerAddress: string | null;
   customerTrn: string | null;
-  customerPlace: string | null;
-  customerArea: string | null;
+  customerContact: string | null;
+  unitNo: string | null;
+  building: string | null;
   periodStart: string | null;
   periodEnd: string | null;
-  planNo: string;
   planDate: string | null;
   contractRef: string | null;
   isRenewal: boolean;
@@ -73,22 +78,33 @@ export interface VatPlanHead {
 
 export function vatPlanFromContract(c: VatPlanContract): { rows: SegPaymentInput[]; head: VatPlanHead } {
   const ref = c.ref ?? (c.id != null ? `CID-${c.id}` : null);
-  const place = [c.unit?.number, c.property?.buildingName].filter(Boolean).join(', ');
-  const area = [c.property?.community, c.property?.emirate, 'UAE'].filter(Boolean).join(', ');
+  const ll = c.landlord;
+  // Power of Attorney: the provider's contact phone is the POA holder's when set
+  // (same rule as the Ejari contract and the receipts).
+  const providerPhone = ll?.hasPoa ? (ll.poaPersonPhone || ll.phone) : ll?.phone;
+  // A customer profile has no address of its own — the leased building's is it:
+  // its street address, then community + emirate unless the street line already
+  // names them. Unit and building print once, in the box below the parties.
+  const street = c.property?.fullAddress?.trim() || '';
+  const customerAddress = [street, c.property?.community, c.property?.emirate]
+    .filter((p, i): p is string => !!p && (i === 0 || !street.toLowerCase().includes(p.toLowerCase())))
+    .join(', ') || null;
   return {
     rows: segRowsFromContract(c, c.payments ?? []),
     head: {
       // The name cheques are written to, as on the Payment Summary.
-      supplierName: c.landlord?.bankAccountName || c.landlord?.companyName || c.landlord?.name || null,
-      supplierTrn: c.landlord?.vatTrn ?? null,
-      supplierContact: [c.landlord?.email, c.landlord?.phone].filter(Boolean).join('  |  ') || null,
+      providerName: ll?.bankAccountName || ll?.companyName || ll?.name || null,
+      providerAddress: ll?.address?.trim() || null,
+      providerTrn: ll?.vatTrn ?? null,
+      providerContact: [ll?.email, providerPhone].filter(Boolean).join('  |  ') || null,
       customerName: c.tenant?.companyName || c.tenant?.name || null,
+      customerAddress,
       customerTrn: c.tenant?.vatTrn ?? null,
-      customerPlace: place || null,
-      customerArea: area,
+      customerContact: [c.tenant?.email, c.tenant?.phone].filter(Boolean).join('  |  ') || null,
+      unitNo: c.unit?.number ?? null,
+      building: c.property?.buildingName ?? null,
       periodStart: c.startDate ?? null,
       periodEnd: c.endDate ?? null,
-      planNo: c.planRefNo ?? (ref ? `PLAN-${ref}` : 'PLAN'),
       planDate: c.createdAt ?? null,
       contractRef: ref,
       isRenewal: (c.contractType ?? '').toLowerCase() === 'renewal',
@@ -102,13 +118,14 @@ const s = StyleSheet.create({
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 2, borderBottomColor: GREEN, paddingBottom: 6 },
   h1: { fontSize: 18, fontWeight: 700, color: GREEN },
   pill: { fontSize: 8, fontWeight: 700, color: GREEN, backgroundColor: '#e4efeb', paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 },
-  parties: { flexDirection: 'row', marginTop: 12 },
+  refRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: HAIR_SOFT },
+  parties: { flexDirection: 'row', marginTop: 10 },
   party: { width: '50%', paddingRight: 12 },
   k: { fontSize: 7, color: FAINT, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3, fontWeight: 700 },
   pName: { fontSize: 10, fontWeight: 700, color: INK, marginBottom: 2 },
   pLine: { fontSize: 8.5, color: MUTE, marginTop: 1 },
-  meta: { flexDirection: 'row', marginTop: 12, paddingVertical: 7, borderTopWidth: 1, borderBottomWidth: 1, borderColor: HAIR_SOFT },
-  metaCol: { width: '33.33%' },
+  unitBox: { marginTop: 12, padding: 8, borderWidth: 1, borderColor: HAIR, borderRadius: 4 },
+  unitRow: { flexDirection: 'row' },
   metaV: { fontSize: 9.5, fontWeight: 700, color: INK },
   gTitle: { fontSize: 10, fontWeight: 700, color: GREEN, marginTop: 12, marginBottom: 4 },
   table: { borderWidth: 1, borderColor: HAIR, borderRadius: 4, overflow: 'hidden' },
@@ -136,34 +153,43 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
   const methods = new Set(plan.groups.flatMap(g => g.lines.map(l => l.method ?? '')));
   const oneMethod = methods.size === 1 ? METHOD[[...methods][0]] : null;
   return (
-    <Document title={`Payment summary with VAT${head.contractRef ? ` — ${head.contractRef}` : ''}`}>
+    <Document title={`Payment Summary${head.contractRef ? ` — ${head.contractRef}` : ''}`}>
       <Page size="A4" style={s.page}>
         <View style={s.top}>
-          <Text style={s.h1}>Payment Summary with VAT</Text>
+          <Text style={s.h1}>Payment Summary</Text>
           <Text style={s.pill}>{head.isRenewal ? 'Renewal' : 'New Lease'}</Text>
+        </View>
+
+        {/* Date left, reference right — the way an invoice opens. */}
+        <View style={s.refRow}>
+          <View><Text style={s.k}>Date</Text><Text style={s.metaV}>{fmtD(head.planDate)}</Text></View>
+          <View style={{ alignItems: 'flex-end' }}><Text style={s.k}>Reference</Text><Text style={s.metaV}>{head.contractRef ?? '—'}</Text></View>
         </View>
 
         <View style={s.parties}>
           <View style={s.party}>
-            <Text style={s.k}>Supplier / Provider</Text>
-            {head.supplierName ? <Text style={s.pName}>{head.supplierName}</Text> : null}
-            {head.supplierTrn ? <Text style={s.pLine}>TRN: {head.supplierTrn}</Text> : null}
-            {head.supplierContact ? <Text style={s.pLine}>{head.supplierContact}</Text> : null}
+            <Text style={s.k}>Provider</Text>
+            {head.providerName ? <Text style={s.pName}>{head.providerName}</Text> : null}
+            {head.providerAddress ? <Text style={s.pLine}>{head.providerAddress}</Text> : null}
+            {/* TRN always printed — a blank shows the number is missing from the profile. */}
+            <Text style={s.pLine}>TRN: {head.providerTrn || '—'}</Text>
+            {head.providerContact ? <Text style={s.pLine}>{head.providerContact}</Text> : null}
           </View>
           <View style={s.party}>
             <Text style={s.k}>Customer</Text>
             {head.customerName ? <Text style={s.pName}>{head.customerName}</Text> : null}
-            {head.customerPlace ? <Text style={s.pLine}>{head.customerPlace}</Text> : null}
-            {head.customerArea ? <Text style={s.pLine}>{head.customerArea}</Text> : null}
-            {head.customerTrn ? <Text style={s.pLine}>TRN: {head.customerTrn}</Text> : null}
-            {head.periodStart ? <Text style={s.pLine}>Contract period: {fmtD(head.periodStart)} – {fmtD(head.periodEnd)}</Text> : null}
+            {head.customerAddress ? <Text style={s.pLine}>{head.customerAddress}</Text> : null}
+            <Text style={s.pLine}>TRN: {head.customerTrn || '—'}</Text>
+            {head.customerContact ? <Text style={s.pLine}>{head.customerContact}</Text> : null}
           </View>
         </View>
 
-        <View style={s.meta}>
-          <View style={s.metaCol}><Text style={s.k}>Plan no.</Text><Text style={s.metaV}>{head.planNo}</Text></View>
-          <View style={s.metaCol}><Text style={s.k}>Plan date</Text><Text style={s.metaV}>{fmtD(head.planDate)}</Text></View>
-          <View style={s.metaCol}><Text style={s.k}>Contract</Text><Text style={s.metaV}>{head.contractRef ?? '—'}</Text></View>
+        <View style={s.unitBox} wrap={false}>
+          <View style={s.unitRow}>
+            <View style={{ width: '33.33%', paddingRight: 8 }}><Text style={s.k}>Unit</Text><Text style={s.metaV}>{head.unitNo ?? '—'}</Text></View>
+            <View style={{ width: '33.33%', paddingRight: 8 }}><Text style={s.k}>Building</Text><Text style={s.metaV}>{head.building ?? '—'}</Text></View>
+            <View style={{ width: '33.33%' }}><Text style={s.k}>Contract period</Text><Text style={s.metaV}>{head.periodStart ? `${fmtD(head.periodStart)} – ${fmtD(head.periodEnd)}` : '—'}</Text></View>
+          </View>
         </View>
 
         {plan.groups.map(g => {
@@ -214,10 +240,10 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
           <Text style={[s.grandTd, num, { width: W.total }]}>{aed(plan.grandTotal)}</Text>
         </View>
 
-        {/* Where to transfer — only when a line is actually paid by transfer. */}
-        {plan.groups.some(g => g.lines.some(l => l.method === 'bank_transfer')) && (head.bank?.accountName || head.bank?.bankName || head.bank?.iban) ? (
+        {/* The landlord's account — always printed when on file, cheque plans too. */}
+        {head.bank?.accountName || head.bank?.bankName || head.bank?.iban ? (
           <View style={s.payTo} wrap={false}>
-            <Text style={s.k}>Bank transfer to</Text>
+            <Text style={s.k}>Bank account details</Text>
             <View style={s.payRow}>
               {head.bank.accountName ? <View style={s.payCol}><Text style={s.k}>Account name</Text><Text style={s.metaV}>{head.bank.accountName}</Text></View> : null}
               {head.bank.bankName ? <View style={s.payCol}><Text style={s.k}>Bank</Text><Text style={s.metaV}>{head.bank.bankName}</Text></View> : null}
@@ -262,13 +288,13 @@ function docKey(rows: SegPaymentInput[], head: VatPlanHead): string {
 
 export default function VatPlanViewer({ contract }: { contract: VatPlanContract }) {
   const { rows, head } = vatPlanFromContract(contract);
-  const fileName = `Payment-summary-with-VAT-${head.contractRef ?? 'contract'}.pdf`;
+  const fileName = `Payment-summary-${head.contractRef ?? 'contract'}.pdf`;
   const { bytes, url, error } = useReactPdfDoc(() => <VatPlanDoc rows={rows} head={head} />, docKey(rows, head));
   return (
     <div style={WRAP}>
       <div style={BAR}>
         <div>
-          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Payment Summary with VAT{head.contractRef ? ` — ${head.contractRef}` : ''}</p>
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Payment Summary{head.contractRef ? ` — ${head.contractRef}` : ''}</p>
           <p style={{ margin: 0, fontSize: 12, color: '#666' }}>Net · VAT · Total for every line — system-generated</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

@@ -10,7 +10,6 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { Loader2 } from 'lucide-react';
 import type { VatPlanContract } from '@/components/upnow/VatPlanPdf';
-import { fetchPaymentRefs } from '@/lib/paymentRefs';
 
 function FullScreenLoader() {
   return (
@@ -35,12 +34,7 @@ export default function VatPlanPrintPage() {
     if (!params?.id) return;
     fetch(`/api/contracts/${params.id}`, { credentials: 'include' })
       .then(r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
-      .then(async (c: VatPlanContract) => {
-        // The plan reference (PP-<rp>-<year>-<nnnnn>) lives on the payment-refs
-        // endpoint, not the contract — fold it in for the header.
-        const refs = await fetchPaymentRefs(params.id).catch(() => null);
-        setContract(refs?.planRefNo ? { ...c, planRefNo: refs.planRefNo } : c);
-      })
+      .then((c: VatPlanContract) => setContract(c))
       .catch(e => setError(e.message));
   }, [params?.id]);
 
