@@ -16,7 +16,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText, Scale } from 'lucide-react';
+import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText, Scale, Receipt } from 'lucide-react';
 import { legalApi, type AlertItem, type OpenRecord } from '@/lib/legal';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { contractHref, type ContractSurface } from '@/lib/contractHref';
@@ -169,7 +169,11 @@ interface DrillState {
 interface ArrearsCheque {
   id: number;
   contractId: number;
+  /** Still owed — the face value less anything that has come in against it. */
   amount: number;
+  /** The cheque's own value; differs from `amount` only on a part-paid bounce.
+   *  Optional so an older payload still renders. */
+  faceAmount?: number;
   dueDate: string | null;
   chequeNumber: string | null;
   kind: 'overdue' | 'bounced';
@@ -178,9 +182,27 @@ interface ArrearsCheque {
   buildingName: string | null;
   /** >0 only on a bounce PART made good — the remainder is still owed. */
   coveredAmount: number;
+  /** The balance of that bounce keyed with no date — why it is still listed. */
+  undatedBalance?: number;
   /** `locked_at IS NOT NULL` on the cheque's lease — which of the two contract
    *  surfaces the row opens. Server-decided; the client cannot see `locked_at`.
    *  Optional so an older payload falls back to the register rather than 404ing. */
+  locked?: boolean;
+}
+
+/** A bounced-cheque fee not yet paid — the rows behind the Bounce fees tile. */
+interface BounceFee {
+  id: number;
+  contractId: number;
+  amount: number;
+  date: string | null;
+  /** The bounced cheque's number when the fee is linked to it; older fee rows
+   *  name it only in `description`. */
+  forCheque: string | null;
+  description: string | null;
+  customer: string | null;
+  unitLabel: string | null;
+  buildingName: string | null;
   locked?: boolean;
 }
 
@@ -214,6 +236,11 @@ interface FinancialSummary {
   bouncedAmount: number;
   /** The rows behind both arrears tiles, stamped with which one they belong to. */
   arrearsCheques: ArrearsCheque[];
+  /** Bounced-cheque fees the customer has not paid. Optional: an older backend
+   *  does not send them, and the tile then stays hidden rather than reading 0. */
+  bounceFeesCount?: number;
+  bounceFeesAmount?: number;
+  bounceFees?: BounceFee[];
   depositsHeld: number;
   /** How many contracts that held money sits across. */
   depositsHeldCount: number;
@@ -1125,7 +1152,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
       ],
       note: overdue
         ? 'Rent cheques whose date has passed and which have not cleared. Not refused by the bank — chase the payment.'
-        : 'Cheques the bank refused that are still to chase. Two kinds are excluded: one replaced in full (its replacement is counted instead) and one already carried by a final settlement, where the landlord has proposed how it resolves.',
+        : 'Cheques the bank refused that are still to chase. A cheque paid in part is listed for the balance still owed. Two kinds are excluded: one paid in full (its replacement is counted instead) and one already carried by a final settlement, where the landlord has proposed how it resolves.',
       groups: [{
         rows: rows.map(c => {
           const late = daysLate(c.dueDate);
@@ -1135,9 +1162,12 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
             subtitle: `${c.unitLabel ? `${c.unitLabel} · ` : ''}${c.buildingName ?? ''} · due ${day(c.dueDate)}`
               + `${c.chequeNumber ? ` · #${c.chequeNumber}` : ''}`
               + `${late ? ` · ${late} day${late === 1 ? '' : 's'} late` : ''}`
-              // A part-replaced bounce: say what came back, or the row reads as
-              // the whole face value being outstanding.
-              + `${c.coveredAmount > 0 ? ` · ${fmt(c.coveredAmount)} already recovered` : ''}`,
+              // A part-paid bounce: say what came back against the cheque, so the
+              // amount on the right reads as the balance and not a smaller cheque.
+              + `${c.coveredAmount > 0 ? ` · ${c.coveredAmount.toLocaleString()} of ${(c.faceAmount ?? c.coveredAmount + c.amount).toLocaleString()} recovered` : ''}`
+              // …and when the balance was keyed with no date, say so: that is the
+              // one thing the team has to fix for it to be chased on its date.
+              + `${(c.undatedBalance ?? 0) > 0 ? ' · balance undated' : ''}`,
             amount: fmt(c.amount),
             // The lease's OWN surface, not a hard-coded register route. An
             // unpaid cheque on a lease still in setup is worked in Operations,
@@ -1155,6 +1185,40 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   };
   const drillOverdue = drillArrears('overdue');
   const drillBounced = drillArrears('bounced');
+  const bouncedPartPaid = fin?.arrearsCheques.filter(c => c.kind === 'bounced' && c.coveredAmount > 0).length ?? 0;
+
+  /** The fees behind the Bounce fees tile — the penalty raised on each bounce,
+   *  which the rent-only Bounced tile never shows. */
+  const drillBounceFees = () => {
+    if (!fin?.bounceFees) return;
+    const rows = fin.bounceFees;
+    const fmt = (n: number) => `AED ${n.toLocaleString()}`;
+    const day = (iso: string | null) => iso
+      ? new Date(iso).toLocaleDateString(undefined, { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: '2-digit' })
+      : null;
+    const total = rows.reduce((n, f) => n + f.amount, 0);
+    setDrill({
+      title: 'Bounce fees',
+      headline: fmt(total),
+      summary: [
+        { label: 'Fees', value: String(rows.length) },
+        { label: 'Leases', value: String(new Set(rows.map(f => f.contractId)).size) },
+        { label: 'Total', value: fmt(total), tone: 'red' },
+      ],
+      note: 'Bounced-cheque fees charged to the customer and not yet paid. A lease already on a final settlement is excluded — the settlement charges the fee for each bounce it carries.',
+      groups: [{
+        rows: rows.map(f => ({
+          key: f.id,
+          title: f.customer ?? 'Customer',
+          subtitle: `${f.unitLabel ? `${f.unitLabel} · ` : ''}${f.buildingName ?? ''}`
+            + (f.forCheque ? ` · for cheque #${f.forCheque}` : (f.description ? ` · ${f.description}` : ''))
+            + (day(f.date) ? ` · raised ${day(f.date)}` : ''),
+          amount: fmt(f.amount),
+          href: contractHref(f.contractId, f.locked === false ? 'operations' : 'lease', manager),
+        })),
+      }],
+    });
+  };
 
   const rangeLabel = RANGE_PRESETS.find(r => r.key === selectedRange)?.label ?? '';
 
@@ -1582,9 +1646,9 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
           <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
             Arrears
           </h2>
-          <span className="text-[11px] text-[var(--neutral-400)]">still to chase &mdash; excludes anything replaced or already on a settlement</span>
+          <span className="text-[11px] text-[var(--neutral-400)]">still to chase &mdash; excludes anything paid in full or already on a settlement</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className={`grid grid-cols-1 gap-4 ${fin?.bounceFees ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <KpiCard
             icon={<Clock size={12} />}
             label="Overdue"
@@ -1597,10 +1661,23 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
             icon={<AlertTriangle size={12} />}
             label="Bounced"
             value={fin ? fmtAed(fin.bouncedAmount) : (finErr ? '—' : '…')}
-            sub={fin ? `${fin.bouncedCount} cheque${fin.bouncedCount === 1 ? '' : 's'} the bank refused` : 'returned cheques'}
+            sub={fin ? `${fin.bouncedCount} cheque${fin.bouncedCount === 1 ? '' : 's'} the bank refused${bouncedPartPaid ? ` · ${bouncedPartPaid} part-paid` : ''}` : 'returned cheques'}
             tone={(fin?.bouncedCount ?? 0) > 0 ? 'warn' : 'default'}
             onClick={drillBounced}
           />
+          {/* The penalty raised on each bounce. Bounced is rent only, so these
+              fees showed on no tile; they get their own rather than being added
+              into a rent figure. */}
+          {fin?.bounceFees && (
+            <KpiCard
+              icon={<Receipt size={12} />}
+              label="Bounce fees"
+              value={fmtAed(fin.bounceFeesAmount ?? 0)}
+              sub={`${fin.bounceFeesCount ?? 0} fee${fin.bounceFeesCount === 1 ? '' : 's'} not yet paid`}
+              tone={(fin.bounceFeesCount ?? 0) > 0 ? 'warn' : 'default'}
+              onClick={drillBounceFees}
+            />
+          )}
         </div>
       </section>
 

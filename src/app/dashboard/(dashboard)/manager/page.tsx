@@ -7,7 +7,7 @@ import {
   Building2, FileText, Eye, DoorOpen, AlertTriangle, ChevronRight, Wallet,
   RefreshCw, LogIn, LogOut, XCircle, Clock,
   PenLine, Stamp, Banknote, Scale, MailQuestion, UserPlus, IdCard, CalendarOff, FileWarning,
-  Wrench, ClipboardList, CalendarCheck, FileX2, Landmark,
+  Wrench, ClipboardList, CalendarCheck, FileX2, Landmark, Receipt,
 } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
@@ -39,6 +39,10 @@ interface ActionItem {
   // landlord's Overdue/Bounced KPI counts the rent half only. Which KIND of
   // problem they are is the bucket, not the field.
   rent?: number; fee?: number;
+  // Bounced card: rent still owed on the lease, and how many of its rent cheques
+  // were paid in PART (listed for the balance). Bounce fees card: how many
+  // unpaid fees; their total rides on `amount` below.
+  owed?: number; partPaid?: number; fees?: number;
   // Head-office rows (0323): cheques and cash on this lease still in the
   // collector's hands, and their total.
   cheques?: number; cash?: number;
@@ -57,6 +61,8 @@ interface ActionCenter {
   renewals: Bucket; renewalOffersOut: Bucket;
   terminationRequests: Bucket; moveIns: Bucket; moveOuts: Bucket;
   chequesBounced: Bucket; chequesOverdue: Bucket; settlementPending: Bucket;
+  /** Optional: an older backend does not send it, and the card then stays off. */
+  bounceFees?: Bucket;
   headOfficeDue?: Bucket; headOfficeTotals?: { cheques: number; cash: number; amount: number };
   /** 0326 — some landlord in scope gave this manager "Hand cheques to head office". */
   headOfficeEnabled?: boolean;
@@ -69,7 +75,7 @@ const BUCKET_WORDS: Record<string, string> = {
   docsExpired: 'Expired documents', docsMissing: 'Missing KYC', docsNoExpiry: 'Expiry not recorded',
   openLeads: 'Leads', awaitingSignature: 'Signatures', moveIns: 'Move-ins', registrationPending: 'Registration',
   renewals: 'Renewals to raise', renewalOffersOut: 'Renewal offers', terminationRequests: 'Terminations',
-  moveOuts: 'Move-outs', settlementPending: 'Settlements', chequesBounced: 'Bounced cheques', chequesOverdue: 'Overdue cheques',
+  moveOuts: 'Move-outs', settlementPending: 'Settlements', chequesBounced: 'Bounced cheques', bounceFees: 'Bounce fees', chequesOverdue: 'Overdue cheques',
   headOfficeDue: 'To submit to head office', chequesToReturn: 'Cheques to return',
   maintenanceApprovals: 'Maintenance approvals', maintenanceHeld: 'Maintenance held', delayedFollowups: 'Follow-ups',
   amcInspections: 'AMC inspections', amcExpired: 'Expired AMCs', amcPayables: 'Payments due',
@@ -139,6 +145,12 @@ const chequeCount = (i: ActionItem, word: string) => {
   const fee = i.fee ?? 0;
   return fee ? `${fee} fee cheque${fee > 1 ? 's' : ''}` : `${word} cheque`;
 };
+const aed = (n: unknown) => `AED ${Number(n ?? 0).toLocaleString('en-AE')}`;
+/** A bounce paid in PART says so, with what is left — "1 bounced" alone reads
+ *  as the whole cheque still unpaid. */
+const bouncedStatus = (i: ActionItem) => i.partPaid
+  ? `${chequeCount(i, 'bounced')} · part-paid, ${aed(i.owed)} left`
+  : chequeCount(i, 'bounced');
 
 /**
  * Manager home — always the manager's own dashboard layout (headline stats +
@@ -357,11 +369,14 @@ function ManagerMultiOverview() {
          and vendor bills where they pay them. Told apart from the property
          manager's by the permissions the landlord gave, not by a role name. */
       (() => {
+        const bouncedPartPaid = (action?.chequesBounced?.items ?? []).reduce((n, i) => n + (i.partPaid ?? 0), 0);
+        const bounceFeesTotal = (action?.bounceFees?.items ?? []).reduce((n, i) => n + Number(i.amount ?? 0), 0);
         const tiles: { label: string; value: string | number; trend?: string; icon: typeof Landmark; color: 'primary' | 'gold' | 'error' | 'neutral' }[] = [
           ...(action?.headOfficeEnabled ? [{ label: 'To submit to head office', value: actionLoading ? '—' : (action?.headOfficeTotals?.cheques ?? 0) + (action?.headOfficeTotals?.cash ?? 0),
             trend: actionLoading ? undefined : `${action?.headOfficeTotals?.cheques ?? 0} cheque${(action?.headOfficeTotals?.cheques ?? 0) === 1 ? '' : 's'} · ${action?.headOfficeTotals?.cash ?? 0} cash`, icon: Landmark, color: 'primary' as const }] : []),
           { label: 'Overdue cheques',  value: actionLoading ? '—' : action?.chequesOverdue?.count ?? 0, trend: 'to chase', icon: Banknote, color: 'gold' as const },
-          { label: 'Bounced cheques',  value: actionLoading ? '—' : action?.chequesBounced?.count ?? 0, trend: 'to replace', icon: AlertTriangle, color: 'error' as const },
+          { label: 'Bounced cheques',  value: actionLoading ? '—' : action?.chequesBounced?.count ?? 0, trend: bouncedPartPaid ? `to replace · ${bouncedPartPaid} part-paid` : 'to replace', icon: AlertTriangle, color: 'error' as const },
+          ...(action?.bounceFees ? [{ label: 'Bounce fees', value: actionLoading ? '—' : action.bounceFees.count, trend: actionLoading ? undefined : `${aed(bounceFeesTotal)} unpaid`, icon: Receipt, color: 'error' as const }] : []),
           { label: 'Cheques to return', value: toReturnRows == null ? '—' : toReturnRows.length, trend: toReturnRows == null ? undefined : `${toReturnRows.filter(r => r.custody === 'with_head_office').length} at head office · ${toReturnRows.filter(r => r.custody === 'with_us').length} with us`, icon: Banknote, color: 'error' as const },
           ...(vendorPayer ? [{ label: 'Vendor payments due', value: payables.length, trend: 'next 30 days', icon: Wallet, color: 'neutral' as const }] : []),
         ];
@@ -634,10 +649,23 @@ function ManagerMultiOverview() {
           groupBy={buildingOf}
           compact={i => ({
             unit: unitOf(i),
-            status: chequeCount(i, 'bounced'),
+            status: bouncedStatus(i),
             // A bounce is the harder failure of the two: the instalment is not
             // merely late, the payment instrument itself failed.
             overdue: true,
+            href: leaseHref(i),
+          })} />
+        ) },
+        /* The fee charged on a bounce and not yet paid. Not a cheque that went
+           bad, so it is not on the Bounced card — it gets its own, the same
+           fees as the landlord's Bounce fees tile. */
+        { key: 'bounceFees', count: action?.bounceFees?.count ?? 0, el: (
+          <ActionBucket icon={Receipt} color="#b91c1c" label="Bounce Fees" href={`/dashboard/manager/payments${scopeQ()}`}
+          loading={actionLoading} bucket={action?.bounceFees}
+          groupBy={buildingOf}
+          compact={i => ({
+            unit: unitOf(i),
+            status: `${i.fees ?? 1} fee${(i.fees ?? 1) > 1 ? 's' : ''} · ${aed(i.amount)}`,
             href: leaseHref(i),
           })} />
         ) },
@@ -802,7 +830,7 @@ function ManagerMultiOverview() {
           ) },
         ];
         // Settlements are the lease side's work (owner, 23 Sep 2026: "settlement you can remove").
-        const ACCOUNTS_CARDS = new Set(['headOfficeDue', 'chequesOverdue', 'chequesBounced', 'chequesToReturn', 'amcPayables']);
+        const ACCOUNTS_CARDS = new Set(['headOfficeDue', 'chequesOverdue', 'chequesBounced', 'bounceFees', 'chequesToReturn', 'amcPayables']);
         const shownBuckets = financeFirst
           ? [...ACCOUNTS_CARDS].map(k => withReturn.find(b => b.key === k)).filter((b): b is typeof withReturn[number] => !!b && (b.key !== 'amcPayables' || vendorPayer))
           : withReturn.filter(b => b.key !== 'chequesToReturn');
