@@ -17,6 +17,7 @@ import { CustomerForm } from '@/components/upnow/CustomerForm';
 import { docLabel } from '@/lib/docLabel';
 import { openDocViewer } from '@/lib/docViewer';
 import { DocumentReaderModal, type ReaderSlot } from '@/components/upnow/DocumentReaderModal';
+import { landlordLinkShows } from '@/lib/landlordLinkDocs';
 import { KycUploadModal, type UploadSlot } from '@/components/upnow/KycUploadModal';
 import { putKycSlot } from '@/lib/kycSlotUpload';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
@@ -50,6 +51,10 @@ type Doc = {
   /** The RP's declared home for this document (`documents.section`, migr 0204).
    *  Null on everything filed before the choice existed. */
   section?: string | null;
+  /** The recorded binder-visibility choice (`documents.portal_hidden`, migr
+   *  0338) — configured from this page's document readers; null = no choice,
+   *  the default rule in lib/landlordLinkDocs.ts decides. */
+  portalHidden?: boolean | null;
 };
 type Financials = {
   totalActiveRent: number; securityDepositHeld: number;
@@ -1345,6 +1350,31 @@ export default function CustomerDetailPage() {
           // (both Emirates ID sides, a superseded re-upload) gets one removed.
           deletableDocId={canDeleteDocs(data.rpId ?? null) ? (f) => (typeof f.id === 'number' ? f.id : null) : undefined}
           onDeleted={() => load({ silent: true })}
+          // Configure, per document, what the landlord's no-login link shows —
+          // this page is where documents are managed, so the choice lives here
+          // (the contract binder is the very view that link renders). The
+          // server enforces write access; hiding removes nothing.
+          portalVisibility={{
+            stateFor: (f) => {
+              if (typeof f.id !== 'number') return null;
+              const d = data.documents.find(x => x.id === f.id);
+              // EFFECTIVE state, not the raw flag: a loose lease paper with no
+              // choice recorded is hidden by the default rule, and the toggle
+              // must say so — clicking Show records the explicit choice.
+              return d ? { docId: d.id, hidden: !landlordLinkShows(d) } : null;
+            },
+            onToggle: async (docId, hidden) => {
+              const res = await fetch(`/api/documents/${docId}/portal-visibility`, {
+                method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hidden }),
+              });
+              if (!res.ok) {
+                const b = await res.json().catch(() => ({})) as { message?: string | string[] };
+                throw new Error(Array.isArray(b.message) ? b.message.join(', ') : (b.message ?? `Could not change the visibility (${res.status})`));
+              }
+              void load({ silent: true });
+            },
+          }}
         />
       )}
 

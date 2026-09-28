@@ -37,6 +37,7 @@ import { DownloadDocButton } from '@/components/upnow/DownloadDocButton';
 import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergePart } from '@/components/upnow/DownloadDocsPopup';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { resolveDocSection } from '@/lib/documentCatalogue';
+import { landlordLinkShows } from '@/lib/landlordLinkDocs';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
 import { segRowsFromContract, buildSegregatedPlan } from '@/lib/segregatedPlan';
 import { slotOfDoc } from '@/lib/planAttach';
@@ -63,6 +64,9 @@ export interface BinderDoc {
    *  0204). Null on every row filed before the choice existed — those fall back
    *  to the catalogue default and then to the key matchers below. */
   section?: string | null;
+  /** The recorded binder-visibility choice (`documents.portal_hidden`, migr
+   *  0338); null = no choice → the default rule in lib/landlordLinkDocs.ts. */
+  portalHidden?: boolean | null;
 }
 
 const KEY_ALIASES: Record<string, string[]> = {
@@ -694,7 +698,13 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const refile = (d: BinderDoc, to: 'kyc' | 'tenancy') =>
     onSetSection && canRefile(d) ? <RefileButton doc={d} to={to} onSetSection={onSetSection} /> : undefined;
 
-  const all = documents.filter(d => !!d.fileUrl);
+  // The binder renders the lease's PRESENTATION set — the same on the RP
+  // documents page and on the landlord's no-login link (which is also filtered
+  // server-side): the manager's recorded choice wins, else the default rule
+  // (named slots + the customer's KYC pack show; loose lease papers filed for
+  // internal reference don't). Configured from the customer profile's document
+  // readers — deliberately NOT from here, since this is the shared view itself.
+  const all = documents.filter(d => !!d.fileUrl && landlordLinkShows(d));
   // A payment confirmation is ONE lease's cheques, never the customer's. The
   // customer-scoped rows travel with every contract of the tenant, and the Airtable
   // import filed a 2025 lease's overflow "Payment Advice" copies on the customer

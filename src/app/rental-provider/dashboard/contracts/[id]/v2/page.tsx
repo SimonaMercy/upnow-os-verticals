@@ -84,6 +84,7 @@ import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import { EmailsCard } from '@/components/email/EmailsCard';
 import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 import RenewalNoticePreviewModal from '@/components/contract/RenewalNoticePreviewModal';
+import { landlordLinkShows, landlordLinkShowsByDefault } from '@/lib/landlordLinkDocs';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -103,6 +104,8 @@ interface ContractDoc {
   issueDate: string | null;
   expiryDate: string | null;
   isVisibleToTenant: boolean;
+  /** Recorded binder/landlord-link choice; null = the default rule decides. */
+  portalHidden?: boolean | null;
 }
 
 /** Identity of a stored documents row (its upsert key): an upload posted under
@@ -2863,7 +2866,7 @@ function DetailsDrawer({
   /** upload-url → PUT → POST /api/documents — attach a contract document. */
   /** `replaceOf` = the stored row to overwrite in place (binder "Replace");
    *  omitted → a fresh timestamped row is added beside whatever is on file. */
-  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string, replaceOf?: DocReplaceTarget) => Promise<number | void>;
+  onUploadDoc: (file: File, meta: { key: string; label: string; category: string; section: DocSection }, visibleToTenant: boolean, expiryDate: string, replaceOf?: DocReplaceTarget, visibleOnLandlordLink?: boolean) => Promise<number | void>;
   /** POST /api/documents/request — request a document from the tenant. */
   onRequestDoc: (label: string, notes: string) => Promise<void>;
   /** Running tenancy notes log (newest first). */
@@ -3641,6 +3644,15 @@ function DetailsDrawer({
   const [upFile, setUpFile] = useState<File | null>(null);
   const [upType, setUpType] = useState('');
   const [upVisible, setUpVisible] = useState(false);
+  // Whether the lease binder / landlord link will carry this document. Asked at
+  // upload time (owner's call, 28 Sep 2026); pre-set from the default rule for
+  // the picked type + section, and `upLandlordTouched` works like
+  // upSectionTouched — an untouched control sends nothing, so the row stays on
+  // the default rule (portal_hidden NULL) instead of freezing today's default.
+  const [upLandlord, setUpLandlord] = useState(true);
+  const [upLandlordTouched, setUpLandlordTouched] = useState(false);
+  const landlordDefaultFor = (section: DocSection, key: string) =>
+    section === 'kyc' ? true : landlordLinkShowsByDefault({ ownerType: 'tenancy_contract', documentKey: key });
   const [upExpiry, setUpExpiry] = useState('');
   const [upBusy, setUpBusy] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
@@ -3732,6 +3744,8 @@ function DetailsDrawer({
     // Same for visibility: the backend resets it on re-upload, so carry the
     // row's current setting into the form instead of silently going internal.
     setUpVisible(!!target?.isVisibleToTenant);
+    setUpLandlord(target ? landlordLinkShows(target) : landlordDefaultFor(filedUnder ?? known?.section ?? sectionForDocKey(d.key) ?? sectionForCategory(d.category), d.key));
+    setUpLandlordTouched(false);
     setUpExpiry('');
     setUpErr(null);
     requestAnimationFrame(() => {
@@ -3758,6 +3772,7 @@ function DetailsDrawer({
     const t = DOC_TYPES.find(x => x.value === value);
     setUpTypeQuery(t?.label ?? '');
     if (t && !upSectionTouched) setUpSection(t.section);
+    if (t && !upLandlordTouched) setUpLandlord(landlordDefaultFor(upSectionTouched ? upSection : t.section, value));
   };
   const submitUpload = async () => {
     if (!upFile || !upType) return;
@@ -3770,9 +3785,11 @@ function DetailsDrawer({
         { key: meta.value, label: upName.trim() || meta.label, category: meta.category, section: upSection },
         upVisible, upExpiry,
         replacing ? { ownerType: replacing.ownerType, ownerId: replacing.ownerId, documentKey: replacing.documentKey } : undefined,
+        upLandlordTouched ? upLandlord : undefined,
       );
       setShowUpload(false); setUpFile(null); setUpType(''); setUpTypeQuery(''); setUpVisible(false); setUpExpiry('');
       setUpSection('tenancy'); setUpSectionTouched(false); setUpName(''); setUpReplaceOf(null);
+      setUpLandlord(true); setUpLandlordTouched(false);
       if (docFileRef.current) docFileRef.current.value = '';
     } catch (e) {
       setUpErr(e instanceof Error ? e.message : 'Upload failed');
@@ -5268,7 +5285,7 @@ function DetailsDrawer({
                               <label key={sec} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer', border: `1px solid ${upSection === sec ? 'var(--jade-deep, #2e9f82)' : '#e8e6e0'}`, background: upSection === sec ? 'var(--jade-tint, #eef9f4)' : '#fff', borderRadius: 10, padding: '8px 10px' }}>
                                 <input
                                   type="radio" name="v2DocSection" data-testid={`up-section-${sec}`} checked={upSection === sec} style={{ marginTop: 2 }}
-                                  onChange={() => { setUpSection(sec); setUpSectionTouched(true); }}
+                                  onChange={() => { setUpSection(sec); setUpSectionTouched(true); if (!upLandlordTouched) setUpLandlord(landlordDefaultFor(sec, upType)); }}
                                 />
                                 <span>
                                   <span style={{ fontWeight: 600 }}>{SECTION_LABEL[sec]}</span>
@@ -5297,6 +5314,27 @@ function DetailsDrawer({
                               <input type="radio" name="v2DocVisibility" checked={upVisible} onChange={() => setUpVisible(true)} /> Visible to customer
                             </label>
                           </div>
+                        </div>
+                        {/* WHAT THE LANDLORD SEES. The lease's documents binder and
+                            the landlord's no-login link render the same set, so
+                            this one answer covers both. Pre-set from the default
+                            rule for the picked type; untouched, the row follows
+                            that rule rather than freezing today's answer. */}
+                        <div className="field" style={{ marginBottom: 0 }}>
+                          <label>Landlord link</label>
+                          <div style={{ display: 'flex', gap: 18 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                              <input type="radio" name="v2DocLandlord" data-testid="up-landlord-show" checked={upLandlord} onChange={() => { setUpLandlord(true); setUpLandlordTouched(true); }} /> Show on landlord link
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                              <input type="radio" name="v2DocLandlord" data-testid="up-landlord-hide" checked={!upLandlord} onChange={() => { setUpLandlord(false); setUpLandlordTouched(true); }} /> Internal reference only
+                            </label>
+                          </div>
+                          {upType && !upLandlordTouched && (
+                            <p className="note" style={{ marginTop: 6 }}>
+                              {upLandlord ? 'Standard document — shown by default.' : 'Reference paper — off the landlord link unless you choose Show.'}
+                            </p>
+                          )}
                         </div>
                         </div>
                         <div style={{ padding: '12px 18px 16px', borderTop: '1px solid #f0eee9' }}>
@@ -7615,6 +7653,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     visibleToTenant: boolean,
     expiryDate: string,
     replaceOf?: DocReplaceTarget,
+    // undefined = no choice made: the row keeps NULL (new) or its current
+    // setting (replacement) and the default rule decides what the binder shows.
+    visibleOnLandlordLink?: boolean,
   ) => {
     const asKyc = meta.section === 'kyc';
     if (asKyc && !replaceOf && !contract.tenant.id) {
@@ -7646,6 +7687,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
       s3Key: fileKey,
       mimeType: file.type || 'application/octet-stream', isVisibleToTenant: visibleToTenant,
     };
+    if (visibleOnLandlordLink !== undefined) docBody.visibleOnLandlordLink = visibleOnLandlordLink;
     if (expiryDate) docBody.expiryDate = expiryDate;
     const docRes = await fetch('/api/documents', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },

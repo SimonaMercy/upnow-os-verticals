@@ -10,7 +10,7 @@
  * by design: documents are previewed in-portal, never downloaded.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { FileText, X, ChevronLeft, ChevronRight, Upload, Download, Printer, Loader2 } from 'lucide-react';
+import { FileText, X, ChevronLeft, ChevronRight, Upload, Download, Printer, Loader2, Eye, EyeOff } from 'lucide-react';
 import { downloadStoredDoc, printStoredDoc } from '@/lib/downloadDoc';
 import { DeleteDocumentButton } from './DeleteDocumentButton';
 import { SecureDocCanvas } from './SecureDocCanvas';
@@ -35,7 +35,7 @@ const C = {
 const isImage = (f: ReaderFile) =>
   (f.mimeType ?? '').startsWith('image/') || /\.(jpe?g|png|gif|webp)(\?|$)/i.test(f.url);
 
-export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose, deletableDocId, onDeleted, wide = false, fileActions, resolveUrl }: {
+export function DocumentReaderModal({ title = 'Documents', summary, slots, initialKey, onClose, deletableDocId, onDeleted, wide = false, fileActions, resolveUrl, portalVisibility }: {
   /** A bigger window and a wider list whose labels wrap — for a long set read at length (a legal case file). */
   wide?: boolean;
   /**
@@ -72,6 +72,18 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
    */
   deletableDocId?: (f: ReaderFile) => number | null;
   onDeleted?: () => void;
+  /**
+   * Configure what the landlord's no-login share link shows, per document —
+   * offered only where documents are MANAGED (the customer profile's KYC and
+   * History readers), never on the binder the landlord link itself renders.
+   * `stateFor` returns the document id and its current hidden flag, or null
+   * for a file with no real document row (nothing to configure). Hiding
+   * removes nothing — only the landlord link's binder leaves the file out.
+   */
+  portalVisibility?: {
+    stateFor: (f: ReaderFile) => { docId: number; hidden: boolean } | null;
+    onToggle: (docId: number, hidden: boolean) => Promise<void>;
+  };
 }) {
   const firstWithFiles = slots.find(s => s.files.length > 0)?.key ?? slots[0]?.key ?? null;
   // Computed once when the reader opens — same identity stamp as openDocViewer.
@@ -150,6 +162,29 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   };
   const actionBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '7px 11px', borderRadius: 9, border: `1px solid ${C.line}`, background: '#fff', color: C.ink2, cursor: 'pointer', flex: '0 0 auto' };
 
+  // Landlord-link visibility of the file being viewed. The slots are a snapshot
+  // taken when the reader opened, so a successful toggle is remembered here and
+  // read over the snapshot — the button and the sidebar markers stay truthful
+  // without closing the reader or refetching mid-view.
+  const [visOverride, setVisOverride] = useState<Record<number, boolean>>({});
+  const [visBusy, setVisBusy] = useState(false);
+  const [visErr, setVisErr] = useState<string | null>(null);
+  const visStateFor = (f: ReaderFile): { docId: number; hidden: boolean } | null => {
+    const s = portalVisibility?.stateFor(f);
+    if (!s) return null;
+    return { docId: s.docId, hidden: visOverride[s.docId] ?? s.hidden };
+  };
+  const visState = rActive ? visStateFor(rActive) : null;
+  const toggleVis = async () => {
+    if (!portalVisibility || !visState) return;
+    setVisBusy(true); setVisErr(null);
+    try {
+      await portalVisibility.onToggle(visState.docId, !visState.hidden);
+      setVisOverride(m => ({ ...m, [visState.docId]: !visState.hidden }));
+    } catch (e) { setVisErr(e instanceof Error ? e.message : 'Could not change the visibility'); }
+    finally { setVisBusy(false); }
+  };
+
   return (
     <div onClick={dismiss} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,18,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isTight ? 0 : 22, zIndex: 70 }}>
       <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: wide ? 1400 : 940, height: isTight ? '100%' : (wide ? '94vh' : '90vh'), maxHeight: isTight ? '100%' : (wide ? '94vh' : '90vh'), background: '#fff', borderRadius: isTight ? 0 : 16, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 70px rgba(15,30,22,.42)' }}>
@@ -179,6 +214,12 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                       <div style={wide ? { fontSize: 12.5, fontWeight: 700, color: C.ink2, lineHeight: 1.3, overflowWrap: 'anywhere' } : { fontSize: 12.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.label}</div>
                       <div style={{ fontSize: 10, fontWeight: 600, color: attached ? (s.note ? C.mute : C.greenT) : C.amber }}>{attached ? (s.note ?? (s.files.length > 1 ? `${s.files.length} files` : 'Uploaded')) : 'Not uploaded'}</div>
                     </div>
+                    {/* At-a-glance marker: some file in this slot is kept off the
+                        landlord link — so the hidden set is scannable without
+                        stepping through every document. */}
+                    {portalVisibility && s.files.some(f => visStateFor(f)?.hidden) && (
+                      <span title="Hidden from the landlord link" style={{ flex: '0 0 auto', color: C.amber, display: 'inline-flex' }}><EyeOff size={13} /></span>
+                    )}
                   </div>
                 </div>
               );
@@ -195,6 +236,21 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
               {/* Removing the file you are looking at. Deliberately here rather
                   than on the sidebar rows: the sidebar names a SLOT, and a slot
                   can hold several files. */}
+              {visErr && (
+                <span title={visErr} style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '0 0 auto' }}>{visErr}</span>
+              )}
+              {rActive && visState && (
+                <button type="button" onClick={() => void toggleVis()} disabled={visBusy}
+                  style={visState.hidden
+                    ? { ...actionBtn, background: '#fdf7ee', border: '1px solid #e9c48a', color: '#8a5a10' }
+                    : actionBtn}
+                  title={visState.hidden
+                    ? 'Hidden from the landlord link — click to show it there again'
+                    : 'Keep this document off the landlord link — it stays filed here for internal reference'}>
+                  {visBusy ? <Loader2 size={14} className="animate-spin" /> : visState.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                  {visState.hidden ? 'Show on landlord link' : 'Hide from landlord link'}
+                </button>
+              )}
               {rActive && actionDocId != null && fileActions?.download && (
                 <button type="button" onClick={() => void act('download')} disabled={acting != null} style={actionBtn} title="Download this file">
                   {acting === 'download' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Download
