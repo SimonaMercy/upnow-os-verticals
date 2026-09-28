@@ -46,7 +46,7 @@ const ContractButtons = dynamic(() => import('@/components/contract/ContractButt
   loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing contract…</div>,
 });
 
-interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string; section?: string | null }
+interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string; section?: string | null; portalHidden?: boolean | null }
 interface Sig { role: string; signatoryName: string | null; signatureImage: string | null; stampImage?: string | null; signedAt: string; method?: string }
 interface Detail {
   contract: EjariContractData & { id: number; status: string | null; contractType?: string | null };
@@ -553,6 +553,11 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
     category: doc.category ?? null, ownerType: doc.ownerType,
     // The RP's declared section decides the pane — see resolveDocSection.
     section: doc.section ?? null,
+    // The recorded Show choice must survive this mapping: the renewal pane
+    // keeps a non-core KYC document only when portalHidden === false, and
+    // dropping the field here silently re-hid it on the landlord link while
+    // the RP page showed it — the views MUST stay consistent.
+    portalHidden: doc.portalHidden ?? null,
   }));
   const planContract: PlanContract = {
     contractType: d.contract.contractType,
