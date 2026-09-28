@@ -38,7 +38,8 @@ import { DownloadDocsButton, fetchStoredDocBytes, type MergeDocItem, type MergeP
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { resolveDocSection } from '@/lib/documentCatalogue';
 import { buildCurrentPlan, type PlanContract, type PlanPayment } from '@/lib/currentPlan';
-import { segRowsFromContract } from '@/lib/segregatedPlan';
+import { segRowsFromContract, buildSegregatedPlan } from '@/lib/segregatedPlan';
+import { slotOfDoc } from '@/lib/planAttach';
 import ds from './ContractDocsBinder.module.css';
 
 // Generated tenancy artifacts (NOT uploaded KYC/ID) are the counterparty's own
@@ -708,9 +709,17 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const matchDocs = (key: string): BinderDoc[] => {
     const accepted = [key, ...(KEY_ALIASES[key] ?? [])];
     const base = (d: BinderDoc) => norm(d.documentKey).replace(/_\d{10,}$/, '');
+    // The Payment Confirmation reads in the Payment Summary's own order: a
+    // cheque file's slot tag (`<slot> · <file>`, planAttach) names the summary
+    // line it confirms, so tagged files sort by that line's position in the
+    // plan. Untagged files (sent "all together", and a lead's synthetic
+    // cheque rows) keep their existing order, after the tagged ones.
+    const pos = key === 'payment_advice'
+      ? (d: BinderDoc) => { const i = planSlots.indexOf(slotOfDoc(d.displayName) ?? ''); return i < 0 ? planSlots.length : i; }
+      : () => 0;
     return all.filter(d => !isKyc(d) && !isOccupant(d)
       && (!LEASE_ONLY_KEYS.has(key) || ownedByLease(d))
-      && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => b.id - a.id);
+      && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => pos(a) - pos(b) || b.id - a.id);
   };
   const isRenewal = contractType === 'renewal';
   // A lead's plan is already a plan; a lease's is rebuilt from its payments.
@@ -718,6 +727,11 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   // Raw rows for the segregated Payment Plan PDF (Security Deposit · Rental Income ·
   // Management Fee · Third Party) — shared by the download and the on-screen card.
   const planRows = segRowsFromContract(planContract, planPayments);
+  // Attach-slot labels in the summary's display order — the same terms the
+  // attach flows write into the file's tag (rent per instalment, the other
+  // groups once at their heading).
+  const planSlots = buildSegregatedPlan(planRows).groups.flatMap(g =>
+    g.key === 'rental' ? g.lines.map(l => `Rent — ${l.item}`) : [g.title]);
   const hasPlan = currentPlan.rentFils > 0 || currentPlan.items.length > 0;
   const showReceipts = receipt != null;
   const hasReceiptData = planPayments.length > 0 || (planContract.fees?.length ?? 0) > 0;
