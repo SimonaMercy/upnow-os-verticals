@@ -326,7 +326,12 @@ const idCardsFor = (
   const placed = (d: BinderDoc) =>
     (isEid(d) ? eidShown.has(d.id) : isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d))));
   const coreDoc = (d: BinderDoc) => isEid(d) || isPassport(d) || isVisa(d) || (company && (isLicense(d) || isMoa(d)));
-  for (const d of docs.filter(d => !placed(d) && (!coreOnly || coreDoc(d))).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
+  // `coreOnly` trims a renewal's pane to the core pack — but a document the
+  // manager EXPLICITLY put on the landlord link (portalHidden === false, the
+  // recorded Show choice) always renders: a Show toggle that the renewal trim
+  // silently overrides is a lie (owner, 28 Sep 2026 — an undertaking letter
+  // filed as KYC vanished from both views despite being selected).
+  for (const d of docs.filter(d => !placed(d) && (!coreOnly || coreDoc(d) || d.portalHidden === false)).sort((a, b) => restRank(a) - restRank(b) || a.id - b.id)) {
     cards.push(card(d));
   }
   return cards;
@@ -849,7 +854,7 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
   const isCoreKyc = (d: BinderDoc) =>
     (!personPrefix(d) && (isEid(d) || isPassport(d) || isVisa(d) || (isCompanyTenant && (isLicense(d) || isMoa(d)))))
     || (isCompanyTenant && isThirdParty(d));
-  const idExtras = primaryPool.filter(d => !usedIds.has(d.id) && (!isRenewal || isCoreKyc(d)));
+  const idExtras = primaryPool.filter(d => !usedIds.has(d.id) && (!isRenewal || isCoreKyc(d) || d.portalHidden === false));
   // Everyone on the lease besides the customer. The keys call them occupants and
   // start at `occupant_2` — occupant 1 IS the customer, whose pack is above — so
   // the pane numbers them 1..N in order and calls them DEPENDANTS, which is what
