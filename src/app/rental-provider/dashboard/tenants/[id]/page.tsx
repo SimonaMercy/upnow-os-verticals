@@ -1358,10 +1358,11 @@ export default function CustomerDetailPage() {
             stateFor: (f) => {
               if (typeof f.id !== 'number') return null;
               const d = data.documents.find(x => x.id === f.id);
-              // EFFECTIVE state, not the raw flag: a loose lease paper with no
-              // choice recorded is hidden by the default rule, and the toggle
-              // must say so — clicking Show records the explicit choice.
-              return d ? { docId: d.id, hidden: !landlordLinkShows(d) } : null;
+              // EFFECTIVE state plus whether it is a recorded choice — with
+              // none, the reader offers both explicit actions, because a
+              // renewal binder honours only an explicit Show and a guessed
+              // toggle cost a double click (owner, 28 Sep 2026).
+              return d ? { docId: d.id, hidden: !landlordLinkShows(d), chosen: d.portalHidden != null } : null;
             },
             onToggle: async (docId, hidden) => {
               const res = await fetch(`/api/documents/${docId}/portal-visibility`, {

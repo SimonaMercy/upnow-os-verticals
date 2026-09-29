@@ -81,7 +81,11 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
    * removes nothing — only the landlord link's binder leaves the file out.
    */
   portalVisibility?: {
-    stateFor: (f: ReaderFile) => { docId: number; hidden: boolean } | null;
+    /** `chosen` = an explicit choice is recorded. Without one the document
+     *  follows the default rule — and a renewal binder honours only an
+     *  EXPLICIT Show, so the reader offers both actions until one is made:
+     *  the first click must always do exactly what its label says. */
+    stateFor: (f: ReaderFile) => { docId: number; hidden: boolean; chosen: boolean } | null;
     onToggle: (docId: number, hidden: boolean) => Promise<void>;
   };
 }) {
@@ -169,18 +173,19 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
   const [visOverride, setVisOverride] = useState<Record<number, boolean>>({});
   const [visBusy, setVisBusy] = useState(false);
   const [visErr, setVisErr] = useState<string | null>(null);
-  const visStateFor = (f: ReaderFile): { docId: number; hidden: boolean } | null => {
+  const visStateFor = (f: ReaderFile): { docId: number; hidden: boolean; chosen: boolean } | null => {
     const s = portalVisibility?.stateFor(f);
     if (!s) return null;
-    return { docId: s.docId, hidden: visOverride[s.docId] ?? s.hidden };
+    const o = visOverride[s.docId];
+    return { docId: s.docId, hidden: o ?? s.hidden, chosen: o !== undefined || s.chosen };
   };
   const visState = rActive ? visStateFor(rActive) : null;
-  const toggleVis = async () => {
+  const toggleVis = async (hide: boolean) => {
     if (!portalVisibility || !visState) return;
     setVisBusy(true); setVisErr(null);
     try {
-      await portalVisibility.onToggle(visState.docId, !visState.hidden);
-      setVisOverride(m => ({ ...m, [visState.docId]: !visState.hidden }));
+      await portalVisibility.onToggle(visState.docId, hide);
+      setVisOverride(m => ({ ...m, [visState.docId]: hide }));
     } catch (e) { setVisErr(e instanceof Error ? e.message : 'Could not change the visibility'); }
     finally { setVisBusy(false); }
   };
@@ -239,8 +244,8 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
               {visErr && (
                 <span title={visErr} style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '0 0 auto' }}>{visErr}</span>
               )}
-              {rActive && visState && (
-                <button type="button" onClick={() => void toggleVis()} disabled={visBusy}
+              {rActive && visState && (visState.chosen ? (
+                <button type="button" onClick={() => void toggleVis(!visState.hidden)} disabled={visBusy}
                   style={visState.hidden
                     ? { ...actionBtn, background: '#fdf7ee', border: '1px solid #e9c48a', color: '#8a5a10' }
                     : actionBtn}
@@ -250,7 +255,22 @@ export function DocumentReaderModal({ title = 'Documents', summary, slots, initi
                   {visBusy ? <Loader2 size={14} className="animate-spin" /> : visState.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
                   {visState.hidden ? 'Show on landlord link' : 'Hide from landlord link'}
                 </button>
-              )}
+              ) : (
+                // No choice recorded yet: the document follows the default rule,
+                // which a renewal binder does not honour for non-core KYC — so
+                // one guessed toggle here cost a double click. Offer BOTH
+                // explicit actions; the first click does what its label says.
+                <>
+                  <button type="button" onClick={() => void toggleVis(false)} disabled={visBusy} style={actionBtn}
+                    title="Put this document on the landlord link — recorded as your explicit choice">
+                    {visBusy ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />} Show on landlord link
+                  </button>
+                  <button type="button" onClick={() => void toggleVis(true)} disabled={visBusy} style={actionBtn}
+                    title="Keep this document off the landlord link — it stays filed here for internal reference">
+                    <EyeOff size={14} /> Hide from landlord link
+                  </button>
+                </>
+              ))}
               {rActive && actionDocId != null && fileActions?.download && (
                 <button type="button" onClick={() => void act('download')} disabled={acting != null} style={actionBtn} title="Download this file">
                   {acting === 'download' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Download
