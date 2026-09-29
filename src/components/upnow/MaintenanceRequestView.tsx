@@ -31,8 +31,9 @@ import { SCOPE_LABEL, maintenanceLocation, maintenanceNoCustomerLabel, type Main
 interface Cat { id: number; name: string }
 interface LinkRow {
   serviceProviderId: number; name: string; relationship: string; isDefault: boolean;
-  /** The backend's own routing rule — a vendor takes jobs only once it accepted the invite. */
-  assignable?: boolean; kind?: string; inviteStatus?: string;
+  /** The backend's own routing rule — an outside vendor takes jobs only once it
+   *  accepted the invite; the landlord's own team needs no invite at all. */
+  assignable?: boolean; ownTeam?: boolean; kind?: string; inviteStatus?: string;
 }
 interface Detail {
   id: number; ref: string; title: string; description: string | null;
@@ -189,12 +190,13 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
   const needsRouting = open && ['no_provider', 'provider_declined', 'vacant_unit', 'amc_vendor'].includes(d.holdReason ?? '');
   const canChangeProvider = open && !needsRouting && !!d.provider && d.booking?.status === 'booked';
   const showReassign = needsRouting || (canChangeProvider && changingProvider);
-  // Only vendors the backend will accept (linkActive). `assignable` absent = an
-  // older payload — offer the row rather than hide it.
+  // Only vendors the backend will accept. `assignable` absent = an older
+  // payload — offer the row rather than hide it.
   const assignable = links.filter(l => l.assignable !== false);
-  const serviceVendors = links.filter(l => (l.kind ?? 'service') === 'service');
-  const invited = serviceVendors.filter(l => l.inviteStatus === 'invited');
-  const notInvited = serviceVendors.filter(l => l.inviteStatus === 'not_invited');
+  // The empty state speaks about the OWN TEAM only. The outside vendors on this
+  // list are AMC contractors — they belong to their contracts, not to this
+  // picker, and naming them here only reads as work waiting on an invite
+  // (owner, 29 Sep 2026).
   const vendorsHref = rp != null ? `/dashboard/manager/vendors?rp=${rp}` : '/rental-provider/dashboard/vendors';
   const showApprove = open && d.stage === 'awaiting_approval' && d.coverage === 'covered';
   // Phase B: priced at intake from the provider's own catalog — no quote exists.
@@ -523,16 +525,10 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           {assignable.length === 0 ? (
             <div className="mt-2">
               <p className="text-sm text-[#6b6860]">
-                {serviceVendors.length === 0
-                  ? 'You have no service vendor yet. Add your own team or a contractor on the Vendors page, then send them the invite.'
-                  : 'None of your vendors can take a job yet — a vendor receives jobs only after accepting your invite.'}
+                You have no maintenance team of your own yet. Add your crew on the Vendors page as
+                <span className="font-semibold text-[#1a1916]"> your own team</span> and they can take this job
+                straight away — no invitation, no email.
               </p>
-              {serviceVendors.length > 0 && (
-                <p className="text-xs text-[#9b9890] mt-1.5">
-                  {invited.length > 0 && <>Invite sent, waiting: {invited.map(l => l.name).join(', ')}. </>}
-                  {notInvited.length > 0 && <>Not invited yet: {notInvited.map(l => l.name).join(', ')}.</>}
-                </p>
-              )}
               <Link href={vendorsHref} className={btn + ' text-white mt-3'} style={{ background: '#1a7a52' }}>Open Vendors</Link>
             </div>
           ) : (
@@ -550,6 +546,12 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                 {busy === 'reassign' ? 'Routing…' : 'Route job'}
               </button>
+              {links.find(l => String(l.serviceProviderId) === reassignTo)?.relationship === 'internal_team' && (
+                <p className="basis-full text-[11px] text-[#6b6860]">
+                  Your own team&apos;s job runs on this page — task list, before and after photos, bills and
+                  mark-as-done. Nothing is emailed to them.
+                </p>
+              )}
             </div>
           )}
         </div>
