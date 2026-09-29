@@ -15,6 +15,7 @@ import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearR
 import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow/ReportSheetView';
 import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
+import { MarketComparisonReport } from '@/components/upnow/MarketComparisonReport';
 
 export default function ReportDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -51,6 +52,9 @@ export default function ReportDetailPage() {
   }
   if (params.slug === 'move-out-reasons') {
     return <MoveOutReasonsReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
+  }
+  if (params.slug === 'market-comparison') {
+    return <MarketComparisonReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;
   }
   if (params.slug === 'lease-revenue-by-year') {
     return <LeaseRevenueByYearReport endpointBase="/api/reports" backHref="/rental-provider/dashboard/reports" />;

@@ -30,6 +30,7 @@ import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
+import { MarketComparisonReport } from '@/components/upnow/MarketComparisonReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
 import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
@@ -170,6 +171,17 @@ export default function ManagerReportsPage() {
         extraQuery={`rp=${effectiveRp}`}
         onBack={() => navigate(null)}
         managerRp={effectiveRp}
+      />
+    );
+  }
+  // Market Comparison renders its own per-source table, scoped to this managed
+  // landlord's layouts via rp=N. The market side is the same for every landlord.
+  if (openSlug === 'market-comparison') {
+    return (
+      <MarketComparisonReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
       />
     );
   }

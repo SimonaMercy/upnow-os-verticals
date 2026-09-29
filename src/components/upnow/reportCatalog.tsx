@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck, LogOut,
+  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck, LogOut, Scale,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -107,6 +107,7 @@ export const REPORT_TILES: ReportTile[] = [
   { slug: 'portfolio',          title: 'Portfolio',         description: 'Units, occupied counts, and the rent roll per property.',              Icon: Building2,    available: true,  group: 'portfolio' },
   { slug: 'portfolio-overview', title: 'Unit Mix',       description: 'Units by type, occupancy, and annual asking rent.',                    Icon: FileBarChart, available: true,  group: 'portfolio' },
   { slug: 'vacancy-analysis',   title: 'Vacant Units',         description: 'Vacant units with last rent, market rent and asking rent at stake.',              Icon: MapPin,       available: true,  group: 'portfolio' },
+  { slug: 'market-comparison',  title: 'Market Comparison',  description: 'Each layout against what the market asks for the same area, type and bedrooms — Bayut, Property Finder, Dubizzle and government data side by side, the market average, and whether you sit below, at or above it.', Icon: Scale, available: true, group: 'portfolio' },
   // ── Leasing Activity ───────────────────────────────────────────────────
   { slug: 'leasing-activity',   title: 'Contract Registration Activity', description: 'New leases per month, rent signed, and Contract Registration status.',                 Icon: CalendarClock, available: true, group: 'leasing', hidden: true },
   { slug: 'contract-status',    title: 'Contract Status - Monthly', description: 'The monthly contract status sheet for a whole year — every month, the contracts turning over that month with property, customer, unit, term, annual rent and cheques, each marked Renewed / For signature / Pending / Move-out, plus the month\'s signed-agreement and Contract Registration counts.', Icon: ClipboardCheck, available: true, group: 'leasing', hidden: true },
