@@ -179,8 +179,12 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
     return yearScoped.filter(c => {
       if (filterAsset !== 'all' && c.property.buildingName !== filterAsset) return false;
       // Stage: draft = pending, issued, live = active, winddown = terminating.
+      // A lease with NOTICE on it is not an ordinary live lease, whether the
+      // notice is still awaiting the landlord's decision or already accepted —
+      // both read as `winddown`. The Terminated pipeline keeps the finer
+      // Requested / Move-out / Bills / Settlement lanes.
       if (filterStage !== 'all') {
-        const stage = c.windDown ? 'winddown' : c.status === 'active' ? 'live' : c.status === 'issued' ? 'issued' : 'draft';
+        const stage = (c.windDown || c.terminationRequested) ? 'winddown' : c.status === 'active' ? 'live' : c.status === 'issued' ? 'issued' : 'draft';
         if (stage !== filterStage) return false;
       }
       // Missing-item slice: keep only contracts where that item is still undone.
@@ -221,8 +225,8 @@ export default function OperationsBoard({ listPath, contractHref, canAct = true 
   // semantics as the Leases page, so the counts always match the year selected.
   const stats = useMemo(() => ({
     total: yearScoped.length,
-    live: yearScoped.filter(c => c.status === 'active' && !c.windDown).length,
-    winding: yearScoped.filter(c => c.windDown).length,
+    live: yearScoped.filter(c => c.status === 'active' && !c.windDown && !c.terminationRequested).length,
+    winding: yearScoped.filter(c => c.windDown || c.terminationRequested).length,
     ready: yearScoped.filter(c => c.status !== 'active' && c.doneCount >= c.totalCount).length,
     drafts: yearScoped.filter(c => c.status === 'pending' && !c.contractSent).length,
   }), [yearScoped]);

@@ -70,7 +70,11 @@ function stageKeyToCol(key: string): ColKey {
 }
 // The column a card currently sits in = its first incomplete gate.
 function cardColumn(c: OpsContract): ColKey {
-  if (c.windDown) return 'winddown';
+  // Notice given, whether or not the landlord has answered it yet. A pending
+  // request carries a single `termination_accept` step, and stageKeyToCol has no
+  // case for it — so without this test a lease waiting on a termination decision
+  // fell through to "Ready to activate", which is the opposite of true.
+  if (c.windDown || c.terminationRequested) return 'winddown';
   const firstUndone = c.checklist.find(i => !i.done);
   return firstUndone ? stageKeyToCol(firstUndone.key) : 'ready';
 }
@@ -203,8 +207,8 @@ export default function OperationsKanban({ listPath, contractHref, canAct = true
 
   const stats = useMemo(() => ({
     total: yearScoped.length,
-    live: yearScoped.filter(c => c.status === 'active' && !c.windDown).length,
-    winding: yearScoped.filter(c => c.windDown).length,
+    live: yearScoped.filter(c => c.status === 'active' && !c.windDown && !c.terminationRequested).length,
+    winding: yearScoped.filter(c => c.windDown || c.terminationRequested).length,
     ready: yearScoped.filter(c => c.status !== 'active' && c.doneCount >= c.totalCount).length,
     drafts: yearScoped.filter(c => c.status === 'pending' && !c.contractSent).length,
   }), [yearScoped]);
