@@ -159,6 +159,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
     { label: 'Contact person', node: <span className="text-[#1a1916] font-medium">{v.contactName ?? '—'}</span> },
     // A record (Etisalat, an authority) keeps only what it has — no empty address / licence rows (owner, 30 Sep).
     ...(participating || v.address ? [{ label: 'Address', node: <span className="text-[#1a1916] font-medium break-words">{v.address ?? '—'}</span> }] : []),
+    ...(v.trn ? [{ label: 'TRN', node: <span className="text-[#1a1916] font-medium tabular-nums">{v.trn}</span> }] : []),
     ...(!participating && !v.tradeLicence?.number && !v.tradeLicence?.expiry && !v.tradeLicence?.doc ? [] : [{ label: 'Trade licence', node: (() => {
       const lic = v.tradeLicence; const today = new Date().toISOString().slice(0, 10);
       if (!lic || (!lic.number && !lic.expiry && !lic.doc)) return <span className="text-[#9b9890]">Not on file</span>;

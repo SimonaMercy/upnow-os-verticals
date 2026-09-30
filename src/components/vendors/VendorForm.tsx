@@ -29,7 +29,7 @@ export interface VendorFormValue {
   relationship: 'internal_team' | 'contracted_vendor'; entityType: string | null;
   phone: string | null; email: string | null; inviteStatus: 'not_invited' | 'invited' | 'accepted';
   trades: { id: number; name: string }[];
-  contactName?: string | null; address?: string | null;
+  contactName?: string | null; address?: string | null; trn?: string | null;
   tradeLicence?: { number: string | null; expiry: string | null; doc: { id: number; fileUrl: string; displayName: string | null } | null } | null;
   paymentFrequency?: string | null;
 }
@@ -79,6 +79,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
   const [entityType, setEntityType] = useState<'company' | 'individual'>(v?.entityType === 'individual' ? 'individual' : 'company');
   const [contactName, setContactName] = useState(v?.contactName ?? '');
   const [address, setAddress] = useState(v?.address ?? '');
+  const [trn, setTrn] = useState(v?.trn ?? '');
   const [licNo, setLicNo] = useState(v?.tradeLicence?.number ?? '');
   const [licExpiry, setLicExpiry] = useState(v?.tradeLicence?.expiry ?? '');
   const [licFile, setLicFile] = useState<File | null>(null);
@@ -89,7 +90,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // A record's Company block opens on request — or at once when something is already in it.
-  const [showCompany, setShowCompany] = useState(!!(v?.address || v?.entityType === 'individual' || v?.tradeLicence?.number || v?.tradeLicence?.expiry || v?.tradeLicence?.doc));
+  const [showCompany, setShowCompany] = useState(!!(v?.address || v?.trn || v?.entityType === 'individual' || v?.tradeLicence?.number || v?.tradeLicence?.expiry || v?.tradeLicence?.doc));
 
   const service = kind === 'service';
   const company = entityType === 'company';
@@ -100,11 +101,12 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
 
   const submit = async () => {
     if (!name.trim()) { setErr('The vendor needs a name.'); return; }
+    if (trn.trim() && !/^\d{15}$/.test(trn.trim())) { setErr('The TRN is the 15-digit number on their tax invoice.'); return; }
     if (licExpiry && licExpiry < today && !confirm('The trade licence date is in the past — save it as expired?')) return;
     setErr(null); setBusy('Saving…');
     try {
       const details = {
-        contactName: contactName.trim() || null, address: address.trim() || null,
+        contactName: contactName.trim() || null, address: address.trim() || null, trn: trn.trim() || null,
         tradeLicenceNumber: licNo.trim() || null, tradeLicenceExpiry: licExpiry || null,
         paymentFrequency: payFreq || null,
       };
@@ -226,6 +228,10 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
               <div>
                 <label className={label} htmlFor="vf-address">Address</label>
                 <input id="vf-address" className={field} placeholder="Office / yard address" value={address} onChange={e => setAddress(e.target.value)} />
+              </div>
+              <div>
+                <label className={label} htmlFor="vf-trn">TRN <span className="font-normal text-[#9b9890]">— VAT registration, from their tax invoice</span></label>
+                <input id="vf-trn" className={field} inputMode="numeric" maxLength={15} placeholder="15 digits, e.g. 100314979400003" value={trn} onChange={e => setTrn(e.target.value.replace(/\D/g, ''))} />
               </div>
             </div>
             <div className="rounded-xl border border-[#f0eee8] bg-[#fafaf8] p-3 grid gap-3">

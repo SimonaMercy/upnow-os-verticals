@@ -32,7 +32,7 @@ export interface VendorRow {
   technicians: number; openJobs: number;
   category: string | null; expenseCategoryId?: number | null;
   paymentFrequency?: string | null;
-  contactName?: string | null; address?: string | null;
+  contactName?: string | null; address?: string | null; trn?: string | null;
   tradeLicence?: { number: string | null; expiry: string | null; doc: { id: number; fileUrl: string; displayName: string | null } | null } | null;
 }
 interface Cat { id: number; name: string; parentId: number | null }
