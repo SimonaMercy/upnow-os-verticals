@@ -11,7 +11,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  * maintenance plan (done/pending). Add-AMC supports picking an existing vendor
  * (auto-prefills a renewal for next year) or creating a new vendor, with notes.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Wrench, Loader2, Plus, Search, X, UploadCloud } from 'lucide-react';
@@ -82,6 +82,11 @@ interface PropertyOpt { id: number; buildingName?: string | null; name?: string 
 export interface CategoryOpt { id: number; name: string; defaultKind: string; isActive: boolean }
 interface VendorOpt { id: number; name: string; serviceCategory: string | null; expenseCategoryId?: number | null; expenseCategoryName?: string | null; expenseCategoryKind?: string | null; paymentFrequency?: string | null }
 interface PlanRow { title: string; dueDate: string; notes: string }
+
+/** How the AMC list is split into sections (owner, 30 Sep 2026). "Category" = the contract kind, as on the Add form; "Sub-category" = its report grouping. */
+type GroupBy = 'kind' | 'category' | 'property' | 'vendor' | 'none';
+const GROUP_LABEL: Record<GroupBy, string> = { kind: 'Group: Category', category: 'Group: Sub-category', property: 'Group: Property', vendor: 'Group: Vendor', none: 'No grouping' };
+interface AmcGroup { key: string; label: string; items: AmcContract[] }
 
 const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = {
   active:   { bg: '#e7f4ee', fg: '#1a7a52', label: 'Active' },
@@ -293,9 +298,11 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
    *  is read and the contracts open, but Add / Renew are not offered. */
   canEdit?: boolean;
 }) {
-  const { meta: kindOf } = useKinds(base, rp);
+  const { kinds: kindRows, meta: kindOf } = useKinds(base, rp);
   const [tab, setTab] = useState<'active' | 'expired' | 'cancelled'>('active');
   const [view, setView] = useState<'rows' | 'grid'>('rows');
+  // The list in sections (owner, 30 Sep: "segregation are not clear, let's group them") — by category first, like the expenses sheet.
+  const [groupBy, setGroupBy] = useState<GroupBy>('kind');
   const [contracts, setContracts] = useState<AmcContract[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -307,8 +314,9 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
 
   // Per-viewer convenience only: remember Rows/Grid in this browser (read once after mount to avoid a hydration mismatch).
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { try { const v = localStorage.getItem('amc.view'); if (v === 'grid' || v === 'rows') setView(v); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { const v = localStorage.getItem('amc.view'); if (v === 'grid' || v === 'rows') setView(v); const g = localStorage.getItem('amc.group'); if (g && GROUP_LABEL[g as GroupBy]) setGroupBy(g as GroupBy); } catch { /* ignore */ } }, []);
   const pickView = (v: 'rows' | 'grid') => { setView(v); try { localStorage.setItem('amc.view', v); } catch { /* ignore */ } };
+  const pickGroup = (g: GroupBy) => { setGroupBy(g); try { localStorage.setItem('amc.group', g); } catch { /* ignore */ } };
 
   const load = useCallback(() => {
     setLoading(true);
@@ -335,9 +343,30 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   const shown = (contracts ?? [])
     .filter(c => tab === 'expired' ? c.status === 'expired' : tab === 'cancelled' ? c.status === 'cancelled' : c.status !== 'expired' && c.status !== 'cancelled')
     .filter(c => !propFilter || (propFilter === 'none' ? c.propertyId == null : String(c.propertyId) === propFilter))
-    .filter(c => !needle || [c.vendorName, c.accountNumber, c.propertyName, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
+    .filter(c => !needle || [c.vendorName, c.accountNumber, c.propertyName, c.categoryLabel, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
     // Ongoing contracts never run out — they sit after the dated ones.
     .sort((a, b) => (a.endDate ?? '9999').localeCompare(b.endDate ?? '9999'));
+  // The sections: categories in the landlord's own order (Settings → Categories); the rest A–Z, the "none" bucket last.
+  const groups: AmcGroup[] = (() => {
+    if (groupBy === 'none') return [{ key: 'all', label: '', items: shown }];
+    const keyOf = (c: AmcContract) => groupBy === 'kind' ? (c.kind ?? 'service') : groupBy === 'category' ? (c.categoryLabel?.trim() ?? '')
+      : groupBy === 'property' ? (c.propertyId != null ? String(c.propertyId) : '') : String(c.vendorId);
+    const labelOf = (c: AmcContract) => groupBy === 'kind' ? kindOf(c.kind).label : groupBy === 'category' ? (c.categoryLabel?.trim() || 'No sub-category')
+      : groupBy === 'property' ? (c.propertyName?.trim() || 'All properties') : c.vendorName;
+    const byKey = new Map<string, AmcGroup>();
+    for (const c of shown) { const k = keyOf(c); const g = byKey.get(k) ?? { key: k, label: labelOf(c), items: [] }; g.items.push(c); byKey.set(k, g); }
+    const rank = (g: AmcGroup) => { const i = kindRows.findIndex(k => k.key === g.key); return i < 0 ? 999 : i; };
+    return [...byKey.values()].sort((a, b) => groupBy === 'kind' ? rank(a) - rank(b)
+      : (a.key === '' ? 1 : 0) - (b.key === '' ? 1 : 0) || a.label.localeCompare(b.label));
+  })();
+  const groupHead = (g: AmcGroup, grid = false) => groupBy === 'none' ? null : (
+    <div className={grid ? 'flex items-center gap-2 mb-2 text-[10.5px] font-bold tracking-[.08em] uppercase text-[#5b615e]'
+      : 'flex items-center gap-2 px-[18px] py-2 bg-[#f6f7f6] border-b border-[#eef0ee] text-[10.5px] font-bold tracking-[.08em] uppercase text-[#5b615e]'}>
+      {groupBy === 'kind' && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: kindOf(g.key).fg }} />}
+      <span className="truncate">{g.label}</span>
+      <span className="font-semibold normal-case tracking-normal text-[#8a8f8c] whitespace-nowrap">· {g.items.length} {g.items.length === 1 ? 'contract' : 'contracts'}</span>
+    </div>
+  );
 
   const closeModal = () => { setShowAdd(false); setRenewFrom(null); };
   const detailHrefOf = (c: AmcContract) => base === '/amc'
@@ -425,6 +454,10 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
           {propOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           {hasUnassigned && <option value="none">No property on the contract</option>}
         </select>
+        <select value={groupBy} onChange={e => pickGroup(e.target.value as GroupBy)} title="Split the list into sections"
+          className="py-2 pl-3 pr-8 border border-[#e6e8e6] rounded-lg text-[12px] bg-white focus:outline-none focus:border-[#1a7a52] w-full sm:w-auto">
+          {(Object.keys(GROUP_LABEL) as GroupBy[]).map(g => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
+        </select>
         <div className="flex gap-1.5 ml-auto">
           {([['active', `Active · ${kpi.active + kpi.expiring + kpi.unknown}`], ['expired', `Expired · ${kpi.expired}`], ...(kpi.cancelled ? [['cancelled', `Cancelled · ${kpi.cancelled}`] as const] : [])] as ReadonlyArray<readonly ['active' | 'expired' | 'cancelled', string]>).map(([key, label]) => (
             <button key={key} type="button" onClick={() => setTab(key)}
@@ -451,7 +484,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
               <div className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)_minmax(0,.6fr)_minmax(0,1fr)_150px] gap-3 items-center px-[18px] py-2.5 text-[10px] font-bold tracking-[.08em] text-[#8a8f8c] border-b border-[#eef0ee]">
                 <span>VENDOR</span><span>PERIOD</span><span>VALUE / YR</span><span>VISITS · PAYMENTS</span><span />
               </div>
-              {shown.map(c => {
+              {groups.map(g => (<Fragment key={g.key}>{groupHead(g)}{g.items.map(c => {
                 const cell = workCell(c); const href = detailHrefOf(c);
                 return (
                   <div key={c.id} onClick={() => router.push(href)}
@@ -484,13 +517,14 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                     </div>
                   </div>
                 );
-              })}
+              })}</Fragment>))}
             </div>
           </div>
         </div>
       ) : (
-        <div className="grid gap-3.5 mt-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-          {shown.map(c => {
+        <div className="mt-3.5 space-y-5">{groups.map(g => (<div key={g.key}>{groupHead(g, true)}
+        <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+          {g.items.map(c => {
             const cell = workCell(c); const href = detailHrefOf(c);
             return (
               <Link key={c.id} href={href} className="no-underline text-inherit bg-white border border-[#e6e8e6] rounded-[14px] px-[18px] py-4 flex flex-col gap-3 hover:border-[#c9cfcb]">
@@ -515,7 +549,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
               </Link>
             );
           })}
-        </div>
+        </div></div>))}</div>
       )}
     </div>
   );
