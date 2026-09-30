@@ -32,6 +32,8 @@ interface AmcRow {
   modeOfPayment: string | null; numberOfPayments: number | null;
   renewalOfId?: number | null; renewedById?: number | null; annualValueAed?: number | null;
   kind?: string; categoryLabel?: string | null;
+  /** 0346 — the vendor's account on this contract; ongoing = no end date. */
+  accountNumber?: string | null; ongoing?: boolean;
   payments?: { count: number; paid: number; overdue: number; unbilled?: number; nextDue: string | null; receivedAed: number; totalAed: number } | null;
   documents: AmcDoc[]; tasks: { total: number; done: number; pending: number };
 }
@@ -275,9 +277,9 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
           const paid = (ledger[c.id] ?? []).filter(r => r.status === 'paid');
           return (
           <tr key={c.id} className="border-b border-[#f4f2ec] last:border-0 align-top">
-            <td className={td + ' font-mono text-xs text-[#9b9890]'}>AMC-{c.id}</td>
+            <td className={td + ' font-mono text-xs text-[#9b9890]'}>AMC-{c.id}{c.accountNumber && <div className="font-sans text-[11.5px] font-semibold text-[#4a4842] mt-0.5 whitespace-nowrap">Acc {c.accountNumber}</div>}</td>
             <td className={td + ' font-medium'}>{c.propertyName ?? 'All properties'}</td>
-            <td className={td + ' whitespace-nowrap'}>{fmtD(c.startDate)} → {fmtD(c.endDate)}</td>
+            <td className={td + ' whitespace-nowrap'}>{fmtD(c.startDate)} → {c.ongoing ? 'Ongoing' : fmtD(c.endDate)}</td>
             <td className={td}>
               {(() => {
                 const proofs = paid.filter(r => r.proof).map(r => ({ fileUrl: r.proof!.fileUrl, caption: `Payment #${r.seq}${r.reference ? ` · ${r.reference}` : ''}${r.paidAt ? ` · ${fmtD(r.paidAt)}` : ''}`, documentKey: r.proof!.documentKey }));
@@ -449,7 +451,8 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
           <div className="mt-3 grid gap-4">
             {Object.entries(
               contracts.reduce<Record<string, AmcRow[]>>((acc, c) => {
-                const k = c.propertyName ?? 'All properties';
+                // One chronology per property AND account — two Etisalat accounts are not one contract's terms (0346).
+                const k = `${c.propertyName ?? 'All properties'}${c.accountNumber ? ` · Acc ${c.accountNumber}` : ''}`;
                 (acc[k] = acc[k] ?? []).push(c);
                 return acc;
               }, {}),

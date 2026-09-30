@@ -171,7 +171,7 @@ interface InspectionRow {
 }
 /** An expired AMC still awaiting a decision — renew it, or cancel it if discontinued. */
 /** 0279 — a payable due: an installment or bill on any contract kind. */
-interface PayableRow { installmentId: number; contractId: number; rpId: number; seq: number; kind: string; categoryLabel: string | null; vendorName: string; propertyName: string | null; dueDate: string; amountAed: number | null; overdue: boolean; awaitingBill: boolean }
+interface PayableRow { installmentId: number; contractId: number; rpId: number; seq: number; kind: string; categoryLabel: string | null; vendorName: string; accountNumber?: string | null; propertyName: string | null; dueDate: string; amountAed: number | null; overdue: boolean; awaitingBill: boolean }
 interface ExpiredAmcRow { id: number; rpId: number; vendorName: string; propertyName: string | null; endDate: string | null; status: string; renewedById: number | null }
 
 function ManagerMultiOverview() {
@@ -436,7 +436,7 @@ function ManagerMultiOverview() {
         };
         const payablesBucket: Bucket = {
           count: payables.length,
-          items: payables.map(r => ({ id: r.installmentId, rpId: r.rpId, building: r.propertyName ?? 'No building on the contract', vendor: r.vendorName, date: r.dueDate, parentId: r.contractId, awaitingLandlord: r.overdue, awaitingTenant: r.awaitingBill, amount: r.amountAed, category: r.categoryLabel })),
+          items: payables.map(r => ({ id: r.installmentId, rpId: r.rpId, building: r.propertyName ?? 'No building on the contract', vendor: r.accountNumber ? `${r.vendorName} · Acc ${r.accountNumber}` : r.vendorName, date: r.dueDate, parentId: r.contractId, awaitingLandlord: r.overdue, awaitingTenant: r.awaitingBill, amount: r.amountAed, category: r.categoryLabel })),
         };
         const expiredAmcBucket: Bucket = {
           count: expiredAmcs.length,

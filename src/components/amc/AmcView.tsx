@@ -73,7 +73,9 @@ export interface AmcContract {
   vatMode?: VatMode; annualVatAed?: number | null;
   cancelledAt?: string | null; cancelReason?: string | null;
   kind?: ContractKind | string; categoryLabel?: string | null; expenseCategoryId?: number | null;
-  payments?: { count: number; paid: number; overdue: number; unbilled?: number; nextDue: string | null; receivedAed: number; totalAed: number } | null;
+  /** 0346 — the vendor's account / contract number; ongoing = a start and no end date. */
+  accountNumber?: string | null; ongoing?: boolean;
+  payments?: { count: number; paid: number; overdue: number; unbilled?: number; unbilledDue?: number; nextDue: string | null; receivedAed: number; totalAed: number } | null;
   documents: AmcDoc[]; tasks: { total: number; done: number; pending: number; overdue?: number; quotationsPending?: number };
 }
 interface PropertyOpt { id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }
@@ -91,7 +93,16 @@ const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = 
 const cap = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const FREQ_MONTHS: Record<string, number> = { monthly: 1, quarterly: 3, annually: 12 };
-const addMonths = (iso: string, n: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+/** Calendar months on, held to the month's last day: 31 Jan + 1 = 28 Feb, not 3 Mar (so a month is never skipped). */
+export const addMonths = (iso: string, n: number) => {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
+};
+/** 0346 — an ongoing contract's schedule reaches a year past today (or its start); the server keeps it rolling. */
+export const ongoingHorizon = (start: string) => { const t = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE }); return addMonths(start > t ? start : t, 12); };
+/** "Etisalat · 764506535" — the account tells one vendor's contracts apart (0346). */
+export const accountTag = (c: { accountNumber?: string | null }) => c.accountNumber ? `Acc ${c.accountNumber}` : null;
 const addYears = (iso: string, n: number) => addMonths(iso, n * 12);
 export interface PayRow {
   id?: number | null; dueDate: string; amountAed: string; status?: string; reference?: string | null;
@@ -135,8 +146,10 @@ export function buildPayRows(start: string, end: string, count: number, annualVa
 export const PAY_PRESETS = [1, 2, 3, 4, 6, 12];
 
 /** The flexible payment plan editor — shared by the Add/Renew form and the detail page. */
-export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, onChange, dirty, setDirty, onCount, proofs, modeOfPayment, vatInside }: {
+export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, onChange, dirty, setDirty, onCount, proofs, modeOfPayment, vatInside, ongoing }: {
   start: string; end: string; frequency: string; annualValue: string;
+  /** 0346 — one row per period, rolling a year ahead: no split to choose. */
+  ongoing?: boolean;
   /** 0299 — the contract carries VAT: every amount here is what is PAID (VAT included) and each row shows its split. */
   vatInside?: boolean;
   rows: PayRow[]; onChange: (rows: PayRow[]) => void; dirty: boolean; setDirty: (d: boolean) => void;
@@ -159,18 +172,21 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
   const totalVat = Math.round(rows.reduce((n, r) => n + rowVat(r), 0) * 100) / 100;
   const showVat = !!vatInside || totalVat > 0;
   const months = start && end ? termMonthsOf(start, end) : 12;
-  const expected = annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Math.round(Number(annualValue) * (months / 12) * 100) / 100 : null;
-  const regen = (n: number) => { setDirty(false); onCount?.(n === def ? null : n); onChange(buildPayRows(start, end, n, annualValue)); };
+  // An ongoing plan has no term to add up to — each row is its period's share (0346).
+  const expected = !ongoing && annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Math.round(Number(annualValue) * (months / 12) * 100) / 100 : null;
+  const regen = (n: number) => { setDirty(false); onCount?.(n === def ? null : n); onChange(ongoing ? buildOngoingRows(start, frequency, annualValue) : buildPayRows(start, end, n, annualValue)); };
   const setRow = (i: number, patch: Partial<PayRow>) => { setDirty(true); onChange(rows.map((r, j) => j === i ? { ...r, ...patch } : r)); };
   const field = 'text-xs px-2.5 py-1.5 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium text-[#6b6860]">Payment plan</span>
-        <select className={field} value={presets.includes(count) ? String(count) : 'custom'} onChange={e => { if (e.target.value !== 'custom') regen(Number(e.target.value)); }} disabled={!start}>
+        {ongoing
+          ? <span className="text-[11px] text-[#6b6860]">One per {frequency === 'quarterly' ? 'quarter' : frequency === 'annually' ? 'year' : 'month'} · {rows.length} to {rows.length ? rows[rows.length - 1].dueDate : '—'}, then rolling</span>
+          : <select className={field} value={presets.includes(count) ? String(count) : 'custom'} onChange={e => { if (e.target.value !== 'custom') regen(Number(e.target.value)); }} disabled={!start}>
           {presets.map(n => <option key={n} value={n}>{n === def ? `${n} · from ${frequency ? frequency.replace(/_/g, ' ') : 'frequency'}` : n === 1 ? '1 · single payment' : `${n} payments`}</option>)}
           {!presets.includes(count) && <option value="custom">{count} · custom</option>}
-        </select>
+        </select>}
         <button type="button" onClick={() => { setDirty(true); onChange([...rows, { dueDate: rows[rows.length - 1]?.dueDate ?? start, amountAed: '' }]); }} className="text-[11px] font-semibold text-[#1a7a5a] cursor-pointer" disabled={!start}>+ Add installment</button>
         {dirty && <button type="button" onClick={() => regen(def)} className="text-[11px] font-semibold text-[#6b6860] hover:text-[#1a1916] cursor-pointer ml-auto">Regenerate from frequency</button>}
       </div>
@@ -236,6 +252,27 @@ export function visitTitle(category: string | null | undefined, fallback?: strin
   const label = raw.toLowerCase() === 'maintenance' ? 'Maintenance' : raw.charAt(0).toUpperCase() + raw.slice(1);
   return `${label} visit`;
 }
+/**
+ * 0346 — an ongoing contract's rows, exactly as the server extends them: one per
+ * period at start + n × cadence up to a year ahead, each the period's share of
+ * the annual value (empty when there is none — the bill fills it in).
+ */
+export function buildOngoingRows(start: string, frequency: string, annualValue: string): PayRow[] {
+  if (!start) return [];
+  const annual = annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Number(annualValue) : null;
+  const months = FREQ_MONTHS[frequency];
+  if (!months) return [{ dueDate: start, amountAed: annual != null ? String(annual) : '' }];
+  const each = annual != null ? String(Math.round(annual * months / 12 * 100) / 100) : '';
+  const horizon = ongoingHorizon(start);
+  const rows: PayRow[] = [];
+  for (let k = 0; k < 600 && rows.length < 60; k++) {
+    const due = addMonths(start, k * months);
+    if (due > horizon) break;
+    rows.push({ dueDate: due, amountAed: each });
+  }
+  return rows;
+}
+
 function buildPlan(start: string, end: string, frequency: string, category: string, categoryLabel?: string): PlanRow[] {
   if (!start || !end) return [];
   const title = visitTitle(categoryLabel, category);
@@ -294,8 +331,9 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   const shown = (contracts ?? [])
     .filter(c => tab === 'expired' ? c.status === 'expired' : tab === 'cancelled' ? c.status === 'cancelled' : c.status !== 'expired' && c.status !== 'cancelled')
     .filter(c => !propFilter || (propFilter === 'none' ? c.propertyId == null : String(c.propertyId) === propFilter))
-    .filter(c => !needle || [c.vendorName, c.propertyName, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
-    .sort((a, b) => (a.endDate ?? '').localeCompare(b.endDate ?? ''));
+    .filter(c => !needle || [c.vendorName, c.accountNumber, c.propertyName, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
+    // Ongoing contracts never run out — they sit after the dated ones.
+    .sort((a, b) => (a.endDate ?? '9999').localeCompare(b.endDate ?? '9999'));
 
   const closeModal = () => { setShowAdd(false); setRenewFrom(null); };
   const detailHrefOf = (c: AmcContract) => base === '/amc'
@@ -319,6 +357,12 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
     if (kindOf(c.kind).visits) { const f = visitsFlag(c); return { left: `${c.tasks.done} / ${c.tasks.total} completed`, ...f }; }
     const p = c.payments;
     if (!p || !p.count) return { left: kindOf(c.kind).schedule === 'none' ? 'Spend recorded as it happens' : 'No schedule', text: '', color: '#8a8f8c' };
+    // An ongoing schedule keeps growing — count what's paid and flag only what is due by today.
+    if (c.ongoing) {
+      if (p.overdue > 0) return { left: `${p.paid} paid`, text: `${p.overdue} overdue`, color: '#b42318' };
+      if (p.unbilledDue) return { left: `${p.paid} paid`, text: `${p.unbilledDue} bill${p.unbilledDue === 1 ? '' : 's'} awaited`, color: '#c47a00' };
+      return { left: `${p.paid} paid`, text: p.nextDue ? `next ${fmt(p.nextDue)}` : '', color: '#5b615e' };
+    }
     if (p.overdue > 0) return { left: `${p.paid} / ${p.count} paid`, text: `${p.overdue} overdue`, color: '#b42318' };
     if (p.unbilled) return { left: `${p.paid} / ${p.count} paid`, text: `${p.unbilled} bill${p.unbilled === 1 ? '' : 's'} awaited`, color: '#c47a00' };
     if (p.paid === p.count) return { left: `${p.paid} / ${p.count} paid`, text: 'Settled', color: '#1a7a52' };
@@ -411,12 +455,13 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold">{c.vendorName}</span>
+                        {accountTag(c) && <span className="text-[11px] font-semibold text-[#5b615e] bg-[#f1f3f1] px-1.5 py-[1px] rounded">{accountTag(c)}</span>}
                         {chip(c)}{kindChip(c)}
                         {c.renewalOfId != null && <span className={pillCls + ' font-semibold'} style={{ background: '#e9effc', color: '#2a5bd7' }}>Renewal</span>}
                       </div>
                       <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">{subline(c)}</div>
                     </div>
-                    <div className="whitespace-nowrap">{fmt(c.startDate)} → {fmt(c.endDate)}</div>
+                    <div className="whitespace-nowrap">{fmt(c.startDate)} → {c.ongoing ? 'Ongoing' : fmt(c.endDate)}</div>
                     {/* ONE grid cell: the value with its VAT beneath — a second sibling would become a column of its own and shift the row. */}
                     <div className="whitespace-nowrap">
                       <div className="font-semibold">{money(c.annualValueAed)}</div>
@@ -447,13 +492,13 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
               <Link key={c.id} href={href} className="no-underline text-inherit bg-white border border-[#e6e8e6] rounded-[14px] px-[18px] py-4 flex flex-col gap-3 hover:border-[#c9cfcb]">
                 <div className="flex items-start justify-between gap-2.5">
                   <div className="min-w-0">
-                    <div className="font-bold text-[13px] truncate">{c.vendorName}</div>
+                    <div className="font-bold text-[13px] truncate">{c.vendorName}{accountTag(c) && <span className="ml-1.5 text-[11px] font-semibold text-[#5b615e]">{accountTag(c)}</span>}</div>
                     <div className="text-[11px] text-[#8a8f8c] mt-0.5 truncate">{subline(c)}</div>
                   </div>
                   <div className="flex gap-1 shrink-0">{chip(c)}{kindChip(c)}{c.renewalOfId != null && <span className={pillCls + ' font-semibold'} style={{ background: '#e9effc', color: '#2a5bd7' }}>Renewal</span>}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5 text-[12px]">
-                  <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">PERIOD</div><div className="mt-0.5">{fmt(c.startDate)} → {fmt(c.endDate)}</div></div>
+                  <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">PERIOD</div><div className="mt-0.5">{fmt(c.startDate)} → {c.ongoing ? 'Ongoing' : fmt(c.endDate)}</div></div>
                   <div><div className="text-[10px] font-bold tracking-[.08em] text-[#8a8f8c]">VALUE / YR</div><div className="mt-0.5 font-semibold">{money(c.annualValueAed)}</div>{!!c.annualVatAed && <div className="text-[10.5px] text-[#8a8f8c]">incl. VAT {aed2(c.annualVatAed)}</div>}</div>
                 </div>
                 <div className="flex justify-between items-center text-[12px]">
@@ -524,6 +569,9 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const km = kindOf(kind);
   const [startDate, setStartDate] = useState(nextStart);
   const [endDate, setEndDate] = useState(nextStart ? addYears(nextStart, 1) : '');
+  // 0346 — no end date (owner, 30 Sep: Etisalat, Dubai Holding). Bills and recurring costs start ongoing; a visit plan needs an end.
+  const [ongoing, setOngoing] = useState(false);
+  const [accountNumber, setAccountNumber] = useState(from?.accountNumber ?? '');
   const [frequency, setFrequency] = useState(from?.frequency ?? 'annually');
   const [modeOfPayment, setModeOfPayment] = useState(from?.modeOfPayment ?? '');
   const [payRows, setPayRows] = useState<PayRow[]>([]);
@@ -546,6 +594,9 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const renewalOfId: number | null = from ? from.id : null;
+  const isOngoing = ongoing && !km.visits;
+  // The plan an ongoing contract starts with: its rows up to a year ahead.
+  const termEnd = isOngoing ? (startDate ? ongoingHorizon(startDate) : '') : endDate;
 
 
   useEffect(() => {
@@ -574,23 +625,23 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
     if (v?.paymentFrequency) setFrequency(v.paymentFrequency);
   }
 
-  useEffect(() => { if (!planDirty) setPlan(buildPlan(startDate, endDate, frequency, category, categoryLabel)); }, [startDate, endDate, frequency, category, categoryLabel, planDirty]);
+  useEffect(() => { if (!planDirty) setPlan(buildPlan(startDate, termEnd, frequency, category, categoryLabel)); }, [startDate, termEnd, frequency, category, categoryLabel, planDirty]);
   // The payment plan follows the terms until the user edits a row (then it is theirs).
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (payDirty) return;
-    const rows = buildPayRows(startDate, endDate, payCount ?? defaultPayCount(frequency, startDate, endDate), annualTotal);
+    const rows = isOngoing ? buildOngoingRows(startDate, frequency, annualTotal) : buildPayRows(startDate, termEnd, payCount ?? defaultPayCount(frequency, startDate, termEnd), annualTotal);
     // Bill-type kinds: one row per period with NO amount — the bill fills it in when it arrives.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPayRows(km.schedule === 'bills' && annualValue.trim() === '' ? rows.map(r => ({ ...r, amountAed: '' })) : rows);
-  }, [startDate, endDate, frequency, annualValue, annualTotal, payDirty, payCount, kind, km.schedule]);
-  // Picking a bill-type kind defaults the cadence to monthly; ad-hoc has no schedule.
-  const pickKind = (k: ContractKind) => { setKind(k); setPayDirty(false); if (kindOf(k).schedule === 'bills') setFrequency('monthly'); };
+  }, [startDate, termEnd, frequency, annualValue, annualTotal, payDirty, payCount, kind, km.schedule, isOngoing]);
+  // Picking a bill-type kind defaults the cadence to monthly; ad-hoc has no schedule. Bills and ad-hoc start ongoing, the rest dated.
+  const pickKind = (k: ContractKind) => { const m = kindOf(k); setKind(k); setPayDirty(false); if (m.schedule === 'bills') setFrequency('monthly'); if (!from) setOngoing(!m.visits && m.schedule !== 'fixed'); };
 
   const editRow = (i: number, patch: Partial<PlanRow>) => { setPlanDirty(true); setPlan(p => p.map((r, j) => j === i ? { ...r, ...patch } : r)); };
   const removeRow = (i: number) => { setPlanDirty(true); setPlan(p => p.filter((_, j) => j !== i)); };
-  const addRow = () => { setPlanDirty(true); setPlan(p => [...p, { title: visitTitle(categoryLabel, category), dueDate: endDate || startDate || '', notes: '' }]); };
-  const regenerate = () => { setPlanDirty(false); setPlan(buildPlan(startDate, endDate, frequency, category, categoryLabel)); };
+  const addRow = () => { setPlanDirty(true); setPlan(p => [...p, { title: visitTitle(categoryLabel, category), dueDate: termEnd || startDate || '', notes: '' }]); };
+  const regenerate = () => { setPlanDirty(false); setPlan(buildPlan(startDate, termEnd, frequency, category, categoryLabel)); };
 
   async function submit() {
     setError(null);
@@ -603,12 +654,13 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
         serviceProviderId: spId,
         propertyId: propertyId ? Number(propertyId) : null,
         kind, categoryLabel: categoryLabel.trim() || null, expenseCategoryId: newCat ? null : categoryId,
-        contractType, startDate, endDate: endDate || null, frequency,
+        contractType, startDate, endDate: isOngoing ? null : endDate || null, ongoing: isOngoing, frequency,
+        accountNumber: accountNumber.trim() || null,
         renewalOfId: contractType === 'renewal' ? renewalOfId : null,
         annualValueAed: annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Number(annualValue) : null,
         vatMode, annualVatAed: annualVat.trim() !== '' ? Number(annualVat) : null,
         modeOfPayment: modeOfPayment || null,
-        numberOfPayments: km.schedule === 'none' ? null : payRows.length || null,
+        numberOfPayments: km.schedule === 'none' || isOngoing ? null : payRows.length || null,
         installments: km.schedule === 'none' ? [] : payRows.filter(r => r.dueDate).map(r => ({ dueDate: r.dueDate, amountAed: r.amountAed.trim() === '' ? null : Number(r.amountAed) || 0 })),
         notes: notes.trim() || null,
         tasks: km.visits ? plan.filter(r => r.title.trim()).map(r => ({ title: r.title.trim(), dueDate: r.dueDate || null, notes: r.notes.trim() || null })) : [],
@@ -662,7 +714,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef] sticky top-0 bg-white z-10">
           <div>
             <h2 className="text-sm font-bold text-[#1a1916]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : 'Add a contract or expense'}</h2>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>
+            <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{accountNumber.trim() ? ` · Acc ${accountNumber.trim()}` : ''}{isOngoing ? ' · ongoing' : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>
           </div>
           <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916]"><X size={18} /></button>
         </div>
@@ -679,6 +731,9 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
               {from
                 ? <p className="text-[11px] text-[#2e9f82] mt-1">Everything from AMC-{from.id} ({fmt(from.startDate)} – {fmt(from.endDate)}) is prefilled for the next term — change what differs, then save. The old contract stays on record.</p>
                 : <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <a href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</a> first.</p>}
+              <div className="mt-3"><span className={lbl}>Account / contract no. <span className="font-normal text-[#9b9890]">— tells this vendor&rsquo;s contracts apart</span></span>
+                <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. Etisalat account 764506535, DEWA premise no." />
+              </div>
               <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#9b9890]">— which building this cost belongs to</span></span>
                 <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
                   <option value="">— all / none —</option>
@@ -722,7 +777,16 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
             <Section n={3} title="Term & value">
               <div className="grid grid-cols-2 gap-3">
                 <div><span className={lbl}>Start date</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
-                <div><span className={lbl}>End date</span><input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
+                <div><span className={lbl}>End date</span>
+                  {isOngoing
+                    ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#6b6860] bg-[#fafaf8]">Ongoing — no end date</div>
+                    : <input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} />}
+                  {!km.visits && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-[#6b6860] mt-1 cursor-pointer">
+                      <input type="checkbox" checked={isOngoing} onChange={e => { setOngoing(e.target.checked); setPayDirty(false); }} /> Ongoing — no end date
+                    </label>
+                  )}
+                </div>
                 <div><span className={lbl}>{km.schedule === 'bills' ? 'Billing cycle' : km.visits ? 'Visit & payment cadence' : 'Payment cadence'}</span>
                   <select className={field} value={frequency} onChange={e => setFrequency(e.target.value)}>
                     <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option>
@@ -749,8 +813,8 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
           {/* ── right: the money, the visits, the paperwork ── */}
           <div className="space-y-4 min-w-0">
             <Section n={4} title={km.schedule === 'bills' ? 'Bills' : km.schedule === 'none' ? 'Spend' : 'Payments'}
-              hint={km.schedule === 'none' ? 'No schedule — each spend is recorded on the contract page as it happens.' : km.schedule === 'bills' ? `One row per ${frequency === 'monthly' ? 'month' : 'period'}, amount left empty — enter each bill when it arrives.` : 'Tick “already paid” to record the cheque / transfer details and proof now — nothing to re-enter later.'}>
-              {km.schedule !== 'none' && <PaymentPlanEditor start={startDate} end={endDate} frequency={frequency} annualValue={annualTotal} rows={payRows} onChange={setPayRows} dirty={payDirty} setDirty={setPayDirty} onCount={setPayCount} proofs modeOfPayment={modeOfPayment} vatInside={vatMode !== 'none'} />}
+              hint={km.schedule === 'none' ? 'No schedule — each spend is recorded on the contract page as it happens.' : isOngoing ? `Ongoing — the rows run a year ahead and keep rolling forward; nothing to renew. ${km.schedule === 'bills' ? 'Enter each bill when it arrives.' : ''}` : km.schedule === 'bills' ? `One row per ${frequency === 'monthly' ? 'month' : 'period'}, amount left empty — enter each bill when it arrives.` : 'Tick “already paid” to record the cheque / transfer details and proof now — nothing to re-enter later.'}>
+              {km.schedule !== 'none' && <PaymentPlanEditor ongoing={isOngoing} start={startDate} end={termEnd} frequency={frequency} annualValue={annualTotal} rows={payRows} onChange={setPayRows} dirty={payDirty} setDirty={setPayDirty} onCount={setPayCount} proofs modeOfPayment={modeOfPayment} vatInside={vatMode !== 'none'} />}
             </Section>
 
             {km.visits && (
@@ -838,7 +902,7 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
         propertyId: from.propertyId,
         contractType: 'renewal',
         renewalOfId: from.id,
-        startDate, endDate: endDate || null,
+        startDate, endDate: endDate || null, accountNumber: from.accountNumber ?? null,
         frequency: from.frequency,
         modeOfPayment: from.modeOfPayment,
         numberOfPayments: from.numberOfPayments,

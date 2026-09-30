@@ -22,7 +22,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { openDocViewer } from '@/lib/docViewer';
 import { splitVat, typedFromStored, aed2, type VatMode } from '@/lib/vatSplit';
 import { AmountWithVat } from '@/components/upnow/VatChoice';
-import { AddAmcModal, PaymentPlanEditor, useKinds, type AmcContract, type ContractKind, type PayRow, type CategoryOpt } from '@/components/amc/AmcView';
+import { AddAmcModal, PaymentPlanEditor, useKinds, ongoingHorizon, accountTag, type AmcContract, type ContractKind, type PayRow, type CategoryOpt } from '@/components/amc/AmcView';
 
 interface VendorInfo {
   email: string | null; phone: string | null; contactName: string | null; contactPhone: string | null;
@@ -185,6 +185,9 @@ function AttendChooser({ busy, onPick, onCancel, label }: { busy: boolean; onPic
 function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: number | null; c: Contract; onClose: () => void; onSaved: () => void }) {
   const [startDate, setStartDate] = useState(c.startDate ? isoDay(c.startDate) : '');
   const [endDate, setEndDate] = useState(c.endDate ? isoDay(c.endDate) : '');
+  // 0346 — ongoing: no end date; setting one stops the rolling schedule there.
+  const [ongoing, setOngoing] = useState(!!c.ongoing);
+  const [accountNumber, setAccountNumber] = useState(c.accountNumber ?? '');
   const [vatMode, setVatMode] = useState<VatMode>(c.vatMode ?? 'none');
   const [annual, setAnnual] = useState(typedFromStored(c.annualValueAed, c.annualVatAed, c.vatMode ?? 'none'));
   // Blank = our 5%; filled = the supplier's own VAT figure. Starts from what is stored so an unchanged save keeps it to the fil.
@@ -207,11 +210,15 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
   const [error, setError] = useState<string | null>(null);
   const field = 'w-full text-sm px-3 py-2 border border-[#e6e8e6] rounded-lg bg-white focus:outline-none focus:border-[#1a7a52]';
   const l = 'text-xs font-medium text-[#5b615e] mb-1 block';
+  const canBeOngoing = !kindOf(kind).visits;
   async function submit() {
-    setError(null); setSaving(true);
+    setError(null);
+    if (!(ongoing && canBeOngoing) && !endDate) { setError(canBeOngoing ? 'Set an end date, or tick "Ongoing — no end date".' : 'Set the end date.'); return; }
+    setSaving(true);
     try {
       await apiPatch(scoped(base, rp, `/contracts/${c.id}`), {
-        startDate: startDate || null, endDate: endDate || null,
+        startDate: startDate || null, endDate: ongoing && canBeOngoing ? null : endDate || null,
+        accountNumber: accountNumber.trim() || null,
         annualValueAed: annual.trim() !== '' ? Number(annual) : null,
         vatMode, annualVatAed: vatMode !== 'none' && annualVat.trim() !== '' ? Number(annualVat) : null,
         modeOfPayment: mode || null, notes: notes.trim() || null,
@@ -268,9 +275,22 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
               </select>
             </div>
           </div>
+          <div><span className={l}>Account / contract no. <span className="font-normal text-[#8a8f8c]">— tells this vendor&rsquo;s contracts apart</span></span>
+            <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. Etisalat account 764506535" />
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <div><span className={l}>Start date</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
-            <div><span className={l}>End date</span><input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
+            <div><span className={l}>End date</span>
+              {ongoing && canBeOngoing
+                ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#5b615e] bg-[#fafaf8]">Ongoing — no end date</div>
+                : <input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} />}
+              {canBeOngoing && (
+                <label className="flex items-center gap-1.5 text-[11px] text-[#5b615e] mt-1 cursor-pointer">
+                  <input type="checkbox" checked={ongoing} onChange={e => setOngoing(e.target.checked)} /> Ongoing — no end date
+                </label>
+              )}
+              {c.ongoing && !ongoing && canBeOngoing && <p className="text-[11px] text-[#8a8f8c] mt-1">Unbilled, unpaid rows after the end date are removed.</p>}
+            </div>
             {/* Cadence is set once, on the Add form, where it generates the visits and the schedule. Changing it
                 here would only relabel the contract — the rows already on record would not move — so it is read-only
                 and says where the real change is made (owner, 12 Sep: "if I change, what will happen?"). */}
@@ -284,7 +304,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
                 {['cheque', 'bank_transfer', 'cash', 'card', 'online'].map(m => <option key={m} value={m}>{cap(m)}</option>)}
               </select>
             </div>
-            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.numberOfPayments ?? '—'} on the schedule · edit them on the contract page</div></div>
+            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.ongoing ? 'Rolling, a year ahead' : `${c.numberOfPayments ?? '—'} on the schedule`} · edit them on the contract page</div></div>
           </div>
 
           <div><span className={l}>Notes</span><textarea rows={3} className={field} value={notes} onChange={e => setNotes(e.target.value)} /></div>
@@ -543,7 +563,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   // A cancelled (discontinued) contract is neither renewable nor cancellable again.
   const cancelled = c.status === 'cancelled';
   const km = kindOf(c.kind);
-  const renewable = c.renewedById == null && !cancelled;
+  // An ongoing contract never runs out, so there is nothing to renew (0346).
+  const renewable = c.renewedById == null && !cancelled && !c.ongoing;
   const cancellable = !cancelled && c.renewedById == null;
   const v = c.vendor;
   const category = v?.category ?? (c.serviceCategory ? cap(c.serviceCategory) : null);
@@ -603,7 +624,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     ...(lastPaid && !overdueRows.slice(0, 3).includes(lastPaid) ? [lastPaid] : []),
   ].sort((a, b) => a.seq - b.seq);
   const contractStart = c.startDate ? isoDay(c.startDate) : '';
-  const contractEnd = c.endDate ? isoDay(c.endDate) : '';
+  // 0346 — an ongoing contract's plan runs a year ahead and keeps rolling.
+  const contractEnd = c.endDate ? isoDay(c.endDate) : c.ongoing && contractStart ? ongoingHorizon(contractStart) : '';
   const annualStr = c.annualValueAed != null ? String(c.annualValueAed) : '';
 
   const stageWord = (x: Visit) => !x.stages[0] ? 'awaiting attendance' : 'awaiting delivery note';
@@ -704,7 +726,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f1f3f1]">
               <div>
                 <h2 className="text-sm font-bold">Record payment · #{paying.seq}</h2>
-                <p className="text-[11.5px] text-[#5b615e] mt-0.5">{c.vendorName} · due {fmtD(paying.dueDate)}{paying.reference ? ` · bill ${paying.reference}` : ''}</p>
+                <p className="text-[11.5px] text-[#5b615e] mt-0.5">{c.vendorName}{c.accountNumber ? ` · Acc ${c.accountNumber}` : ''} · due {fmtD(paying.dueDate)}{paying.reference ? ` · bill ${paying.reference}` : ''}</p>
               </div>
               <button type="button" onClick={() => setPaying(null)} className="text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
@@ -763,8 +785,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               <button onClick={() => setPlanOpen(false)} className="text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
             <div className="px-5 py-4">
-              <p className="text-[11.5px] text-[#5b615e] mb-3">Term {fmtD(c.startDate)} → {fmtD(c.endDate)} · {c.frequency ? cap(c.frequency) : 'no frequency'} · {aed(c.annualValueAed)}/yr{c.annualVatAed ? ` (incl. VAT ${aed2(c.annualVatAed)})` : ''}. Pick a preset or shape the plan by hand — any number of installments, any dates and amounts. Paid installments stay as they are.</p>
-              <PaymentPlanEditor start={contractStart} end={contractEnd} frequency={c.frequency ?? ''} annualValue={annualStr} rows={planRows} onChange={setPlanRows} dirty={planDirty} setDirty={setPlanDirty} vatInside={(c.vatMode ?? 'none') !== 'none'} />
+              <p className="text-[11.5px] text-[#5b615e] mb-3">Term {fmtD(c.startDate)} → {c.ongoing ? 'ongoing' : fmtD(c.endDate)} · {c.frequency ? cap(c.frequency) : 'no frequency'} · {aed(c.annualValueAed)}/yr{c.annualVatAed ? ` (incl. VAT ${aed2(c.annualVatAed)})` : ''}. Pick a preset or shape the plan by hand — any number of installments, any dates and amounts. Paid installments stay as they are.</p>
+              <PaymentPlanEditor ongoing={!!c.ongoing} start={contractStart} end={contractEnd} frequency={c.frequency ?? ''} annualValue={annualStr} rows={planRows} onChange={setPlanRows} dirty={planDirty} setDirty={setPlanDirty} vatInside={(c.vatMode ?? 'none') !== 'none'} />
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#f1f3f1]">
               <button onClick={() => setPlanOpen(false)} className={btn}>Cancel</button>
@@ -788,6 +810,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <p className="text-[11px] text-[#8a8f8c]"><Link href={listHref} className="hover:underline">AMC Contracts</Link> › AMC-{c.id}</p>
             <div className="flex items-center gap-2.5 flex-wrap mt-0.5">
               <h1 className="text-[19px] font-bold tracking-[-.01em] leading-tight">{c.vendorName}</h1>
+              {accountTag(c) && <span className="text-[11px] font-semibold px-2 py-[3px] rounded-full bg-[#f1f3f1] text-[#5b615e]">{accountTag(c)}</span>}
               <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-full" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
               {!km.visits && <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-full" style={{ background: km.bg, color: km.fg }} title={km.hint}>{km.label}</span>}
               {km.visits && overdue.length > 0 && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full bg-[#fdecea] text-[#b42318]">{overdue.length} visit{overdue.length === 1 ? '' : 's'} overdue</span>}
@@ -823,10 +846,10 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
         )}
         {/* fact strip */}
         <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr] mt-[18px] border-t border-[#eef0ee] pt-3.5 gap-y-3">
-          <div className="sm:pr-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>PERIOD</div><div className="text-[13px] font-semibold mt-[3px]">{fmtD(c.startDate)} → {fmtD(c.endDate)}</div></div>
+          <div className="sm:pr-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>PERIOD</div><div className="text-[13px] font-semibold mt-[3px]">{fmtD(c.startDate)} → {c.ongoing ? 'Ongoing' : fmtD(c.endDate)}</div></div>
           {km.visits
             ? <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>INSPECTIONS</div><div className="text-[13px] font-semibold mt-[3px]">{c.frequency ? cap(c.frequency) : 'As scheduled'} · {n} visit{n === 1 ? '' : 's'}</div></div>
-            : <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{km.schedule === 'bills' ? 'BILLS' : km.schedule === 'none' ? 'SPEND' : 'PAYMENTS'}</div><div className="text-[13px] font-semibold mt-[3px]">{km.schedule === 'none' ? `${rows.length} recorded` : `${c.frequency ? cap(c.frequency) : 'As set'} · ${rows.length} ${km.schedule === 'bills' ? 'bills' : payWord}`}</div></div>}
+            : <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{km.schedule === 'bills' ? 'BILLS' : km.schedule === 'none' ? 'SPEND' : 'PAYMENTS'}</div><div className="text-[13px] font-semibold mt-[3px]">{km.schedule === 'none' ? `${rows.length} recorded` : `${c.frequency ? cap(c.frequency) : 'As set'} · ${c.ongoing ? 'rolling, a year ahead' : `${rows.length} ${km.schedule === 'bills' ? 'bills' : payWord}`}`}</div></div>}
           <div className="sm:px-[18px]"><div className={lbl}>ANNUAL VALUE</div><div className="text-[13px] font-semibold mt-[3px]">{aed(c.annualValueAed)}</div>{c.annualValueAed != null && (c.annualVatAed ? <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{aed2(c.annualValueAed - c.annualVatAed)} + VAT {aed2(c.annualVatAed)}</div> : <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">No VAT</div>)}</div>
         </div>
         {/* lineage rail */}

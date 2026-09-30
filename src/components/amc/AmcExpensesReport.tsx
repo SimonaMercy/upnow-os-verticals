@@ -16,7 +16,7 @@ import { kindMeta, kindMetaFromRow, type KindMeta } from './AmcView';
 
 interface MonthCell { due: number; paid: number; /** 0299 — the VAT inside due / paid. */ dueVat?: number; paidVat?: number; count: number; unbilled: number; overdue: number; paidCount: number }
 interface Row {
-  contractId: number; kind: string; categoryLabel: string | null; vendorName: string; propertyName: string | null;
+  contractId: number; kind: string; categoryLabel: string | null; vendorName: string; accountNumber?: string | null; propertyName: string | null;
   startDate: string | null; endDate: string | null; annualValueAed: number | null; frequency: string | null; cancelled: boolean;
   spread?: boolean; recoverable?: boolean;
   months: MonthCell[]; ytdDue: number; ytdPaid: number;
@@ -80,7 +80,7 @@ export function AmcExpensesReport({ base, rp, listHref, detailHrefOf }: { base: 
     const head = ['Property', 'Category', 'Kind', 'Vendor', 'Contract start', 'Contract end', 'Annual value', 'Frequency', ...MONTHS.map(m => `${m} ${year}`), 'YTD'];
     const lines = [head.join(',')];
     for (const g of groups) {
-      for (const r of g.rows) lines.push([g.name, r.categoryLabel ?? '', kindOf(r.kind).label, r.vendorName, r.startDate ?? '', r.endDate ?? '', r.annualValueAed ?? '', r.frequency ?? '', ...r.months.map(c => c[basis] || ''), basis === 'due' ? r.ytdDue : r.ytdPaid].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+      for (const r of g.rows) lines.push([g.name, r.categoryLabel ?? '', kindOf(r.kind).label, r.accountNumber ? `${r.vendorName} (${r.accountNumber})` : r.vendorName, r.startDate ?? '', r.endDate ?? 'ongoing', r.annualValueAed ?? '', r.frequency ?? '', ...r.months.map(c => c[basis] || ''), basis === 'due' ? r.ytdDue : r.ytdPaid].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
       lines.push([`${g.name} — subtotal`, '', '', '', '', '', '', '', ...g.sub.map(x => x || ''), g.ytd].map(v => `"${v}"`).join(','));
     }
     lines.push(['Total', '', '', '', '', '', '', '', ...grand.map(x => x || ''), grandYtd].map(v => `"${v}"`).join(','));
@@ -205,7 +205,7 @@ function GroupRows({ g, cellStyle, td, detailHrefOf, kindOf }: {
                 {r.spread && <span className="text-[9.5px] font-bold px-1.5 py-[1px] rounded-full bg-[#e9effc] text-[#2a5bd7] shrink-0" title="Read as one part per month of the term">spread</span>}
                 {r.recoverable && <span className="text-[9.5px] font-bold px-1.5 py-[1px] rounded-full bg-[#fdf3e3] text-[#c47a00] shrink-0" title="Rebilled to tenants">recoverable</span>}
               </div>
-              <Link href={detailHrefOf(r.contractId)} className="text-[10.5px] text-[#5b615e] hover:text-[#1a7a52] truncate block">{r.vendorName} · AMC-{r.contractId}</Link>
+              <Link href={detailHrefOf(r.contractId)} className="text-[10.5px] text-[#5b615e] hover:text-[#1a7a52] truncate block">{r.vendorName}{r.accountNumber ? ` · Acc ${r.accountNumber}` : ''} · AMC-{r.contractId}</Link>
             </td>
             <td className={td + ' text-[#5b615e]'}>{r.startDate ? `${fmtD(r.startDate)} → ${fmtD(r.endDate)}` : '—'}{r.frequency ? <span className="text-[#8a8f8c]"> · {r.frequency.replace(/_/g, ' ')}</span> : null}</td>
             <td className={td + ' text-right'}>{r.annualValueAed != null ? fmtN(r.annualValueAed) : <span className="text-[#b9bdba]">variable</span>}</td>
