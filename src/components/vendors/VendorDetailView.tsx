@@ -21,7 +21,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
 import { KIND_META, chip, type VendorRow } from '@/components/vendors/VendorsListView';
 import { EmailsCard } from '@/components/email/EmailsCard';
 import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
-import { VendorForm } from '@/components/vendors/VendorForm';
+import { PAY_FREQ_LABEL, VendorForm } from '@/components/vendors/VendorForm';
 
 interface Tech { id: number; name: string; phone: string | null; status: string; isLeadCapable: boolean }
 interface Cat { id: number; name: string; parentId: number | null }
@@ -153,10 +153,11 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
   const profile: { label: string; node: React.ReactNode }[] = [
     { label: 'Email', node: missing(v.email) },
     { label: 'Phone', node: missing(v.phone) },
-    { label: 'Entity', node: <span className="text-[#1a1916] font-medium">{v.entityType === 'individual' ? 'Individual / solo' : 'Company'}</span> },
+    ...(participating || v.entityType === 'individual' ? [{ label: 'Entity', node: <span className="text-[#1a1916] font-medium">{v.entityType === 'individual' ? 'Individual / solo' : 'Company'}</span> }] : []),
     { label: 'Contact person', node: <span className="text-[#1a1916] font-medium">{v.contactName ?? '—'}</span> },
-    { label: 'Address', node: <span className="text-[#1a1916] font-medium break-words">{v.address ?? '—'}</span> },
-    { label: 'Trade licence', node: (() => {
+    // A record (Etisalat, an authority) keeps only what it has — no empty address / licence rows (owner, 30 Sep).
+    ...(participating || v.address ? [{ label: 'Address', node: <span className="text-[#1a1916] font-medium break-words">{v.address ?? '—'}</span> }] : []),
+    ...(!participating && !v.tradeLicence?.number && !v.tradeLicence?.expiry && !v.tradeLicence?.doc ? [] : [{ label: 'Trade licence', node: (() => {
       const lic = v.tradeLicence; const today = new Date().toISOString().slice(0, 10);
       if (!lic || (!lic.number && !lic.expiry && !lic.doc)) return <span className="text-[#9b9890]">Not on file</span>;
       const expired = lic.expiry != null && lic.expiry < today;
@@ -167,8 +168,9 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
           {/* The copy itself lives on the Vendor KYC card below (owner, 12 Sep) — no second link here. */}
         </span>
       );
-    })() },
+    })() }]),
     { label: "What they're for", node: <span className="text-[#1a1916] font-medium">{v.category ?? '—'}</span> },
+    { label: 'Payment frequency', node: <span className="text-[#1a1916] font-medium">{v.paymentFrequency ? PAY_FREQ_LABEL[v.paymentFrequency] ?? v.paymentFrequency : '—'}</span> },
     ...(participating ? [
       { label: 'Relationship', node: <span className="text-[#1a1916] font-medium">{own ? 'Our own team' : 'Contracted vendor'}</span> },
       { label: 'Trades', node: <span className="text-[#1a1916] font-medium">{v.trades.length ? v.trades.map(t => t.name).join(' · ') : 'Not set'}</span> },

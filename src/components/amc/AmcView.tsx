@@ -78,7 +78,7 @@ export interface AmcContract {
 }
 interface PropertyOpt { id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }
 export interface CategoryOpt { id: number; name: string; defaultKind: string; isActive: boolean }
-interface VendorOpt { id: number; name: string; serviceCategory: string | null; expenseCategoryId?: number | null; expenseCategoryName?: string | null; expenseCategoryKind?: string | null }
+interface VendorOpt { id: number; name: string; serviceCategory: string | null; expenseCategoryId?: number | null; expenseCategoryName?: string | null; expenseCategoryKind?: string | null; paymentFrequency?: string | null }
 interface PlanRow { title: string; dueDate: string; notes: string }
 
 const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = {
@@ -570,6 +570,8 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
       setNewCat(false); setCategoryId(v.expenseCategoryId); setCategoryLabel(v.expenseCategoryName ?? '');
       if (v.expenseCategoryKind && kindList.some(k => k.key === v.expenseCategoryKind)) pickKind(v.expenseCategoryKind);
     }
+    // 0345 — and how often they're paid.
+    if (v?.paymentFrequency) setFrequency(v.paymentFrequency);
   }
 
   useEffect(() => { if (!planDirty) setPlan(buildPlan(startDate, endDate, frequency, category, categoryLabel)); }, [startDate, endDate, frequency, category, categoryLabel, planDirty]);

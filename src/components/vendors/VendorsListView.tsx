@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Search, Users } from 'lucide-react';
 import { apiGet } from '@/lib/api';
-import { VendorForm } from '@/components/vendors/VendorForm';
+import { PAY_FREQ_LABEL, VendorForm } from '@/components/vendors/VendorForm';
 
 interface Trade { id: number; name: string }
 /** 0279 adds landlord (head landlord / authority the rent goes to) and internal (employees). */
@@ -31,6 +31,7 @@ export interface VendorRow {
   trades: Trade[]; pricing: { categoryGroupId: number; group: string; mode: string; hourlyRateAed: number | null }[];
   technicians: number; openJobs: number;
   category: string | null; expenseCategoryId?: number | null;
+  paymentFrequency?: string | null;
   contactName?: string | null; address?: string | null;
   tradeLicence?: { number: string | null; expiry: string | null; doc: { id: number; fileUrl: string; displayName: string | null } | null } | null;
 }
@@ -104,6 +105,7 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
           </div>
           <span className="text-[13px] text-[#6b6860] truncate">
             {v.category ? <><b className="text-[#4a4842] font-semibold">{v.category}</b>{' · '}</> : null}
+            {v.paymentFrequency && PAY_FREQ_LABEL[v.paymentFrequency] ? <>{`Paid ${PAY_FREQ_LABEL[v.paymentFrequency].toLowerCase()}`}{' · '}</> : null}
             {participating
               ? (v.trades.length ? v.trades.map(t => t.name).join(' · ') : 'no trades set')
               : 'record — contracts & payments here; never invited, never assigned work'}

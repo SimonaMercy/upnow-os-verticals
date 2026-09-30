@@ -4,10 +4,14 @@
  * One vendor form for Add and Edit (owner, 10 Sep 2026: "no option to edit the
  * vendor's details … no option to attach their trade licence … form is not
  * properly arranged"). Four sections, top to bottom:
- *   1. Vendor      — type, name, what they're for
+ *   1. Vendor      — type, name, what they're for, payment frequency
  *   2. Company     — entity, relationship, contact person, address, trade licence (number · valid till · copy)
  *   3. Contact     — phone, email (locked once the vendor has accepted the invite)
  *   4. Trades      — service vendors only
+ * A RECORD (utility, government, …) asks for less (owner, 30 Sep 2026: "we
+ * don't need trade license or too many information, just to keep records and
+ * payment frequency only"): contact person moves into Contact, and Company —
+ * address, trade licence — stays folded away unless asked for or already filled.
  * The licence copy is filed against the vendor record after the save, then
  * linked to it; the number and validity are kept on the record either way.
  */
@@ -27,10 +31,13 @@ export interface VendorFormValue {
   trades: { id: number; name: string }[];
   contactName?: string | null; address?: string | null;
   tradeLicence?: { number: string | null; expiry: string | null; doc: { id: number; fileUrl: string; displayName: string | null } | null } | null;
+  paymentFrequency?: string | null;
 }
 interface Group { id: number; name: string }
 
 export const KIND_LABEL: Record<VendorKind, string> = { service: 'Service', utility: 'Utility', government: 'Government', insurance: 'Insurance', supplier: 'Supplier', landlord: 'Head landlord', internal: 'Internal' };
+/** 0345 — the same cadences as an AMC contract, which starts from the vendor's. */
+export const PAY_FREQ_LABEL: Record<string, string> = { monthly: 'Monthly', quarterly: 'Quarterly', annually: 'Annually', one_time: 'One-time' };
 const KIND_HINT: Record<VendorKind, string> = {
   service: 'e.g. Elevator Maintenance, Pest Control', utility: 'e.g. Utility – Power, Utility – Water',
   government: 'e.g. Land Renewal, Municipal Fees', insurance: 'e.g. Building Insurance', supplier: 'e.g. Cleaning Material',
@@ -78,8 +85,11 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
   const [phone, setPhone] = useState(v?.phone ?? '');
   const [email, setEmail] = useState(v?.email ?? '');
   const [trades, setTrades] = useState<number[]>(v?.trades.map(t => t.id) ?? []);
+  const [payFreq, setPayFreq] = useState(v?.paymentFrequency ?? '');
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // A record's Company block opens on request — or at once when something is already in it.
+  const [showCompany, setShowCompany] = useState(!!(v?.address || v?.entityType === 'individual' || v?.tradeLicence?.number || v?.tradeLicence?.expiry || v?.tradeLicence?.doc));
 
   const service = kind === 'service';
   const company = entityType === 'company';
@@ -96,6 +106,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
       const details = {
         contactName: contactName.trim() || null, address: address.trim() || null,
         tradeLicenceNumber: licNo.trim() || null, tradeLicenceExpiry: licExpiry || null,
+        paymentFrequency: payFreq || null,
       };
       let spId = v?.serviceProviderId ?? null;
       if (mode === 'add') {
@@ -151,7 +162,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                   return <button key={k} type="button" disabled={disabled} onClick={() => setKind(k)} className={chipCls(kind === k, disabled)}>{KIND_LABEL[k]}</button>;
                 })}
               </div>
-              <p className={hint}>{kindLocked ? 'Already invited — an invited vendor stays a service vendor.' : service ? 'Does maintenance work — you can invite them onto UpNow and assign jobs.' : 'A record for contracts and payments — never invited, never assigned work.'}</p>
+              <p className={hint}>{kindLocked ? 'Already invited — an invited vendor stays a service vendor.' : service ? 'Does maintenance work — you can invite them onto UpNow and assign jobs.' : 'A record for contracts and payments — never invited, never assigned work. Only the name is needed; no trade licence.'}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -177,11 +188,20 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                 )}
                 <p className={hint}>A sub-category from Settings → AMC categories. A contract added for this vendor starts with it.</p>
               </div>
+              <div>
+                <label className={label} htmlFor="vf-payfreq">Payment frequency</label>
+                <select id="vf-payfreq" className={field} value={payFreq} onChange={e => setPayFreq(e.target.value)}>
+                  <option value="">— not set —</option>
+                  {Object.entries(PAY_FREQ_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                <p className={hint}>How often you pay them. A contract added for this vendor starts with it.</p>
+              </div>
             </div>
           </Section>
 
-          {/* 2 · Company */}
-          <Section title={company ? 'Company' : 'Person'} sub="the vendor's own details, on your record">
+          {/* 2 · Company — a service vendor's always; a record's only when asked for */}
+          {(service || showCompany) && (
+          <Section title={company ? 'Company' : 'Person'} sub={service ? "the vendor's own details, on your record" : 'optional'}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={label} htmlFor="vf-entity">Entity</label>
@@ -189,17 +209,12 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                   <option value="company">Company</option><option value="individual">Individual / solo</option>
                 </select>
               </div>
-              {service ? (
+              {service && (
                 <div>
                   <label className={label} htmlFor="vf-relationship">Relationship</label>
                   <select id="vf-relationship" className={field} value={relationship} onChange={e => setRelationship(e.target.value as typeof relationship)}>
                     <option value="contracted_vendor">Contracted vendor</option><option value="internal_team">Our own team</option>
                   </select>
-                </div>
-              ) : (
-                <div>
-                  <label className={label} htmlFor="vf-contact">Contact person</label>
-                  <input id="vf-contact" className={field} placeholder="Who you deal with" value={contactName} onChange={e => setContactName(e.target.value)} />
                 </div>
               )}
               {service && (
@@ -208,7 +223,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                   <input id="vf-contact2" className={field} placeholder="Who you deal with" value={contactName} onChange={e => setContactName(e.target.value)} />
                 </div>
               )}
-              <div className={service ? '' : 'sm:col-span-2'}>
+              <div>
                 <label className={label} htmlFor="vf-address">Address</label>
                 <input id="vf-address" className={field} placeholder="Office / yard address" value={address} onChange={e => setAddress(e.target.value)} />
               </div>
@@ -240,10 +255,17 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
               </label>
             </div>
           </Section>
+          )}
 
           {/* 3 · Contact */}
-          <Section title="Contact" sub={service ? 'for the invite and job alerts' : undefined}>
+          <Section title="Contact" sub={service ? 'for the invite and job alerts' : 'optional'}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {!service && (
+                <div className="sm:col-span-2">
+                  <label className={label} htmlFor="vf-contact">Contact person</label>
+                  <input id="vf-contact" className={field} placeholder="Who you deal with" value={contactName} onChange={e => setContactName(e.target.value)} />
+                </div>
+              )}
               <div>
                 <label className={label} htmlFor="vf-phone">Phone</label>
                 <input id="vf-phone" type="tel" className={field} placeholder="+971 50 000 0000" disabled={contactLocked} value={phone} onChange={e => setPhone(e.target.value)} />
@@ -255,6 +277,11 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                 {contactLocked && <p className={hint}>They&rsquo;ve accepted — sign-in details are theirs to change.</p>}
               </div>
             </div>
+            {!service && !showCompany && (
+              <button type="button" onClick={() => setShowCompany(true)} className="justify-self-start text-[12px] font-semibold text-[#1a7a5a] hover:underline cursor-pointer">
+                + Add company details — address, trade licence
+              </button>
+            )}
           </Section>
 
           {/* 4 · Trades */}
