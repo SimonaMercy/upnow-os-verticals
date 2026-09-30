@@ -99,8 +99,12 @@ export const addMonths = (iso: string, n: number) => {
   const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
   return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
 };
-/** 0346 — an ongoing contract's schedule reaches a year past today (or its start); the server keeps it rolling. */
-export const ongoingHorizon = (start: string) => { const t = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE }); return addMonths(start > t ? start : t, 12); };
+/** 0346 — an ongoing schedule is made one calendar year at a time: to 31 Dec of this year (of next year from 1 December,
+ *  or of the start's year if later) — the server adds each new year on its own, exactly like this. */
+export const ongoingHorizon = (start: string) => {
+  const t = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+  return `${Math.max(Number(t.slice(0, 4)) + (t.slice(5, 7) === '12' ? 1 : 0), Number(start.slice(0, 4)))}-12-31`;
+};
 /** "Etisalat · 764506535" — the account tells one vendor's contracts apart (0346). */
 export const accountTag = (c: { accountNumber?: string | null }) => c.accountNumber ? `Acc ${c.accountNumber}` : null;
 const addYears = (iso: string, n: number) => addMonths(iso, n * 12);
@@ -148,7 +152,7 @@ export const PAY_PRESETS = [1, 2, 3, 4, 6, 12];
 /** The flexible payment plan editor — shared by the Add/Renew form and the detail page. */
 export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, onChange, dirty, setDirty, onCount, proofs, modeOfPayment, vatInside, ongoing }: {
   start: string; end: string; frequency: string; annualValue: string;
-  /** 0346 — one row per period, rolling a year ahead: no split to choose. */
+  /** 0346 — one row per period, a calendar year at a time: no split to choose. */
   ongoing?: boolean;
   /** 0299 — the contract carries VAT: every amount here is what is PAID (VAT included) and each row shows its split. */
   vatInside?: boolean;
@@ -182,7 +186,7 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-medium text-[#6b6860]">Payment plan</span>
         {ongoing
-          ? <span className="text-[11px] text-[#6b6860]">One per {frequency === 'quarterly' ? 'quarter' : frequency === 'annually' ? 'year' : 'month'} · {rows.length} to {rows.length ? rows[rows.length - 1].dueDate : '—'}, then rolling</span>
+          ? <span className="text-[11px] text-[#6b6860]">One per {frequency === 'quarterly' ? 'quarter' : frequency === 'annually' ? 'year' : 'month'} · {rows.length} to {rows.length ? rows[rows.length - 1].dueDate : '—'} · next year added automatically</span>
           : <select className={field} value={presets.includes(count) ? String(count) : 'custom'} onChange={e => { if (e.target.value !== 'custom') regen(Number(e.target.value)); }} disabled={!start}>
           {presets.map(n => <option key={n} value={n}>{n === def ? `${n} · from ${frequency ? frequency.replace(/_/g, ' ') : 'frequency'}` : n === 1 ? '1 · single payment' : `${n} payments`}</option>)}
           {!presets.includes(count) && <option value="custom">{count} · custom</option>}
@@ -254,7 +258,7 @@ export function visitTitle(category: string | null | undefined, fallback?: strin
 }
 /**
  * 0346 — an ongoing contract's rows, exactly as the server extends them: one per
- * period at start + n × cadence up to a year ahead, each the period's share of
+ * period at start + n × cadence through its calendar year, each the period's share of
  * the annual value (empty when there is none — the bill fills it in).
  */
 export function buildOngoingRows(start: string, frequency: string, annualValue: string): PayRow[] {
@@ -595,7 +599,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const [error, setError] = useState<string | null>(null);
   const renewalOfId: number | null = from ? from.id : null;
   const isOngoing = ongoing && !km.visits;
-  // The plan an ongoing contract starts with: its rows up to a year ahead.
+  // The plan an ongoing contract starts with: its rows through the calendar year.
   const termEnd = isOngoing ? (startDate ? ongoingHorizon(startDate) : '') : endDate;
 
 
@@ -813,7 +817,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
           {/* ── right: the money, the visits, the paperwork ── */}
           <div className="space-y-4 min-w-0">
             <Section n={4} title={km.schedule === 'bills' ? 'Bills' : km.schedule === 'none' ? 'Spend' : 'Payments'}
-              hint={km.schedule === 'none' ? 'No schedule — each spend is recorded on the contract page as it happens.' : isOngoing ? `Ongoing — the rows run a year ahead and keep rolling forward; nothing to renew. ${km.schedule === 'bills' ? 'Enter each bill when it arrives.' : ''}` : km.schedule === 'bills' ? `One row per ${frequency === 'monthly' ? 'month' : 'period'}, amount left empty — enter each bill when it arrives.` : 'Tick “already paid” to record the cheque / transfer details and proof now — nothing to re-enter later.'}>
+              hint={km.schedule === 'none' ? 'No schedule — each spend is recorded on the contract page as it happens.' : isOngoing ? `Ongoing — this year's rows now; each new year's are added automatically on 1 December. Nothing to renew. ${km.schedule === 'bills' ? 'Enter each bill when it arrives.' : ''}` : km.schedule === 'bills' ? `One row per ${frequency === 'monthly' ? 'month' : 'period'}, amount left empty — enter each bill when it arrives.` : 'Tick “already paid” to record the cheque / transfer details and proof now — nothing to re-enter later.'}>
               {km.schedule !== 'none' && <PaymentPlanEditor ongoing={isOngoing} start={startDate} end={termEnd} frequency={frequency} annualValue={annualTotal} rows={payRows} onChange={setPayRows} dirty={payDirty} setDirty={setPayDirty} onCount={setPayCount} proofs modeOfPayment={modeOfPayment} vatInside={vatMode !== 'none'} />}
             </Section>
 

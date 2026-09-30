@@ -48,7 +48,9 @@ interface Visit { t: Task; n: number; stages: [boolean, boolean]; done: number; 
 interface InstDoc { id: number; fileUrl: string; displayName: string | null; documentKey: string }
 /** 0281 — `bill` is the vendor's bill copy; `proof` is the proof of PAYMENT; `paymentMethod` how it was settled. */
 /** 0299 — amountAed is the VAT-INCLUSIVE total; vatAed the VAT inside it. */
-interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; vatMode?: VatMode; vatAed?: number; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null }
+interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; vatMode?: VatMode; vatAed?: number; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null;
+  /** 0347 — the bill's own dates; `payBy` = when it is actually due (its pay-by date, else the schedule date). */
+  billDate?: string | null; billDueDate?: string | null; payBy?: string }
 const PAY_METHODS = ['cheque', 'bank_transfer', 'cash', 'card', 'online'] as const;
 interface InstPayload { derived: boolean; defaultCount: number; installments: Inst[] }
 
@@ -185,7 +187,7 @@ function AttendChooser({ busy, onPick, onCancel, label }: { busy: boolean; onPic
 function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: number | null; c: Contract; onClose: () => void; onSaved: () => void }) {
   const [startDate, setStartDate] = useState(c.startDate ? isoDay(c.startDate) : '');
   const [endDate, setEndDate] = useState(c.endDate ? isoDay(c.endDate) : '');
-  // 0346 — ongoing: no end date; setting one stops the rolling schedule there.
+  // 0346 — ongoing: no end date; setting one stops the schedule there.
   const [ongoing, setOngoing] = useState(!!c.ongoing);
   const [accountNumber, setAccountNumber] = useState(c.accountNumber ?? '');
   const [vatMode, setVatMode] = useState<VatMode>(c.vatMode ?? 'none');
@@ -304,7 +306,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
                 {['cheque', 'bank_transfer', 'cash', 'card', 'online'].map(m => <option key={m} value={m}>{cap(m)}</option>)}
               </select>
             </div>
-            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.ongoing ? 'Rolling, a year ahead' : `${c.numberOfPayments ?? '—'} on the schedule`} · edit them on the contract page</div></div>
+            <div><span className={l}>Payments</span><div className="text-[12px] text-[#5b615e] px-1 py-2">{c.ongoing ? 'A year at a time, added automatically' : `${c.numberOfPayments ?? '—'} on the schedule`} · edit them on the contract page</div></div>
           </div>
 
           <div><span className={l}>Notes</span><textarea rows={3} className={field} value={notes} onChange={e => setNotes(e.target.value)} /></div>
@@ -348,6 +350,8 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const [remindBusy, setRemindBusy] = useState(false);
   const [inst, setInst] = useState<InstPayload | null>(null);
   const [paying, setPaying] = useState<Inst | null>(null);
+  // 0346 — the year an ongoing contract's bills are shown for; null = this year.
+  const [billYear, setBillYear] = useState<string | null>(null);
   const [payRef, setPayRef] = useState('');
   const [payDate, setPayDate] = useState('');
   const [payMethod, setPayMethod] = useState('');
@@ -356,6 +360,9 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const [payVat, setPayVat] = useState<VatMode>('none');
   const [payOpened, setPayOpened] = useState<{ amount: string; vat: VatMode }>({ amount: '', vat: 'none' });
   const [billVat, setBillVat] = useState<VatMode>('none');
+  // 0347 — the dates printed on the bill (owner, 30 Sep: issue date and due date are not the same).
+  const [billDate, setBillDate] = useState('');
+  const [billDueDate, setBillDueDate] = useState('');
   const [spendVat, setSpendVat] = useState<VatMode>('none');
   const [payFile, setPayFile] = useState<File | null>(null);
   const [spendMethod, setSpendMethod] = useState('');
@@ -428,12 +435,13 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     if (r.id == null) return;
     const v = billAmount.trim();
     if (v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) { say('Enter the bill amount.', 'warn'); return; }
+    if (billDate && billDueDate && billDueDate < billDate) { say('The due date is before the bill date.', 'warn'); return; }
     setPayBusy(true);
     try {
       let proofDocId: number | null = null;
       if (f) proofDocId = await uploadContractFile(cid, f, `sp_bill_inst_${r.id}`, 'payment', billRef.trim() ? `Bill · ${billRef.trim()}` : `Bill · #${r.seq}`);
-      await apiPatch(scoped(base, rp, `/installments/${r.id}/bill`), { amountAed: Number(v), vatMode: billVat, reference: billRef.trim() || null, billDocId: proofDocId });
-      setBillingId(null); setBillAmount(''); setBillRef(''); load(); say(`Bill #${r.seq} recorded — ${aed2(splitVat(Number(v), billVat).total)}${billVat !== 'none' ? ' incl. VAT' : ''}.`);
+      await apiPatch(scoped(base, rp, `/installments/${r.id}/bill`), { amountAed: Number(v), vatMode: billVat, reference: billRef.trim() || null, billDocId: proofDocId, billDate: billDate || null, billDueDate: billDueDate || null });
+      setBillingId(null); setBillAmount(''); setBillRef(''); setBillDate(''); setBillDueDate(''); load(); say(`Bill #${r.seq} recorded — ${aed2(splitVat(Number(v), billVat).total)}${billVat !== 'none' ? ' incl. VAT' : ''}.`);
     } catch { say('Could not record the bill.', 'warn'); }
     finally { setPayBusy(false); }
   };
@@ -604,8 +612,13 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
   const rows = inst?.installments ?? [];
   const derived = inst?.derived ?? true;
   // 'awaiting' = a bill not yet received (no amount): it is awaited, not overdue.
-  const stateOf = (r: Inst): 'paid' | 'overdue' | 'upcoming' | 'awaiting' => r.status === 'paid' ? 'paid' : r.amountAed == null ? 'awaiting' : r.dueDate < today ? 'overdue' : 'upcoming';
+  // 0347 — overdue from the bill's own due date when it has one, else the schedule date.
+  const stateOf = (r: Inst): 'paid' | 'overdue' | 'upcoming' | 'awaiting' => r.status === 'paid' ? 'paid' : r.amountAed == null ? 'awaiting' : (r.payBy ?? r.dueDate) < today ? 'overdue' : 'upcoming';
   const paidRows = rows.filter(r => r.status === 'paid');
+  // An ongoing contract's bills, one year at a time (owner, 30 Sep: "we will render year wise"). It opens on this year.
+  const billYears = c.ongoing ? [...new Set(rows.map(r => r.dueDate.slice(0, 4)))].sort() : [];
+  const yearOn = billYears.length ? (billYear && billYears.includes(billYear) ? billYear : billYears.includes(today.slice(0, 4)) ? today.slice(0, 4) : billYears[billYears.length - 1]) : null;
+  const yearRows = yearOn ? rows.filter(r => r.dueDate.slice(0, 4) === yearOn) : rows;
   const overdueRows = rows.filter(r => stateOf(r) === 'overdue');
   const awaitingRows = rows.filter(r => stateOf(r) === 'awaiting');
   const received = paidRows.reduce((n, r) => n + (r.amountAed ?? 0), 0);
@@ -624,7 +637,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
     ...(lastPaid && !overdueRows.slice(0, 3).includes(lastPaid) ? [lastPaid] : []),
   ].sort((a, b) => a.seq - b.seq);
   const contractStart = c.startDate ? isoDay(c.startDate) : '';
-  // 0346 — an ongoing contract's plan runs a year ahead and keeps rolling.
+  // 0346 — an ongoing contract's plan: this calendar year (next year's is added automatically).
   const contractEnd = c.endDate ? isoDay(c.endDate) : c.ongoing && contractStart ? ongoingHorizon(contractStart) : '';
   const annualStr = c.annualValueAed != null ? String(c.annualValueAed) : '';
 
@@ -676,10 +689,15 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                             </span>
                           )}
                           {st === 'awaiting' && (
-                            <button type="button" onClick={() => { setBillingId(r.id); setBillAmount(''); setBillRef(''); setBillVat(c.vatMode ?? 'none'); setPaying(null); }}
+                            <button type="button" onClick={() => { setBillingId(r.id); setBillAmount(''); setBillRef(''); setBillDate(''); setBillDueDate(''); setBillVat(c.vatMode ?? 'none'); setPaying(null); }}
                               className="text-[10.5px] font-bold px-2 py-[3px] rounded-[5px] border border-[#c47a00] text-[#c47a00] bg-white cursor-pointer shrink-0">
                               {r.dueDate.slice(0, 7) <= today.slice(0, 7) ? 'Enter bill' : 'bill awaited'}
                             </button>
+                          )}
+                          {/* 0347 — a bill already entered can be corrected (its dates, amount, number) until it is paid. */}
+                          {st !== 'paid' && st !== 'awaiting' && km.schedule === 'bills' && r.id != null && (
+                            <button type="button" onClick={() => { setBillingId(r.id); setBillAmount(typedFromStored(r.amountAed, r.vatAed ?? 0, r.vatMode ?? 'none')); setBillVat(r.vatMode ?? 'none'); setBillRef(r.reference ?? ''); setBillDate(r.billDate ?? ''); setBillDueDate(r.billDueDate ?? ''); setPaying(null); }}
+                              className="text-[10px] text-[#8a8f8c] hover:text-[#1c1f1d] underline cursor-pointer shrink-0">edit bill</button>
                           )}
                           {st !== 'paid' && st !== 'awaiting' && (
                             <button type="button" onClick={() => { setPaying(r); setPayRef(''); setPayDate(today); setPayMethod(c.modeOfPayment && (PAY_METHODS as readonly string[]).includes(c.modeOfPayment) ? c.modeOfPayment : ''); { const vm: VatMode = r.amountAed != null ? (r.vatMode ?? 'none') : (c.vatMode ?? 'none'); const typed = typedFromStored(r.amountAed, r.vatAed, vm); setPayAmount(typed); setPayVat(vm); setPayOpened({ amount: typed, vat: vm }); } setPayFile(null); }}
@@ -693,21 +711,30 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                             {r.vatAed
                               ? <>Before VAT <span className="font-semibold text-[#5b615e]">{aed2(Math.round((r.amountAed - r.vatAed) * 100) / 100)}</span> + VAT <span className="font-semibold text-[#5b615e]">{aed2(r.vatAed)}</span></>
                               : 'No VAT'}
+                            {r.billDate && <> · bill dated <span className="font-semibold text-[#5b615e]">{fmtS(r.billDate)}</span></>}
+                            {r.billDueDate && <> · <span className={st === 'overdue' ? 'font-bold text-[#b42318]' : 'font-semibold text-[#5b615e]'}>due {fmtS(r.billDueDate)}</span></>}
                           </div>
                         )}
                         {billingId != null && billingId === r.id && (
                           <div className="my-2 p-2 rounded-lg border border-[#f5d9a8] bg-[#fdf8ee]">
-                            <div className="text-[11px] font-semibold text-[#5b615e] mb-1.5">Bill #{r.seq} · {fmtS(r.dueDate)} — record the bill as it arrived</div>
+                            <div className="text-[11px] font-semibold text-[#5b615e] mb-1.5">Bill #{r.seq} · {fmtS(r.dueDate)} — {r.amountAed != null ? 'correct the bill on record' : 'record the bill as it arrived'}</div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <AmountWithVat size="sm" accent="#c47a00" className="w-48" placeholder="Amount (AED)" autoFocus amount={billAmount} onAmount={setBillAmount} mode={billVat} onMode={setBillVat} />
                               <input value={billRef} onChange={e => setBillRef(e.target.value)} placeholder="Bill / invoice no."
                                 className="text-[12px] px-2.5 py-1.5 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#c47a00] flex-1 min-w-[120px]" />
                             </div>
+                            <div className="flex items-center gap-3 flex-wrap mt-2">
+                              <label className="text-[11px] text-[#5b615e] flex items-center gap-1.5">Bill date
+                                <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)} className="text-[12px] px-2 py-1 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#c47a00]" /></label>
+                              <label className="text-[11px] text-[#5b615e] flex items-center gap-1.5">Due date
+                                <input type="date" value={billDueDate} min={billDate || undefined} onChange={e => setBillDueDate(e.target.value)} className="text-[12px] px-2 py-1 border border-[#e6e8e6] rounded-md bg-white focus:outline-none focus:border-[#c47a00]" /></label>
+                              <span className="text-[10.5px] text-[#8a8f8c]">As printed on the bill — overdue counts from its due date.</span>
+                            </div>
                             <div className="flex items-center gap-2 flex-wrap mt-2">
                               <label className={btnFillSm + (payBusy ? ' opacity-50' : '')}>{payBusy ? 'Saving…' : 'Attach bill copy & save'}
                                 <input type="file" accept="image/*,application/pdf" className="hidden" disabled={payBusy} onChange={e => { const f = e.target.files?.[0]; if (f) void enterBill(r, f); e.target.value = ''; }} />
                               </label>
-                              <button type="button" disabled={payBusy} onClick={() => void enterBill(r, null)} className={btnSm}>Save without the copy</button>
+                              <button type="button" disabled={payBusy} onClick={() => void enterBill(r, null)} className={btnSm}>{r.bill ? 'Save (keep the copy on file)' : 'Save without the copy'}</button>
                               <button type="button" onClick={() => setBillingId(null)} className="text-[11px] text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer">Cancel</button>
                             </div>
                           </div>
@@ -726,7 +753,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f1f3f1]">
               <div>
                 <h2 className="text-sm font-bold">Record payment · #{paying.seq}</h2>
-                <p className="text-[11.5px] text-[#5b615e] mt-0.5">{c.vendorName}{c.accountNumber ? ` · Acc ${c.accountNumber}` : ''} · due {fmtD(paying.dueDate)}{paying.reference ? ` · bill ${paying.reference}` : ''}</p>
+                <p className="text-[11.5px] text-[#5b615e] mt-0.5">{c.vendorName}{c.accountNumber ? ` · Acc ${c.accountNumber}` : ''} · due {fmtD(paying.payBy ?? paying.dueDate)}{paying.reference ? ` · bill ${paying.reference}` : ''}</p>
               </div>
               <button type="button" onClick={() => setPaying(null)} className="text-[#8a8f8c] hover:text-[#1c1f1d] cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
@@ -849,7 +876,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           <div className="sm:pr-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>PERIOD</div><div className="text-[13px] font-semibold mt-[3px]">{fmtD(c.startDate)} → {c.ongoing ? 'Ongoing' : fmtD(c.endDate)}</div></div>
           {km.visits
             ? <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>INSPECTIONS</div><div className="text-[13px] font-semibold mt-[3px]">{c.frequency ? cap(c.frequency) : 'As scheduled'} · {n} visit{n === 1 ? '' : 's'}</div></div>
-            : <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{km.schedule === 'bills' ? 'BILLS' : km.schedule === 'none' ? 'SPEND' : 'PAYMENTS'}</div><div className="text-[13px] font-semibold mt-[3px]">{km.schedule === 'none' ? `${rows.length} recorded` : `${c.frequency ? cap(c.frequency) : 'As set'} · ${c.ongoing ? 'rolling, a year ahead' : `${rows.length} ${km.schedule === 'bills' ? 'bills' : payWord}`}`}</div></div>}
+            : <div className="sm:px-[18px] sm:border-r border-[#eef0ee]"><div className={lbl}>{km.schedule === 'bills' ? 'BILLS' : km.schedule === 'none' ? 'SPEND' : 'PAYMENTS'}</div><div className="text-[13px] font-semibold mt-[3px]">{km.schedule === 'none' ? `${rows.length} recorded` : `${c.frequency ? cap(c.frequency) : 'As set'} · ${c.ongoing ? 'each year added automatically' : `${rows.length} ${km.schedule === 'bills' ? 'bills' : payWord}`}`}</div></div>}
           <div className="sm:px-[18px]"><div className={lbl}>ANNUAL VALUE</div><div className="text-[13px] font-semibold mt-[3px]">{aed(c.annualValueAed)}</div>{c.annualValueAed != null && (c.annualVatAed ? <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{aed2(c.annualValueAed - c.annualVatAed)} + VAT {aed2(c.annualVatAed)}</div> : <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">No VAT</div>)}</div>
         </div>
         {/* lineage rail */}
@@ -1020,10 +1047,23 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
             <h2 className="text-[14px] font-bold">{km.schedule === 'bills' ? 'Bills' : km.schedule === 'none' ? 'Spend' : 'Payments'}</h2>
             <span className="text-[11px] text-[#8a8f8c]">{km.hint}</span>
           </div>
-          {rows.length > 0 && (
+          {billYears.length > 0 && (
+            <div className="flex items-center gap-1.5 mt-4 flex-wrap">
+              {billYears.map(y => { const inYear = rows.filter(r => r.dueDate.slice(0, 4) === y); return (
+                <button key={y} type="button" onClick={() => setBillYear(y)}
+                  className="text-[11px] px-3 py-1.5 rounded-full font-semibold transition-colors cursor-pointer"
+                  style={yearOn === y ? { background: '#1c1f1d', color: '#fff' } : { background: '#fff', color: '#5b615e', border: '1px solid #e6e8e6' }}>
+                  {y} · {inYear.filter(r => r.status === 'paid').length} of {inYear.length} paid
+                </button>
+              ); })}
+              <span className="text-[11px] text-[#8a8f8c] ml-auto">Paid in {yearOn}: <b className="text-[#1c1f1d]">{aed2(yearRows.filter(r => r.status === 'paid').reduce((n, r) => n + (r.amountAed ?? 0), 0))}</b></span>
+            </div>
+          )}
+          {/* One year's months at a time for an ongoing contract (owner, 30 Sep) — never an endless strip. */}
+          {yearRows.length > 0 && (
             <>
-              <div className="relative grid gap-1 mt-4" style={{ gridTemplateColumns: `repeat(${Math.min(rows.length, 24)}, minmax(0, 1fr))` }}>
-                {rows.slice(0, 24).map(r => { const st = stateOf(r); return (
+              <div className="relative grid gap-1 mt-4" style={{ gridTemplateColumns: `repeat(${Math.min(yearRows.length, 24)}, minmax(0, 1fr))` }}>
+                {yearRows.slice(0, 24).map(r => { const st = stateOf(r); return (
                   <div key={r.seq} className="text-center min-w-0" title={`#${r.seq} · ${fmtS(r.dueDate)} · ${st}`}>
                     <div className="w-5 h-5 rounded-full mx-auto grid place-items-center text-[10px] font-extrabold" style={st === 'paid' ? { background: '#1a7a52', border: '2px solid #1a7a52', color: '#fff' } : st === 'overdue' ? { background: '#fff', border: '2px solid #b42318' } : st === 'awaiting' ? { background: '#fdf3e3', border: '2px solid #f5d9a8' } : { background: '#fff', border: '2px solid #d9ddda' }}>{st === 'paid' ? '✓' : st === 'awaiting' ? '?' : ''}</div>
                     <div className={`text-[10.5px] mt-1.5 truncate ${st === 'overdue' ? 'font-bold text-[#b42318]' : st === 'awaiting' ? 'font-bold text-[#c47a00]' : st === 'paid' ? 'font-semibold text-[#1a7a52]' : 'text-[#5b615e]'}`}>{mon(r.dueDate, true)}</div>
@@ -1040,7 +1080,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
           )}
           {derived && rows.length === 0 && km.schedule !== 'none' && <p className="text-[12px] text-[#8a8f8c] mt-4">No schedule yet — set it up in the Payments card.</p>}
           {km.schedule === 'none' && rows.length === 0 && !spendOpen && <p className="text-[12px] text-[#8a8f8c] mt-4">Nothing recorded yet. Each spend goes on here with its amount and receipt.</p>}
-          {!derived && rows.length > 0 && paymentRows(rows)}
+          {!derived && yearRows.length > 0 && paymentRows(yearRows)}
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             {!spendOpen && <button type="button" onClick={() => { setSpendOpen(true); setSpendDate(today); setSpendPaid(km.schedule === 'none'); }} className={btnGreenSm}>{km.schedule === 'none' ? '+ Record a spend' : '+ Add a bill'}</button>}
             {canEdit && !derived && km.schedule !== 'none' && <button type="button" onClick={openPlanEditor} className="text-[11px] font-semibold text-[#5b615e] hover:text-[#1c1f1d] cursor-pointer">Edit schedule</button>}
