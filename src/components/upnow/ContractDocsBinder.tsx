@@ -727,14 +727,20 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     // The Payment Confirmation reads in the Payment Summary's own order: a
     // cheque file's slot tag (`<slot> · <file>`, planAttach) names the summary
     // line it confirms, so tagged files sort by that line's position in the
-    // plan. Untagged files (sent "all together", and a lead's synthetic
-    // cheque rows) keep their existing order, after the tagged ones.
+    // plan. Untagged files (sent "all together", and a lead's cheques) follow,
+    // in the order they were sent: a converted lead's cheques are copied in
+    // cheque order (real rows, rising ids) or synthesised as `-leadChequeId`,
+    // so upload order is the absolute id ascending — newest-first would read
+    // a converted lease's "Cheque 1…4" as 4…1.
     const pos = key === 'payment_advice'
       ? (d: BinderDoc) => { const i = planSlots.indexOf(slotOfDoc(d.displayName) ?? ''); return i < 0 ? planSlots.length : i; }
       : () => 0;
+    const tie = key === 'payment_advice'
+      ? (a: BinderDoc, b: BinderDoc) => Math.abs(a.id) - Math.abs(b.id)
+      : (a: BinderDoc, b: BinderDoc) => b.id - a.id;
     return all.filter(d => !isKyc(d) && !isOccupant(d)
       && (!LEASE_ONLY_KEYS.has(key) || ownedByLease(d))
-      && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => pos(a) - pos(b) || b.id - a.id);
+      && (accepted.includes(base(d)) || accepted.includes(norm(d.displayName)))).sort((a, b) => pos(a) - pos(b) || tie(a, b));
   };
   const isRenewal = contractType === 'renewal';
   // A lead's plan is already a plan; a lease's is rebuilt from its payments.
