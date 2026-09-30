@@ -108,7 +108,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
       const params = new URLSearchParams(window.location.search);
       // The tab someone bookmarked — the vendor person's link opens on Vendors.
       const tab = TABS.find((x) => x.slug === params.get('tab'));
-      if (tab && !(tab.key === 'other' && isManager)) setKind(tab.key);
+      if (tab) setKind(tab.key);
       // The mail icon on an Operations card: that customer's (or lead's) unread emails.
       const customer = Number(params.get('customer'));
       const lead = Number(params.get('lead'));
@@ -119,7 +119,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
       if (t) setOpenId(t);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [rp, isManager, loadThreads, check]);
+  }, [rp, loadThreads, check]);
 
   // The portal-wide sync (on arrival, then every few minutes) brought mail in: show it.
   useEffect(() => {
@@ -142,8 +142,6 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
   const several = boxes.length > 1;
   const labelOf = (id: number | null) => (several ? boxes.find((b) => b.id === id)?.label ?? null : null);
   const threads = list?.items ?? [];
-  // "Other" mail is the landlord's own post; a manager never has any to show.
-  const tabs = TABS.filter((t) => t.key !== 'other' || !isManager);
   const chooseTab = (next: 'all' | EmailKind) => {
     setKind(next); setPage(1); setOpenId(null);
     const url = new URL(window.location.href);
@@ -212,7 +210,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
       ))}
 
       <div className="mb-3 border-b border-[#e8e6e0] flex gap-1 overflow-x-auto" role="tablist" aria-label="Who the conversation is with">
-        {tabs.map((t) => {
+        {TABS.map((t) => {
           const on = kind === t.key;
           const unread = list?.unreadBy?.[t.key] ?? 0;
           return (
@@ -259,7 +257,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
             </div>
           </div>
           <div className={`flex-1 min-h-0 overflow-y-auto divide-y divide-[#f0eee9] ${loadingList ? 'opacity-60' : ''}`}>
-            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : `No emails with ${kind === 'other' ? 'anyone else' : `${tabs.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
+            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : `No emails with ${kind === 'other' ? 'anyone else' : `${TABS.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
             {threads.map((t) => <EmailRow key={t.id} t={t} active={openId === t.id} showKind={kind === 'all'} mailboxLabel={mailboxId == null ? labelOf(t.mailboxId) : null} onOpen={() => setOpenId(t.id)} />)}
           </div>
           {list && <EmailPager page={list.page} pageSize={list.pageSize} total={list.total} onPage={setPage} disabled={loadingList} />}
@@ -275,7 +273,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
             <div className="flex-1 grid place-items-center bg-[#fbfaf8]">
               <div className="text-center px-6">
                 <div className="w-14 h-14 rounded-2xl grid place-items-center mx-auto mb-3 bg-[#eef9f4] text-[#1a7a5a]"><Mail size={24} /></div>
-                <p className="text-sm font-semibold text-[#1a1916]">{kind === 'all' ? 'Choose a conversation' : `Choose a conversation — ${tabs.find((t) => t.key === kind)?.label}`}</p>
+                <p className="text-sm font-semibold text-[#1a1916]">{kind === 'all' ? 'Choose a conversation' : `Choose a conversation — ${TABS.find((t) => t.key === kind)?.label}`}</p>
                 <p className="text-sm text-[#6b6860] mt-1 max-w-[360px]">Read the whole trail in order — who wrote, who was copied, every file — and answer everyone from here.</p>
               </div>
             </div>

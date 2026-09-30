@@ -195,7 +195,7 @@ export const PERM_GROUPS = [
     label: 'Emails',
     description: 'Your mailbox — the Emails page, and the Emails section of leads, leases, customers and vendors',
     perms: [
-      { key: 'canReadEmails', label: 'Read emails', meta: 'can_read_emails' },
+      { key: 'canReadEmails', label: 'Read emails — every email in your mailbox, the Other tab included', meta: 'can_read_emails' },
       { key: 'canSendEmails', label: 'Send emails — write, reply, reply all and forward from your mailbox', meta: 'can_send_emails', requires: 'canReadEmails' },
     ],
   },
