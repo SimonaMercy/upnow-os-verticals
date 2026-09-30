@@ -31,9 +31,10 @@ import { SCOPE_LABEL, maintenanceLocation, maintenanceNoCustomerLabel, type Main
 interface Cat { id: number; name: string }
 interface LinkRow {
   serviceProviderId: number; name: string; relationship: string; isDefault: boolean;
-  /** The backend's own routing rule — an outside vendor takes jobs only once it
-   *  accepted the invite; the landlord's own team needs no invite at all. */
-  assignable?: boolean; ownTeam?: boolean; kind?: string; inviteStatus?: string;
+  /** The backend's own routing rule. `selfManaged` = picking this one runs the
+   *  job on THIS page (no portal for them, nothing emailed); otherwise the
+   *  vendor accepted an invite and works the job from their own portal. */
+  assignable?: boolean; selfManaged?: boolean; kind?: string; inviteStatus?: string;
 }
 interface Detail {
   id: number; ref: string; title: string; description: string | null;
@@ -191,12 +192,12 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
   const canChangeProvider = open && !needsRouting && !!d.provider && d.booking?.status === 'booked';
   const showReassign = needsRouting || (canChangeProvider && changingProvider);
   // Only vendors the backend will accept. `assignable` absent = an older
-  // payload — offer the row rather than hide it.
+  // payload — offer the row rather than hide it. Every vendor the landlord
+  // recorded is in here: the ones who accepted work the job from their own
+  // portal, the rest are run from this page (owner, 29 Sep 2026 — "there must
+  // be an option to select a vendor").
   const assignable = links.filter(l => l.assignable !== false);
-  // The empty state speaks about the OWN TEAM only. The outside vendors on this
-  // list are AMC contractors — they belong to their contracts, not to this
-  // picker, and naming them here only reads as work waiting on an invite
-  // (owner, 29 Sep 2026).
+  const picked = links.find(l => String(l.serviceProviderId) === reassignTo) ?? null;
   const vendorsHref = rp != null ? `/dashboard/manager/vendors?rp=${rp}` : '/rental-provider/dashboard/vendors';
   const showApprove = open && d.stage === 'awaiting_approval' && d.coverage === 'covered';
   // Phase B: priced at intake from the provider's own catalog — no quote exists.
@@ -228,7 +229,11 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 <h1 className="text-[19px] font-bold tracking-[-.01em]">{d.title}</h1>
                 <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: stage.bg, color: stage.fg }}>{stage.label}</span>
                 {cover && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: cover.bg, color: cover.fg }}>{cover.label}</span>}
-                {d.inHouse && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap bg-[#e7f4ee] text-[#1a7a52]">Own team</span>}
+                {d.inHouse && (
+                  <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full whitespace-nowrap bg-[#e7f4ee] text-[#1a7a52]">
+                    {d.provider?.relationship === 'internal_team' ? 'Own team' : 'You run this job'}
+                  </span>
+                )}
               </div>
               <p className="text-[12px] text-[#5b615e] mt-1">
                 {[d.category?.name, custName ?? maintenanceNoCustomerLabel(d.scope)].filter(Boolean).join(' · ')}
@@ -267,7 +272,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           <div className="sm:px-[18px] sm:border-r border-[#eef0ee]">
             <div className={lbl}>PROVIDER</div>
             <div className="text-[13px] font-semibold mt-[3px]">{d.provider ? d.provider.name : <span className="text-[#c47a00]">Not assigned</span>}</div>
-            <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{d.provider?.relationship === 'internal_team' ? 'Own team — no routing or quotation' : d.booking ? `Job BK-${d.booking.id} · ${d.booking.status.replace(/_/g, ' ')}` : d.provider ? 'Vendor' : 'Waiting to be routed'}</div>
+            <div className="text-[10.5px] text-[#8a8f8c] mt-0.5">{d.provider?.relationship === 'internal_team' ? 'Own team — no routing or quotation' : d.booking ? `Job BK-${d.booking.id} · ${d.booking.status.replace(/_/g, ' ')}` : d.inHouse ? 'Vendor — you run this job, no quotation' : d.provider ? 'Vendor' : 'Waiting to be routed'}</div>
           </div>
           <div className="sm:px-[18px] sm:border-r border-[#eef0ee]">
             <div className={lbl}>RAISED</div>
@@ -304,7 +309,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
         </div>
       )}
 
-      {/* ── own-team job: before/after photos, bills, mark done ── */}
+      {/* ── a job you run yourself (own crew or a vendor you phone): before/after photos, bills, mark done ── */}
       {d.inHouse && (
         <InHouseJobPanel
           url={(path) => scoped(base, rp, `/requests/${id}${path}`)}
@@ -525,9 +530,8 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           {assignable.length === 0 ? (
             <div className="mt-2">
               <p className="text-sm text-[#6b6860]">
-                You have no maintenance team of your own yet. Add your crew on the Vendors page as
-                <span className="font-semibold text-[#1a1916]"> your own team</span> and they can take this job
-                straight away — no invitation, no email.
+                You have no vendor recorded yet. Add your own crew or a contractor on the Vendors page and
+                they can take this job straight away — no invitation, no email.
               </p>
               <Link href={vendorsHref} className={btn + ' text-white mt-3'} style={{ background: '#1a7a52' }}>Open Vendors</Link>
             </div>
@@ -537,7 +541,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 <option value="">Choose a provider…</option>
                 {assignable.map(l => (
                   <option key={l.serviceProviderId} value={l.serviceProviderId}>
-                    {l.name}{l.relationship === 'internal_team' ? ' · own team' : ''}{l.isDefault ? ' · default' : ''}
+                    {l.name}{l.relationship === 'internal_team' ? ' · own team' : l.selfManaged !== false ? ' · you run it' : ''}{l.isDefault ? ' · default' : ''}
                   </option>
                 ))}
               </select>
@@ -546,10 +550,14 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                 {busy === 'reassign' ? 'Routing…' : 'Route job'}
               </button>
-              {links.find(l => String(l.serviceProviderId) === reassignTo)?.relationship === 'internal_team' && (
+              {picked && (
                 <p className="basis-full text-[11px] text-[#6b6860]">
-                  Your own team&apos;s job runs on this page — task list, before and after photos, bills and
-                  mark-as-done. Nothing is emailed to them.
+                  {picked.selfManaged !== false
+                    ? <>This job runs on this page — task list, before and after photos, bills and mark-as-done.
+                        {picked.relationship === 'internal_team' ? ' Your crew' : ` ${picked.name}`} is recorded as
+                        who did it. Nothing is emailed to them.</>
+                    : <>{picked.name} accepted your invitation, so this goes to their own portal as a job they
+                        action and price there.</>}
                 </p>
               )}
             </div>

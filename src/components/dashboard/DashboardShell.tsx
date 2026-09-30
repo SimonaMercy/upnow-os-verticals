@@ -103,7 +103,11 @@ function useSpTier(): string | null {
 }
 
 const SP_LIGHT_NAV: NavItem[] = [
-  { label: 'Jobs',        href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs', '/dashboard/service-provider'] },
+  // A landlord's own vendor works jobs the landlord runs from THEIR page: no
+  // booking exists, so /operations (a booking board) was permanently empty for
+  // this tier — the owner signed in as their crew and saw nothing while nine
+  // jobs stood against them (29 Sep 2026). My jobs is that crew's real board.
+  { label: 'Jobs',        href: '/dashboard/service-provider/my-jobs',    icon: ClipboardList, match: ['/dashboard/service-provider/jobs', '/dashboard/service-provider'] },
   { label: 'Technicians', href: '/dashboard/service-provider/team',       icon: Users },
   { divider: true },
   { label: 'Profile',     href: '/dashboard/service-provider/settings',   icon: Settings },
@@ -173,6 +177,9 @@ const NAV: Record<UserRole, NavItem[]> = {
     // (the job detail) is reached by opening a card.
     { label: 'Overview',         href: '/dashboard/service-provider',            icon: LayoutDashboard },
     { label: 'Operations',       href: '/dashboard/service-provider/operations', icon: ClipboardList, match: ['/dashboard/service-provider/jobs'] },
+    // Jobs a landlord runs from their own page — no booking, so they never
+    // reach Operations. Empty for a vendor nobody self-manages.
+    { label: 'My jobs',          href: '/dashboard/service-provider/my-jobs',    icon: ClipboardList },
     // SP-86 · where every technician is right now (presence + last fix + live job)
     { label: 'Live map',         href: '/dashboard/service-provider/live',       icon: MapPin },
     // SP-103 · who works when and where: shifts per technician, zones, conflicts
