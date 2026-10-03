@@ -7033,9 +7033,18 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   // wind-down steps, so gate the steps on the contract still being active.
   // A direct termination keeps the wind-down visible while active AND after it
   // closes to terminated (the lease only flips terminated once settlement is paid).
+  // So does any lease that has ENDED after the customer gave notice — a mutual
+  // termination closed by the effective-date cron, or a declined renewal that
+  // expired. Its move-out and settlement may still be owed, and the Operations
+  // board keeps its card until the settlement is paid (backend
+  // ENDED_AWAITING_SETTLEMENT_SQL) — the card must open onto those steps. Unit
+  // 302 (CID-167), 3 Oct 2026. A called-off renewal term never ran: no steps.
   const isWinding = (contract.termination?.response === 'accepted' && contract.status === 'active')
     || (!!contract.vacateAtEnd && contract.contractActive !== false)
-    || contract.termination?.method === 'direct';
+    || contract.termination?.method === 'direct'
+    || ((contract.status === 'terminated' || contract.status === 'expired')
+      && (contract.termination?.response === 'accepted' || !!contract.vacateAtEnd)
+      && contract.termination?.method !== 'cancelled');
   const baseSteps = mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
   const steps = isWinding ? [...baseSteps, MOVE_OUT_STEP, CLOSEOUT_STEP, SETTLEMENT_STEP] : baseSteps;
   const doneArr = steps.map(s => isDone(s.key, derived));
