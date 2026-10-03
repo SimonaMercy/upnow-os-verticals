@@ -5,13 +5,14 @@
  * units and leases, the lead's stage, the vendor), everyone on the trail by the
  * side they are on, and every file in it in one place. A conversation nobody
  * owns yet can be filed under the right person by hand — every other email from
- * that address follows, now and later.
+ * that address follows, now and later. The landlord can also move it to the
+ * Finance, Legal or Promotions tab, and back.
  */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Building2, ExternalLink, Link2, Loader2, Search, Unlink, X } from 'lucide-react';
-import { emailApi, errorText, type EmailPerson, type EmailRecipient, type EmailSide, type EmailThreadDetail, type Rp } from '@/lib/emailApi';
-import { Avatar, FileCard, KindChip } from './EmailBits';
+import { Building2, ExternalLink, Landmark, Link2, Loader2, Megaphone, Scale, Search, Undo2, Unlink, X } from 'lucide-react';
+import { emailApi, errorText, type EmailCategory, type EmailPerson, type EmailRecipient, type EmailSide, type EmailThreadDetail, type Rp } from '@/lib/emailApi';
+import { Avatar, FileCard, KIND_LABEL, KindChip } from './EmailBits';
 
 const STATUS_TONE: Record<string, string> = {
   active: 'text-[#1a7a5a] bg-[#eef9f4]', expired: 'text-[#6b6860] bg-[#f4f3ef]', terminated: 'text-[#b42318] bg-red-50',
@@ -54,6 +55,14 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
     try { onLinked(await emailApi.link(rp, thread.id, to)); setLinking(false); setQ(''); }
     catch (e) { setError(errorText(e, 'Could not file this conversation')); } finally { setBusy(false); }
   };
+  const moveTo = async (category: EmailCategory | null) => {
+    setBusy(true); setError(null);
+    try { onLinked(await emailApi.setCategory(rp, thread.id, category)); }
+    catch (e) { setError(errorText(e, 'Could not move this conversation')); } finally { setBusy(false); }
+  };
+  /** Whose record it is filed under — whichever tab it shows in. */
+  const recordKind = thread.tenantId ? 'customer' : thread.leadId ? 'lead' : thread.vendorId ? 'vendor' : 'other';
+  const category = thread.category ?? null;
 
   const recordHref = thread.tenantId ? `${base}/tenants/${thread.tenantId}` : thread.leadId ? `${base}/leads/${thread.leadId}` : thread.vendorId ? `${base}/vendors/${thread.vendorId}` : null;
   const sides = (['theirs', 'team', 'copied'] as EmailSide[]).map((s) => ({ side: s, people: thread.people.filter((p) => p.side === s) })).filter((g) => g.people.length);
@@ -71,10 +80,10 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             <KindChip kind={thread.kind} />
           </div>
           <div className="text-xs text-[#6b6860] mt-1 break-all">{thread.counterpartEmail}</div>
-          {recordHref && <Link href={recordHref} className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#1a7a5a] hover:underline">Open the {thread.kind} <ExternalLink size={13} /></Link>}
+          {recordHref && <Link href={recordHref} className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#1a7a5a] hover:underline">Open the {recordKind} <ExternalLink size={13} /></Link>}
         </section>
 
-        {thread.kind === 'customer' && (
+        {recordKind === 'customer' && (
           <section>
             <h3 className={H3}>Units and leases</h3>
             {thread.contracts.length === 0 && <p className="text-xs text-[#9b9890]">No lease on record.</p>}
@@ -132,13 +141,13 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             {!linking ? (
               <div className="space-y-2">
                 <p className="text-xs text-[#6b6860]">
-                  {thread.kind === 'other'
+                  {recordKind === 'other'
                     ? 'Nobody yet — this address is on no customer, lead or vendor. File it under the right one and every email from this address follows.'
                     : `${thread.recordName ?? 'A record'}. If this address belongs to someone else, file it under them instead.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setLinking(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] cursor-pointer"><Link2 size={13} /> {thread.kind === 'other' ? 'File under…' : 'File under someone else…'}</button>
-                  {thread.kind !== 'other' && <button type="button" disabled={busy} onClick={() => void link({ kind: 'none' })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e8e6e0] text-[#6b6860] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer disabled:opacity-60"><Unlink size={13} /> Move to Other</button>}
+                  <button type="button" onClick={() => setLinking(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] cursor-pointer"><Link2 size={13} /> {recordKind === 'other' ? 'File under…' : 'File under someone else…'}</button>
+                  {recordKind !== 'other' && <button type="button" disabled={busy} onClick={() => void link({ kind: 'none' })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e8e6e0] text-[#6b6860] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer disabled:opacity-60"><Unlink size={13} /> Move to Other</button>}
                 </div>
               </div>
             ) : (
@@ -163,6 +172,31 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             )}
             {busy && <div className="mt-2 text-xs text-[#6b6860] inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Filing…</div>}
             {error && <div className="mt-2 text-xs text-[#b42318]">{error}</div>}
+          </section>
+        )}
+
+        {!isManager && (
+          <section>
+            <h3 className={H3}>Tab</h3>
+            <p className="text-xs text-[#6b6860] mb-2">
+              {category
+                ? `In ${KIND_LABEL[category]}${recordKind !== 'other' ? `, still filed under ${thread.recordName ?? 'its record'}` : ''}. Only this conversation — new ones from this address follow the usual rules.`
+                : 'Your finance team’s emails, legal matters and promotions have tabs of their own. Moving it changes only this conversation.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(['finance', 'legal', 'promotions'] as const).filter((c) => c !== category).map((c) => (
+                <button key={c} type="button" disabled={busy} onClick={() => void moveTo(c)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+                  {c === 'finance' ? <Landmark size={13} /> : c === 'legal' ? <Scale size={13} /> : <Megaphone size={13} />} Move to {KIND_LABEL[c]}
+                </button>
+              ))}
+              {category && (
+                <button type="button" disabled={busy} onClick={() => void moveTo(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e8e6e0] text-[#6b6860] hover:border-[#9b9890] cursor-pointer disabled:opacity-60">
+                  <Undo2 size={13} /> Take out of {KIND_LABEL[category]}
+                </button>
+              )}
+            </div>
           </section>
         )}
       </div>

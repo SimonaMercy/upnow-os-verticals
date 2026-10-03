@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Archive, ArrowLeft, Inbox, Mail, MailWarning, Paperclip, Plus, RefreshCw, Search, SendHorizontal, TrendingUp, Users, Wrench } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowLeft, Inbox, Landmark, Mail, MailWarning, Megaphone, Paperclip, Plus, RefreshCw, Scale, Search, SendHorizontal, TrendingUp, Users, Wrench } from 'lucide-react';
 import { emailApi, errorText, type EmailKind, type EmailThreadPage, type MailboxInfo, type Rp } from '@/lib/emailApi';
 import { EmailComposer } from './EmailComposer';
 import { EmailThreadView } from './EmailThreadView';
@@ -32,7 +32,8 @@ const BOXES: Array<{ key: Box; label: string; Icon: typeof Mail }> = [
 const TABS: Array<{ key: 'all' | EmailKind; slug: string; label: string; Icon: typeof Mail }> = [
   { key: 'all', slug: 'all', label: 'All', Icon: Mail }, { key: 'customer', slug: 'customers', label: 'Customers', Icon: Users },
   { key: 'lead', slug: 'leads', label: 'Leads', Icon: TrendingUp }, { key: 'vendor', slug: 'vendors', label: 'Vendors', Icon: Wrench },
-  { key: 'other', slug: 'other', label: 'Other', Icon: Archive },
+  { key: 'finance', slug: 'finance', label: 'Finance', Icon: Landmark }, { key: 'legal', slug: 'legal', label: 'Legal', Icon: Scale },
+  { key: 'promotions', slug: 'promotions', label: 'Promotions', Icon: Megaphone }, { key: 'other', slug: 'other', label: 'Other', Icon: Archive },
 ];
 
 export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: boolean }) {
@@ -215,8 +216,9 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
           const unread = list?.unreadBy?.[t.key] ?? 0;
           return (
             <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => chooseTab(t.key)}
-              className={`shrink-0 inline-flex items-center gap-2 px-4 py-2.5 -mb-px border-b-2 text-sm cursor-pointer whitespace-nowrap ${on ? 'border-[#2e9f82] text-[#1a1916] font-semibold' : 'border-transparent text-[#6b6860] hover:text-[#1a1916] hover:border-[#d8d5cd]'}`}>
-              <t.Icon size={15} className={on ? 'text-[#2e9f82]' : 'text-[#9b9890]'} />
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2.5 -mb-px border-b-2 text-sm cursor-pointer whitespace-nowrap ${on ? 'border-[#2e9f82] text-[#1a1916] font-semibold' : 'border-transparent text-[#6b6860] hover:text-[#1a1916] hover:border-[#d8d5cd]'}`}>
+              {/* Eight tabs: the icons give way on a laptop screen so every tab stays in view. */}
+              <t.Icon size={15} className={`hidden 2xl:block ${on ? 'text-[#2e9f82]' : 'text-[#9b9890]'}`} />
               {t.label}
               <span className={`tabular-nums text-xs font-normal ${on ? 'text-[#6b6860]' : 'text-[#9b9890]'}`}>{(list?.counts[t.key] ?? 0).toLocaleString('en-GB')}</span>
               {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums" aria-label={`${unread} unread`}>{unread}</span>}
@@ -257,7 +259,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
             </div>
           </div>
           <div className={`flex-1 min-h-0 overflow-y-auto divide-y divide-[#f0eee9] ${loadingList ? 'opacity-60' : ''}`}>
-            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : `No emails with ${kind === 'other' ? 'anyone else' : `${TABS.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
+            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : kind === 'finance' || kind === 'legal' || kind === 'promotions' ? `Nothing in ${TABS.find((t) => t.key === kind)?.label} yet.` : `No emails with ${kind === 'other' ? 'anyone else' : `${TABS.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
             {threads.map((t) => <EmailRow key={t.id} t={t} active={openId === t.id} showKind={kind === 'all'} mailboxLabel={mailboxId == null ? labelOf(t.mailboxId) : null} onOpen={() => setOpenId(t.id)} />)}
           </div>
           {list && <EmailPager page={list.page} pageSize={list.pageSize} total={list.total} onPage={setPage} disabled={loadingList} />}

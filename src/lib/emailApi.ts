@@ -91,6 +91,8 @@ export interface EmailThreadRow {
   tenantId: number | null;
   leadId: number | null;
   vendorId: number | null;
+  /** In the Finance, Legal or Promotions tab — instead of its record's. */
+  category?: EmailCategory | null;
   messageCount: number;
   unreadCount: number;
   /** Files across the whole conversation. */
@@ -102,11 +104,14 @@ export interface EmailThreadRow {
   lastSnippet: string | null;
 }
 
-/** Whose conversation it is. "other" = nobody on record (bank, municipality, newsletter) — the landlord only. */
-export type EmailKind = 'customer' | 'lead' | 'vendor' | 'other';
+/** The landlord's finance team, legal matters, newsletters and automatic notices — tabs of their own beside the records'. */
+export type EmailCategory = 'finance' | 'legal' | 'promotions';
 
-export function emailKindOf(t: Pick<EmailThreadRow, 'tenantId' | 'leadId' | 'vendorId'>): EmailKind {
-  return t.tenantId != null ? 'customer' : t.leadId != null ? 'lead' : t.vendorId != null ? 'vendor' : 'other';
+/** Which tab a conversation is in. "other" = nobody on record (bank, municipality, newsletter). */
+export type EmailKind = 'customer' | 'lead' | 'vendor' | EmailCategory | 'other';
+
+export function emailKindOf(t: Pick<EmailThreadRow, 'tenantId' | 'leadId' | 'vendorId' | 'category'>): EmailKind {
+  return t.category ?? (t.tenantId != null ? 'customer' : t.leadId != null ? 'lead' : t.vendorId != null ? 'vendor' : 'other');
 }
 
 /** One page of conversations, newest first; `counts` feed the tabs. */
@@ -255,6 +260,9 @@ export const emailApi = {
   /** "File under…" — tie the conversation's address to a customer, lead or vendor (landlord only); `none` unties it. */
   link: (rp: Rp, threadId: number, to: { kind: 'customer' | 'lead' | 'vendor' | 'none'; id?: number }) =>
     apiPost<EmailThreadDetail>(scoped(`/email/threads/${threadId}/link`, rp), to),
+  /** Move a conversation to Finance, Legal or Promotions, or (null) back to its record's tab. Landlord only. */
+  setCategory: (rp: Rp, threadId: number, category: EmailCategory | null) =>
+    apiPost<EmailThreadDetail>(scoped(`/email/threads/${threadId}/category`, rp), { category }),
   sync: (rp: Rp) => apiPost<{ ran: boolean; imported: number; checked: number; remaining: number; onServer?: number; notIn?: number; error?: string }>(scoped('/email/sync', rp), {}),
 };
 

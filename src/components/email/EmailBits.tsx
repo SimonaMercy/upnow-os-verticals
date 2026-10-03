@@ -5,9 +5,10 @@ import { FileImage, FileSpreadsheet, FileText, File as FileIcon, Paperclip, User
 import { emailApi, emailKindOf, emailWhen, fileSize, type EmailAttachmentRow, type EmailKind, type EmailThreadRow, type Rp } from '@/lib/emailApi';
 import { bareSubject, initialsOf, tidySnippet } from '@/lib/emailText';
 
-export const KIND_LABEL: Record<EmailKind, string> = { customer: 'Customer', lead: 'Lead', vendor: 'Vendor', other: 'Other' };
+export const KIND_LABEL: Record<EmailKind, string> = { customer: 'Customer', lead: 'Lead', vendor: 'Vendor', finance: 'Finance', legal: 'Legal', promotions: 'Promotions', other: 'Other' };
 export const KIND_CHIP: Record<EmailKind, string> = {
-  customer: 'text-[#1a7a5a] bg-[#eef9f4]', lead: 'text-[#1d5f8a] bg-[#e8f2fb]', vendor: 'text-[#8a6d1d] bg-[#fdf3e3]', other: 'text-[#6b6860] bg-[#f0eee9]',
+  customer: 'text-[#1a7a5a] bg-[#eef9f4]', lead: 'text-[#1d5f8a] bg-[#e8f2fb]', vendor: 'text-[#8a6d1d] bg-[#fdf3e3]',
+  finance: 'text-[#5b3fa0] bg-[#f1ecfb]', legal: 'text-[#9a2f2f] bg-[#fbecea]', promotions: 'text-[#9a3b6b] bg-[#fbecf4]', other: 'text-[#6b6860] bg-[#f0eee9]',
 };
 
 export function KindChip({ kind }: { kind: EmailKind }) {
