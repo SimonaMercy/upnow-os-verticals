@@ -81,6 +81,8 @@ const aed = (fils: number) => `AED ${Math.round(fils / 100).toLocaleString()}`;
 const aedWhole = (v: number) => `AED ${Math.round(v).toLocaleString()}`;
 /** Building names carry stray whitespace from import — never render them raw. */
 const clean = (s?: string | null) => (s ?? '').trim();
+// Same shape the sign-in form accepts — the customer logs in with this address.
+const looksLikeEmail = (s: string) => /^\S+@\S+\.\S+$/.test(s.trim());
 
 /** "2 BR · 2 bath · 1,313 sqft · Floor 1" — whatever of that we actually know. */
 function unitSpecLine(u: UnitOpt): string {
@@ -332,7 +334,7 @@ export function NewLeadModal({
   const stageReady: Record<number, boolean> = {
     1: pickingExisting
       ? !!tenantId
-      : !!name.trim() && !!email.trim() && (customerType === 'individual' || !!companyName.trim()),
+      : !!name.trim() && looksLikeEmail(email) && (customerType === 'individual' || !!companyName.trim()),
     2: !!unitId,
     3: mode === 'viewing' ? !!date : !!moveIn,
     4: true,
@@ -570,6 +572,9 @@ export function NewLeadModal({
                       <div>
                         <label className={LABEL}>Email <span className="text-red-500">*</span></label>
                         <input className={FIELD} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="ahmed@example.com" />
+                        {email.trim() && !looksLikeEmail(email) && (
+                          <p className="text-xs text-red-600 mt-1">Enter their real email — they sign in with it. No placeholders like “-”.</p>
+                        )}
                       </div>
                       <div>
                         <label className={LABEL}>Phone <span className="text-[#9b9890] font-normal">(optional)</span></label>
