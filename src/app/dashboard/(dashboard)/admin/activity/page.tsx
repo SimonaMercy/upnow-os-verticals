@@ -161,6 +161,7 @@ const ACTION_LABELS: Record<string, string> = {
   'contract.renewal.accept': 'Renewal accepted',
   'contract.addendum.attach-layout': 'Addendum attached',
   'contract.renewal.send': 'Renewal offer sent',
+  'contract.renewal.notice_email': 'Renewal notice email',
   'contract.inspection.moveout.update': 'Move-out inspection updated',
   'rp.settings.update': 'Settings updated',
   'contract.tenant.cheques.submit': 'Customer cheques submitted',

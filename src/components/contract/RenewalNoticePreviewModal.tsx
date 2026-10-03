@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import { X, Loader2, AlertCircle, Send, Mail } from 'lucide-react';
 import { useBackClose } from '@/lib/useSlideOver';
+import { noticeReasonText } from './RenewalNoticeDelivery';
 
 export interface RenewalNoticePreview {
   subject: string;
@@ -25,6 +26,8 @@ export interface RenewalNoticePreview {
   from: { name: string | null; address: string };
   senderIsLandlordMailbox: boolean;
   alreadySent?: boolean;
+  /** Why this server would NOT email it (production runs OTP-only), or null. */
+  deliveryBlocked?: string | null;
 }
 
 export default function RenewalNoticePreviewModal({
@@ -132,6 +135,19 @@ export default function RenewalNoticePreviewModal({
                 </div>
               )}
 
+              {/* The send moves the lease to an offer whether or not the email
+                  leaves, so a server that will not email it says so first. */}
+              {preview.deliveryBlocked && (
+                <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    <strong>This email will NOT be sent</strong> — {noticeReasonText(preview.deliveryBlocked)}.
+                    If you continue, the lease is marked as offered but the customer receives nothing
+                    from the system; send the notice by hand.
+                  </span>
+                </div>
+              )}
+
               {preview.alreadySent && (
                 <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg bg-amber-50 text-amber-800 px-4 py-3 text-sm">
                   <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -158,7 +174,7 @@ export default function RenewalNoticePreviewModal({
                 <button onClick={send} disabled={sending || !preview.to}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#268a71] disabled:opacity-60">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  {sending ? 'Sending…' : 'Confirm and send to customer'}
+                  {sending ? 'Sending…' : preview.deliveryBlocked ? 'Mark as sent (no email)' : 'Confirm and send to customer'}
                 </button>
               </div>
             </>

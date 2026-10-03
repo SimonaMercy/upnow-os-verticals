@@ -84,6 +84,7 @@ import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import { EmailsCard } from '@/components/email/EmailsCard';
 import { WhatsAppCard } from '@/components/whatsapp/WhatsAppCard';
 import RenewalNoticePreviewModal from '@/components/contract/RenewalNoticePreviewModal';
+import RenewalNoticeDelivery from '@/components/contract/RenewalNoticeDelivery';
 import { landlordLinkShows, landlordLinkShowsByDefault } from '@/lib/landlordLinkDocs';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2123,6 +2124,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
                 View proposal · CID-{h.contract.renewalChild.id}
               </Link>
             </div>
+          )}
+          {/* Was the notice actually EMAILED — from the delivery record kept on
+              every send. Production runs with most email off. */}
+          {h.contract.renewalAccepted === 'pending' && h.contract.renewalChild && (
+            <RenewalNoticeDelivery parentContractId={h.contract.id} />
           )}
           {/* Renewal DRAFT — saved for RP review; the customer has NOT been
               notified yet (gated on renewalAccepted='pending'). RP reviews then
@@ -8259,6 +8265,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
                 manager's view "you" was the wrong actor anyway. */}
           </div>
         </div>
+
+        {/* The offered renewal draft: was its notice actually EMAILED to the
+            customer — the delivery record lives on the parent that sent it. */}
+        {contract.contractType === 'renewal' && !!contract.parentContractId && contract.renewalAccepted === 'pending' && !contract.renewalChild && (
+          <div style={{ margin: '0 0 12px' }}>
+            <RenewalNoticeDelivery parentContractId={contract.parentContractId} />
+          </div>
+        )}
 
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
