@@ -132,6 +132,8 @@ export interface EmailMessageRow {
   ccEmails: string[];
   subject: string;
   bodyText: string;
+  /** Kept as its writer laid it out (tables, pictures) — shown from `emailApi.layout`. Plain text otherwise. */
+  hasLayout?: boolean;
   sentByName: string | null;
   sentByRole: string | null;
   status: 'sent' | 'not_sent' | 'received';
@@ -238,6 +240,8 @@ export const emailApi = {
     return json as StagedAttachment;
   },
   attachmentUrl: (rp: Rp, id: number) => apiGet<{ url: string; fileName: string }>(scoped(`/email/attachments/${id}/url`, rp)),
+  /** One email as its writer laid it out — somebody else's HTML: clean it (emailLayout.ts) before showing it. */
+  layout: (rp: Rp, messageId: number) => apiGet<{ html: string }>(scoped(`/email/messages/${messageId}/layout`, rp)),
   markUnread: (rp: Rp, id: number) => apiPost<{ ok: true }>(scoped(`/email/threads/${id}/unread`, rp), {}),
   /** Forward one email of the conversation, its files with it, to anyone. It stays on the trail. */
   forward: (rp: Rp, threadId: number, body: { messageId: number; to: string; cc?: string[]; body?: string; attachments?: StagedAttachment[] }) =>

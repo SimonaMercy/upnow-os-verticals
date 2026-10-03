@@ -10,8 +10,9 @@
  * Used by the inbox page and by the slide-over on the customer, lead, vendor and
  * lease pages.
  *
- * Message bodies are plain text, always — an incoming email's HTML is never
- * rendered inside the dashboard.
+ * An email kept as its writer laid it out (tables, pictures) is shown that way,
+ * in a sealed frame (EmailLayoutFrame) — never as markup inside the dashboard.
+ * Anything else is its plain text.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDownUp, ChevronsUpDown, Forward, Info, Loader2, MailOpen, Paperclip, Plus, Reply, ReplyAll, Send, X } from 'lucide-react';
@@ -22,6 +23,7 @@ import {
 import { bareSubject, dayLabel, firstWords, splitEmailBody } from '@/lib/emailText';
 import { Avatar, FileCard, KindChip } from './EmailBits';
 import { EmailContextPanel } from './EmailContextPanel';
+import { EmailLayoutFrame } from './EmailLayoutFrame';
 
 /** Files picked in a composer, parked on the server until Send. */
 export function useStagedAttachments(rp: Rp) {
@@ -101,6 +103,20 @@ function Message({ m, rp, who, open, onToggle, onForward }: { m: EmailMessageRow
   const sender = out ? (m.sentByName ? `You · ${m.sentByName}` : 'You') : who(m.fromEmail);
   const when = new Date(m.sentAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const to = m.toEmails.length ? m.toEmails : [m.toEmail];
+  // The text — the whole email when it has no layout of its own, the stand-in when the layout cannot be had.
+  const textBody = (
+    <>
+      <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : <span className="text-[#9b9890] italic">No text in this email{m.attachments?.length ? ' — see the attachment below' : ''}.</span>)}</div>
+      {(parts.signature || parts.quoted) && (
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {parts.signature && <button type="button" onClick={() => setShowSignature((v) => !v)} aria-expanded={showSignature} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showSignature ? 'Hide signature' : 'Signature'}</button>}
+          {parts.quoted && <button type="button" onClick={() => setShowQuoted((v) => !v)} aria-expanded={showQuoted} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showQuoted ? 'Hide earlier emails' : 'Earlier emails quoted below'}</button>}
+        </div>
+      )}
+      {showSignature && <div className="mt-2 text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.signature}</div>}
+      {showQuoted && <div className="mt-2 pl-3 border-l-2 border-[#e8e6e0] text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.quoted}</div>}
+    </>
+  );
 
   if (!open) {
     return (
@@ -136,15 +152,7 @@ function Message({ m, rp, who, open, onToggle, onForward }: { m: EmailMessageRow
       </div>
       <div className="pl-[60px] pr-4 pb-3.5">
         {m.status === 'not_sent' && <div className="mb-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">Not sent — email is switched off on this environment.</div>}
-        <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : <span className="text-[#9b9890] italic">No text in this email{m.attachments?.length ? ' — see the attachment below' : ''}.</span>)}</div>
-        {(parts.signature || parts.quoted) && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {parts.signature && <button type="button" onClick={() => setShowSignature((v) => !v)} aria-expanded={showSignature} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showSignature ? 'Hide signature' : 'Signature'}</button>}
-            {parts.quoted && <button type="button" onClick={() => setShowQuoted((v) => !v)} aria-expanded={showQuoted} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showQuoted ? 'Hide earlier emails' : 'Earlier emails quoted below'}</button>}
-          </div>
-        )}
-        {showSignature && <div className="mt-2 text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.signature}</div>}
-        {showQuoted && <div className="mt-2 pl-3 border-l-2 border-[#e8e6e0] text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.quoted}</div>}
+        {m.hasLayout ? <EmailLayoutFrame rp={rp} messageId={m.id} fallback={textBody} /> : textBody}
         {m.attachments.length > 0 && <div className="flex flex-wrap gap-2 mt-3">{m.attachments.map((a) => <FileCard key={a.id} rp={rp} file={a} />)}</div>}
         {onForward && (
           <div className="mt-3 pt-2.5 border-t border-[#f0eee9]">
