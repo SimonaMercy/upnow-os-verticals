@@ -17,7 +17,9 @@ import { CheckCircle2, XCircle, Mail, X, AlertTriangle } from 'lucide-react';
 export interface RenewalNoticeRecord {
   id: number;
   at: string;
-  status: 'sent' | 'blocked' | 'failed';
+  /** sent = their mail server accepted it · bounced = the customer's server then
+   *  refused it (a bounce came back) · blocked / failed = it never left. */
+  status: 'sent' | 'bounced' | 'blocked' | 'failed';
   reason?: string;
   to: string | null;
   cc?: string[];
@@ -28,6 +30,8 @@ export interface RenewalNoticeRecord {
   subject?: string;
   html?: string;
   sentBy?: string | null;
+  /** The bounce that came back for it, read from the landlord's mailbox. */
+  bounce?: { at: string; summary: string; diagnostic?: string | null; emailMessageId?: number };
 }
 
 /** Why a notice was not emailed, in words a manager can act on. */
@@ -47,7 +51,14 @@ export function noticeReasonText(reason?: string | null): string {
 const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-export default function RenewalNoticeDelivery({ parentContractId }: { parentContractId: number }) {
+export default function RenewalNoticeDelivery({ parentContractId, onResend, refreshAfter }: {
+  parentContractId: number;
+  /** Opens the send flow again — shown only when the last notice did not reach
+   *  the customer (bounced, failed or blocked). */
+  onResend?: () => void;
+  /** A send just happened at this time (ms): keep looking until its record is in. */
+  refreshAfter?: number;
+}) {
   const [rows, setRows] = useState<RenewalNoticeRecord[] | null>(null);
   const [viewing, setViewing] = useState<RenewalNoticeRecord | null>(null);
   const [showAll, setShowAll] = useState(false);
@@ -61,17 +72,21 @@ export default function RenewalNoticeDelivery({ parentContractId }: { parentCont
         .then(r => (r.ok ? r.json() : []))
         .then((list: RenewalNoticeRecord[]) => {
           if (cancelled) return;
-          setRows(Array.isArray(list) ? list : []);
+          const rowsNow = Array.isArray(list) ? list : [];
+          setRows(rowsNow);
           // Just sent: the email goes out in the background, so its record can
           // trail the Send by a few seconds. Look again briefly before saying
-          // there is none.
-          if ((!Array.isArray(list) || !list.length) && ++tries < 6) timer = setTimeout(load, 3000);
+          // there is none — or, right after a send, until that send's record is in.
+          const waiting = refreshAfter
+            ? !rowsNow.some(r => new Date(r.at).getTime() >= refreshAfter - 5000)
+            : !rowsNow.length;
+          if (waiting && ++tries < 8) timer = setTimeout(load, 3000);
         })
         .catch(() => { if (!cancelled) setRows([]); });
     };
     load();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [parentContractId]);
+  }, [parentContractId, refreshAfter]);
 
   if (rows === null) {
     return <div className="text-xs text-gray-500 py-1">Checking the renewal notice email…</div>;
@@ -91,10 +106,31 @@ export default function RenewalNoticeDelivery({ parentContractId }: { parentCont
 
   const [latest, ...earlier] = rows;
   const by = latest.sentBy ? <> · by {latest.sentBy}</> : null;
+  // The send option comes back when the last notice never reached the customer
+  // (owner, 4 Oct 2026: "It should give the send option again").
+  const sendAgain = onResend && latest.status !== 'sent' ? (
+    <button type="button" onClick={onResend}
+            className="ml-1 inline-flex items-center rounded-md bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-red-700">
+      Send again
+    </button>
+  ) : null;
 
   return (
     <div className="grid gap-1.5" style={{ justifySelf: 'stretch' }}>
-      {latest.status === 'sent' ? (
+      {latest.status === 'bounced' ? (
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-xs">
+          <XCircle size={14} className="mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            <strong>Renewal notice NOT delivered</strong> — <span className="break-all">{latest.to}</span> could not
+            receive it: {latest.bounce?.summary ?? 'the customer\'s mail server refused it'}.
+            {latest.bounce?.diagnostic ? <> <span className="opacity-80">({latest.bounce.diagnostic})</span></> : null}
+            {' '}Correct the customer&apos;s email address, then send it again.
+            {' · '}sent {fmtWhen(latest.at)}{latest.bounce?.at ? <>, bounced {fmtWhen(latest.bounce.at)}</> : null}{by}
+            {latest.html ? <>{' · '}<button type="button" className="underline font-semibold" onClick={() => setViewing(latest)}>View email</button></> : null}
+            {sendAgain}
+          </span>
+        </div>
+      ) : latest.status === 'sent' ? (
         <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2 text-xs">
           <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
           <span className="min-w-0">
@@ -114,6 +150,7 @@ export default function RenewalNoticeDelivery({ parentContractId }: { parentCont
             {noticeReasonText(latest.reason)}. The customer has not received it from the system;
             send it by hand. · {fmtWhen(latest.at)}{by}
             {latest.html ? <>{' · '}<button type="button" className="underline font-semibold" onClick={() => setViewing(latest)}>View email</button></> : null}
+            {sendAgain}
           </span>
         </div>
       )}
@@ -137,7 +174,9 @@ export default function RenewalNoticeDelivery({ parentContractId }: { parentCont
             <ul className="mt-1 grid gap-0.5">
               {earlier.map(r => (
                 <li key={r.id}>
-                  {fmtWhen(r.at)} · {r.status === 'sent' ? `emailed to ${r.to}` : `not emailed — ${noticeReasonText(r.reason)}`}
+                  {fmtWhen(r.at)} · {r.status === 'sent' ? `emailed to ${r.to}`
+                    : r.status === 'bounced' ? `bounced — ${r.to}: ${r.bounce?.summary ?? 'refused'}`
+                    : `not emailed — ${noticeReasonText(r.reason)}`}
                   {r.sentBy ? ` · by ${r.sentBy}` : ''}
                   {r.html ? <>{' · '}<button type="button" className="underline" onClick={() => setViewing(r)}>view</button></> : null}
                 </li>
@@ -154,7 +193,7 @@ export default function RenewalNoticeDelivery({ parentContractId }: { parentCont
               <div className="min-w-0">
                 <div className="text-sm font-bold truncate">{viewing.subject ?? 'Renewal notice'}</div>
                 <div className="text-[11px] text-white/80 break-all">
-                  {viewing.status === 'sent' ? 'As emailed' : 'Not emailed'} · {fmtWhen(viewing.at)}
+                  {viewing.status === 'sent' ? 'As emailed' : viewing.status === 'bounced' ? 'Sent, then bounced' : 'Not emailed'} · {fmtWhen(viewing.at)}
                   {viewing.from ? ` · from ${viewing.from}` : ''}{viewing.to ? ` · to ${viewing.to}` : ''}
                   {viewing.messageId ? ` · Message-ID ${viewing.messageId}` : ''}
                 </div>

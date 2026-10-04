@@ -887,6 +887,8 @@ interface StepHandlers {
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
+  /** When a renewal notice was last sent from this page (ms), or null. */
+  noticeSentAt: number | null;
   /** Undo a sent settlement — pulls it back to draft so the figures can be
    *  corrected and re-sent (only while the customer hasn't agreed yet). */
   onUnsendSettlement: () => Promise<void>;
@@ -2128,7 +2130,11 @@ function stepContent(key: StepKey, st: DerivedState, h: StepHandlers, mode: 'new
           {/* Was the notice actually EMAILED — from the delivery record kept on
               every send. Production runs with most email off. */}
           {h.contract.renewalAccepted === 'pending' && h.contract.renewalChild && (
-            <RenewalNoticeDelivery parentContractId={h.contract.id} />
+            <RenewalNoticeDelivery
+              parentContractId={h.contract.id}
+              refreshAfter={h.noticeSentAt ?? undefined}
+              onResend={h.perms.renewals ? () => void h.onRenewalDraft('send') : undefined}
+            />
           )}
           {/* Renewal DRAFT — saved for RP review; the customer has NOT been
               notified yet (gated on renewalAccepted='pending'). RP reviews then
@@ -7009,6 +7015,9 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [rejectErr, setRejectErr] = useState<string | null>(null);
   // Parent lease whose renewal notice is being reviewed before sending; null = closed.
   const [renewalPreviewFor, setRenewalPreviewFor] = useState<number | null>(null);
+  // When a renewal notice was last sent from this page — the delivery line
+  // reloads and waits for that send's record.
+  const [noticeSentAt, setNoticeSentAt] = useState<number | null>(null);
 
   // Loading / error
   if (loading && !contract) {
@@ -7849,6 +7858,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onAttachChequeForSlot, onRemoveChequeDoc, onTagChequeDoc, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
+    noticeSentAt,
     onUnsendSettlement,
     onCancelTermination,
     onUploadMoveInDoc, onUploadMoveOutDoc, onUploadCloseoutClearance, onUploadCloseoutFinalBill,
@@ -8270,7 +8280,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             customer — the delivery record lives on the parent that sent it. */}
         {contract.contractType === 'renewal' && !!contract.parentContractId && contract.renewalAccepted === 'pending' && !contract.renewalChild && (
           <div style={{ margin: '0 0 12px' }}>
-            <RenewalNoticeDelivery parentContractId={contract.parentContractId} />
+            <RenewalNoticeDelivery
+              parentContractId={contract.parentContractId}
+              refreshAfter={noticeSentAt ?? undefined}
+              onResend={perms.renewals ? onSendRenewalDraft : undefined}
+            />
           </div>
         )}
 
@@ -8605,7 +8619,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
           parentContractId={renewalPreviewFor}
           open
           onClose={() => setRenewalPreviewFor(null)}
-          onSent={() => { void reload(); loadNotes(); }}
+          onSent={() => { setNoticeSentAt(Date.now()); void reload(); loadNotes(); }}
         />
       )}
       {modal === 'sign' && perms.signLandlord && <SignModal contract={contract} signerName={landlordSignerName} onBehalfOf={landlordOnBehalfOf} onClose={() => setModal(null)} onSigned={() => { setModal(null); void reload(); }} />}

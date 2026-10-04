@@ -28,6 +28,8 @@ export interface RenewalNoticePreview {
   alreadySent?: boolean;
   /** Why this server would NOT email it (production runs OTP-only), or null. */
   deliveryBlocked?: string | null;
+  /** The last notice, when it never reached the customer — this is a resend. */
+  resendOf?: { status: string; to: string | null; at: string; summary: string | null } | null;
 }
 
 export default function RenewalNoticePreviewModal({
@@ -148,7 +150,18 @@ export default function RenewalNoticePreviewModal({
                 </div>
               )}
 
-              {preview.alreadySent && (
+              {preview.resendOf && (
+                <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm">
+                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                  <span>
+                    <strong>Sending again.</strong> The last notice{preview.resendOf.to ? <> to <strong className="break-all">{preview.resendOf.to}</strong></> : null} was
+                    not delivered{preview.resendOf.summary ? <> — {noticeReasonText(preview.resendOf.summary)}</> : null}.
+                    Check the <strong>To</strong> address above is the customer&apos;s correct email before sending.
+                  </span>
+                </div>
+              )}
+
+              {preview.alreadySent && !preview.resendOf && (
                 <div className="mx-5 mt-4 flex items-start gap-2 rounded-lg bg-amber-50 text-amber-800 px-4 py-3 text-sm">
                   <AlertCircle size={16} className="mt-0.5 shrink-0" />
                   <span>This renewal has already been sent to the customer.</span>
@@ -174,7 +187,7 @@ export default function RenewalNoticePreviewModal({
                 <button onClick={send} disabled={sending || !preview.to}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#268a71] disabled:opacity-60">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  {sending ? 'Sending…' : preview.deliveryBlocked ? 'Mark as sent (no email)' : 'Confirm and send to customer'}
+                  {sending ? 'Sending…' : preview.deliveryBlocked ? 'Mark as sent (no email)' : preview.resendOf ? 'Send again to customer' : 'Confirm and send to customer'}
                 </button>
               </div>
             </>
