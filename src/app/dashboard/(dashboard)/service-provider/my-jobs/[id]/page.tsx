@@ -7,13 +7,17 @@
  */
 import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Camera, MapPin, Square, CheckSquare, Receipt, Paperclip } from 'lucide-react';
+import { ArrowLeft, Camera, MapPin, Square, CheckSquare, Receipt, Paperclip, MessageSquare, ClipboardList } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '@/lib/api';
+import { APP_TIME_ZONE } from '@/lib/datetime';
+import { PhotoLightbox, type GalleryPhoto } from '@/components/upnow/PhotoGallery';
 
 interface Finding { id?: string; label: string; doneAt?: string | null }
 interface Task { id: number; label: string; doneAt: string | null; findings: Finding[] }
-/** `viewUrl` is the signed link the backend hands out (photosFor) — there is no `url`. */
-interface Photo { id: number; viewUrl: string; kind: string; caption: string | null }
+/** `viewUrl` is the signed link the backend hands out (photosFor) — there is no `url`.
+ *  `mine` = this crew put it up, so it may remove it. */
+interface Photo { id: number; viewUrl: string; kind: string; caption: string | null; mine: boolean }
+interface Comment { id: number; text: string; by: string | null; at: string; mine: boolean }
 interface Bill {
   id: number; billDate: string | null; category: string; supplier: string | null;
   description: string | null; vatMode: string; netAed: number; vatAed: number;
@@ -26,9 +30,13 @@ interface Job {
   where: string | null; address: string | null;
   tasks: Task[]; photos: Photo[];
   bills: Bill[]; billCategories: string[];
+  comments: Comment[];
 }
 
 const MAX_BYTES = 10 * 1024 * 1024;
+
+const fmtDt = (iso: string) =>
+  new Date(iso).toLocaleString('en-GB', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 export default function CrewJobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -43,6 +51,8 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
   const [bAmount, setBAmount] = useState('');
   const [bVat, setBVat] = useState<'none' | 'inclusive' | 'exclusive'>('none');
   const [bFile, setBFile] = useState<File | null>(null);
+  const [gallery, setGallery] = useState<{ photos: GalleryPhoto[]; start: number } | null>(null);
+  const [comment, setComment] = useState('');
 
   const load = useCallback(() => {
     apiGet<Job>(base).then(setJob).catch(e => setErr(e instanceof Error ? e.message : 'Could not load this job.'));
@@ -85,6 +95,9 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
   const field = 'border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white';
   const shot = (k: string) => job.photos.filter(p => p.kind === k);
   const closed = !!job.closedAt;
+  // A restoration's description opens with an auto-written "Tasks: …" line —
+  // the task list says it better (same rule as the landlord's job page).
+  const reported = (job.tasks.length ? (job.description ?? '').replace(/^Tasks:[^\n]*\n*/, '') : (job.description ?? '')).trim();
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -102,15 +115,20 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
         {job.address && <p className="text-[11px] text-[#9b9890] mt-0.5">{job.address}</p>}
       </div>
 
-      {err && <p className="mt-3 text-sm text-[#b91c1c]">{err}</p>}
-      {closed && <p className="mt-3 text-[12px] text-[#15803d] font-semibold">This job is closed — nothing more to do.</p>}
-
-      {job.description && (
-        <div className={card}>
-          <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">What was reported</h2>
-          <p className="text-sm text-[#3d423f] mt-1.5 whitespace-pre-wrap">{job.description}</p>
+      {/* What was reported — on most jobs the ONLY instruction the crew gets
+          (owner, 5 Oct 2026: "descriptions should be prominent"), so it sits
+          straight under the title, highlighted, in reading size. */}
+      {reported && (
+        <div className="mt-4 rounded-xl border border-[#f0d9a8] bg-[#fdf3dc] px-4 py-3.5">
+          <h2 className="text-[11px] font-bold uppercase tracking-wide text-[#8a5a00] flex items-center gap-1.5">
+            <ClipboardList size={12} /> What was reported
+          </h2>
+          <p className="text-[15px] leading-relaxed font-medium text-[#1a1916] mt-1.5 whitespace-pre-wrap">{reported}</p>
         </div>
       )}
+
+      {err && <p className="mt-3 text-sm text-[#b91c1c]">{err}</p>}
+      {closed && <p className="mt-3 text-[12px] text-[#15803d] font-semibold">This job is closed — nothing more to do.</p>}
 
       {job.tasks.length > 0 && (
         <div className={card}>
@@ -163,11 +181,15 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
             ? <p className="text-[11.5px] text-[#9b9890] mt-2">None yet.</p>
             : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
-                {shot(kind).map(p => (
+                {shot(kind).map((p, k) => (
                   <div key={p.id} className="relative group">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e8e6e0]" />
-                    {!closed && (
+                    {/* Tap to open — the same viewer the landlord's job page uses, with the caption. */}
+                    <button type="button" title={p.caption ?? 'View photo'} className="block w-full cursor-pointer"
+                      onClick={() => setGallery({ photos: shot(kind).map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} photo` })), start: k })}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e8e6e0] hover:opacity-90" />
+                    </button>
+                    {!closed && p.mine && (
                       <button
                         type="button" disabled={!!busy}
                         onClick={() => run(`rm${p.id}`, () => apiDelete<Job>(`${base}/photos/${p.id}`))}
@@ -180,6 +202,11 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                 ))}
               </div>
             )}
+          {shot(kind).length > 0 && (
+            <p className="text-[10.5px] text-[#8a8f8c] mt-1.5">
+              {kind === 'before' && shot(kind).some(r => r.caption?.startsWith('Move-out')) ? `${shot(kind).filter(r => r.caption?.startsWith('Move-out')).length} from the move-out report · ` : ''}tap a photo to view it
+            </p>
+          )}
         </div>
       ))}
 
@@ -295,6 +322,46 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
           </div>
         )}
       </div>
+
+      {/* A word on the job for the landlord — it shows on their job timeline. */}
+      <div className={card}>
+        <h2 className="text-[14px] font-bold text-[#1c1f1d] flex items-center gap-1.5"><MessageSquare size={14} /> Comments</h2>
+        {job.comments.length === 0
+          ? <p className="text-[11.5px] text-[#9b9890] mt-2">No comments yet.</p>
+          : (
+            <ul className="mt-3 space-y-2.5">
+              {job.comments.map(c => (
+                <li key={c.id}>
+                  <p className="text-[10.5px] text-[#8a8f8c]">{c.mine ? 'You' : c.by ?? 'Your landlord'} · {fmtDt(c.at)}</p>
+                  <p className="text-[13px] text-[#3d423f] whitespace-pre-wrap">{c.text}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        {!closed && (
+          <div className="mt-3 flex items-end gap-2">
+            <textarea
+              value={comment} onChange={e => setComment(e.target.value)} rows={2} maxLength={2000}
+              placeholder="Write a comment for your landlord"
+              className={`${field} flex-1 resize-y`}
+            />
+            <button
+              type="button" disabled={!!busy || !comment.trim()}
+              onClick={() => run('comment', async () => {
+                const next = await apiPost<Job>(`${base}/comments`, { text: comment.trim() });
+                setComment('');
+                return next;
+              })}
+              className="text-[12px] font-semibold text-white rounded-lg px-3 py-1.5 disabled:opacity-50"
+              style={{ background: '#1a7a52' }}
+            >
+              {busy === 'comment' ? 'Posting…' : 'Post'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {gallery && <PhotoLightbox photos={gallery.photos} start={gallery.start} onClose={() => setGallery(null)} />}
     </div>
   );
 }

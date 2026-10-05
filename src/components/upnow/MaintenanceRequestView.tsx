@@ -92,7 +92,7 @@ const EVENT_LABEL: Record<string, string> = {
   auto_approved: 'Quote auto-approved (under the threshold)',
   approval_needed: 'Quote needs approval', quote_rejected: 'Quote rejected',
   reassigned: 'Reassigned', provider_declined: 'Provider declined',
-  verified: 'Work signed off', closed: 'Closed out', cancelled: 'Cancelled', note: 'Note',
+  verified: 'Work signed off', closed: 'Closed out', cancelled: 'Cancelled', note: 'Note', comment: 'Comment',
   own_team_engaged: 'Own team — engaged on routing, no quote needed',
   own_team_assigned: 'Given to your own team — no routing or quote needed',
   photo_removed: 'Photo removed',
@@ -653,6 +653,9 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                   <p className="text-xs text-[#6b6860]">{aed(Number(e.payload.amountAed))} · payment #{String(e.payload.paymentId)}</p>
                 )}
                 {e.type === 'note' && e.payload?.note != null && <p className="text-xs text-[#6b6860]">{String(e.payload.note)}</p>}
+                {e.type === 'comment' && e.payload?.text != null && (
+                  <p className="text-xs text-[#3d423f] whitespace-pre-wrap">{e.payload?.by != null && <span className="font-semibold">{String(e.payload.by)}: </span>}{String(e.payload.text)}</p>
+                )}
               </div>
             </li>
           ))}

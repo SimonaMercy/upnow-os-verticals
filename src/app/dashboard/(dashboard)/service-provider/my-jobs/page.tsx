@@ -82,6 +82,9 @@ export default function CrewJobsPage() {
     return m;
   }, [jobs]);
 
+  // The auto-written "Tasks: …" line of a restoration adds nothing the task count doesn't say.
+  const desc = (j: CrewJob) => (j.tasksTotal > 0 ? (j.description ?? '').replace(/^Tasks:[^\n]*\n*/, '') : (j.description ?? '')).trim();
+
   const card = (j: CrewJob) => {
     const age = j.closedAt ? null : ageDays(j.assignedAt);
     return (
@@ -97,6 +100,8 @@ export default function CrewJobsPage() {
           )}
         </div>
         <div className="c-unit">{j.where ?? '—'}</div>
+        {/* Three jobs can share a title ("Wall Painting") — the description is what tells them apart. */}
+        {desc(j) && <p className="text-[12px] leading-snug text-[#3d423f] mt-1.5 line-clamp-2">{desc(j)}</p>}
         <div className="c-foot">
           <span className="rent">{j.tasksTotal > 0 ? `${j.tasksDone} of ${j.tasksTotal} done` : j.closedAt ? 'Closed' : 'No task list'}</span>
           {fmtDay(j.closedAt ?? j.assignedAt) && <span className="term">{fmtDay(j.closedAt ?? j.assignedAt)}</span>}

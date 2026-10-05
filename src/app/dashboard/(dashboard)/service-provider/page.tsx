@@ -193,10 +193,13 @@ export default function ServiceProviderOverview() {
   const [bookings, setBookings] = useState<SpBooking[]>([]);
   const [services, setServices] = useState<SpService[]>([]);
   // v2: a landlord-invited light vendor's home IS the job board — the
-  // marketplace checklist (KYC, services, job-ready) is the other tier.
+  // marketplace checklist (KYC, services, job-ready) is the other tier. Its
+  // board is My jobs: the jobs its landlord runs have no booking, so the
+  // booking board (/operations) is always empty for it — same as the nav's
+  // "Jobs" (#247).
   const router = useRouter();
   useEffect(() => {
-    try { if (sessionStorage.getItem('sp_tier') === 'landlord_vendor') router.replace('/dashboard/service-provider/operations'); } catch { /* stay */ }
+    try { if (sessionStorage.getItem('sp_tier') === 'landlord_vendor') router.replace('/dashboard/service-provider/my-jobs'); } catch { /* stay */ }
   }, [router]);
 
   const [jobReady, setJobReady] = useState<{ jobReady: boolean; cards: Record<string, { complete: boolean }> } | null>(null);

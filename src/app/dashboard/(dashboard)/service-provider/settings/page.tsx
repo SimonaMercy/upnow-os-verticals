@@ -13,6 +13,14 @@
  *                    rules), each an open sub-tab.
  *   - Team:          full roster management (SpTeamPanel) + coverage gaps.
  *   - Notifications: preference toggles (same UI-level fidelity as RP's tab).
+ *
+ * A landlord's own vendor (tier landlord_vendor) gets two of these, with no
+ * tab strip — its nav already has "Profile" and "Technicians": Profile trimmed
+ * to business details, account and how it charges; Team as it is. Rules,
+ * Notifications, coverage, compliance documents and the platform agreement
+ * are marketplace machinery it never uses (owner, 5 Oct 2026: "why we have
+ * multiple options like notifications and rules … profile also should be
+ * cleaned").
  */
 'use client';
 
@@ -218,7 +226,7 @@ function ProfileTab() {
 
   const saveBusiness = async () => {
     if (!businessName.trim()) { setBizError('Business name is required'); return; }
-    if (!emirates.length) { setBizError('Pick at least one emirate'); return; }
+    if (!lightVendor && !emirates.length) { setBizError('Pick at least one emirate'); return; }
     setBizSaving(true); setBizError(null); setBizSaved(false);
     try {
       await apiPatch('/profiles/service-provider/me', {
@@ -226,7 +234,7 @@ function ProfileTab() {
         ownerName: ownerName.trim() || null,
         tradeLicenseNumber: licence.trim() || null,
         vatTrn: trn.trim() || null,
-        emiratesServed: emirates,
+        ...(lightVendor ? {} : { emiratesServed: emirates }),
       });
       setBizSaved(true);
     } catch (e) { setBizError(e instanceof Error ? e.message : 'Failed to save'); }
@@ -266,25 +274,11 @@ function ProfileTab() {
   return (
     <div className="space-y-6">
       {lightVendor && <VendorRateCard />}
-      {lightVendor && (
-        <div style={{ background: '#fff', border: '1px solid #E4E7E2', borderRadius: 14, padding: '16px 18px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#182420' }}>Want marketplace jobs too?</div>
-            <p style={{ fontSize: 13, color: '#55645B', margin: '4px 0 0', lineHeight: 1.5 }}>
-              Today you work only for the landlords who invited you. Becoming an UpNow marketplace provider opens customer bookings —
-              it needs the full onboarding (verification, services, coverage area) and applies to marketplace work only; your landlord jobs are unaffected.
-            </p>
-          </div>
-          <a href="/dashboard/service-provider/onboarding" style={{ flexShrink: 0, padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, background: '#0B7A4E', color: '#fff', textDecoration: 'none' }}>
-            Start marketplace onboarding
-          </a>
-        </div>
-      )}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         {/* Business profile — editable */}
         <Card
-          title="Business Profile"
-          description="Your legal identity on UpNow — keep it matching your trade licence."
+          title={lightVendor ? 'Business details' : 'Business Profile'}
+          description={lightVendor ? 'As on your trade licence.' : 'Your legal identity on UpNow — keep it matching your trade licence.'}
           action={approved ? (
             <span className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold bg-[#2e9f82]/10 text-[#2e9f82]">
               <BadgeCheck size={13} /> Verified
@@ -306,7 +300,7 @@ function ProfileTab() {
               <Field label="Trade licence no." value={licence} onChange={setLicence} placeholder="e.g. CN-1234567" />
               <Field label="VAT TRN (optional)" value={trn} onChange={setTrn} placeholder="100XXXXXXXXXXXX" />
             </div>
-            <div>
+            {!lightVendor && <div>
               <span className="block text-xs font-medium mb-1.5 text-[#6b6860]">Emirates served</span>
               <div className="flex flex-wrap gap-1.5">
                 {EMIRATES.map((em) => (
@@ -317,8 +311,8 @@ function ProfileTab() {
               <p className="text-xs text-[#9b9890] mt-1.5">
                 Zones for each city are picked in <b>Rules → Coverage</b>.
               </p>
-            </div>
-            {(profile?.serviceCategories?.length ?? 0) > 0 && (
+            </div>}
+            {!lightVendor && (profile?.serviceCategories?.length ?? 0) > 0 && (
               <div>
                 <span className="block text-xs font-medium mb-1.5 text-[#6b6860]">Service categories</span>
                 <div className="flex flex-wrap gap-1.5">
@@ -337,8 +331,8 @@ function ProfileTab() {
         </Card>
 
         <div className="space-y-6">
-          {/* Customer queries contact — editable */}
-          <Card
+          {/* Customer queries contact — editable (marketplace bookings only) */}
+          {!lightVendor && <Card
             title="Customer Queries Contact"
             description="Customers and UpNow support reach this person about bookings."
           >
@@ -369,28 +363,29 @@ function ProfileTab() {
               </div>
             </div>
             <SaveBar saving={ctSaving} saved={ctSaved} error={ctError} onSave={() => void saveContact()} />
-          </Card>
+          </Card>}
 
           {/* Account */}
           <Card title="Account">
             <Row label="Email" value={user?.email ?? '—'} />
             {user?.phone && <Row label="Phone" value={user.phone} />}
             <Row label="Role" value="Service Provider" />
-            <Row
+            {!lightVendor && <Row
               label="Review status"
               value={approved
                 ? <span className="text-[#2e9f82]">Approved</span>
                 : pretty(profile?.complianceStatus ?? 'pending_review')}
-            />
+            />}
           </Card>
 
-          {/* SP-252 — the platform agreement: read it again, see when you accepted, the record of every version. */}
-          <PlatformAgreementCard />
+          {/* SP-252 — the platform agreement: read it again, see when you accepted, the record of every version.
+              A light vendor is never asked to accept it (SpOnboardingGate), so it is not shown one. */}
+          {!lightVendor && <PlatformAgreementCard />}
         </div>
       </div>
 
-      {/* Documents — same page, with expiry tracking */}
-      <div>
+      {/* Documents — same page, with expiry tracking (marketplace compliance: "pause new bookings") */}
+      {!lightVendor && <div>
         {attention.length > 0 && (
           <div className="mb-4 rounded-2xl px-5 py-4 bg-red-50 border border-red-200">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-red-700">
@@ -418,7 +413,7 @@ function ProfileTab() {
             compact
           />
         </Card>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -556,8 +551,26 @@ function NotificationsTab() {
 }
 
 /* ── Page ─────────────────────────────────────────────────────────────────── */
+/** The light-tier flag SpOnboardingGate records (same source as the nav). Read
+ *  after mount so server and first client render agree. */
+function useLightVendor(): boolean {
+  const [light, setLight] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of the gate's tier flag after hydration
+    try { setLight(sessionStorage.getItem('sp_tier') === 'landlord_vendor'); } catch { /* not light */ }
+    const on = (e: Event) => setLight((e as CustomEvent<string>).detail === 'landlord_vendor');
+    window.addEventListener('sp-tier', on);
+    return () => window.removeEventListener('sp-tier', on);
+  }, []);
+  return light;
+}
+const LIGHT_TABS: MainTab[] = ['profile', 'team'];
+
 export default function ServiceProviderSettingsPage() {
   const [mainTab, setMainTab] = useState<MainTab>('profile');
+  const light = useLightVendor();
+  // A light vendor has only Profile and Team — a stale ?tab=rules lands on Profile.
+  const tab: MainTab = light && !LIGHT_TABS.includes(mainTab) ? 'profile' : mainTab;
 
   // Persist the active tab in the URL (?tab=) — same pattern as RP settings:
   // restore on mount, replaceState on switch (no history spam). Restoring in
@@ -577,32 +590,36 @@ export default function ServiceProviderSettingsPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
+      {/* Header — a light vendor reaches each section from its own nav item, so the page is named for it */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">Settings</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">Manage your business profile, operating rules, team and preferences.</p>
+        <h1 className="text-2xl font-bold text-[#1a1916]">{light ? (tab === 'team' ? 'Technicians' : 'Profile') : 'Settings'}</h1>
+        <p className="text-sm text-[#6b6860] mt-0.5">
+          {light
+            ? (tab === 'team' ? 'The people who work your jobs.' : 'Your business details and how you charge.')
+            : 'Manage your business profile, operating rules, team and preferences.'}
+        </p>
       </div>
 
-      {/* Top-level tabs — same construction as RP settings */}
-      <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e8e6e0] mb-6 w-fit max-w-full flex-wrap">
+      {/* Top-level tabs — same construction as RP settings (none for a light vendor: its nav is the switch) */}
+      {!light && <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e8e6e0] mb-6 w-fit max-w-full flex-wrap">
         {MAIN_TABS.map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => selectTab(key)}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-              mainTab === key ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+              tab === key ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
             }`}>
             <Icon size={14} /> {label}
           </button>
         ))}
-      </div>
+      </div>}
 
-      {mainTab === 'profile' && <ProfileTab />}
-      {mainTab === 'rules' && (
+      {tab === 'profile' && <ProfileTab />}
+      {tab === 'rules' && (
         <div className="max-w-3xl">
           <SpJobReady />
         </div>
       )}
-      {mainTab === 'team' && <TeamTab />}
-      {mainTab === 'notifications' && <NotificationsTab />}
+      {tab === 'team' && <TeamTab />}
+      {tab === 'notifications' && <NotificationsTab />}
     </div>
   );
 }
