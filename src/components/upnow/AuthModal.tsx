@@ -73,6 +73,7 @@ export function AuthModal({
   onClose,
   onModeChange,
   dismissible = true,
+  notice = null,
 }: {
   mode: AuthModalMode;
   onClose: () => void;
@@ -84,6 +85,8 @@ export function AuthModal({
    * mid-sign-in; that page passes false to pin it open.
    */
   dismissible?: boolean;
+  /** Shown in the sign-in error line until an error replaces it — e.g. why the person was signed out. */
+  notice?: string | null;
 }) {
   const router = useRouter();
   const { login, verifyLoginOtp, register, refresh, verifyOtp, requestOtp } = useAuth();
@@ -654,9 +657,9 @@ export function AuthModal({
                 />
               </div>
 
-              {error && (
+              {(error ?? notice) && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', color: '#b91c1c', padding: '10px 12px', borderRadius: 10, fontSize: 13, margin: '10px 0' }}>
-                  <AlertCircle size={15} /> {error}
+                  <AlertCircle size={15} /> {error ?? notice}
                 </div>
               )}
 

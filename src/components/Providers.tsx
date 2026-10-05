@@ -6,6 +6,7 @@ import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { installApiFetchCoalescing } from "@/lib/fetchCoalescing";
 import { setDocViewerWatermark } from "@/lib/docViewer";
+import { watchForAiAgent } from "@/lib/aiAgentSignals";
 
 /**
  * Feeds the logged-in user's identity to the document viewer's watermark. Lives
@@ -33,6 +34,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       },
     });
   });
+
+  // Watch for an AI agent driving the page from the first render, so sign-in
+  // and every signed-in request refuse it (lib/aiAgentSignals.ts).
+  useEffect(() => {
+    watchForAiAgent();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

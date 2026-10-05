@@ -13,11 +13,12 @@
  * lands on the holding page instead, which is the intended behaviour.
  */
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { Outfit } from 'next/font/google';
 import { AuthModal, type AuthModalMode } from '@/components/upnow/AuthModal';
 import { SiteBackdrop } from '@/components/upnow/SiteBackdrop';
+import { AI_AGENT_BLOCKED_NOTICE } from '@/lib/aiAgentSignals';
 import styles from './loginPage.module.css';
 
 const outfit = Outfit({
@@ -28,9 +29,16 @@ const outfit = Outfit({
 
 const WORDMARK = ['U', 'p', 'N', 'o', 'w'];
 
+const noSubscribe = () => () => {};
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<AuthModalMode>('signin');
+  // `?blocked=ai`: sent here because an AI agent was seen driving the session
+  // (lib/aiAgentSignals.ts). Read after hydration — the server has no URL query.
+  const search = useSyncExternalStore(noSubscribe, () => window.location.search, () => '');
+  const notice =
+    new URLSearchParams(search).get('blocked') === 'ai' ? AI_AGENT_BLOCKED_NOTICE : null;
 
   return (
     <main className={`${styles.page} ${outfit.className}`}>
@@ -66,6 +74,7 @@ export default function LoginPage() {
         onClose={() => router.push('/')}
         onModeChange={setMode}
         dismissible={false}
+        notice={notice}
       />
     </main>
   );

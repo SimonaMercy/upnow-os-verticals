@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  AI_AGENT_BLOCKED_HEADER,
+  AI_AGENT_BLOCKED_HEADER_VALUE,
+  AI_AGENT_COOKIE,
+} from '@/lib/aiAgentSignals';
 
 /**
  * Next.js API catch-all proxy → NestJS backend.
@@ -47,6 +52,18 @@ function isTokenIssuingPath(pathStr: string): boolean {
 }
 
 /**
+ * The backend refused an AI agent (src/auth/ai-agent-guard.ts) — end the
+ * session there and then, so the tab it was driving is signed out. The header
+ * lets the page notice on any call, not only the ones made through api.ts.
+ */
+function endSessionIfAiAgent(res: NextResponse, status: number, data: unknown): void {
+  if (status === 403 && (data as { error?: unknown } | null)?.error === 'AI_AGENT_BLOCKED') {
+    res.cookies.delete(COOKIE);
+    res.headers.set(AI_AGENT_BLOCKED_HEADER, AI_AGENT_BLOCKED_HEADER_VALUE);
+  }
+}
+
+/**
  * Signer-evidence forwarding: this proxy sits between every browser and the
  * backend, so without these headers the API would record the Next server as
  * the "signer". x-forwarded-for carries the browser's IP chain (Next/Amplify
@@ -59,6 +76,13 @@ function evidenceHeaders(req: NextRequest): Record<string, string> {
   if (xff) out['X-Forwarded-For'] = xff;
   const ua = req.headers.get('user-agent');
   if (ua) out['X-Client-User-Agent'] = ua;
+  // AI-agent guard (backend src/auth/ai-agent-guard.ts): ChatGPT's agent signs
+  // every request with Signature-Agent, and the page's own agent check
+  // (lib/aiAgentSignals.ts) rides a cookie.
+  const signatureAgent = req.headers.get('signature-agent');
+  if (signatureAgent) out['X-Client-Signature-Agent'] = signatureAgent;
+  const agentSignals = req.cookies.get(AI_AGENT_COOKIE)?.value;
+  if (agentSignals) out['X-Client-Agent-Signals'] = agentSignals;
   return out;
 }
 
@@ -126,7 +150,9 @@ async function proxy(
     const text = await upstream.text();
     let parsed: unknown;
     try { parsed = JSON.parse(text); } catch { parsed = text; }
-    return NextResponse.json(parsed, { status: upstream.status });
+    const res = NextResponse.json(parsed, { status: upstream.status });
+    endSessionIfAiAgent(res, upstream.status, parsed);
+    return res;
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...evidenceHeaders(req) };
@@ -198,6 +224,7 @@ async function proxy(
       : data;
 
   const response = NextResponse.json(payload, { status: upstream.status });
+  endSessionIfAiAgent(response, upstream.status, data);
 
   if (rawToken) {
     response.cookies.set(COOKIE, rawToken, {

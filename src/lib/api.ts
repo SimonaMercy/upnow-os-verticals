@@ -3,6 +3,8 @@
 // they never touch JavaScript context (no localStorage, no sessionStorage).
 // See: src/app/api/[...path]/route.ts
 
+import { leaveForAiAgent } from "./aiAgentSignals";
+
 // In-flight GET requests keyed by path, so concurrent identical reads share a
 // single network request (see apiGet). Cleared the moment each settles.
 const inFlightGets = new Map<string, Promise<unknown>>();
@@ -16,6 +18,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
         if (Array.isArray(body.message)) message = body.message.join(", ");
         else if (typeof body.message === "string") message = body.message;
         else if (typeof body.error === "string") message = body.error;
+        // An AI agent was seen driving this tab — the session is gone (the
+        // proxy cleared it); off to /login with the reason (lib/aiAgentSignals.ts).
+        if (res.status === 403 && body.error === "AI_AGENT_BLOCKED") leaveForAiAgent();
       }
     } catch {
       try {
