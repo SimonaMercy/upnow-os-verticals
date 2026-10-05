@@ -30,9 +30,7 @@
 export const AI_AGENT_COOKIE = 'upnow_ai_agent';
 
 export const AI_AGENT_BLOCKED_NOTICE =
-  'UpNow cannot be used through ChatGPT, Claude or any other AI tool, so you have been signed out. ' +
-  'Please sign in yourself, in your own browser, with no AI assistant running. ' +
-  'If you are not using one, switch off any browser extension that clicks or fills in pages for you and try again in 5 minutes.';
+  'You are not allowed to sign in. AI tools cannot be used on UpNow.';
 
 /** Set by the proxy on every response the backend refused as an AI agent. */
 export const AI_AGENT_BLOCKED_HEADER = 'x-upnow-blocked';
