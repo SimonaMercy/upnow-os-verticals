@@ -29,6 +29,7 @@ import { getOccupantDocs, deriveOccupantCount, docNeedsExpiry, RESIDENTIAL_RENTA
 import { sectionForDocKey } from '@/lib/documentCatalogue';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
+import { CustomerContactsCard } from '@/components/customers/CustomerContactsCard';
 
 type Lease = {
   id: number; ref: string; contractType: string | null; status: string | null;
@@ -715,6 +716,10 @@ export default function CustomerDetailPage() {
             </div>
           ))}
         </div>
+
+        {/* Other contacts — second addresses, family, a PRO: whose emails and
+            WhatsApp messages are filed under this customer. Never on the contract. */}
+        <CustomerContactsCard rp={isManager ? (rpScope || null) : null} tenantId={Number(params?.id)} />
       </div>
 
       {editing && (

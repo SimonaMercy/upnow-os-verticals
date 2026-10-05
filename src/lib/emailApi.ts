@@ -154,6 +154,8 @@ export interface EmailContract { id: number; status: string; startDate: string |
 
 export interface EmailThreadDetail extends Omit<EmailThreadRow, 'messageCount' | 'lastMessageAt' | 'lastDirection' | 'lastSnippet' | 'unitLabel' | 'fileCount' | 'lastFrom' | 'mailboxId'> {
   kind: EmailKind;
+  /** Written from one of the customer's other contacts (a second address, family, a PRO) — who it is. */
+  contact?: { id: number; name: string | null; relationship: string | null } | null;
   /** The landlord's own mailboxes — "You" wherever one appears. */
   ownAddresses: string[];
   /** May the person signed in reply, reply all or forward here? */
@@ -257,7 +259,7 @@ export const emailApi = {
       ...(body.body?.trim() ? { body: body.body } : {}),
       attachments: (body.attachments ?? []).map(({ key, fileName, mimeType }) => ({ key, fileName, mimeType })),
     }),
-  /** "File under…" — tie the conversation's address to a customer, lead or vendor (landlord only); `none` unties it. */
+  /** "File under…" — tie the conversation's address to a customer, lead or vendor (the landlord, or a team member who may send); `none` unties it. */
   link: (rp: Rp, threadId: number, to: { kind: 'customer' | 'lead' | 'vendor' | 'none'; id?: number }) =>
     apiPost<EmailThreadDetail>(scoped(`/email/threads/${threadId}/link`, rp), to),
   /** Move a conversation to Finance, Legal or Promotions, or (null) back to its record's tab. Landlord only. */

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Building2, ExternalLink, Link2, Loader2, Search, Unlink, X } from 'lucide-react';
 import { KIND_CHIP, KIND_LABEL, errorText, prettyPhone, whatsappApi, type Rp, type WaChatDetail, type WaPerson } from '@/lib/whatsappApi';
+import { relationshipLabel } from '@/lib/customerContactsApi';
 
 const STATUS_TONE: Record<string, string> = {
   active: 'text-[#1a7a5a] bg-[#eef9f4]', expired: 'text-[#6b6860] bg-[#f4f3ef]', terminated: 'text-[#b42318] bg-red-50', draft: 'text-[#8a6d1d] bg-[#fdf3e3]',
@@ -54,6 +55,11 @@ export function WaContextPanel({ rp, isManager, chat, onClose, onLinked }: {
             <span className={`text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${KIND_CHIP[chat.kind]}`}>{KIND_LABEL[chat.kind]}</span>
           </div>
           {chat.phone && !chat.isGroup && <div className="text-[#4a4842] mt-1 tabular-nums">{prettyPhone(chat.phone)}</div>}
+          {chat.contact && (
+            <div className="mt-2 rounded-lg bg-[#eef9f4] px-3 py-2 text-xs text-[#1a5c45] leading-relaxed">
+              <span className="font-semibold">{relationshipLabel(chat.contact.relationship)}</span>{chat.contact.name ? ` · ${chat.contact.name}` : ''} — not the customer’s primary number. Kept under the customer’s other contacts.
+            </div>
+          )}
           <dl className="mt-2 space-y-1 text-xs text-[#6b6860]">
             {chat.savedName && <div className="flex gap-2"><dt className="w-[92px] shrink-0">Saved on phone</dt><dd className="text-[#2b2a27] break-words">{chat.savedName}</dd></div>}
             {chat.profileName && <div className="flex gap-2"><dt className="w-[92px] shrink-0">WhatsApp name</dt><dd className="text-[#2b2a27] break-words">{chat.profileName}</dd></div>}

@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { Building2, ExternalLink, Landmark, Link2, Loader2, Megaphone, Scale, Search, Undo2, Unlink, X } from 'lucide-react';
 import { emailApi, errorText, type EmailCategory, type EmailPerson, type EmailRecipient, type EmailSide, type EmailThreadDetail, type Rp } from '@/lib/emailApi';
 import { Avatar, FileCard, KIND_LABEL, KindChip } from './EmailBits';
+import { relationshipLabel } from '@/lib/customerContactsApi';
 
 const STATUS_TONE: Record<string, string> = {
   active: 'text-[#1a7a5a] bg-[#eef9f4]', expired: 'text-[#6b6860] bg-[#f4f3ef]', terminated: 'text-[#b42318] bg-red-50',
@@ -80,6 +81,11 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             <KindChip kind={thread.kind} />
           </div>
           <div className="text-xs text-[#6b6860] mt-1 break-all">{thread.counterpartEmail}</div>
+          {thread.contact && (
+            <div className="mt-2 rounded-lg bg-[#eef9f4] px-3 py-2 text-xs text-[#1a5c45] leading-relaxed">
+              <span className="font-semibold">{relationshipLabel(thread.contact.relationship)}</span>{thread.contact.name ? ` · ${thread.contact.name}` : ''} — not the customer’s primary email. Kept under the customer’s other contacts.
+            </div>
+          )}
           {recordHref && <Link href={recordHref} className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#1a7a5a] hover:underline">Open the {recordKind} <ExternalLink size={13} /></Link>}
         </section>
 
@@ -135,7 +141,7 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
           </section>
         )}
 
-        {!isManager && (
+        {(!isManager || thread.canSend) && (
           <section>
             <h3 className={H3}>Filed under</h3>
             {!linking ? (

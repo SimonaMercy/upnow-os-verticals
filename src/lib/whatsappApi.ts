@@ -73,7 +73,9 @@ export type WaContext =
   | { type: 'vendor'; id: number; name: string; phone: string | null; email: string | null }
   | { type: 'team'; id: number; name: string; role: string; phone: string | null };
 
-export interface WaChatDetail extends WaChatRow { lineStatus: string; /** May the person signed in answer here? */ canSend: boolean; context: WaContext | null }
+export interface WaChatDetail extends WaChatRow { lineStatus: string; /** May the person signed in answer here? */ canSend: boolean; context: WaContext | null;
+  /** The number is one of the customer's other contacts (a spouse, a son, a second phone) — who it is. */
+  contact?: { id: number; name: string | null; relationship: string | null } | null }
 
 export interface WaReaction { emoji: string; count: number; mine: boolean }
 
