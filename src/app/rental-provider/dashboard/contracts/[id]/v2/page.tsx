@@ -2907,10 +2907,11 @@ function DetailsDrawer({
   const [recBusy, setRecBusy] = useState(false);
   const [recErr, setRecErr] = useState<string | null>(null);
   /** The cheque copy / transfer receipt the payment is recorded against —
-   *  asked for on every cheque and transfer (owner, 23 Sep 2026). */
+   *  OPTIONAL (owner, 5 Oct 2026): a payment is often added before the cheque
+   *  or transfer is in hand, and its copy is attached on the payment plan once
+   *  it is received. Was required on every cheque and transfer since 23 Sep. */
   const [recFile, setRecFile] = useState<File | null>(null);
   const [feeFile, setFeeFile] = useState<File | null>(null);
-  const needsProof = (method: string) => method === 'cheque' || method === 'bank_transfer';
   /** Files the cheque copy / transfer slip BEFORE the payment is recorded, so a
    *  refused upload stops the save rather than leaving a payment with nothing
    *  behind it; returns the document id to link. */
@@ -3039,7 +3040,6 @@ function DetailsDrawer({
     const recTaxed = rec.paymentType === 'rental_income';
     const fig = splitVat(typed, recTaxed ? rec.vatMode : 'none', rec.vatOverride.trim() ? Number(rec.vatOverride) : null);
     if (!Number.isFinite(fig.vat) || fig.vat < 0 || fig.vat > fig.total) { setRecErr('Enter a valid VAT amount'); return; }
-    if (needsProof(rec.paymentMethod) && !recFile) { setRecErr('Attach the cheque copy or the transfer receipt'); return; }
     setRecBusy(true); setRecErr(null);
     try {
       const proofId = await uploadProof(recFile, rec.chequeNumber.trim());
@@ -3375,7 +3375,6 @@ function DetailsDrawer({
     const typed = Number(feeAdd.amount); const { vat, total } = feeFig(feeAdd);
     if (!Number.isFinite(typed) || typed <= 0) { setFeeAddErr('Enter a valid amount'); return; }
     if (!Number.isFinite(vat) || vat < 0 || vat > total) { setFeeAddErr('Enter a valid VAT amount'); return; }
-    if (needsProof(feeAdd.paymentMethod) && !feeFile) { setFeeAddErr('Attach the cheque copy or the transfer receipt'); return; }
     setFeeAddBusy(true); setFeeAddErr(null);
     try {
       const proofId = await uploadProof(feeFile, feeAdd.chequeNumber.trim());
@@ -4601,7 +4600,7 @@ function DetailsDrawer({
                             <input className="input" value={feeAdd.chequeNumber} placeholder="Cheque #, transfer ID…"
                               onChange={e => setFeeAdd(v => ({ ...v, chequeNumber: e.target.value }))} />
                           </div>
-                          <div className="field"><label>Attachment — {feeAdd.paymentMethod === 'cheque' ? 'cheque copy' : feeAdd.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt (optional)'}</label>
+                          <div className="field"><label>Attachment — {feeAdd.paymentMethod === 'cheque' ? 'cheque copy' : feeAdd.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt'} (optional)</label>
                             <input type="file" className="input" accept="image/*,application/pdf" onChange={e => setFeeFile(e.target.files?.[0] ?? null)} />
                           </div>
                         </div>
@@ -4696,7 +4695,7 @@ function DetailsDrawer({
                         <input type="date" className="input" value={rec.transactionDate} onChange={e => setRec(v => ({ ...v, transactionDate: e.target.value }))} />
                       </div>
                       <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
-                        <label>Attachment — {rec.paymentMethod === 'cheque' ? 'cheque copy' : rec.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt (optional)'}</label>
+                        <label>Attachment — {rec.paymentMethod === 'cheque' ? 'cheque copy' : rec.paymentMethod === 'bank_transfer' ? 'transfer receipt' : 'receipt'} (optional)</label>
                         <input type="file" className="input" accept="image/*,application/pdf" onChange={e => setRecFile(e.target.files?.[0] ?? null)} />
                       </div>
                       {/* Offered only when there is a failed cheque left to
