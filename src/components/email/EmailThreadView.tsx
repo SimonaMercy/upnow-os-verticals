@@ -100,7 +100,8 @@ function Message({ m, rp, who, open, onToggle, onForward }: { m: EmailMessageRow
   const parts = useMemo(() => splitEmailBody(m.bodyText), [m.bodyText]);
   const out = m.direction === 'out';
   // An email written in the portal names the person; one sent from the office mail app is just "You".
-  const sender = out ? (m.sentByName ? `You · ${m.sentByName}` : 'You') : who(m.fromEmail);
+  // Sent from the portal → the person; sent from Outlook on the shared mailbox → nobody named.
+  const sender = out ? (m.sentByName ? `You · ${m.sentByName}` : m.sentFrom === 'mailbox' ? 'You · from Outlook, nobody named' : 'You') : who(m.fromEmail);
   const when = new Date(m.sentAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const to = m.toEmails.length ? m.toEmails : [m.toEmail];
   // The text — the whole email when it has no layout of its own, the stand-in when the layout cannot be had.

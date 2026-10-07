@@ -103,6 +103,8 @@ export interface WaMessage {
   media: WaMedia | null;
   sentByName: string | null;
   sentByRole: string | null;
+  /** Outbound only — where it was typed. The portal names the person; the phone or a computer's WhatsApp names nobody. */
+  typedOn?: 'portal' | 'phone' | 'computer' | null;
   status: 'received' | 'sending' | 'sent' | 'not_sent';
   error: string | null;
   sentAt: string;

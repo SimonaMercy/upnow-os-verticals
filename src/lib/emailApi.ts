@@ -141,6 +141,8 @@ export interface EmailMessageRow {
   hasLayout?: boolean;
   sentByName: string | null;
   sentByRole: string | null;
+  /** Outbound only — the portal names the person; a mail sent from Outlook on the shared mailbox names nobody. */
+  sentFrom?: 'portal' | 'mailbox' | null;
   status: 'sent' | 'not_sent' | 'received';
   sentAt: string;
   attachments: EmailAttachmentRow[];

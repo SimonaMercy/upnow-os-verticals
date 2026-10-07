@@ -369,6 +369,8 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
   );
 
   const who = out ? m.sentByName : isGroup ? (m.authorName || prettyPhone(m.authorPhone)) : null;
+  // A reply typed on the phone or on a computer's WhatsApp reaches the portal with no person behind it.
+  const outside = out && !m.sentByName ? (m.typedOn === 'phone' ? 'Typed on the phone — nobody named' : m.typedOn === 'computer' ? 'Typed on a computer, not the portal — nobody named' : null) : null;
   return (
     <div id={`wa-msg-${m.id}`} className={`group flex items-end gap-1.5 ${out ? 'justify-end' : 'justify-start'} scroll-mt-24`}>
       {out && actions}
@@ -382,7 +384,8 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
         )}
         {content}
         <div className={`flex items-center justify-end gap-1 mt-1 text-[10.5px] text-[#9b9890] tabular-nums ${sticker ? 'bg-white/80 rounded-full px-1.5 w-fit ml-auto' : ''}`}>
-          {out && who ? <span className="mr-auto pr-3 truncate max-w-[180px]">{who}{m.sentByRole === 'manager' ? ' · manager' : ''}</span> : null}
+          {out && who ? <span className="mr-auto pr-3 truncate max-w-[180px]">{who}{m.sentByRole === 'manager' ? ' · manager' : ''}</span>
+            : outside ? <span className="mr-auto pr-3 truncate max-w-[300px] italic" title={outside}>{outside}</span> : null}
           {m.editedAt && !m.isRevoked ? <span>Edited</span> : null}
           <span>{waTime(m.sentAt)}</span>
           <Ticks m={m} />
