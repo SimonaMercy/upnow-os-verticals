@@ -59,17 +59,22 @@ type NavCounts = Partial<Record<NavBadgeKey, number>>;
 // Switched on everywhere on 21 Sep 2026 (owner: "let's enable the tabs that we hide for production") —
 // the restoration / own-team jobs, the Units page and the Vacant Units report all lead to it.
 
+// Owner's v32 pattern (this branch is the preview): `tone` marks which layer an
+// item belongs to — 'shared' = dark-green shared UpNow OS (reused by every
+// vertical), 'pack' = light-green Spaces pack (property-specific records).
+type NavTone = 'shared' | 'pack';
+
 type NavItem =
   // `match` lists extra path prefixes that also activate the item — for sections
   // whose detail pages live under a different route than the nav href (e.g. the
   // Leases list is /orders but a lease opens at /contracts/:id/v2).
   // `hidden` parks a section: the entry stays here (route, icon, position) but
   // is dropped from the rail. See the HIDDEN note below.
-  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string | string[]; badgeKey?: NavBadgeKey; match?: string[]; hidden?: true;
+  | { label: string; href: string; icon: React.ElementType; soon?: boolean; requirePerm?: string | string[]; badgeKey?: NavBadgeKey; match?: string[]; hidden?: true; tone?: NavTone;
       /** Dropped for a finance-only manager (money flags, no lease / listing / editing / maintenance authority) — the pricing tool is not theirs. */
       financeHidden?: true }
   | { divider: true }
-  | { section: string };
+  | { section: string; tone?: NavTone };
 
 /**
  * HIDDEN sections (3 Aug 2026) — parked for a later development cycle:
@@ -119,58 +124,10 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'My Services', href: '/dashboard/customer/services', icon: Wrench },
     { label: 'My Profile',  href: '/dashboard/customer/profile',  icon: UserCircle },
   ],
-  rental_provider: [
-    { label: 'Dashboard',        href: '/rental-provider/dashboard',                icon: LayoutDashboard },
-    { label: 'Leads',            href: '/rental-provider/dashboard/leads',          icon: TrendingUp, badgeKey: 'leads' },
-    { label: 'Properties',       href: '/rental-provider/dashboard/portfolio',      icon: Building2, badgeKey: 'properties' },
-    { label: 'Units',            href: '/rental-provider/dashboard/units',          icon: Home, badgeKey: 'units' },
-    { label: 'Customers',        href: '/rental-provider/dashboard/tenants',        icon: UserCheck },
-    { label: 'Payments',         href: '/rental-provider/dashboard/payments',       icon: Wallet, match: ['/rental-provider/dashboard/deposits'] },
-    { label: 'Operations',       href: '/rental-provider/dashboard/operations',     icon: ClipboardList, badgeKey: 'operations' },
-    // No badge on Leases. The register carries several figures of its own
-    // (fully set up, starts later, expired) and a single number in the nav could
-    // only ever be one of them — which read as a contradiction against the page.
-    // Operations keeps its badge: that one IS a worklist length, a single fact.
-    { label: 'Leases',           href: '/rental-provider/dashboard/orders',         icon: FileText, match: ['/rental-provider/dashboard/contracts'] },
-    { label: 'Ended Leases',     href: '/rental-provider/dashboard/ended-leases',   icon: Archive },
-    { divider: true },
-    // v2: maintenance is a first-class section — the request worklist, the item
-    // catalogue, and the landlord's own vendor roster (which also highlights for
-    // the AMC contracts page until that folds in fully).
-    { section: 'Maintenance' },
-    { label: 'Requests',         href: '/rental-provider/dashboard/maintenance',      icon: ClipboardList, match: ['/rental-provider/dashboard/maintenance/'] },
-    { label: 'Vendors',          href: '/rental-provider/dashboard/vendors',          icon: Users },
-    // AMC contracts — destined to fold into the vendor pages as the
-    // commitments layer lands; until then it lives here under Maintenance.
-    { label: 'AMC',              href: '/rental-provider/dashboard/amc',              icon: FileSignature },
-    // Building inspections (0383): each building's monthly / quarterly walk-through.
-    { label: 'Building inspections', href: '/rental-provider/dashboard/building-inspections', icon: ClipboardCheck, match: ['/rental-provider/dashboard/building-inspections'] },
-    { divider: true },
-    // Legal & breach management — the disputes register (spec 2026-09-14);
-    // breaches themselves live on the lease page and the Operations boards.
-    { section: 'Legal' },
-    // Two pipelines, two pages (owner, 14 Sep: "keep breaches and Legal separate — separate pages").
-    { label: 'Breaches',         href: '/rental-provider/dashboard/breaches',         icon: ShieldAlert, match: ['/rental-provider/dashboard/breaches'] },
-    { label: 'Legal',            href: '/rental-provider/dashboard/legal',            icon: Scale, match: ['/rental-provider/dashboard/legal'] },
-    { divider: true },
-    { section: 'More' },
-    { label: 'Templates',        href: '/rental-provider/dashboard/templates',      icon: BookOpen },
-    // Un-parked 17 Sep: the page is now the landlord's email inbox (their own
-    // mailbox, Settings → Email). The badge is unread replies.
-    { label: 'Emails',           href: '/rental-provider/dashboard/communications', icon: Mail, badgeKey: 'emails' },
-    { label: 'WhatsApp',         href: '/rental-provider/dashboard/whatsapp',       icon: MessageCircle, badgeKey: 'whatsapp' },
-    { label: 'Reports',          href: '/rental-provider/dashboard/reports',        icon: BarChart2 },
-    { label: 'Analytics',        href: '/rental-provider/dashboard/analytics',      icon: LineChart, hidden: true },
-    // What the managers are doing — the visual overview built on the activity
-    // log. Sits directly above Settings, where the team is administered.
-    // LANDLORD-ONLY: the manager rail has no counterpart, and the API refuses a
-    // manager outright (see ReportsController's team-overview routes).
-    { label: 'Team',             href: '/rental-provider/dashboard/team',           icon: Users },
-    { divider: true },
-    // Profile OUT of Settings; Maintenance List / Restoration List / AMC categories IN (owner, 12 Sep).
-    { label: 'My Profile',       href: '/rental-provider/dashboard/profile',        icon: UserCircle },
-    { label: 'Settings',         href: '/rental-provider/dashboard/settings',       icon: Settings, match: ['/rental-provider/dashboard/maintenance-list', '/rental-provider/dashboard/restoration-list', '/rental-provider/dashboard/amc/categories'] },
-  ],
+  // v32 preview: the landlord rail is derived from OS_GROUPS (buildOsRail) —
+  // one dark/light tab per prototype group; the folded pages surface as an
+  // in-page tab strip (OsGroupTabs).
+  rental_provider: [],
   service_provider: [
     // Onboarding, Team and Documents intentionally have no nav entries:
     // onboarding is where the gate sends unapproved accounts, Team lives in
@@ -193,43 +150,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Earnings',         href: '/dashboard/service-provider/earnings',   icon: Wallet },
     { label: 'Settings',         href: '/dashboard/service-provider/settings',   icon: Settings },
   ],
-  manager: [
-    { label: 'Overview',         href: '/dashboard/manager',            icon: LayoutDashboard },
-    { label: 'Leads',            href: '/dashboard/manager/leads',   icon: TrendingUp, requirePerm: 'canManageViewings', match: ['/dashboard/manager/viewings'] },
-    { label: 'Properties',       href: '/dashboard/manager/properties', icon: Building2, requirePerm: 'canListProperties' },
-    { label: 'Units',            href: '/dashboard/manager/units',      icon: Home, requirePerm: 'canListProperties', financeHidden: true },
-    { label: 'Customers',        href: '/dashboard/manager/tenants',    icon: UserCheck, requirePerm: 'canManageAgreements' },
-    { label: 'Payments',         href: '/dashboard/manager/payments',  icon: Wallet,  requirePerm: 'canManageDeposits', match: ['/dashboard/manager/deposits'] },
-    { label: 'Operations',       href: '/dashboard/manager/operations', icon: ClipboardList, requirePerm: 'canManageAgreements' },
-    { label: 'Leases',           href: '/dashboard/manager/contracts',  icon: FileText,  requirePerm: 'canManageAgreements' },
-    { label: 'Ended Leases',     href: '/dashboard/manager/ended-leases', icon: Archive, requirePerm: 'canManageAgreements' },
-    { divider: true },
-    // Mirrors the landlord rail's Maintenance section; the header drops on its
-    // own when canManageMaintenance empties it (see sectionsKept).
-    { section: 'Maintenance' },
-    { label: 'Requests',         href: '/dashboard/manager/maintenance',      icon: ClipboardList, requirePerm: 'canManageMaintenance', match: ['/dashboard/manager/maintenance/'] },
-    { label: 'Vendors',          href: '/dashboard/manager/vendors',          icon: Users, requirePerm: 'canManageVendors' },
-    // Either flag opens AMC: the coordinator (contracts & visits) or the
-    // finance manager (bills, installments, expenses report) — 0319.
-    { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: ['canManageAmc', 'canRecordVendorPayments'] },
-    { label: 'Building inspections', href: '/dashboard/manager/building-inspections', icon: ClipboardCheck, requirePerm: 'canManageInspections', match: ['/dashboard/manager/building-inspections'] },
-    { divider: true },
-    { section: 'Legal' },
-    { label: 'Breaches',         href: '/dashboard/manager/breaches',         icon: ShieldAlert, requirePerm: 'canManageLegal', match: ['/dashboard/manager/breaches'] },
-    { label: 'Legal',            href: '/dashboard/manager/legal',            icon: Scale, requirePerm: 'canManageLegal', match: ['/dashboard/manager/legal'] },
-    { divider: true },
-    { section: 'More' },
-    { label: 'Templates',        href: '/dashboard/manager/templates',  icon: BookOpen, requirePerm: 'canManageTemplates' },
-    { label: 'Emails',           href: '/dashboard/manager/communications', icon: Mail, requirePerm: 'canReadEmails' },
-    { label: 'WhatsApp',         href: '/dashboard/manager/whatsapp',       icon: MessageCircle, requirePerm: 'canReadWhatsapp' },
-    { label: 'Reports',          href: '/dashboard/manager/reports',    icon: BarChart2, requirePerm: 'canViewReports' },
-    { label: 'Analytics',        href: '/dashboard/manager/analytics',  icon: LineChart, requirePerm: 'canViewReports', hidden: true },
-    { label: 'My Profile',       href: '/dashboard/manager/profile',    icon: UserCircle },
-    // The lists moved under Settings (owner, 12 Sep) — the page shows only what the landlord delegated.
-    // Settings holds the delegated lists (maintenance coverage, restoration, AMC
-    // categories) — the property side's; not for a finance-only member (owner, 23 Sep 2026).
-    { label: 'Settings',         href: '/dashboard/manager/settings',   icon: Settings, match: ['/dashboard/manager/maintenance-coverage', '/dashboard/manager/maintenance-list', '/dashboard/manager/restoration-list', '/dashboard/manager/amc/categories'], financeHidden: true },
-  ],
+  // v32 preview: like the landlord rail, the manager rail comes from
+  // OS_GROUPS (buildOsRail) — every requirePerm gate is on the group children,
+  // so an undelegated page drops from the tab strip and a fully undelegated
+  // group drops its rail tab, exactly as the flat rail behaved.
+  manager: [],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
     { label: 'My Jobs',          href: '/dashboard/technician/jobs',           icon: CalendarCheck },
@@ -338,6 +263,224 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
 };
 
+/* ─────────────────────────────────────────────
+   v32 preview groups — the single source of truth for the landlord and
+   manager navigation on this branch. One rail tab per prototype group
+   (dark = shared UpNow OS, light = Spaces pack); the pages that fold into a
+   group appear as an in-page tab strip (OsGroupTabs) instead of extra rail
+   rows. Grouping per the prototype's currentMap. Every existing route keeps
+   an entry (parity gate).
+───────────────────────────────────────────── */
+type OsChild = { label: string; href: string; badgeKey?: NavBadgeKey; requirePerm?: string | string[]; match?: string[]; hidden?: true; financeHidden?: true };
+// `soon` = the prototype tab has no page yet: the rail shows it dimmed with an
+// "In development" chip (no link, no children).
+type OsGroup = { label: string; icon: React.ElementType; tone: NavTone; badgeKey?: NavBadgeKey; soon?: true; children: OsChild[] };
+
+const RP_BASE = '/rental-provider/dashboard';
+const MGR_BASE = '/dashboard/manager';
+
+const OS_GROUPS: Partial<Record<UserRole, OsGroup[]>> = {
+  rental_provider: [
+    { label: 'Demand', icon: TrendingUp, tone: 'shared', badgeKey: 'leads', children: [
+      { label: 'Leads', href: `${RP_BASE}/leads` },
+    ] },
+    // The lead/viewing calendar already exists as a view of the Leads page —
+    // the tab deep-links it (owner, 29 Sep: "calendar we already have linked
+    // with lead").
+    { label: 'Calendar', icon: CalendarCheck, tone: 'shared', children: [
+      { label: 'Calendar', href: `${RP_BASE}/leads?view=calendar` },
+    ] },
+    { label: 'Communications', icon: Mail, tone: 'shared', children: [
+      { label: 'Emails', href: `${RP_BASE}/communications`, badgeKey: 'emails' },
+      { label: 'WhatsApp', href: `${RP_BASE}/whatsapp`, badgeKey: 'whatsapp' },
+    ] },
+    // No shared Finance tab: Payments and Deposits are the lease money and
+    // live in the pack's Transactions tab (owner, 29 Sep: "payments related
+    // things will fall in Transactions").
+    { label: 'Settings', icon: Settings, tone: 'shared', children: [
+      { label: 'Settings', href: `${RP_BASE}/settings`, match: [`${RP_BASE}/maintenance-list`, `${RP_BASE}/restoration-list`, `${RP_BASE}/amc/categories`] },
+      // Templates sit with the operating configuration (owner, 29 Sep).
+      { label: 'Templates', href: `${RP_BASE}/templates` },
+      { label: 'My Profile', href: `${RP_BASE}/profile` },
+    ] },
+    { label: 'Overview', icon: LayoutDashboard, tone: 'pack', children: [
+      { label: 'Overview', href: RP_BASE },
+    ] },
+    { label: 'Portfolio', icon: Building2, tone: 'pack', children: [
+      { label: 'Properties', href: `${RP_BASE}/portfolio`, badgeKey: 'properties' },
+      { label: 'Units', href: `${RP_BASE}/units`, badgeKey: 'units' },
+    ] },
+    { label: 'Customers', icon: UserCheck, tone: 'pack', children: [
+      { label: 'Customers', href: `${RP_BASE}/tenants` },
+    ] },
+    { label: 'Leases', icon: FileText, tone: 'pack', children: [
+      { label: 'Leases', href: `${RP_BASE}/orders`, match: [`${RP_BASE}/contracts`] },
+      { label: 'Ended Leases', href: `${RP_BASE}/ended-leases` },
+    ] },
+    // Transactions = the money moving on the leases (owner, 29 Sep). One page:
+    // deposits are a tab INSIDE Payments (/deposits is a legacy redirect,
+    // SCRUM-577), so the tab opens the ledger directly with no strip.
+    { label: 'Transactions', icon: Wallet, tone: 'pack', children: [
+      { label: 'Payments', href: `${RP_BASE}/payments`, match: [`${RP_BASE}/deposits`] },
+    ] },
+    // Operations keeps its rail badge: that one IS a worklist length, a single fact.
+    { label: 'Operations', icon: ClipboardList, tone: 'pack', badgeKey: 'operations', children: [
+      { label: 'Ops Board', href: `${RP_BASE}/operations` },
+    ] },
+    // Prototype: "Staff activity + provider costs → Spaces → Performance &
+    // Economics" — the Team activity overview is that page today. LANDLORD-ONLY
+    // (the API refuses managers), so the manager groups have no counterpart.
+    // It follows Transactions and Operations directly (owner, 4 Oct:
+    // "Transaction, operations and performance & economics together").
+    { label: 'Performance & Economics', icon: LineChart, tone: 'pack', children: [
+      { label: 'Team', href: `${RP_BASE}/team` },
+    ] },
+    // Maintenance = upkeep of the units: the requests, who does the work and
+    // the standing contracts (owner, 4 Oct: "create maintenance menu and move them").
+    { label: 'Maintenance', icon: Wrench, tone: 'pack', children: [
+      { label: 'Requests', href: `${RP_BASE}/maintenance`, match: [`${RP_BASE}/maintenance/`] },
+      { label: 'Vendors', href: `${RP_BASE}/vendors` },
+      // AMC folds into the vendor pages when the commitments layer lands.
+      { label: 'AMC', href: `${RP_BASE}/amc` },
+      // Building inspections (0383): each building's monthly / quarterly walk-through.
+      { label: 'Building inspections', href: `${RP_BASE}/building-inspections`, match: [`${RP_BASE}/building-inspections/`] },
+    ] },
+    // Two pipelines, two pages (owner, 14 Sep: "keep breaches and Legal separate — separate pages").
+    { label: 'Cases', icon: Scale, tone: 'pack', children: [
+      { label: 'Breaches', href: `${RP_BASE}/breaches` },
+      { label: 'Legal', href: `${RP_BASE}/legal` },
+    ] },
+    { label: 'Reports', icon: BarChart2, tone: 'pack', children: [
+      { label: 'Reports', href: `${RP_BASE}/reports` },
+      { label: 'Analytics', href: `${RP_BASE}/analytics`, hidden: true },
+    ] },
+    // No Business tab for now (owner, 4 Oct: "Business you can remove for
+    // now") — the provider's own company (entities, branches, payables,
+    // people, P&L in the prototype) has no page yet.
+  ],
+  manager: [
+    { label: 'Demand', icon: TrendingUp, tone: 'shared', children: [
+      { label: 'Leads', href: `${MGR_BASE}/leads`, requirePerm: 'canManageViewings', match: [`${MGR_BASE}/viewings`] },
+    ] },
+    { label: 'Calendar', icon: CalendarCheck, tone: 'shared', children: [
+      { label: 'Calendar', href: `${MGR_BASE}/leads?view=calendar`, requirePerm: 'canManageViewings' },
+    ] },
+    { label: 'Communications', icon: Mail, tone: 'shared', children: [
+      { label: 'Emails', href: `${MGR_BASE}/communications`, requirePerm: 'canReadEmails' },
+      { label: 'WhatsApp', href: `${MGR_BASE}/whatsapp`, requirePerm: 'canReadWhatsapp' },
+    ] },
+    { label: 'Settings', icon: Settings, tone: 'shared', children: [
+      // Settings holds the delegated lists (maintenance coverage, restoration,
+      // AMC categories) — not for a finance-only member (owner, 23 Sep 2026).
+      { label: 'Settings', href: `${MGR_BASE}/settings`, financeHidden: true, match: [`${MGR_BASE}/maintenance-coverage`, `${MGR_BASE}/maintenance-list`, `${MGR_BASE}/restoration-list`, `${MGR_BASE}/amc/categories`] },
+      // Templates sit with the operating configuration (owner, 29 Sep).
+      { label: 'Templates', href: `${MGR_BASE}/templates`, requirePerm: 'canManageTemplates' },
+      { label: 'My Profile', href: `${MGR_BASE}/profile` },
+    ] },
+    { label: 'Overview', icon: LayoutDashboard, tone: 'pack', children: [
+      { label: 'Overview', href: MGR_BASE },
+    ] },
+    { label: 'Portfolio', icon: Building2, tone: 'pack', children: [
+      { label: 'Properties', href: `${MGR_BASE}/properties`, requirePerm: 'canListProperties' },
+      { label: 'Units', href: `${MGR_BASE}/units`, requirePerm: 'canListProperties', financeHidden: true },
+    ] },
+    { label: 'Customers', icon: UserCheck, tone: 'pack', children: [
+      { label: 'Customers', href: `${MGR_BASE}/tenants`, requirePerm: 'canManageAgreements' },
+    ] },
+    { label: 'Leases', icon: FileText, tone: 'pack', children: [
+      { label: 'Leases', href: `${MGR_BASE}/contracts`, requirePerm: 'canManageAgreements' },
+      { label: 'Ended Leases', href: `${MGR_BASE}/ended-leases`, requirePerm: 'canManageAgreements' },
+    ] },
+    // Transactions = the money moving on the leases (owner, 29 Sep). One page:
+    // deposits are a tab INSIDE Payments (/deposits is a legacy redirect).
+    { label: 'Transactions', icon: Wallet, tone: 'pack', children: [
+      { label: 'Payments', href: `${MGR_BASE}/payments`, requirePerm: 'canManageDeposits', match: [`${MGR_BASE}/deposits`] },
+    ] },
+    { label: 'Operations', icon: ClipboardList, tone: 'pack', children: [
+      { label: 'Ops Board', href: `${MGR_BASE}/operations`, requirePerm: 'canManageAgreements' },
+    ] },
+    { label: 'Maintenance', icon: Wrench, tone: 'pack', children: [
+      { label: 'Requests', href: `${MGR_BASE}/maintenance`, requirePerm: 'canManageMaintenance', match: [`${MGR_BASE}/maintenance/`] },
+      { label: 'Vendors', href: `${MGR_BASE}/vendors`, requirePerm: 'canManageVendors' },
+      // Either flag opens AMC: the coordinator (contracts & visits) or the
+      // finance manager (bills, installments, expenses report) — 0319.
+      { label: 'AMC', href: `${MGR_BASE}/amc`, requirePerm: ['canManageAmc', 'canRecordVendorPayments'] },
+      { label: 'Building inspections', href: `${MGR_BASE}/building-inspections`, requirePerm: 'canManageInspections', match: [`${MGR_BASE}/building-inspections/`] },
+    ] },
+    { label: 'Cases', icon: Scale, tone: 'pack', children: [
+      { label: 'Breaches', href: `${MGR_BASE}/breaches`, requirePerm: 'canManageLegal' },
+      { label: 'Legal', href: `${MGR_BASE}/legal`, requirePerm: 'canManageLegal' },
+    ] },
+    { label: 'Reports', icon: BarChart2, tone: 'pack', children: [
+      { label: 'Reports', href: `${MGR_BASE}/reports`, requirePerm: 'canViewReports' },
+      { label: 'Analytics', href: `${MGR_BASE}/analytics`, requirePerm: 'canViewReports', hidden: true },
+    ] },
+  ],
+};
+
+// Finance-only = holds a money flag and none of the working flags. Units
+// (layout pricing) and the delegated Settings lists are not on their map
+// (owner, 23 Sep 2026). Shared by the rail and the tab strip.
+function isFinanceOnly(role: UserRole, perms: Record<string, boolean>): boolean {
+  return role === 'manager'
+    && (perms.canRecordPayments || perms.canClearCheques || perms.canManageCollections)
+    && !perms.canManageAgreements && !perms.canEditProperties && !perms.canManageViewings && !perms.canManageMaintenance;
+}
+
+/** A group's children this user can see — same rules as the flat rail applied:
+ *  parked entries drop, WhatsApp drops without a bridge, manager permission
+ *  gates and the finance-only carve-out apply per child. */
+function visibleOsChildren(group: OsGroup, role: UserRole, managerPerms: Record<string, boolean>, waOn: boolean, financeOnly: boolean): OsChild[] {
+  return group.children.filter(c => {
+    if (c.hidden) return false;
+    if (!waOn && c.href.endsWith('/whatsapp')) return false;
+    if (role === 'manager') {
+      if (c.financeHidden && financeOnly) return false;
+      if (c.requirePerm) {
+        const need = Array.isArray(c.requirePerm) ? c.requirePerm : [c.requirePerm];
+        if (!need.some(f => managerPerms[f] === true)) return false;
+      }
+    }
+    return true;
+  });
+}
+
+/** Rail items from OS_GROUPS: one tab per group with visible children, its
+ *  href the first page the user can open, its `match` covering every child so
+ *  the tab highlights wherever inside the group the user is. The two layer
+ *  headers and the divider between them are inserted where the tone flips. */
+function buildOsRail(role: UserRole, managerPerms: Record<string, boolean>, waOn: boolean): NavItem[] {
+  const groups = OS_GROUPS[role] ?? [];
+  const financeOnly = isFinanceOnly(role, managerPerms);
+  const items: NavItem[] = [];
+  let toneSeen: NavTone | null = null;
+  for (const g of groups) {
+    const kids = visibleOsChildren(g, role, managerPerms, waOn, financeOnly);
+    if (!g.soon && !kids.length) continue;
+    if (g.tone !== toneSeen) {
+      if (toneSeen) items.push({ divider: true });
+      items.push({ section: g.tone === 'shared' ? 'Shared UpNow OS' : 'Spaces pack', tone: g.tone });
+      toneSeen = g.tone;
+    }
+    if (g.soon) {
+      // No page behind it yet — dimmed placeholder with an "In development"
+      // chip; the href is only a stable React key, soon-items never link.
+      items.push({ label: g.label, href: `#soon-${g.label}`, icon: g.icon, tone: g.tone, soon: true });
+      continue;
+    }
+    const [first, ...rest] = kids;
+    items.push({
+      label: g.label,
+      href: first.href,
+      icon: g.icon,
+      badgeKey: g.badgeKey,
+      tone: g.tone,
+      match: [...rest.map(k => k.href), ...kids.flatMap(k => k.match ?? [])],
+    });
+  }
+  return items;
+}
+
 const ROLE_LABEL: Record<UserRole, string> = {
   customer:          'Customer',
   rental_provider:  'Rental Provider',
@@ -424,14 +567,18 @@ function Sidebar({
   // other entry point; this just avoids a scope flash on sidebar clicks.
   const scopeRp = role === 'manager' ? navSearchParams.get('rp') : null;
   const withScope = (href: string) =>
-    scopeRp && href.startsWith('/dashboard/manager') ? `${href}?rp=${scopeRp}` : href;
+    scopeRp && href.startsWith('/dashboard/manager') ? `${href}${href.includes('?') ? '&' : '?'}rp=${scopeRp}` : href;
   // Parked sections (see the HIDDEN note on NAV) drop out for every role, ahead
   // of the manager permission filter so an emptied section header still goes.
   // The onboarding gate stamps the SP tier (sessionStorage + an 'sp-tier'
   // event, since the stamp lands AFTER this shell first renders); a light
   // vendor gets its own nav.
   const spTier = useSpTier();
-  const baseNav = role === 'service_provider' && spTier === 'landlord_vendor' ? SP_LIGHT_NAV : (NAV[role] ?? []);
+  const baseNav = role === 'service_provider' && spTier === 'landlord_vendor'
+    ? SP_LIGHT_NAV
+    : OS_GROUPS[role]
+      ? buildOsRail(role, managerPerms, waOn)
+      : (NAV[role] ?? []);
   // WhatsApp has no entry where the environment has no bridge to run it through.
   const rawNav = baseNav.filter(item => !('hidden' in item && item.hidden))
     .filter(item => waOn || !('href' in item && typeof item.href === 'string' && item.href.endsWith('/whatsapp')));
@@ -511,32 +658,51 @@ function Sidebar({
       {!collapsed && <span className={shell.roleChip}>{ROLE_LABEL[role]}</span>}
 
       {/* Nav */}
-      <nav className={shell.nav} style={collapsed ? { alignItems: 'center' } : undefined}>
+      {/* The v32 tabs are filled blocks, so they get a little more air than the
+          flat rails' 2px (owner, 4 Oct) — inline, the module serves every rail. */}
+      <nav className={shell.nav} style={{ ...(OS_GROUPS[role] ? { gap: 6 } : null), ...(collapsed ? { alignItems: 'center' } : null) }}>
         {navItems.map((item, i) => {
           if ('divider' in item) {
             return <hr key={`divider-${i}`} className={shell.divider} style={collapsed ? { width: '100%' } : undefined} />;
           }
           if ('section' in item) {
             if (collapsed) return null;
-            return <p key={`section-${i}`} className={shell.section}>{item.section}</p>;
+            // The two v32 group headers carry a colour swatch matching their layer.
+            const swatch = item.tone === 'shared'
+              ? { background: '#0b563e' }
+              : item.tone === 'pack'
+                ? { background: '#bfe4d3', border: '1px solid #78b99b' }
+                : null;
+            return (
+              <p key={`section-${i}`} className={shell.section} style={swatch ? { display: 'flex', alignItems: 'center', gap: 6 } : undefined}>
+                {swatch && <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, boxSizing: 'border-box', ...swatch }} />}
+                {item.section}
+              </p>
+            );
           }
           const Icon = item.icon;
 
           if ('soon' in item && item.soon) {
+            // A toned soon-item stays in its layer's colour, dimmed, so an
+            // in-development tab (Business) reads as part of its own group.
+            const soonTone: React.CSSProperties | undefined =
+              item.tone === 'shared' ? { background: '#124e39', color: '#cfe1d9', opacity: 0.55 }
+              : item.tone === 'pack' ? { background: '#e7f4ed', color: '#174c3a', border: '1px solid #cce7d9', opacity: 0.55 }
+              : undefined;
             if (collapsed) {
               return (
                 <div key={item.href} className={shell.itemSoon}
-                  style={{ justifyContent: 'center', padding: '8px', gap: 0 }}
-                  title={item.label}>
-                  <span className={shell.glyph}><Icon size={16} /></span>
+                  style={{ ...soonTone, justifyContent: 'center', padding: '8px', gap: 0 }}
+                  title={`${item.label} — in development`}>
+                  <span className={shell.glyph} style={item.tone ? { color: 'inherit' } : undefined}><Icon size={16} /></span>
                 </div>
               );
             }
             return (
-              <div key={item.href} className={shell.itemSoon}>
-                <span className={shell.glyph}><Icon size={16} /></span>
+              <div key={item.href} className={shell.itemSoon} style={soonTone}>
+                <span className={shell.glyph} style={item.tone ? { color: 'inherit' } : undefined}><Icon size={16} /></span>
                 <span>{item.label}</span>
-                <span className={shell.soonChip}>Soon</span>
+                <span className={shell.soonChip}>In development</span>
               </div>
             );
           }
@@ -548,16 +714,44 @@ function Sidebar({
           ];
           const isOverview = overviewRoutes.includes(item.href);
           const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
-          const matchesThis = onPath(item.href) || (item.match?.some(onPath) ?? false);
+          // A query href (Calendar → /leads?view=calendar) is a VIEW of another
+          // tab's page: it is active only when its params are all present, and
+          // the plain-path tab of the same page (Demand → /leads) then yields.
+          const [hrefPath, hrefQuery] = item.href.split('?');
+          const queryMatches = (q: string) => q.split('&').every((kv) => {
+            const [k, v] = kv.split('=');
+            return navSearchParams.get(k) === v;
+          });
+          const siblingQueryActive = !hrefQuery && navHrefs.some((h) => {
+            const [p, q] = h.split('?');
+            return !!q && p === item.href && onPath(p) && queryMatches(q);
+          });
+          const matchesThis = onPath(hrefPath) || (item.match?.some(onPath) ?? false);
           // Most-specific wins: a parent (e.g. Settings) yields the highlight to a
           // deeper nav item nested under its href.
           const moreSpecific = navHrefs.some((h) => h !== item.href && h.startsWith(item.href + '/') && onPath(h));
-          const isActive = isOverview
-            ? pathname === item.href
-            : matchesThis && !moreSpecific;
+          const isActive = hrefQuery
+            ? onPath(hrefPath) && queryMatches(hrefQuery)
+            : isOverview
+              ? pathname === item.href && !siblingQueryActive
+              : matchesThis && !moreSpecific && !siblingQueryActive;
 
           const badgeCount = item.badgeKey ? (counts[item.badgeKey] ?? 0) : 0;
           const hasBadge = badgeCount > 0;
+
+          // v32 layer colours: dark green = shared OS, light green = Spaces pack.
+          // Inline so they win over shell.item / shell.active without touching
+          // the module used by every other rail.
+          const toneStyle: React.CSSProperties | undefined =
+            item.tone === 'shared'
+              ? (isActive
+                  ? { background: '#073b2b', color: '#fff', boxShadow: 'inset 0 0 0 2px #74c9a6', fontWeight: 600 }
+                  : { background: '#124e39', color: '#e9f2ed' })
+              : item.tone === 'pack'
+                ? (isActive
+                    ? { background: '#bfe4d3', color: '#164c39', border: '1px solid #68ae8c', fontWeight: 600 }
+                    : { background: '#e7f4ed', color: '#174c3a', border: '1px solid #cce7d9' })
+                : undefined;
 
           return (
             <Link
@@ -565,10 +759,10 @@ function Sidebar({
               href={withScope(item.href)}
               onClick={onClose}
               className={cn(shell.item, isActive && shell.active)}
-              style={collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : undefined}
+              style={{ ...toneStyle, ...(collapsed ? { justifyContent: 'center', padding: '8px', gap: 0 } : null) }}
               title={collapsed ? (hasBadge ? `${item.label} (${badgeCount})` : item.label) : undefined}
             >
-              <span className={shell.glyph} style={collapsed && hasBadge ? { position: 'relative' } : undefined}>
+              <span className={shell.glyph} style={{ ...(item.tone ? { color: 'inherit' } : null), ...(collapsed && hasBadge ? { position: 'relative' } : null) }}>
                 <Icon size={16} />
                 {collapsed && hasBadge && (
                   <span style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 99, background: '#2e9f82', border: '1.5px solid #fff' }} />
@@ -698,6 +892,77 @@ function CustomerAvatarMenu() {
 /* ─────────────────────────────────────────────
    DashboardShell — main export
 ───────────────────────────────────────────── */
+/** v32 preview: the in-page tab strip for the active OS group — the pages that
+ *  fold into the selected rail tab (e.g. Portfolio → Properties · Units).
+ *  Rendered by the shell between the topbar and the page so no page component
+ *  changes; hidden when the group has one visible page. Tone-coloured like the
+ *  rail: dark band for shared-OS groups, light band for Spaces-pack groups. */
+function OsGroupTabs({ role, pathname, counts }: { role: UserRole; pathname: string; counts: NavCounts }) {
+  const managerPerms = useManagerNavPerms(role);
+  const waOn = useWhatsappEnabled(role);
+  const tabsSearchParams = useSearchParams();
+  const scopeRp = role === 'manager' ? tabsSearchParams.get('rp') : null;
+  const withScope = (href: string) =>
+    scopeRp && href.startsWith('/dashboard/manager') ? `${href}${href.includes('?') ? '&' : '?'}rp=${scopeRp}` : href;
+  const groups = OS_GROUPS[role];
+  if (!groups) return null;
+  const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
+  // Most specific claim wins: /rental-provider/dashboard (Overview) would
+  // prefix-match everything, so prefer the group whose matched base is longest.
+  let active: OsGroup | undefined;
+  let bestLen = -1;
+  for (const g of groups) {
+    for (const c of g.children) {
+      for (const base of [c.href, ...(c.match ?? [])]) {
+        if (onPath(base) && base.length > bestLen) { active = g; bestLen = base.length; }
+      }
+    }
+  }
+  if (!active) return null;
+  const kids = visibleOsChildren(active, role, managerPerms, waOn, isFinanceOnly(role, managerPerms));
+  if (kids.length < 2) return null;
+  const shared = active.tone === 'shared';
+  return (
+    <div
+      className="flex-shrink-0 flex items-center gap-1.5 px-5 py-2 border-b overflow-x-auto"
+      style={{ background: shared ? '#124e39' : '#e7f4ed', borderColor: shared ? '#0b3f2c' : '#cce7d9' }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: shared ? '#8fc3a2' : '#527a66', marginRight: 8, whiteSpace: 'nowrap' }}>
+        {active.label}
+      </span>
+      {kids.map((c) => {
+        const isOn = onPath(c.href) || (c.match?.some(onPath) ?? false);
+        const n = c.badgeKey ? (counts[c.badgeKey] ?? 0) : 0;
+        return (
+          <Link
+            key={c.href}
+            href={withScope(c.href)}
+            className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap"
+            style={{
+              padding: '5px 12px', fontSize: 13, fontWeight: isOn ? 700 : 500,
+              ...(shared
+                ? (isOn ? { background: '#fff', color: '#0b3f2c' } : { color: '#d9ebe4' })
+                : (isOn ? { background: '#124e39', color: '#fff' } : { color: '#174c3a' })),
+            }}
+          >
+            {c.label}
+            {n > 0 && (
+              <span
+                className="inline-flex items-center justify-center min-w-[18px] rounded-full tabular-nums leading-none"
+                style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px',
+                  background: isOn ? (shared ? '#e7f4ed' : 'rgba(255,255,255,.28)') : '#2e9f82',
+                  color: isOn && shared ? '#124e39' : '#fff' }}
+              >
+                {n > 999 ? '999+' : n}
+              </span>
+            )}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
 export function DashboardShell({ children }: { children: ReactNode }) {
   const spTier = useSpTier();
   const { user, loading, isAuthenticated, refresh, signOut } = useAuth();
@@ -901,6 +1166,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           )}
         </header>
         )}
+
+        {/* v32 preview: the active group's pages as an in-page tab strip */}
+        {!hideSidebar && <OsGroupTabs role={role} pathname={pathname} counts={navCounts} />}
 
         {/* Page content */}
         <main className={cn('flex-1 min-h-0 overflow-y-auto', shell.mainCanvas)}>

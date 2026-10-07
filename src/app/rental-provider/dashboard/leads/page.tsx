@@ -2,7 +2,7 @@
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Search, X, RefreshCw, Phone, Mail, Building2,
   Clock, CheckCircle2, MessageSquare, User, Calendar,
@@ -1162,7 +1162,14 @@ export function LeadsWorkspace({ manager, canCreateLeads = true }: { manager?: {
   const [error, setError]           = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [activeTab, setActiveTab]   = useState<'all' | LeadStage>('all');
-  const [view, setView]             = useState<'row' | 'grid' | 'calendar'>('row');
+  // ?view=calendar deep-links the calendar view — the sidebar's Calendar tab
+  // opens the lead/viewing calendar directly (v32 preview). The effect keeps
+  // it working when the tab is clicked while already on this page.
+  const viewParam = useSearchParams().get('view');
+  const [view, setView]             = useState<'row' | 'grid' | 'calendar'>(viewParam === 'calendar' ? 'calendar' : viewParam === 'grid' ? 'grid' : 'row');
+  useEffect(() => {
+    if (viewParam === 'calendar' || viewParam === 'grid' || viewParam === 'row') setView(viewParam);
+  }, [viewParam]);
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [movingLead, setMovingLead] = useState<number | null>(null);
   const [feeRules, setFeeRules]         = useState<FeeRulesMap | null>(null);
