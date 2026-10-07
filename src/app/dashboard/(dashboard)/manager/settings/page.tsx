@@ -8,23 +8,26 @@
  */
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Lock, Building2, Wrench, ClipboardList, Receipt, FileSignature } from 'lucide-react';
+import { Lock, Building2, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature } from 'lucide-react';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { MaintenanceListWorkspace } from '@/app/rental-provider/dashboard/maintenance-list/page';
 import { RestorationListWorkspace } from '@/app/rental-provider/dashboard/restoration-list/page';
 import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
+import { BuildingInspectionsSettings } from '@/components/upnow/BuildingInspectionsSettings';
 
-type Tab = 'maintenance' | 'maintenance_list' | 'restoration' | 'categories';
+type Tab = 'maintenance' | 'maintenance_list' | 'restoration' | 'building_inspections' | 'categories';
 type Flag = 'canManageMaintenance' | 'canManageInspections' | 'canManageAmc';
 const TABS: { key: Tab; label: string; flag: Flag; Icon: React.ComponentType<{ size?: number }> }[] = [
   { key: 'maintenance', label: 'Coverage', flag: 'canManageMaintenance', Icon: Wrench },
   { key: 'maintenance_list', label: 'Items', flag: 'canManageMaintenance', Icon: ClipboardList },
   { key: 'restoration', label: 'Restoration list', flag: 'canManageInspections', Icon: Receipt },
+  { key: 'building_inspections', label: 'Building inspections', flag: 'canManageInspections', Icon: ClipboardCheck },
   { key: 'categories', label: 'AMC categories', flag: 'canManageAmc', Icon: FileSignature },
 ];
 const MENU: { title: string; tabs: Tab[] }[] = [
   { title: 'Maintenance', tabs: ['maintenance', 'maintenance_list', 'restoration'] },
+  { title: 'Buildings', tabs: ['building_inspections'] },
   { title: 'Contracts', tabs: ['categories'] },
 ];
 
@@ -88,6 +91,7 @@ export default function ManagerSettingsPage() {
               {tab === 'maintenance' && <MaintenanceCoveragePanel manager={{ rp: effectiveRp }} />}
               {tab === 'maintenance_list' && <MaintenanceListWorkspace manager={{ rp: effectiveRp }} embedded />}
               {tab === 'restoration' && <RestorationListWorkspace manager={{ rp: effectiveRp }} embedded />}
+              {tab === 'building_inspections' && <BuildingInspectionsSettings manager={{ rp: effectiveRp }} embedded />}
               {tab === 'categories' && <AmcCategoriesView base="/manager/amc" rp={effectiveRp} listHref={`/dashboard/manager/amc?rp=${effectiveRp}`} embedded />}
             </>
           )}

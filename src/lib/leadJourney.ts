@@ -83,6 +83,8 @@ export interface PaymentPlanItem {
   type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment' | 'vat';
   paymentMethod?: PaymentMethodKind | null;
   reference?: string | null;
+  /** The bank the cheque is drawn on — read off the cheque or typed by the landlord. */
+  bankName?: string | null;
 }
 
 export interface PaymentPlan {
@@ -139,6 +141,8 @@ export interface LeadChequeRecord {
   isCustomerUpload?: boolean;
   paymentMethod?: PaymentMethodKind | null;
   planItemIndex?: number | null;
+  /** What the reader found on this upload and where each cheque was placed (0374). */
+  reading?: { kind: string; status: 'pending' | 'done' | 'failed'; fields: Record<string, unknown> | null } | null;
 }
 
 export interface ApiLead {

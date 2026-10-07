@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, Mail, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, Mail, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, ClipboardCheck, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale, MessageCircle } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
@@ -143,6 +143,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     // AMC contracts — destined to fold into the vendor pages as the
     // commitments layer lands; until then it lives here under Maintenance.
     { label: 'AMC',              href: '/rental-provider/dashboard/amc',              icon: FileSignature },
+    // Building inspections (0383): each building's monthly / quarterly walk-through.
+    { label: 'Building inspections', href: '/rental-provider/dashboard/building-inspections', icon: ClipboardCheck, match: ['/rental-provider/dashboard/building-inspections'] },
     { divider: true },
     // Legal & breach management — the disputes register (spec 2026-09-14);
     // breaches themselves live on the lease page and the Operations boards.
@@ -210,6 +212,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     // Either flag opens AMC: the coordinator (contracts & visits) or the
     // finance manager (bills, installments, expenses report) — 0319.
     { label: 'AMC',              href: '/dashboard/manager/amc',              icon: FileSignature, requirePerm: ['canManageAmc', 'canRecordVendorPayments'] },
+    { label: 'Building inspections', href: '/dashboard/manager/building-inspections', icon: ClipboardCheck, requirePerm: 'canManageInspections', match: ['/dashboard/manager/building-inspections'] },
     { divider: true },
     { section: 'Legal' },
     { label: 'Breaches',         href: '/dashboard/manager/breaches',         icon: ShieldAlert, requirePerm: 'canManageLegal', match: ['/dashboard/manager/breaches'] },

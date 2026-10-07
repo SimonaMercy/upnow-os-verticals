@@ -41,6 +41,8 @@ import { REQUESTABLE_DOCS, additionalDocKey, alreadyRequested, dedupeRequests, g
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
+import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
+import type { ChequeIntake } from '@/lib/planAttach';
 import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
@@ -611,6 +613,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const deleteCheque = async (chequeId: number) => {
     const res = await fetch(leadUrl(`/api/leads/${leadId}/cheques/${chequeId}`, manager), { method: 'DELETE', credentials: 'include' });
     if (res.ok) setCheques(prev => prev.filter(c => c.id !== chequeId));
+    // A removed file takes its placement with it (plan references, register rows, stage).
+    await fetchCheques();
+    await fetchLead();
   };
   const setChequeStatus = async (chequeId: number, status: ChequeRowStatus) => {
     const res = await fetch(leadUrl(`/api/leads/${leadId}/cheques/${chequeId}/status`, manager), {
@@ -632,8 +637,61 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     if (res.ok && body?.id) setCheques(prev => prev.map(c => c.id === body.id ? body : c));
     else if (!res.ok) throw new Error(body.message ?? 'Failed to tag payment');
   };
+  // The reader: read every cheque file on the lead and place each cheque on its
+  // plan item (server side); keep the outcome for the payment stages to show.
+  const { scan: scanCheque, scannerModal: chequeScannerModal } = useDocumentScanner();
+  const [chequeIntake, setChequeIntake] = useState<ChequeIntake | null>(null);
+  const [chequeReading, setChequeReading] = useState(false);
+  const readLeadCheques = async (retryChequeId?: number) => {
+    setChequeReading(true);
+    try {
+      const res = await fetch(leadUrl(`/api/leads/${leadId}/cheques/read`, manager), {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retryChequeId: retryChequeId ?? null }),
+      });
+      setChequeIntake(res.ok ? await res.json() as ChequeIntake : { files: [], open: [], ready: false });
+      await fetchCheques();
+      await fetchLead();
+    } catch { setChequeIntake({ files: [], open: [], ready: false }); }
+    finally { setChequeReading(false); }
+  };
+  // Attach a cheque file on the customer's behalf — same row, same reader as
+  // the customer's own upload (owner, 6 Oct 2026: "attachment should be the
+  // same on both sides").
+  const attachChequeForLead = async (slotLabel: string, files: FileList | null, replaceIds?: number[]) => {
+    if (!files || files.length === 0) return;
+    const ownerId = lead?.convertedTenant?.id;
+    if (!ownerId) throw new Error('Convert the lead to a customer first.');
+    const ready: File[] = [];
+    for (const picked of Array.from(files)) { const scanned = await scanCheque(picked); if (scanned) ready.push(scanned); }
+    if (ready.length === 0) return;
+    setBusy(true);
+    try {
+      for (const file of ready) {
+        const urlRes = await fetch('/api/documents/upload-url', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ownerType: 'customer', ownerId, documentKey: 'cheque_upload', originalName: file.name, mimeType: file.type }),
+        });
+        if (!urlRes.ok) throw new Error('Failed to start upload');
+        const { uploadUrl, fileUrl, fileKey } = await urlRes.json() as { uploadUrl: string; fileUrl: string; fileKey: string };
+        const target = (() => { try { const u = new URL(uploadUrl); return u.pathname.startsWith('/api/') ? u.pathname + u.search : uploadUrl; } catch { return uploadUrl; } })();
+        const putRes = await fetch(target, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        if (!putRes.ok) throw new Error('File upload failed');
+        const regRes = await fetch(leadUrl(`/api/leads/${leadId}/cheque-uploads`, manager), {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: fileUrl, fileKey, label: slotLabel }),
+        });
+        if (!regRes.ok) { const b = await regRes.json().catch(() => ({})); throw new Error(b?.message ?? 'Cheque registration failed'); }
+      }
+      for (const id of replaceIds ?? []) {
+        await fetch(leadUrl(`/api/leads/${leadId}/cheques/${id}`, manager), { method: 'DELETE', credentials: 'include' });
+      }
+    } finally { setBusy(false); }
+    await readLeadCheques();
+  };
+
   // Set the RP-chosen method / reference on a plan item (independent of uploads).
-  const setPlanItemMethod = async (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string }) => {
+  const setPlanItemMethod = async (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string; bankName?: string }) => {
     const res = await fetch(leadUrl(`/api/leads/${leadId}/plan-item-method`, manager), {
       method: 'PATCH', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -869,6 +927,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             <p className="abody">{view.body}</p>
 
             <div className="action-body">
+              {chequeScannerModal}
               <StageBody
                 lead={lead} plan={plan} docs={docs} cheques={cheques} busy={busy}
                 pendingViewing={pendingViewing} latestViewing={latestViewing}
@@ -893,6 +952,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 onSetChequeStatus={setChequeStatus}
                 onTagCheque={tagCheque}
                 onSetPlanItemMethod={setPlanItemMethod}
+                onAttachCheque={attachChequeForLead}
+                onReadCheques={readLeadCheques}
+                chequeIntake={chequeIntake}
+                chequeReading={chequeReading}
                 onOpenLease={() => router.push(openLeaseHref)}
               />
             </div>
@@ -1313,7 +1376,13 @@ type StageBodyProps = {
   onDeleteCheque: (chequeId: number) => Promise<void>;
   onSetChequeStatus: (chequeId: number, status: ChequeRowStatus) => Promise<void>;
   onTagCheque: (chequeId: number, patch: { paymentMethod?: PaymentMethodKind; planItemIndex?: number | null; chequeSerial?: string }) => Promise<void>;
-  onSetPlanItemMethod: (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string }) => Promise<void>;
+  onSetPlanItemMethod: (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string; bankName?: string }) => Promise<void>;
+  /** Attach a cheque file against a payment slot on the customer's behalf. */
+  onAttachCheque: (slotLabel: string, files: FileList | null, replaceIds?: number[]) => Promise<void>;
+  /** Read what is unread and place every cheque on its plan item. */
+  onReadCheques: (retryChequeId?: number) => Promise<void>;
+  chequeIntake: ChequeIntake | null;
+  chequeReading: boolean;
   onOpenLease: () => void;
 };
 /* ─── CostSummary: the FULL cost breakdown the customer sees (from lead.costPreview).
@@ -1441,6 +1510,7 @@ function StageBody(props: StageBodyProps) {
     onMarkVisited, onApproveDocuments, onSharePlan, onApproveCheques, onConfirmCollected, onDocsChanged, onSetOccupants,
     onReopen, onVerifyDoc, onSetDocExpiry, onRejectDoc, onUploadDoc, onSaveDocsNote, onIssuePlan,
     onRecordCheque, onDeleteCheque, onSetChequeStatus, onTagCheque, onSetPlanItemMethod,
+    onAttachCheque, onReadCheques, chequeIntake, chequeReading,
     onOpenLease,
   } = props;
 
@@ -1538,6 +1608,7 @@ function StageBody(props: StageBodyProps) {
           feeRules={feeRules} preferredStartDays={preferredStartDays} allowedInstallments={allowedInstallments} rentVatMode={rentVatMode}
           onIssuePlan={onIssuePlan}
           shared={true} onSharePlan={onSharePlan}
+          cheques={cheques} onAttachCheque={onAttachCheque} onDeleteCheque={onDeleteCheque}
         />
       );
 
@@ -1545,7 +1616,8 @@ function StageBody(props: StageBodyProps) {
     case 'cheques_submitted':
       return (
         <>
-          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} />}
+          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} cheques={cheques} busy={busy} onAttachCheque={onAttachCheque} onDeleteCheque={onDeleteCheque} />}
+          <LeadChequeIntake cheques={cheques} intake={chequeIntake} reading={chequeReading} onRead={onReadCheques} />
           <ChequesSection
             plan={plan} cheques={cheques} busy={busy}
             onRecordCheque={onRecordCheque} onDeleteCheque={onDeleteCheque}
@@ -1563,7 +1635,8 @@ function StageBody(props: StageBodyProps) {
       const canIssue = !!(lead.unit?.id && lead.convertedTenant?.id);
       return (
         <>
-          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} />}
+          {plan && <PlanTable plan={plan} advice lead={lead} latestViewing={latestViewing} cheques={cheques} busy={busy} onAttachCheque={onAttachCheque} onDeleteCheque={onDeleteCheque} />}
+          <LeadChequeIntake cheques={cheques} intake={chequeIntake} reading={chequeReading} onRead={onReadCheques} />
           <ChequesSection
             plan={plan} cheques={cheques} busy={busy}
             onRecordCheque={onRecordCheque} onDeleteCheque={onDeleteCheque}
@@ -2111,11 +2184,16 @@ function DocsSection({
  *  list page's plan form; same issue-payment-plan endpoint issues OR edits). ── */
 function PlanSection({
   lead, plan, busy, latestViewing, feeRules, preferredStartDays, allowedInstallments, rentVatMode, onIssuePlan,
-  shared, onSharePlan,
+  shared, onSharePlan, cheques, onAttachCheque, onDeleteCheque,
 }: {
   lead: ApiLead;
   plan: ApiLead['paymentPlan'];
   busy: boolean;
+  /** Once shared, the landlord can attach the customer's cheques here — the same
+   *  control the customer has (owner, 6 Oct 2026: "either customer can attach or admin can attach"). */
+  cheques?: LeadChequeRecord[];
+  onAttachCheque?: (slotLabel: string, files: FileList | null, replaceIds?: number[]) => Promise<void>;
+  onDeleteCheque?: (chequeId: number) => Promise<void>;
   latestViewing: ReturnType<typeof getLatestViewing>;
   feeRules: FeeRulesMap | null;
   preferredStartDays: number[];
@@ -2130,7 +2208,9 @@ function PlanSection({
   if (!plan) return <div className="note">No plan on record.</div>;
   return (
     <>
-      <PlanTable plan={plan} lead={lead} latestViewing={latestViewing} />
+      <PlanTable plan={plan} lead={lead} latestViewing={latestViewing}
+        cheques={shared ? cheques : undefined} busy={busy}
+        onAttachCheque={shared ? onAttachCheque : undefined} onDeleteCheque={shared ? onDeleteCheque : undefined} />
       {!editing && (
         <>
           <div className="note">
@@ -2671,7 +2751,7 @@ function PlanEditor({
 /* ─── ChequesSection: per-cheque view + method/instalment mapping + status +
  *  record. Ports the list page's cheque panel (customer-upload vs RP-recorded). */
 function ChequesSection({
-  plan, cheques, busy, onRecordCheque, onDeleteCheque, onSetChequeStatus, onTagCheque, onSetPlanItemMethod,
+  plan, cheques, busy, onRecordCheque, onDeleteCheque, onSetChequeStatus, onSetPlanItemMethod,
 }: {
   plan: ApiLead['paymentPlan'];
   cheques: LeadChequeRecord[];
@@ -2680,42 +2760,40 @@ function ChequesSection({
   onDeleteCheque: (chequeId: number) => Promise<void>;
   onSetChequeStatus: (chequeId: number, status: ChequeRowStatus) => Promise<void>;
   onTagCheque: (chequeId: number, patch: { paymentMethod?: PaymentMethodKind; planItemIndex?: number | null; chequeSerial?: string }) => Promise<void>;
-  onSetPlanItemMethod: (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string }) => Promise<void>;
+  onSetPlanItemMethod: (patch: { itemIndex: number; paymentMethod?: PaymentMethodKind; reference?: string; bankName?: string }) => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [itemMethods, setItemMethods] = useState<Record<number, PaymentMethodKind>>({});
   const [itemRefs, setItemRefs] = useState<Record<number, string>>({});
+  const [itemBanks, setItemBanks] = useState<Record<number, string>>({});
+  /** Rows whose cheque is shown inline, under the row. */
+  const [shown, setShown] = useState<Set<number>>(new Set());
+  /** The upload the reader placed on this plan item, and the cheque it read there. */
+  const readFor = (itemIndex: number): { upload: LeadChequeRecord; cheque: { chequeNumber?: string | null; bankName?: string | null; amountFils?: number | null; date?: string | null }; paysFor: number } | null => {
+    for (const c of cheques) {
+      if (!c.isCustomerUpload || c.reading?.status !== 'done') continue;
+      const f = c.reading.fields as { cheques?: Array<{ chequeNumber?: string | null; bankName?: string | null; amountFils?: number | null; date?: string | null }>; placement?: Array<{ index: number; outcome: string; paymentIds: number[] }> } | null;
+      const pl = f?.placement?.find(p => p.outcome === 'matched' && p.paymentIds.includes(itemIndex));
+      if (!pl) continue;
+      return { upload: c, cheque: f?.cheques?.[pl.index] ?? {}, paysFor: pl.paymentIds.length };
+    }
+    return null;
+  };
 
-  const sortedItems = plan ? plan.items.slice().sort((a, b) => {
-    if (a.dueDate !== b.dueDate) return (a.dueDate ?? '').localeCompare(b.dueDate ?? '');
-    const order: Record<string, number> = { fee: 0, first_bundle: 1, installment: 2, extra_installment: 3, security_deposit: -1 };
-    return (order[a.type ?? 'installment'] ?? 1) - (order[b.type ?? 'installment'] ?? 1);
-  }) : [];
+  // The rows run in the Payment Summary's own order — Security Deposit, Rent,
+  // Management Fee, Third Party — so the landlord reads the two lists as one.
+  const groupRank = (it: { index: number; type?: string | null; description?: string | null }) => {
+    const label = plan ? leadSlotLabel(plan, it.index) : null;
+    if (label === 'Security Deposit') return 0;
+    if (label?.startsWith('Rent — ')) return 1;
+    if (label === 'Management Fee') return 2;
+    // Third Party, as the card lists it: registration, then the VAT cheque, then the extra charges.
+    return /contract registration/i.test(it.description ?? '') ? 3 : it.type === 'vat' ? 4 : 5;
+  };
+  const sortedItems = plan ? plan.items.slice().sort((a, b) =>
+    groupRank(a) - groupRank(b) || (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.index - b.index) : [];
   const chequeByDesc = new Map<string, LeadChequeRecord>();
   for (const c of cheques) if (c.notes) chequeByDesc.set(c.notes, c);
-  const customerUploads = cheques.filter(c => c.isCustomerUpload);
-  const hasCustomerUploads = customerUploads.length > 0;
-
-  // Recording a cheque means reading the serial off the scan and typing it into
-  // the row above — so the preview opens DOCKED to the right edge rather than in
-  // the centred viewer, which covered the very grid being filled in. The whole
-  // set goes in, opened at the one that was clicked, so the RP pages through
-  // ◀ 2/4 ▶ against the instalment list instead of closing and reopening.
-  // Labelled from the row's own position, so the caption in the dock is the same
-  // text as the row it was opened from even when a cheque without an image sits
-  // between them.
-  const previewable = customerUploads
-    .map((c, i) => ({ c, label: c.notes || `Payment ${i + 1}` }))
-    .filter(p => !!p.c.imageUrl);
-  const openCheque = (c: LeadChequeRecord) => {
-    const at = previewable.findIndex(p => p.c.id === c.id);
-    if (at < 0) return;
-    openDocViewer(
-      previewable.map(p => ({ fileUrl: p.c.imageUrl, caption: p.label })),
-      'Cheques',
-      { dock: true, startIndex: at },
-    );
-  };
 
   return (
     <div className="chqbox">
@@ -2730,7 +2808,7 @@ function ChequesSection({
       {plan && sortedItems.length > 0 && (
         <div className="paygrid">
           <div className="payhead">
-            <span>Instalment</span><span>Method</span><span>Reference</span><span>Record</span>
+            <span>Instalment</span><span>Method</span><span>Reference</span><span>Bank</span><span>Record</span>
           </div>
           {sortedItems.map((item, i) => {
             const method = itemMethods[item.index] ?? item.paymentMethod ?? 'cheque';
@@ -2771,6 +2849,15 @@ function ChequesSection({
                       }
                     } catch (err) { setError(err instanceof Error ? err.message : 'Failed'); }
                   }} />
+                {/* The bank: read off the cheque, or typed — it goes to the lease with the number. */}
+                <input className="qinput payrow-ctl" type="text" value={itemBanks[item.index] ?? item.bankName ?? ''}
+                  onChange={e => setItemBanks(prev => ({ ...prev, [item.index]: e.target.value }))}
+                  placeholder="Bank"
+                  onBlur={async e => {
+                    const val = e.currentTarget.value.trim(); setError(null);
+                    if (val === (item.bankName ?? '')) return;
+                    try { await onSetPlanItemMethod({ itemIndex: item.index, bankName: val }); } catch (err) { setError(err instanceof Error ? err.message : 'Failed'); }
+                  }} />
                 <div className="payrow-rec">
                   {recorded ? (
                     <>
@@ -2792,63 +2879,42 @@ function ChequesSection({
                       }}>Record</button>
                   )}
                 </div>
+                {(() => {
+                  const rd = readFor(item.index);
+                  if (!rd) return null;
+                  const q = rd.cheque;
+                  return (
+                    <>
+                      <div className="payrow-cheque">
+                        <span style={{ color: 'var(--jade-deep)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}>
+                          <Check size={12} /> Read from the cheque{q.amountFils != null ? ` · ${aed(q.amountFils)}` : ''}{q.date ? ` · ${fmtDateOnly(q.date)}` : ''}{rd.paysFor > 1 ? ` · pays ${rd.paysFor} payments` : ''}
+                        </span>
+                        {rd.upload.imageUrl && (
+                          <button type="button" className="linkbtn" style={{ fontSize: 11.5, padding: 0, marginLeft: 'auto' }}
+                            onClick={() => setShown(prev => { const n = new Set(prev); if (n.has(item.index)) n.delete(item.index); else n.add(item.index); return n; })}>
+                            <Eye size={11} /> {shown.has(item.index) ? 'Hide cheque' : 'Show cheque here'}
+                          </button>
+                        )}
+                      </div>
+                      {shown.has(item.index) && rd.upload.imageUrl && (
+                        <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--mist-strong)', paddingTop: 8 }}>
+                          {rd.upload.imageUrl.toLowerCase().split('?')[0].endsWith('.pdf')
+                            ? <iframe title={`Cheque for ${desc}`} src={rd.upload.imageUrl} style={{ width: '100%', height: 420, border: '1px solid var(--mist-strong)', borderRadius: 8, background: '#fff' }} />
+                            // eslint-disable-next-line @next/next/no-img-element
+                            : <img src={rd.upload.imageUrl} alt={`Cheque for ${desc}`} style={{ width: '100%', maxHeight: 520, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--mist-strong)', background: '#fff' }} />}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Customer-uploaded references — thumbnail + View + map to installment + method */}
-      {hasCustomerUploads && (
-        <div className="doclist" style={{ marginBottom: 10 }}>
-          <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Uploaded by customer ({customerUploads.length})</span>
-            {previewable.length > 1 && (
-              <button type="button" className="linkbtn" onClick={() => openCheque(previewable[0].c)}>
-                <Eye size={11} /> View all
-              </button>
-            )}
-          </div>
-          {customerUploads.map((c, i) => {
-            const label = c.notes || `Payment ${i + 1}`;
-            const open = () => openCheque(c);
-            return (
-              <div key={c.id} className="uprow">
-                <button type="button" className="upthumb" onClick={open} disabled={!c.imageUrl} aria-label={`Preview ${label}`}>
-                  {c.imageUrl && !c.imageUrl.toLowerCase().split('?')[0].endsWith('.pdf')
-                    // eslint-disable-next-line @next/next/no-img-element
-                    ? <img src={c.imageUrl} alt={label} />
-                    : <FileText size={16} />}
-                </button>
-                <div className="upmeta">
-                  <div className="dn">{label}</div>
-                  <div className="ds">
-                    {c.amountFils > 0 && <>{aed(c.amountFils)} </>}
-                    {c.chequeSerial && <>· {c.chequeSerial} </>}
-                    {c.bankName && c.bankName !== 'N/A' && <>· {c.bankName} </>}
-                    {c.dueDate && <>· due {fmtDateOnly(c.dueDate)} </>}
-                    {c.ocrStatus === 'done' && <span style={{ color: 'var(--jade-deep)' }}>· auto-read</span>}
-                  </div>
-                  <div className="upctl">
-                    {c.imageUrl && <button type="button" className="mini-btn view" onClick={open}><Eye size={12} /> View</button>}
-                    <select className="qinput" style={{ width: 110 }} value={c.paymentMethod ?? 'cheque'}
-                      onChange={async e => { setError(null); try { await onTagCheque(c.id, { paymentMethod: e.target.value as PaymentMethodKind }); } catch (err) { setError(err instanceof Error ? err.message : 'Failed'); } }}>
-                      {(['cheque', 'bank_transfer', 'card', 'cash'] as PaymentMethodKind[]).map(m => <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>)}
-                    </select>
-                    {plan && (
-                      <select className="qinput" style={{ width: 150 }} value={c.planItemIndex ?? ''}
-                        onChange={async e => { setError(null); const v = e.target.value; try { await onTagCheque(c.id, { planItemIndex: v === '' ? null : Number(v) }); } catch (err) { setError(err instanceof Error ? err.message : 'Failed'); } }}>
-                        <option value="">Map to installment…</option>
-                        {sortedItems.map((it, k) => <option key={it.index} value={it.index}>#{k + 1} {it.description ?? `Payment ${k + 1}`}</option>)}
-                      </select>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* The customer's files show on the plan rows above (View / Replace) and
+          under the payment each one pays — no second list of the same files. */}
 
       {/* Orphan RP cheques not matching any plan item */}
       {plan && (() => {
@@ -2877,13 +2943,56 @@ function ChequesSection({
  *  lease uses (PaymentPlanCard) — heading, landlord/unit meta, Download PDF and
  *  the four groups. One component, so the plan a customer is quoted at lead stage
  *  and the plan they sign look like the same document. ─────────────────────────── */
-function PlanTable({ plan, advice, lead, latestViewing }: {
+/** The attach-slot label of a plan item, as the Payment Summary names them —
+ *  the same rule the customer's page and the server use. */
+function leadSlotLabel(plan: NonNullable<ApiLead['paymentPlan']>, itemIndex: number): string | null {
+  const items = plan.items ?? [];
+  const isRent = (it: { type?: string | null }) => ['first_bundle', 'installment', 'extra_installment'].includes(it.type ?? '');
+  const rent = items.filter(isRent).slice().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.index - b.index);
+  const at = rent.findIndex(it => it.index === itemIndex);
+  if (at >= 0) return `Rent \u2014 ${rent.length > 1 ? `Instalment ${at + 1}` : 'Rent'}`;
+  const it = items.find(x => x.index === itemIndex); if (!it) return null;
+  const d = (it.description ?? '').toLowerCase();
+  return it.type === 'security_deposit' ? 'Security Deposit' : (d.includes('admin') || d.includes('commission')) ? 'Management Fee' : 'Third Party';
+}
+
+function PlanTable({ plan, advice, lead, latestViewing, cheques, busy, onAttachCheque, onDeleteCheque }: {
   plan: NonNullable<ApiLead['paymentPlan']>;
   advice?: boolean;
   lead?: ApiLead;
   latestViewing?: ReturnType<typeof getLatestViewing>;
+  /** When given, each payment takes a cheque file — the same control the customer has. */
+  cheques?: LeadChequeRecord[];
+  busy?: boolean;
+  onAttachCheque?: (slotLabel: string, files: FileList | null, replaceIds?: number[]) => Promise<void>;
+  onDeleteCheque?: (chequeId: number) => Promise<void>;
 }) {
   const segRows = segRowsFromAggregatePlan(plan);
+  const [attachErr, setAttachErr] = useState<string | null>(null);
+  const uploads = (cheques ?? []).filter(c => c.isCustomerUpload);
+  const items = plan.items ?? [];
+  const isRent = (it: { type?: string | null }) => ['first_bundle', 'installment', 'extra_installment'].includes(it.type ?? '');
+  const renderAttach = onAttachCheque ? (slot: { key: string; label: string; amount: number; dueDate: string | null }) => {
+    const filedHere = uploads.some(u => (u.notes ?? '') === slot.label);
+    if (!slot.label.startsWith('Rent \u2014 ') && !filedHere) {
+      // A fee group paid on a cheque that was attached elsewhere (with the rent,
+      // or with the deposit) takes no file of its own: it names that cheque.
+      const group = items.filter(it => !isRent(it) && leadSlotLabel(plan, it.index) === slot.label);
+      const elsewhere = new Set(items.filter(it => leadSlotLabel(plan, it.index) !== slot.label).map(it => it.reference).filter(Boolean));
+      const paidOn = group.length > 0 && group.every(it => it.reference && elsewhere.has(it.reference))
+        ? [...new Set(group.map(it => it.reference as string))] : [];
+      if (paidOn.length > 0) return <span style={{ fontSize: 11.5, color: 'var(--jade-deep)', fontWeight: 600 }}>Paid on cheque{paidOn.length > 1 ? 's' : ''} {paidOn.join(', ')}</span>;
+    }
+    return (
+      <PlanAttachCell
+        slot={slot}
+        refs={uploads.filter(u => (u.notes ?? '') === slot.label).map(u => ({ id: u.id, imageUrl: u.imageUrl ?? null }))}
+        uploading={busy ? 1 : 0}
+        onFiles={(label, files, replaceIds) => { setAttachErr(null); void onAttachCheque(label, files, replaceIds).catch(e => setAttachErr(e instanceof Error ? e.message : 'Upload failed')); }}
+        onRemove={(id) => { if (onDeleteCheque) void onDeleteCheque(id); }}
+      />
+    );
+  } : undefined;
   // No lease exists yet, so the period is the one the lease will be created with:
   // move-in + 12 months, matching the new-lease form's own default.
   const moveInDate = latestViewing?.desiredMoveIn?.slice(0, 10) ?? null;
@@ -2904,8 +3013,26 @@ function PlanTable({ plan, advice, lead, latestViewing }: {
         periodStart={moveInDate}
         periodEnd={moveInDate ? termEndISO(moveInDate, 12) : null}
         bankDetails={plan.bankDetails}
+        renderAttach={renderAttach}
       />
+      {attachErr && <div className="errline">{attachErr}</div>}
     </div>
+  );
+}
+
+/** What the reader made of the lead's cheque files: a refusal line per file it
+ *  took off, and a first read on the payment stages' first visit. */
+function LeadChequeIntake({ cheques, intake, reading, onRead }: { cheques: LeadChequeRecord[]; intake: ChequeIntake | null; reading: boolean; onRead: (retryChequeId?: number) => Promise<void> }) {
+  const uploads = cheques.filter(c => c.isCustomerUpload && !!c.imageUrl);
+  useEffect(() => {
+    if (intake == null && !reading && uploads.length > 0) void onRead();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intake, uploads.length]);
+  return (
+    <>
+      {reading && <p className="note" style={{ margin: 0 }}>Reading the cheques…</p>}
+      {intake?.removed?.map(r => <div key={r.name + r.reason} className="errline">{r.reason} We have taken that file off ({r.name}).</div>)}
+    </>
   );
 }
 
@@ -3068,16 +3195,18 @@ function GlobalStyle() {
 
       /* Record-payment grid (method + reference per instalment) */
       .quest-page .paygrid { display: grid; gap: 6px; margin-bottom: 10px; }
-      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
-      .quest-page .payhead span:nth-child(2), .quest-page .payhead span:nth-child(3), .quest-page .payhead span:nth-child(4) { text-align: left; }
+      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px 116px 124px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+      .quest-page .payhead span:nth-child(2), .quest-page .payhead span:nth-child(3), .quest-page .payhead span:nth-child(4), .quest-page .payhead span:nth-child(5) { text-align: left; }
       .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .quest-page .payrow-rec > select { flex: 1 1 auto; min-width: 0; }
       .quest-page .payrow-rec > .mini-btn { flex: 0 0 auto; }
-      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
+      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px 116px 124px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
       .quest-page .payrow-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
+      .quest-page .payrow-cheque { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; padding-top: 6px; border-top: 1px dashed var(--mist-strong); }
+      .quest-page .payrow-cheque .linkbtn { font-size: 11.5px; padding: 0; }
       .quest-page .payrow-n { font-size: 10px; font-weight: 800; color: var(--jade-deep); background: var(--jade-soft); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
       .quest-page .payrow-lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-      .quest-page .payrow-desc { font-size: 12.5px; color: var(--ink-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .quest-page .payrow-desc { font-size: 12.5px; color: var(--ink-2); font-weight: 600; overflow-wrap: anywhere; }
       .quest-page .payrow-sub { font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
       .quest-page .payrow-ctl { width: 100%; min-width: 0; }
       @media (max-width: 640px) {

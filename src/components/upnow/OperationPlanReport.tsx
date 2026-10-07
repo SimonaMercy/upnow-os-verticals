@@ -14,15 +14,44 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer, Loader2, AlertCircle, Download, ListChecks, ExternalLink } from 'lucide-react';
 
-interface PlanLink { kind: 'lease' | 'lead' | 'unit' | 'job' | 'breach' | 'dispute' | 'vendor-contract'; id: number }
+interface PlanLink { kind: 'lease' | 'lead' | 'unit' | 'job' | 'breach' | 'dispute' | 'vendor-contract' | 'vendor' | 'customers' | 'customer' | 'inspection'; id: number }
+interface Note { body: string; by: string | null; at: string }
 interface Row {
   key: string; section: string; property: string | null; party: string | null; unit: string | null;
   system: string | null; date: string | null; state: string; nextStep: string; link: PlanLink | null; responsible: string | null;
+  /** The last note the team wrote on the record. */
+  note: Note | null;
+  /** The record's last activity (ISO) — the Operations page's clock; days since are shown. */
+  since: string | null;
+  /** A badge colour the row's own page dictates (Leads page red / amber), overriding the days tone. */
+  tone?: 'red' | 'orange' | 'green';
 }
 interface Section { key: string; no: number; title: string; rows: Row[] }
 interface Payload { generatedAt: string; sections: Section[] }
 
 const fmtDate = (s: string | null) => s ? new Date(s + 'T00:00:00').toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const fmtAt = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' });
+/** Days since the record's last activity — the Operations page's own count (its `daysSince`). */
+const daysPending = (since: string | null): number | null => {
+  if (!since) return null;
+  const t = new Date(since).getTime();
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+};
+const pendingFor = (since: string | null): string | null => {
+  const d = daysPending(since);
+  return d == null ? null : d === 0 ? 'today' : d === 1 ? '1 day' : `${d} days`;
+};
+/** The row's colour by how long the matter has waited — the Operations page's own thresholds (`ageTone`):
+ *  7 to 13 days orange, 14 and over red. Anything younger, or with no clock, stays plain (owner, 7 Oct 2026:
+ *  "don't show green, only orange and red; the rows should be filled with full colour"). */
+type Tone = 'orange' | 'red' | 'neutral';
+const toneOf = (since: string | null, own?: Tone | 'green'): Tone => { if (own) return own === 'green' ? 'neutral' : own; const d = daysPending(since); return d == null ? 'neutral' : d >= 14 ? 'red' : d >= 7 ? 'orange' : 'neutral'; };
+const TONE_CLASS: Record<Tone, string> = { orange: 'bg-[#fdebc8] text-[#b45309]', red: 'bg-[#fbcaca] text-[#b91c1c]', neutral: 'bg-[#f1efe9] text-[#3d3b35]' };
+/** The whole row carries the colour. */
+const ROW_CLASS: Record<Tone, string> = { orange: 'bg-[#fff4e5]', red: 'bg-[#fee2e2]', neutral: '' };
+const TONE_FILL: Record<Tone, { fill: string; font: string } | null> = { orange: { fill: 'FFFFF4E5', font: 'FFB45309' }, red: { fill: 'FFFEE2E2', font: 'FFB91C1C' }, neutral: null };
+/** "— Maria Eloisa, 6 Oct 2026" */
+const noteSign = (n: Note) => [n.by, fmtAt(n.at)].filter(Boolean).join(', ');
 
 /** Where a row's record lives on this portal. */
 function hrefOf(link: PlanLink | null, managerRp?: number): string | null {
@@ -36,6 +65,11 @@ function hrefOf(link: PlanLink | null, managerRp?: number): string | null {
     case 'dispute': return `${base}/legal/${link.id}${q}`;
     case 'job': return `${base}/maintenance/${link.id}${q}`;
     case 'unit': return `${base}/units${q}`;
+    case 'vendor-contract': return `${base}/amc/${link.id}${q}`;
+    case 'vendor': return `${base}/vendors/${link.id}${q}`;
+    case 'inspection': return `${base}/building-inspections/${link.id}${q}`;
+    case 'customers': return `${base}/tenants${q}`;
+    case 'customer': return `${base}/tenants/${link.id}${q}`;
     default: return null;
   }
 }
@@ -79,11 +113,12 @@ export function OperationPlanReport({
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Operation');
-    ws.columns = [30.7, 23.7, 20.5, 18, 39.6, 60.7, 24.3, 21.5].map(width => ({ width }));
+    ws.columns = [30.7, 23.7, 20.5, 18, 39.6, 60.7, 24.3, 21.5, 60.7].map(width => ({ width }));
     const font = { name: 'Arial Nova Cond', size: 12 };
     const thin = { style: 'thin' as const };
     const border = { top: thin, left: thin, bottom: thin, right: thin };
-    const head = ws.addRow(['Category', 'Property', 'Tenant/Customer/ Vendors', 'Unit / No', 'Current Position/Issues', 'What Needs to Happen', 'Reponsible', 'Status']);
+    // The team's eight columns as they are; the last note rides along as a ninth, after Status.
+    const head = ws.addRow(['Category', 'Property', 'Tenant/Customer/ Vendors', 'Unit / No', 'Current Position/Issues', 'What Needs to Happen', 'Reponsible', 'Status', 'Last Note']);
     head.height = 47;
     head.eachCell(c => { c.font = { ...font, bold: true }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF808080' } }; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; c.border = border; });
     const dash = (v: string | null | undefined) => (v && v.trim() ? v.trim() : ' -');
@@ -91,8 +126,9 @@ export function OperationPlanReport({
       const rows: (Row | null)[] = sec.rows.length ? sec.rows : [null];
       const start = ws.rowCount + 1;
       for (const r of rows) {
-        const row = ws.addRow([sec.title, dash(r?.property), dash(r?.party), dash(r?.unit), dash(r?.system), dash(r?.nextStep), dash(r?.responsible), dash(r?.state)]);
+        const row = ws.addRow([sec.title, dash(r?.property), dash(r?.party), dash(r?.unit), dash(r?.system), dash(r?.nextStep), dash(r?.responsible), dash(r ? [r.state, pendingFor(r.since)].filter(Boolean).join(' · ') : null), dash(r?.note ? `${r.note.body}\n— ${noteSign(r.note)}` : null)]);
         row.eachCell({ includeEmpty: true }, c => { c.font = font; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
+        if (r) { const t = TONE_FILL[toneOf(r.since, r.tone)]; if (t) { row.eachCell({ includeEmpty: true }, c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: t.fill } }; }); const cell = row.getCell(8); cell.font = { ...font, bold: true, color: { argb: t.font } }; } }
       }
       if (rows.length > 1) ws.mergeCells(start, 1, ws.rowCount, 1);
     }
@@ -112,7 +148,7 @@ export function OperationPlanReport({
           )}
           <h1 className="text-2xl font-bold text-[#26241f] flex items-center gap-2"><ListChecks size={22} className="text-[#2e9f82]" /> Operation Management Plan</h1>
           <p className="text-sm text-[#6b6860] mt-1 max-w-3xl">
-            The work on the books, section by section — {total} items. What the system holds, the stage each matter is at, what that stage calls for, and who handles it.
+            The work on the books, section by section — {total} items. Each matter's current position, the stage it is at, what that stage calls for, the last note on it, and who handles it.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
@@ -140,8 +176,9 @@ export function OperationPlanReport({
                       <tr className="text-left text-[#6b6860] border-b border-[#e8e6e0] text-xs">
                         <th className="py-2 pl-4 pr-3 font-medium w-[150px]">Property</th>
                         <th className="py-2 px-3 font-medium w-[220px]">Customer / Vendor — Unit</th>
-                        <th className="py-2 px-3 font-medium">In the system</th>
-                        <th className="py-2 px-3 font-medium">What needs to happen</th>
+                        <th className="py-2 px-3 font-medium min-w-[280px]">Current position / issues</th>
+                        <th className="py-2 px-3 font-medium w-[160px]">What needs to happen</th>
+                        <th className="py-2 px-3 font-medium min-w-[240px]">Last note</th>
                         <th className="py-2 px-3 font-medium w-[150px]">Responsible</th>
                         <th className="py-2 px-3 pr-4 font-medium w-[170px]">Status</th>
                       </tr>
@@ -150,7 +187,7 @@ export function OperationPlanReport({
                       {sec.rows.map(r => {
                         const href = hrefOf(r.link, managerRp);
                         return (
-                          <tr key={r.key} className="border-b border-[#f1efe9] last:border-0">
+                          <tr key={r.key} className={`border-b border-[#f1efe9] last:border-0 ${ROW_CLASS[toneOf(r.since, r.tone)]}`}>
                             <td className="py-2 pl-4 pr-3 text-[#3d3b35]">{r.property ?? '—'}</td>
                             <td className="py-2 px-3 text-[#26241f]">
                               {r.party && <span className="font-medium">{r.party}</span>}
@@ -158,10 +195,11 @@ export function OperationPlanReport({
                               {!r.party && !r.unit && '—'}
                               {href && <Link href={href} className="ml-1.5 inline-flex align-middle text-[#2e9f82] print:hidden" title="Open"><ExternalLink size={12} /></Link>}
                             </td>
-                            <td className="py-2 px-3 text-[#3d3b35]">{r.system}{r.date && <div className="text-xs text-[#8a8780] mt-0.5">{fmtDate(r.date)}</div>}</td>
+                            <td className="py-2 px-3 text-[#3d3b35] whitespace-pre-line">{r.system}{r.date && <div className="text-xs text-[#8a8780] mt-0.5">{fmtDate(r.date)}</div>}</td>
                             <td className="py-2 px-3 text-[#3d3b35]">{r.nextStep}</td>
+                            <td className="py-2 px-3 text-[#3d3b35]">{r.note ? <><div className="whitespace-pre-line">{r.note.body}</div><div className="text-xs text-[#8a8780] mt-0.5">{noteSign(r.note)}</div></> : <span className="text-[#9b9890]">—</span>}</td>
                             <td className="py-2 px-3 text-[#26241f]">{r.responsible ?? '—'}</td>
-                            <td className="py-2 px-3 pr-4"><span className="inline-block text-xs font-semibold rounded-lg px-2 py-1 bg-[#eef7f2] text-[#1a7a5a]">{r.state}</span></td>
+                            <td className="py-2 px-3 pr-4"><span className={`inline-block text-xs font-semibold rounded-lg px-2 py-1 ${TONE_CLASS[toneOf(r.since, r.tone)]}`}>{r.state}</span>{pendingFor(r.since) && <div className="text-xs text-[#8a8780] mt-1">{pendingFor(r.since)}</div>}</td>
                           </tr>
                         );
                       })}

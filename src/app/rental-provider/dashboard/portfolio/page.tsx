@@ -32,6 +32,8 @@ import {
 } from '@/components/upnow/PropertyFormModal';
 import s from './portfolio.module.css';
 import { PropertyDetailsModal } from './PropertyDetailsModal';
+import { InspectionChip } from '@/components/upnow/InspectionChip';
+import { inspectionFor, useInspectionStatus, type InspectionStatus } from '@/lib/inspectionStatus';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PortfolioMapView } from './PortfolioMapModal';
@@ -204,9 +206,9 @@ function Cover({ url, iconSize, iconColor }: { url: string | null; iconSize: num
 // occupancy · edit/delete. The whole row opens the details popup (units live
 // inside it). Mirrors Properties.dc.html ROW VIEW.
 function PropertyCard({
-  vm, onEdit, onDelete, onShowDetails,
+  vm, inspection, onEdit, onDelete, onShowDetails,
 }: {
-  vm: CardVM; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
+  vm: CardVM; inspection?: InspectionStatus | null; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
 }) {
   return (
     <div onClick={onShowDetails} role="button" title="View property details" className={s.dxRowCard}>
@@ -219,6 +221,8 @@ function PropertyCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
             <span style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-.01em', color: '#1d2823', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: vm.tagColor, background: vm.tagBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.typeLabel}</span>
+            {/* Inspection on top of the property (owner, 7 Oct 2026). */}
+            <InspectionChip status={inspection} settingsHref="/rental-provider/dashboard/settings?tab=building_inspections" />
           </div>
           {vm.address && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#9aa39c', marginTop: 4 }}>
@@ -259,9 +263,9 @@ function PropertyCard({
 // Cover tile that surfaces the SAME information as the Row view (type tag,
 // address + vacancy, annual rent + occupancy text) — no occupancy bar.
 function PropertyGridCard({
-  vm, onEdit, onDelete, onShowDetails,
+  vm, inspection, onEdit, onDelete, onShowDetails,
 }: {
-  vm: CardVM; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
+  vm: CardVM; inspection?: InspectionStatus | null; onEdit: () => void; onDelete: () => void; onShowDetails: () => void;
 }) {
   const footBtn: CSSProperties = {
     width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', cursor: 'pointer',
@@ -273,6 +277,8 @@ function PropertyGridCard({
       <div style={{ height: 138, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
         <Cover url={vm.coverUrl} iconSize={22} iconColor="#b3bcb4" />
         <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
+        {/* Inspection on top of the property (owner, 7 Oct 2026). */}
+        <span style={{ position: 'absolute', top: 10, right: 10 }}><InspectionChip status={inspection} settingsHref="/rental-provider/dashboard/settings?tab=building_inspections" /></span>
       </div>
 
       {/* Body — same fields as the Row view */}
@@ -327,6 +333,8 @@ export default function PortfolioPage() {
   // Main content view: Row (list) · Grid (tiles) · Map (Airbnb list + map). All
   // cards open the details popup — no inline expansion.
   const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
+  // Inspection status per building, for the chip on top of every card (own landlord scope).
+  const inspections = useInspectionStatus(null);
 
   // Deep-link ?add=1 (from the dashboard / contract "List Property" CTAs) opens
   // the Add Property modal straight away — property creation lives here now.
@@ -674,6 +682,7 @@ export default function PortfolioPage() {
                     <PropertyCard
                       key={p.id}
                       vm={toCardVM(p)}
+                      inspection={inspectionFor(inspections, p.id, null)}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onDelete={() => deleteProperty.mutate(p.id)}
                       onShowDetails={() => setDetailsProperty(p)}
@@ -695,6 +704,7 @@ export default function PortfolioPage() {
                     <PropertyGridCard
                       key={p.id}
                       vm={toCardVM(p)}
+                      inspection={inspectionFor(inspections, p.id, null)}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onDelete={() => deleteProperty.mutate(p.id)}
                       onShowDetails={() => setDetailsProperty(p)}

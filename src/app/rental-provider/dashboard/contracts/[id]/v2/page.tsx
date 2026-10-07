@@ -50,10 +50,10 @@ import { openDocsTogether } from '@/lib/openDocsTogether';
 import { type OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
-import { slotOfDoc, fileNameOfDoc, isPaymentAdviceKey } from '@/lib/planAttach';
+import { slotOfDoc, fileNameOfDoc, isPaymentAdviceKey, chequeReadingOf, sameChequeNumber, type DocReading, type ChequeReading, type ChequeIntake } from '@/lib/planAttach';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
-import { segRowsFromContract, buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
+import { segRowsFromContract, buildSegregatedPlan, rentSlotLabels, planOrder, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { isTaxLabel, taxPortionOf } from '@/lib/chargeTax';
 import { AmountWithVat } from '@/components/upnow/VatChoice';
 import { splitVat, vatFormFromStored, type VatMode } from '@/lib/vatSplit';
@@ -107,6 +107,8 @@ interface ContractDoc {
   isVisibleToTenant: boolean;
   /** Recorded binder/landlord-link choice; null = the default rule decides. */
   portalHidden?: boolean | null;
+  /** What the reader found on this file (cheque papers on a renewal); null = not read. */
+  reading?: DocReading | null;
 }
 
 /** Identity of a stored documents row (its upsert key): an upload posted under
@@ -124,6 +126,8 @@ interface ContractPayment {
   chequeStatus?: string | null;
   paidAt?: string | null;
   chequeNumber?: string | null;
+  /** The bank the cheque is drawn on, as read off the cheque (0381). */
+  bankName?: string | null;
   /** Cheque image / payment advice this instalment was recorded against
    *  (`payments.document_id`). Null = a typed reference with no scan on file. */
   documentId?: number | null;
@@ -870,6 +874,11 @@ interface StepHandlers {
   /** Tag a file sent "all together" to the payment it covers. */
   onTagChequeDoc: (docId: number, slotLabel: string) => Promise<void>;
   onMarkChequesOnFile: () => Promise<void>;
+  /** What the reader made of the renewal's cheque files (null until first read). */
+  chequeIntake: ChequeIntake | null;
+  chequeReading: boolean;
+  /** Read what is unread and place every cheque on its payment; `retryDocumentId` re-reads one file. */
+  onReadCheques: (retryDocumentId?: number) => Promise<void>;
   /** Accept the customer's re-uploaded renewal KYC documents → PATCH
    *  /contracts/:id/renewal/accept-docs. Unlocks the Cheques step (Documents → Cheques). */
   onAcceptDocs: () => Promise<void>;
@@ -883,7 +892,7 @@ interface StepHandlers {
   onApproveDocWithExpiry: (docId: number, expiryDate: string) => Promise<void>;
   /** Edit a payment/cheque row — number / method / date / status. Used by the
    *  renewal Cheques step so the RP records each cheque against the plan. */
-  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string; documentId?: number | null; cancellationReason?: string | null }) => Promise<void>;
+  onUpdatePayment: (paymentId: number, patch: { chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; bankName?: string | null; description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string; documentId?: number | null; cancellationReason?: string | null }) => Promise<void>;
   onRevertToDraft: () => Promise<void>;
   /** Send the saved renewal draft to the customer, or discard it. */
   onRenewalDraft: (action: 'send' | 'discard') => Promise<void>;
@@ -957,7 +966,10 @@ function RenewalChequeAttachments({ h, chequeDocs, canEdit }: { h: StepHandlers;
   const slotLabels = buildSegregatedPlan(rows).groups.flatMap(g =>
     g.key === 'rental' ? g.lines.map(l => `Rent — ${l.item}`) : [g.title],
   );
-  const untagged = chequeDocs.filter(d => { const t = slotOfDoc(d.displayName); return !t || !slotLabels.includes(t); });
+  // A scan holding several cheques carries no single tag: it is matched when a
+  // payment points at it (payments.document_id), which the reader sets.
+  const linkedDocIds = new Set([...(h.contract.payments ?? []), ...(h.contract.fees ?? [])].map(p => p.documentId).filter((id): id is number => id != null));
+  const untagged = chequeDocs.filter(d => { const t = slotOfDoc(d.displayName); return (!t || !slotLabels.includes(t)) && !linkedDocIds.has(d.id); });
   const onFiles = async (label: string, files: FileList | null, replaceIds?: number[]) => {
     setErr(null); setUploading(files?.length ?? 0);
     try { await h.onAttachChequeForSlot(label, files, replaceIds); }
@@ -973,8 +985,23 @@ function RenewalChequeAttachments({ h, chequeDocs, canEdit }: { h: StepHandlers;
     try { await h.onTagChequeDoc(id, label); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not tag the file'); }
     finally { setTagBusy(null); }
   };
+  // First visit: read whatever is on file and not yet read (nothing is sent to
+  // the reader twice), so cheques the customer attached arrive already placed.
+  useEffect(() => {
+    if (h.chequeIntake == null && !h.chequeReading && chequeDocs.length > 0 && !h.contract.pdcConfirmed) void h.onReadCheques();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [h.chequeIntake, chequeDocs.length]);
   return (
     <div style={{ display: 'grid', gap: 10 }}>
+      {/* Each cheque is attached against its own payment on the schedule (owner,
+          6 Oct 2026: no bulk box). The reader runs on every file attached. */}
+      {h.chequeReading && <p className="note" style={{ margin: 0 }}>Reading the cheques…</p>}
+      {h.chequeIntake?.removed?.map(r => (
+        <div key={r.name + r.reason} className="errline">{r.name} was not accepted and has been removed: {r.reason}</div>
+      ))}
+      {/* No separate list of what was read: the Payment Summary shows each
+          cheque on its payment, and the Payments rows below carry the read
+          facts. Only a refusal needs its own line. */}
       <PaymentPlanCard
         plan={plan}
         rows={rows}
@@ -988,32 +1015,37 @@ function RenewalChequeAttachments({ h, chequeDocs, canEdit }: { h: StepHandlers;
         periodStart={h.contract.startDate}
         periodEnd={h.contract.endDate}
         bankDetails={h.contract.landlord.bankDetails}
-        renderAttach={(slot) => (
-          <PlanAttachCell
-            slot={slot}
-            refs={chequeDocs.filter(d => slotOfDoc(d.displayName) === slot.label).map(d => ({ id: d.id, imageUrl: d.fileUrl ?? null }))}
-            uploading={uploading}
-            onFiles={(label, files, replaceIds) => void onFiles(label, files, replaceIds)}
-            onRemove={(id) => void onRemove(id)}
-            readOnly={!canEdit}
-          />
-        )}
+        renderAttach={(slot) => {
+          // A fee group already paid on an instalment's cheque takes no file of its own.
+          if (!slot.label.startsWith('Rent \u2014 ')) {
+            const feeRows = [...(h.contract.payments ?? []), ...(h.contract.fees ?? [])].filter(p => !['rental_income', 'rent', 'security_deposit'].includes((p.paymentType ?? '').toLowerCase()));
+            const rentNos = new Set((h.contract.payments ?? []).filter(p => ['rental_income', 'rent'].includes((p.paymentType ?? '').toLowerCase())).map(p => p.chequeNumber).filter(Boolean));
+            const paidBy = feeRows.length > 0 && feeRows.every(p => p.chequeNumber && rentNos.has(p.chequeNumber)) ? feeRows[0].chequeNumber : null;
+            if (paidBy) return <span style={{ fontSize: 11.5, color: 'var(--jade-deep, #1a7a52)', fontWeight: 600 }}>Paid on cheque {paidBy}</span>;
+          }
+          return (
+            <PlanAttachCell
+              slot={slot}
+              refs={chequeDocs.filter(d => slotOfDoc(d.displayName) === slot.label).map(d => ({ id: d.id, imageUrl: d.fileUrl ?? null }))}
+              uploading={uploading}
+              onFiles={(label, files, replaceIds) => void onFiles(label, files, replaceIds)}
+              onRemove={(id) => void onRemove(id)}
+              readOnly={!canEdit}
+            />
+          );
+        }}
       />
-      {/* Bulk alternative to the per-row controls — the same box the customer has:
-          the whole set at once, untagged, then tagged to its payment here. */}
-      {(canEdit || untagged.length > 0) && (
+      {/* Files not matched to a payment — sent before per-payment attach existed,
+          or tagged to a slot the plan no longer has. Tag each to its payment
+          here. There is no "send them all together" box any more (same on the
+          customer's side): a cheque attached against its own payment is the one
+          the reader can check against that payment. */}
+      {untagged.length > 0 && (
         <div className="doclist">
           <div className="subhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span>Or send them all together</span>
-            {untagged.length > 0 && <span style={{ color: 'var(--mute)', fontWeight: 600 }}>{untagged.length} file{untagged.length === 1 ? '' : 's'}</span>}
+            <span>Not matched to a payment</span>
+            <span style={{ color: 'var(--mute)', fontWeight: 600 }}>{untagged.length} file{untagged.length === 1 ? '' : 's'}</span>
           </div>
-          <p className="note" style={{ margin: '0 0 6px' }}>Rather hand the whole set over at once? Attach every cheque here instead of row by row, then tag each one to the payment it covers.</p>
-          {canEdit && (
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--line-2, #d9d6cf)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep, #1a7a52)' }}>
-              <input type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={e => { void onFiles('', e.target.files); e.target.value = ''; }} style={{ display: 'none' }} />
-              {uploading > 0 ? `Uploading ${uploading} file${uploading === 1 ? '' : 's'}…` : 'Choose files'}
-            </label>
-          )}
           {untagged.map((doc, i) => {
             const label = fileNameOfDoc(doc.displayName) || `Cheque ${i + 1}`;
             const open = () => doc.fileUrl && openDocViewer({ fileUrl: doc.fileUrl, caption: label });
@@ -1072,9 +1104,18 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   /** Method + reference typed against a row but NOT yet committed. Nothing is
    *  written until "Record" — exactly like the lead card, where filling the two
    *  fields is preparation and Record is the act of recording the cheque. */
-  const [draft, setDraft] = useState<Record<number, { method?: string; ref?: string }>>({});
+  const [draft, setDraft] = useState<Record<number, { method?: string; ref?: string; bank?: string }>>({});
   /** Rows the RP re-opened to correct after recording. */
   const [reopened, setReopened] = useState<Set<number>>(new Set());
+  /** Rows whose cheque is shown inline, under the row, so the number, amount
+   *  and date on the paper can be checked against the row without a popup
+   *  covering it (owner, 6 Oct 2026). */
+  const [shown, setShown] = useState<Set<number>>(new Set());
+  const chequeFileFor = (r: ContractPayment): ContractDoc | undefined =>
+    (r.documentId != null ? chequeDocs.find(d => d.id === r.documentId) : undefined)
+    ?? (h.chequeIntake?.files.find(f => f.cheques.some(c => c.paymentIds.includes(r.id)))
+      ? chequeDocs.find(d => d.id === h.chequeIntake!.files.find(f => f.cheques.some(c => c.paymentIds.includes(r.id)))!.documentId)
+      : undefined);
 
   /** Commit a row. Returns false (and shows the reason) when the PATCH fails, so
    *  the caller doesn't clear the draft the RP would then have to retype. */
@@ -1093,19 +1134,37 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
   // the previous term and carried forward, so there is no cheque to record for it
   // here. (It is still shown, held, in the Payments record below.) A deposit that
   // IS this contract's own payment row stays in the series.
-  const TYPE_ORDER: Record<string, number> = { security_deposit: -1, admin_fee: 0, ejari_fee: 0, commission: 0 };
+  // Same sequence as the Payment Summary above: rent instalments, then the
+  // management fees, then third party (owner, 6 Oct 2026).
   const payRows: ContractPayment[] = [
     ...(h.contract.payments ?? []),
     ...(h.contract.fees ?? []),
   ]
-    .sort((a, b) => {
-      const da = (a.transactionDate ?? '').slice(0, 10), db = (b.transactionDate ?? '').slice(0, 10);
-      if (da !== db) return da.localeCompare(db);
-      return (TYPE_ORDER[a.paymentType ?? ''] ?? 1) - (TYPE_ORDER[b.paymentType ?? ''] ?? 1);
-    });
+    .sort((a, b) => planOrder(
+      { paymentType: a.paymentType ?? null, amount: a.amount || 0, transactionDate: a.transactionDate ?? null },
+      { paymentType: b.paymentType ?? null, amount: b.amount || 0, transactionDate: b.transactionDate ?? null },
+    ));
   // Bounced / cancelled cheques are void — they stay in the list as history but
   // are out of the header total, the same rule the Payments table applies.
   const payTotal = payRows.reduce((t, r) => t + (feeActive(r) ? (r.amount || 0) : 0), 0);
+
+  // What the reader found on the cheque attached against each rent instalment.
+  // One file per instalment is the only case offered: a slot holding several
+  // files, or a group attached once at its heading, has no single cheque to
+  // read a row's reference from.
+  const slotOf = rentSlotLabels(h.contract.payments ?? []);
+  const readingOf = (r: ContractPayment): { read: ChequeReading | null; failed: boolean } => {
+    // The cheque the reader placed on this payment — also right for a scan that
+    // holds several cheques, and for a fee paid on the rent's cheque.
+    for (const f of h.chequeIntake?.files ?? []) {
+      const q = f.cheques.find(c => c.outcome === 'matched' && c.paymentIds.includes(r.id));
+      if (q) return { read: { chequeNumber: q.chequeNumber, bankName: q.bankName, amountFils: q.amount != null ? Math.round(q.amount * 100) : null, date: q.date, payeeName: q.payeeName, accountNumber: null }, failed: false };
+    }
+    const label = slotOf.get(r);
+    const files = label ? chequeDocs.filter(d => slotOfDoc(d.displayName) === label) : [];
+    if (files.length !== 1) return { read: null, failed: false };
+    return { read: chequeReadingOf(files[0].reading), failed: files[0].reading?.status === 'failed' };
+  };
 
   // Cheque paperwork can already be in hand while the collection was never
   // CONFIRMED — an imported lease, or one demoted back to ISSUED after it ran.
@@ -1157,12 +1216,37 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
         {err && <div className="errline">{err}</div>}
         <div className="paygrid">
           <div className="payhead">
-            <span>Instalment</span><span>Method</span><span>Reference</span><span>Record</span>
+            <span>Instalment</span><span>Method</span><span>Reference</span><span>Bank</span><span>Record</span>
           </div>
           {payRows.map((r, i) => {
             const d = draft[r.id] ?? {};
             const method = d.method ?? r.paymentMethod ?? 'cheque';
-            const reference = d.ref ?? r.chequeNumber ?? '';
+            const { read, failed: readFailed } = readingOf(r);
+            // Offered, not recorded: the number read off the cheque fills an EMPTY
+            // reference, and "Record" is still the RP's act.
+            const offered = d.ref == null && !r.chequeNumber ? (read?.chequeNumber ?? '') : '';
+            const reference = d.ref ?? r.chequeNumber ?? offered;
+            // The bank: typed, else on the row, else what the reader found.
+            const bank = d.bank ?? r.bankName ?? read?.bankName ?? '';
+            const readNotes: string[] = [];
+            if (read) {
+              if (read.chequeNumber && r.chequeNumber && !sameChequeNumber(read.chequeNumber, r.chequeNumber)) readNotes.push(`the cheque reads No. ${read.chequeNumber}, recorded as ${r.chequeNumber}`);
+              if (read.amountFils != null) {
+                // One cheque often pays the instalment AND the fees due with it
+                // (rent + admin + registration on the first cheque). So the cheque
+                // is right when it equals this payment alone, or the payments
+                // recorded on the same cheque number, or those due the same day.
+                const sum = (rows: ContractPayment[]) => rows.reduce((t, x) => t + (feeActive(x) ? (x.amount || 0) : 0), 0);
+                const sameCheque = r.chequeNumber ? sum(payRows.filter(x => sameChequeNumber(x.chequeNumber, r.chequeNumber))) : null;
+                const sameDay = sum(payRows.filter(x => (x.transactionDate ?? '').slice(0, 10) === (r.transactionDate ?? '').slice(0, 10)));
+                const expected = [r.amount || 0, sameCheque, sameDay].filter((v): v is number => v != null);
+                const readAed = read.amountFils / 100;
+                if (!expected.some(v => Math.abs(readAed - v) < 0.01)) {
+                  readNotes.push(`the cheque is for ${fmtAed(readAed)}, ${expected.length > 1 && Math.max(...expected) !== (r.amount || 0) ? `this payment is ${fmtAed(r.amount)} (${fmtAed(Math.max(...expected))} with the fees on it)` : `this payment is ${fmtAed(r.amount)}`}`);
+                }
+              }
+              if (read.date && r.transactionDate && read.date !== r.transactionDate.slice(0, 10)) readNotes.push(`the cheque is dated ${fmtDate(read.date)}, this payment is due ${fmtDate(r.transactionDate)}`);
+            }
             // A row counts as recorded once its cheque reference is on the row —
             // the contract equivalent of the lead's lead_cheques record.
             const recorded = !!r.chequeNumber && !reopened.has(r.id);
@@ -1172,9 +1256,11 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
                   <span className="payrow-n">#{i + 1}</span>
                   <span className="payrow-lbl">
                     <span className="payrow-desc" title={r.description ?? undefined}>{r.description ?? 'Payment'}</span>
+                    {/* Two short lines: what the payment is, then the cheque that
+                        pays it — one line, read off the paper when it was, with
+                        a tick; the number is never printed twice. */}
                     <span className="payrow-sub">
                       {fmtAed(r.amount)}{r.transactionDate ? ` \u00b7 due ${fmtDate(r.transactionDate)}` : ''}
-                      {recorded ? ` \u00b7 ${fmtMethod(r.paymentMethod)} ${r.chequeNumber}` : ''}
                     </span>
                   </span>
                 </div>
@@ -1215,6 +1301,15 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
                         });
                       }}
                     />
+                    <input
+                      className="qinput payrow-ctl"
+                      type="text"
+                      aria-label={`${r.description ?? 'Payment'} bank`}
+                      placeholder="Bank…"
+                      value={bank}
+                      disabled={!canEdit || recorded}
+                      onChange={e => setDraft(v => ({ ...v, [r.id]: { ...v[r.id], bank: e.target.value } }))}
+                    />
                     <div className="payrow-rec">
                       {recorded ? (
                         <>
@@ -1248,7 +1343,7 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
                           onClick={async () => {
                             const serial = reference.trim();
                             if (!serial) { setErr(`Type the cheque # in Reference for #${i + 1} first`); return; }
-                            const ok = await patchRow(r.id, { chequeNumber: serial, paymentMethod: method, chequeStatus: r.chequeStatus ?? 'pending' });
+                            const ok = await patchRow(r.id, { chequeNumber: serial, bankName: bank.trim() || null, paymentMethod: method, chequeStatus: r.chequeStatus ?? 'pending' });
                             if (ok) {
                               setReopened(prev => { const n = new Set(prev); n.delete(r.id); return n; });
                               setDraft(v => { const n = { ...v }; delete n[r.id]; return n; });
@@ -1261,6 +1356,49 @@ function RenewalChequeCollect({ h }: { h: StepHandlers }) {
                         <span className={'cstat ' + (r.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{r.chequeStatus ?? 'pending'}</span>
                   )}
                 </div>
+                {/* Second line, full width: the cheque that pays this row. */}
+                {(read || recorded || readFailed || readNotes.length > 0) && (
+                  <div className="payrow-cheque">
+                    {(read || recorded) && (() => {
+                      const no = read?.chequeNumber ?? r.chequeNumber;
+                      const bank = read?.bankName ?? r.bankName;
+                      const sharedWith = read?.chequeNumber ? payRows.filter(x => sameChequeNumber(x.chequeNumber, read.chequeNumber)).length : 0;
+                      return (
+                        <span className="chqstrip">
+                          {read ? (
+                            <span className="chqcell"><span className="v" style={{ color: 'var(--jade-deep)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <Check size={12} /> Read from the cheque{read.amountFils != null ? ` \u00b7 ${fmtAed(read.amountFils / 100)}` : ''}{read.date ? ` \u00b7 ${fmtDate(read.date)}` : ''}{sharedWith > 1 ? ` \u00b7 pays ${sharedWith} payments` : ''}
+                            </span></span>
+                          ) : (
+                            <span className="chqcell"><span className="v" style={{ color: 'var(--mute)', fontWeight: 600 }}>Typed{no ? ` \u00b7 ${no}` : ''}{bank ? ` \u00b7 ${bank}` : ''}</span></span>
+                          )}
+                        </span>
+                      );
+                    })()}
+                    {chequeFileFor(r) && (
+                      <button type="button" className="linkbtn" style={{ fontSize: 11.5, padding: 0, marginLeft: 'auto' }}
+                        onClick={() => setShown(prev => { const n = new Set(prev); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })}>
+                        <Eye size={11} /> {shown.has(r.id) ? 'Hide cheque' : 'Show cheque here'}
+                      </button>
+                    )}
+                    {readFailed && <span className="payrow-sub">The cheque could not be read &mdash; type the reference.</span>}
+                    {readNotes.map(n => (
+                      <span key={n} className="payrow-sub" style={{ color: 'var(--saffron-deep, #c2410c)', fontWeight: 600 }}>Check: {n}</span>
+                    ))}
+                  </div>
+                )}
+                {shown.has(r.id) && (() => {
+                  const f = chequeFileFor(r)!;
+                  const isPdf = f.fileUrl.toLowerCase().split('?')[0].endsWith('.pdf');
+                  return (
+                    <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--mist-strong, #e5e2da)', paddingTop: 8 }}>
+                      {isPdf
+                        ? <iframe title={`Cheque for ${r.description ?? 'payment'}`} src={f.fileUrl} style={{ width: '100%', height: 420, border: '1px solid var(--mist-strong, #e5e2da)', borderRadius: 8, background: '#fff' }} />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        : <img src={f.fileUrl} alt={`Cheque for ${r.description ?? 'payment'}`} style={{ width: '100%', maxHeight: 520, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--mist-strong, #e5e2da)', background: '#fff' }} />}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -1337,11 +1475,15 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
     const pe = prev.expiryDate ? Date.parse(prev.expiryDate) : 0;
     if (de > pe || (de === pe && d.id > prev.id)) freshestByBase.set(b, d);
   }
-  // Show every KYC doc on file so the RP can see/verify them all. Which ones are
-  // FLAGGED for re-upload (`remaining`) is scoped to the tenancy type by the backend
-  // (commercial → trade licence, residential → personal IDs), so a doc that isn't
-  // flagged simply shows as already "Approved / on file" rather than "Pending".
-  const bases = Array.from(new Set([...remaining, ...Array.from(freshestByBase.keys())]));
+  // Only what this renewal still needs is listed for review: the papers flagged
+  // expired or undated. A paper already approved and in date is not put in front
+  // of the RP again with Approve / Reject on it (owner, 6 Oct 2026, lease 434 — a
+  // second renewal of the same customer showed all five freshly approved papers
+  // "to approve" again); those are summed up in one line below the list.
+  const bases = Array.from(new Set(remaining));
+  const alreadyValid = Array.from(freshestByBase.entries())
+    .filter(([b, d]) => !remaining.includes(b) && !!d.expiryDate && Date.parse(d.expiryDate) >= Date.now())
+    .map(([b, d]) => `${LABELS[b] ?? b} (to ${fmtDate(d.expiryDate)})`);
   const uploadSlots = bases.flatMap(b => UPLOAD_SLOTS[b] ?? [{ key: b, label: LABELS[b] ?? b, category: 'identity' }]);
   // The customer has pressed "Submit for review" on their side — their part is done,
   // so the footer must stop telling the RP to wait on them.
@@ -1363,8 +1505,8 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
   // Record the expiry the RP read off the copy. A future date drops the base out of
   // `remaining` on reload; a past one keeps it flagged but flips the row to a truthful
   // "expired — awaiting a fresh copy". Either way, entering the real date resolves it.
-  const saveExpiry = async (base: string, docId: number) => {
-    const date = expiryDraft[base];
+  const saveExpiry = async (base: string, docId: number, fallback?: string) => {
+    const date = expiryDraft[base] ?? fallback;
     if (!date) return;
     setSavingBase(base); setErr(null);
     try {
@@ -1380,77 +1522,93 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {/* Same View / Approve / Reject row pattern as the lead + new-lease KYC review. */}
       <div className="doclist" style={{ minWidth: 0 }}>
-        {bases.map(b => {
-          const doc = freshestByBase.get(b);
-          const allDocs = docsByBase.get(b) ?? [];
-          const multi = allDocs.length > 1;
+        {/* One row per SLOT, as the customer sees it: the Emirates ID is front and
+            back, each with its own copy, View, expiry date and verdict. Every row
+            with a copy takes a date — not only an undated one — so an expiry read
+            off the paper can be corrected without a re-upload. */}
+        {bases.flatMap(b => (UPLOAD_SLOTS[b] ?? [{ key: b, label: LABELS[b] ?? b, category: 'identity' }]).map(slot => {
+          const side = slot.key.endsWith('_front') ? 'front' : slot.key.endsWith('_back') ? 'back' : null;
+          const forSlot = (docsByBase.get(b) ?? []).filter(d => {
+            if (!side) return true;
+            const k = (d.documentKey ?? '').toLowerCase();
+            // A combined scan (no side in the key) shows both sides.
+            return k.includes(side) || (!k.includes('front') && !k.includes('back'));
+          });
+          const doc = forSlot.reduce<ContractDoc | undefined>((best, d) => {
+            if (!best) return d;
+            const de = d.expiryDate ? Date.parse(d.expiryDate) : 0, be = best.expiryDate ? Date.parse(best.expiryDate) : 0;
+            return de > be || (de === be && d.id > best.id) ? d : best;
+          }, undefined);
+          const multi = forSlot.length > 1;
           const stillMissing = remaining.includes(b);
-          // Two very different reasons hide behind one flag: `needsExpiry` is the RP's to
-          // clear (type the date), `awaitingUpload` is genuinely the customer's.
           const needsExpiry = undated.includes(b);
           const awaitingUpload = stillMissing && !needsExpiry;
-          const lbl = LABELS[b] ?? b;
+          const lbl = slot.label;
           const ok = !!doc && ['processed', 'complete'].includes(doc.status ?? '');
           const rejected = !!doc && doc.status === 'rejected';
           const stt = stillMissing ? 'pending' : ok ? 'approved' : rejected ? 'rejected' : 'pending';
+          const draftKey = slot.key;
+          const draft = expiryDraft[draftKey] ?? (doc?.expiryDate ? doc.expiryDate.slice(0, 10) : '');
+          const changed = !!doc && draft !== (doc.expiryDate ? doc.expiryDate.slice(0, 10) : '');
           return (
-            <div key={b} className={'docitem ' + stt + (canEdit && doc && needsExpiry ? ' needsexp' : '')}>
+            <div key={slot.key} className={'docitem review ' + stt + (canEdit && doc && needsExpiry ? ' needsexp' : '')}>
               <FileText size={14} />
               <div style={{ minWidth: 0 }}>
                 <div className="dn">{lbl}</div>
-                <div className="ds">
-                  {/* A dated copy that's still flagged here and isn't rejected can only be
-                      flagged for one reason — the backend found its expiry in the past. */}
-                  {needsExpiry ? 'No expiry date on file — add it to verify this copy'
+                <div className="ds" title={!doc ? undefined : doc.expiryDate ? `Expiry on file: ${fmtDate(doc.expiryDate)}` : 'No expiry on file'}>
+                  {!doc ? 'Not on file'
+                    : needsExpiry && !doc.expiryDate ? 'No expiry date on file — add it to verify this copy'
                     : rejected ? 'Rejected — awaiting a fresh copy'
-                    : awaitingUpload ? (doc!.expiryDate ? `Expired ${fmtDate(doc!.expiryDate)} — awaiting a fresh copy` : 'Awaiting a fresh copy from the customer')
-                    : ok ? (doc!.expiryDate ? `Approved · expires ${fmtDate(doc!.expiryDate)}` : 'Approved')
-                    : doc!.expiryDate ? `Pending review · expires ${fmtDate(doc!.expiryDate)}` : 'Pending review'}
+                    : awaitingUpload ? (doc.expiryDate ? `Expired ${fmtDate(doc.expiryDate)} — awaiting a fresh copy` : 'Awaiting a fresh copy from the customer')
+                    : ok ? (doc.expiryDate ? `Approved · expires ${fmtDate(doc.expiryDate)}` : 'Approved')
+                    : doc.expiryDate ? `Pending review · expires ${fmtDate(doc.expiryDate)}` : 'Pending review'}
                 </div>
               </div>
               <div className="dacts">
                 {doc && (
-                  <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(allDocs.map(d => ({ fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
-                    <ExternalLink size={12} /> {multi ? `View ${allDocs.length}` : 'View'}
+                  <button type="button" className="mini-btn view cursor-pointer" onClick={() => openDocViewer(forSlot.map(d => ({ fileUrl: d.fileUrl, caption: d.displayName ?? lbl })), lbl)}>
+                    <ExternalLink size={12} /> {multi ? `View ${forSlot.length}` : 'View'}
                   </button>
                 )}
-                {/* Single copy only. A base holding several (both Emirates ID
-                    sides, or a superseded re-upload) has no unambiguous target,
-                    and `doc` here is the FRESHEST — removing that one would take
-                    the good copy and leave the stale one behind. */}
                 {h.perms.deleteDocuments && doc && !multi && (
                   <DeleteDocumentButton docId={doc.id} label={lbl} onDeleted={h.onDocsChanged} />
                 )}
-                {/* Undated copy: the date input IS the fix, so it sits in the row rather than
-                    behind a badge that leaves the RP nothing to press. */}
-                {canEdit && doc && needsExpiry && (
+                {/* Every copy: a date box, Approve and Reject — always. Approve
+                    records the date in the box (changed or not) and verifies the
+                    copy; the landlord may hold the renewed paper in hand even
+                    when the customer has not sent a new scan. */}
+                {canEdit && doc && (
                   <>
                     <input
                       type="date" className="dexp" aria-label={`${lbl} expiry date`}
-                      value={expiryDraft[b] ?? ''}
-                      onChange={e => setExpiryDraft(d => ({ ...d, [b]: e.target.value }))}
+                      value={draft}
+                      onChange={e => setExpiryDraft(d => ({ ...d, [draftKey]: e.target.value }))}
                     />
-                    <button
-                      type="button" className="mini-btn ok cursor-pointer"
-                      disabled={!expiryDraft[b] || savingBase === b}
-                      onClick={() => void saveExpiry(b, doc.id)}
-                    >
-                      <Check size={12} /> {savingBase === b ? 'Saving…' : 'Approve'}
-                    </button>
+                    {(!ok || changed) && (
+                      <button
+                        type="button" className="mini-btn ok cursor-pointer"
+                        disabled={savingBase === draftKey || (changed && !draft)}
+                        onClick={() => void (draft ? saveExpiry(draftKey, doc.id, draft) : h.onApproveDoc(doc.id))}
+                      >
+                        <Check size={12} /> {savingBase === draftKey ? 'Saving…' : changed ? 'Save date' : 'Approve'}
+                      </button>
+                    )}
+                    {!rejected && (
+                      <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id, lbl)}><X size={12} /> Reject</button>
+                    )}
                   </>
                 )}
-                {canEdit && doc && !stillMissing && !ok && (
-                  <button type="button" className="mini-btn ok cursor-pointer" onClick={() => h.onApproveDoc(doc.id)}><Check size={12} /> Approve</button>
-                )}
-                {canEdit && doc && (needsExpiry || (!stillMissing && !rejected)) && (
-                  <button type="button" className="mini-btn no cursor-pointer" onClick={() => h.onRejectDoc(doc.id, lbl)}><X size={12} /> Reject</button>
-                )}
-                {awaitingUpload && <span className="cstat bounced">Pending</span>}
+                {/* The chip only says what the status line already says; with
+                    verdict buttons on the row it is just width. */}
+                {awaitingUpload && !(canEdit && doc) && <span className="cstat bounced">Pending</span>}
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
+      {alreadyValid.length > 0 && (
+        <p className="note" style={{ margin: 0 }}>Already valid, not asked again: {alreadyValid.join(', ')}.</p>
+      )}
       {/* One upload link carrying exactly the documents still owed — the customer
           attaches them all without logging in, and without the RP re-typing the
           list into a request picker. Same control as the lead docs step. */}
@@ -1479,6 +1637,23 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
             <Check size={15} /> {accepting ? 'Accepting…' : 'Accept documents & unlock cheques'}
           </button>
         )
+      ) : canEdit ? (
+        // Something is still owed — the landlord decides. A customer who cannot
+        // renew a paper yet has declared so on their side; the renewal must not
+        // stall on it. Whatever is outstanding stays on the manager's lists.
+        <div style={{ display: 'grid', gap: 8 }}>
+          <p className="note" style={{ margin: 0 }}>
+            Still outstanding: {[
+              ...awaitingCustomer.map(b => `${LABELS[b] ?? b} (expired, awaiting a fresh copy)`),
+              ...undated.map(b => `${LABELS[b] ?? b} (no expiry date recorded)`),
+            ].join(', ')}.
+            {custSubmittedAt ? ` ${h.contract.tenant.name || 'The customer'} submitted on ${fmtDate(custSubmittedAt)}.` : ''}
+            {' '}You can accept now; what is outstanding stays on the manager&rsquo;s lists until a valid copy is on file.
+          </p>
+          <button type="button" className="btn btn-jade btn-block" disabled={accepting} onClick={() => void accept()}>
+            <Check size={15} /> {accepting ? 'Accepting…' : 'Accept documents & unlock cheques'}
+          </button>
+        </div>
       ) : awaitingCustomer.length === 0 ? (
         // Every blocker is RP-side — don't tell them to wait on a customer who has nothing to send.
         <p className="note">
@@ -4057,7 +4232,7 @@ function DetailsDrawer({
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
                             )}
                           </td>
-                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{attachmentOf(p.documentId)}</td>
+                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}> · {p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
                           <td>{fmtMethod(p.paymentMethod)}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
@@ -4471,7 +4646,7 @@ function DetailsDrawer({
                               {fmtAed(p.amount)}
                               {(p.vatAmount ?? 0) > 0 && <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>}
                             </td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{attachmentOf(p.documentId)}</td>
+                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}> · {p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
                             <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                             <td>{fmtDate(p.transactionDate)}</td>
                             <td>
@@ -6906,6 +7081,10 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [ejariUploading, setEjariUploading] = useState(false);
   const [utilityUploading, setUtilityUploading] = useState(false);
   const [chequesUploading, setChequesUploading] = useState(false);
+  // Renewal cheques: what the server's read-and-place step came back with
+  // (declared up here, before the loading return, as every hook must be).
+  const [chequeIntake, setChequeIntake] = useState<ChequeIntake | null>(null);
+  const [chequeReading, setChequeReading] = useState(false);
   const [windDownUploading, setWindDownUploading] = useState(false);
 
   const reload = useCallback(() => {
@@ -7341,6 +7520,21 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     if (!m) return undefined;
     return (contract?.payments ?? []).find(p => (p.paymentType ?? '') === 'rental_income' && (p.description ?? '') === m[1]);
   };
+  // Renewal cheques: the server reads each file, places every cheque on the
+  // payment it pays and fills an empty cheque number — this asks for that.
+  const onReadCheques = async (retryDocumentId?: number) => {
+    if (!contract || (contract.contractType ?? '').toLowerCase() !== 'renewal') return;
+    setChequeReading(true);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/cheques/read`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retryDocumentId: retryDocumentId ?? null }),
+      });
+      setChequeIntake(res.ok ? await res.json() as ChequeIntake : { files: [], open: [], ready: false });
+      if (res.ok) await reload();
+    } catch { setChequeIntake({ files: [], open: [], ready: false }); }
+    finally { setChequeReading(false); }
+  };
   const onAttachChequeForSlot = async (slotLabel: string, files: FileList | null, replaceIds?: number[]) => {
     if (!files || files.length === 0) return;
     const ready: File[] = [];
@@ -7357,6 +7551,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         await fetch(`/api/documents/${id}`, { method: 'DELETE', credentials: 'include' });
       }
       await reload();
+      await onReadCheques();
     } catch (e) { alert(e instanceof Error ? e.message : 'Cheque upload failed'); }
     finally { setChequesUploading(false); }
   };
@@ -7366,6 +7561,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     const row = (contract?.payments ?? []).find(p => p.documentId === docId);
     if (row) await onUpdatePayment(row.id, { documentId: null });
     await reload();
+    await onReadCheques();
   };
   const onTagChequeDoc = async (docId: number, slotLabel: string) => {
     const doc = (contract?.documents ?? []).find(d => d.id === docId);
@@ -7560,7 +7756,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   };
 
   const onUpdatePayment = async (paymentId: number, patch: {
-    chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null;
+    chequeStatus?: string; amount?: number; vatAmount?: number; chequeNumber?: string | null; bankName?: string | null;
     description?: string | null; transactionDate?: string | null; paymentMethod?: string; paymentType?: string;
     documentId?: number | null; replacesPaymentId?: number | null;
     /** Why a cheque is being cancelled (migration 0245). */
@@ -7855,7 +8051,7 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     openModal: setModal,
     openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     patchContract,
-    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onAttachChequeForSlot, onRemoveChequeDoc, onTagChequeDoc, onMarkChequesOnFile, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
+    onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onAttachChequeForSlot, onRemoveChequeDoc, onTagChequeDoc, onMarkChequesOnFile, chequeIntake, chequeReading, onReadCheques, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
     noticeSentAt,
     onUnsendSettlement,
@@ -8930,12 +9126,21 @@ function GlobalStyle() {
       .quest-page .qinput:disabled { background: var(--mist); color: var(--ink-3); }
       .quest-page .errline { font-size: 11.5px; color: var(--brick); background: var(--brick-soft); border: 1px solid var(--brick-edge); border-radius: 9px; padding: 7px 10px; margin-bottom: 8px; }
       .quest-page .paygrid { display: grid; gap: 6px; }
-      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
-      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 108px 122px 136px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
+      .quest-page .payhead { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px 116px 124px; gap: 8px; padding: 0 10px 2px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+      .quest-page .payrow { display: grid; grid-template-columns: minmax(0, 1fr) 92px 104px 116px 124px; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--mist-strong); border-radius: 10px; background: #fff; }
       .quest-page .payrow-info { display: flex; align-items: center; gap: 9px; min-width: 0; }
+      /* The cheque that pays a row — its own line under the controls, full width,
+         small labelled cells side by side, not one dotted sentence. */
+      .quest-page .payrow-cheque { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; padding-top: 6px; border-top: 1px dashed var(--mist-strong); }
+      .quest-page .payrow-cheque .linkbtn { font-size: 11.5px; padding: 0; }
+      .quest-page .chqstrip { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+      .quest-page .chqcell { display: inline-flex; flex-direction: column; min-width: 0; }
+      .quest-page .chqcell .k { font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); line-height: 1.2; }
+      .quest-page .chqcell .v { font-size: 12.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.3; white-space: nowrap; }
       .quest-page .payrow-n { font-size: 10px; font-weight: 800; color: var(--jade-deep); background: var(--jade-soft); border-radius: 6px; padding: 2px 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
       .quest-page .payrow-lbl { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-      .quest-page .payrow-desc { font-size: 12.5px; color: var(--ink-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* The name and its amount line wrap rather than clip — a cut-off name is unreadable. */
+      .quest-page .payrow-desc { font-size: 12.5px; color: var(--ink-2); font-weight: 600; overflow-wrap: anywhere; }
       .quest-page .payrow-sub { font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
       .quest-page .payrow-ctl { width: 100%; min-width: 0; }
       .quest-page .payrow-rec { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -8978,6 +9183,16 @@ function GlobalStyle() {
       .quest-page .docitem > div:not(.dacts) { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
       .quest-page .docitem .dn { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .quest-page .docitem .ds { font-size: 10.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+      /* Review rows carry a date box and verdicts. One line when the panel is wide
+         enough; when it is not, the controls drop to a second line rather than
+         covering the name. The name never shrinks; the status text may truncate
+         (full text on hover). */
+      .quest-page .docitem.review { flex-wrap: wrap; row-gap: 6px; }
+      .quest-page .docitem.review > div:not(.dacts) { flex: 1 1 auto; min-width: 0; }
+      .quest-page .docitem.review .dn { flex-shrink: 0; }
+      .quest-page .docitem.review .ds { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .docitem.review .dacts { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; margin-left: auto; }
+      .quest-page .docitem.review .dexp { width: 128px; padding: 2px 4px; font-size: 11.5px; }
       .quest-page .docitem.approved { background: var(--jade-tint); border-color: #cfe9df; }
       .quest-page .docitem.approved svg, .quest-page .docitem.approved .ds { color: var(--jade-deep); }
       .quest-page .docitem.pending { background: var(--saffron-soft); border-color: var(--saffron-edge); }

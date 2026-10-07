@@ -31,6 +31,7 @@ import { UnitFormModal } from '@/components/upnow/UnitFormModal';
 import { UnitPreviewModal } from '@/components/upnow/UnitPreviewModal';
 import { StartRestorationDialog } from '@/components/upnow/StartRestorationDialog';
 import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
+import { MarketRateReviewNote } from '@/components/upnow/MarketRateReviewNote';
 import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
@@ -969,6 +970,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
               <Layers size={13} /> UNITS &amp; PRICING
             </div>
             <h1 style={{ margin: '6px 0 0', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: INK }}>My Units</h1>
+            {/* This period's market rate review — the rates in the unit mix are reviewed on the landlord's schedule before renewal offers go out (owner, 7 Oct 2026). */}
+            <MarketRateReviewNote rpQ={rpQ || undefined} />
           </div>
           {/* Bulk add-units wizard. Managers land on the same wizard scoped to the
               acting landlord (?rp) via the manager route re-export. Gated by the

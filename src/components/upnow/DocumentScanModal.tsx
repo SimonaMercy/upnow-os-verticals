@@ -409,21 +409,29 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
  */
 export function useDocumentScanner() {
   const [job, setJob] = useState<{ file: File; resolve: (f: File | null) => void } | null>(null);
+  // The current job is kept in a ref as well: resolving the promise inside a
+  // state updater ran it during React's own update pass (twice, in dev), and
+  // when the caller's next `scan()` landed before the modal had unmounted the
+  // modal kept its first photo's state and sat "loading" forever — which is why
+  // three cheques picked together cropped the first and lost the other two.
+  const jobRef = useRef<{ file: File; resolve: (f: File | null) => void } | null>(null);
 
   const scan = useCallback((file: File): Promise<File | null> => {
     if (!file.type.startsWith('image/')) return Promise.resolve(file);
-    return new Promise<File | null>((resolve) => setJob({ file, resolve }));
+    return new Promise<File | null>((resolve) => { jobRef.current = { file, resolve }; setJob(jobRef.current); });
   }, []);
 
   const finish = (result: File | null) => {
-    setJob((current) => {
-      current?.resolve(result);
-      return null;
-    });
+    const current = jobRef.current;
+    jobRef.current = null;
+    setJob(null);
+    current?.resolve(result);
   };
 
   const scannerModal = job ? (
     <DocumentScanModal
+      // One modal per photo: a new file must start from its own load + detect.
+      key={`${job.file.name}:${job.file.size}:${job.file.lastModified}`}
       file={job.file}
       onConfirm={(f) => finish(f)}
       onUseOriginal={() => finish(job.file)}

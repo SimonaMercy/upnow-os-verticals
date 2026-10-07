@@ -24,6 +24,8 @@ import { apiGet, apiPatch } from '@/lib/api';
 import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { uploadExtraPropertyDocs } from '@/lib/propertyDocs';
 import { PropertyDetailsModal } from '@/app/rental-provider/dashboard/portfolio/PropertyDetailsModal';
+import { InspectionChip } from '@/components/upnow/InspectionChip';
+import { inspectionFor, useInspectionStatus, type InspectionStatus } from '@/lib/inspectionStatus';
 import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import {
@@ -225,9 +227,9 @@ function LandlordTag({ name }: { name: string }) {
 // annual rent + occupancy · edit. The whole row opens the details popup (units
 // live inside it). Mirrors the RP portfolio ROW VIEW; delete is RP-only.
 function PropertyCard({
-  vm, canEdit, onEdit, onShowDetails, showPrices,
+  vm, inspection, canEdit, onEdit, onShowDetails, showPrices,
 }: {
-  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
+  vm: CardVM; inspection?: (InspectionStatus & { rp?: number | null }) | null; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
 }) {
   return (
     <div onClick={onShowDetails} role="button" title="View property details" className={s.dxRowCard}>
@@ -241,6 +243,8 @@ function PropertyCard({
             <span style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-.01em', color: '#1d2823', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{vm.name}</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: vm.tagColor, background: vm.tagBg, padding: '3px 8px', borderRadius: 6, flex: '0 0 auto' }}>{vm.typeLabel}</span>
             {vm.landlord && <LandlordTag name={vm.landlord} />}
+            {/* Inspection on top of the property (owner, 7 Oct 2026). */}
+            <InspectionChip status={inspection} />
           </div>
           {vm.address && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#9aa39c', marginTop: 4 }}>
@@ -282,9 +286,9 @@ function PropertyCard({
 // Cover tile that surfaces the SAME information as the Row view (type tag,
 // address + vacancy, annual rent + occupancy text, landlord tag).
 function PropertyGridCard({
-  vm, canEdit, onEdit, onShowDetails, showPrices,
+  vm, inspection, canEdit, onEdit, onShowDetails, showPrices,
 }: {
-  vm: CardVM; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
+  vm: CardVM; inspection?: (InspectionStatus & { rp?: number | null }) | null; canEdit: boolean; onEdit: () => void; onShowDetails: () => void; showPrices: boolean;
 }) {
   const footBtn: CSSProperties = {
     width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', cursor: 'pointer',
@@ -296,6 +300,8 @@ function PropertyGridCard({
       <div style={{ height: 138, background: '#f1f3f0', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
         <Cover url={vm.coverUrl} iconSize={22} iconColor="#b3bcb4" />
         <span style={{ position: 'absolute', top: 10, left: 10, fontSize: 10.5, fontWeight: 700, color: vm.tagColor, background: '#fff', padding: '4px 9px', borderRadius: 7 }}>{vm.typeLabel}</span>
+        {/* Inspection on top of the property (owner, 7 Oct 2026). */}
+        <span style={{ position: 'absolute', top: 10, right: 10 }}><InspectionChip status={inspection} /></span>
       </div>
 
       {/* Body — same fields as the Row view */}
@@ -366,6 +372,9 @@ export default function ManagerPropertiesPage() {
     queryKey: ['manager-properties'],
     queryFn:  () => apiGet<ManagedProperty[]>('/manager/properties'),
   });
+  // Inspection status per building, for the chip on top of every card — one read per landlord on the page.
+  const inspectionRps = useMemo(() => [...new Set(properties.map((p) => p.rentalProviderId))], [properties]);
+  const inspections = useInspectionStatus(inspectionRps);
   // `?property=<id>` opens that property's details popup once the list has loaded
   // — the same deep-link the landlord's portfolio honours, so a link from a lead
   // lands on the property rather than a bare list. Once per mount, so closing the
@@ -673,6 +682,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
+                      inspection={inspectionFor(inspections, p.id, p.rentalProviderId)}
                       canEdit={canForRp('canEditProperties', p.rentalProviderId)} showPrices={showPrices}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}
@@ -694,6 +704,7 @@ export default function ManagerPropertiesPage() {
                     <PropertyGridCard
                       key={p.id}
                       vm={toCardVM(p, multiLandlord)}
+                      inspection={inspectionFor(inspections, p.id, p.rentalProviderId)}
                       canEdit={canForRp('canEditProperties', p.rentalProviderId)} showPrices={showPrices}
                       onEdit={() => setPropertyModal({ open: true, editing: p })}
                       onShowDetails={() => setDetailsProperty(p)}

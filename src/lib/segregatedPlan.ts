@@ -382,6 +382,32 @@ function lineOf(p: SegPaymentInput, item: string, amount: number): SegLine {
  * government/other charges). `rows` should include every payment and every one-off
  * fee row; classification is by `paymentType`.
  */
+/**
+ * The attach-slot label of each RENT payment — `Rent — Instalment N` (or
+ * `Rent — Rent` on a one-payment plan), numbered exactly as buildSegregatedPlan
+ * numbers its rental lines. Lets a screen that holds the payment rows find the
+ * cheque file attached against each one (lib/planAttach tags files by this
+ * label). Rows that re-pay a bounced cheque are not instalments and get none.
+ */
+export function rentSlotLabels<T extends RawPayment>(payments: T[]): Map<T, string> {
+  const rentals = payments
+    .filter(p => p.replacesPaymentId == null && isRental(toRow(p)))
+    .slice()
+    .sort((x, y) => byDate(toRow(x), toRow(y)));
+  const n = rentals.length;
+  return new Map(rentals.map((p, i) => [p, `Rent — ${n > 1 ? `Instalment ${i + 1}` : 'Rent'}`]));
+}
+
+/**
+ * The order the Payment Summary lists payments in: Security Deposit, Rental
+ * Income, Management Fee, Third Party — so any other list of the same payments
+ * can be sorted to match it. Ties by due date, as the groups are.
+ */
+export function planOrder(a: SegPaymentInput, b: SegPaymentInput): number {
+  const rank = (p: SegPaymentInput) => (isDeposit(p) ? 0 : isRental(p) ? 1 : isManagementFee(p) ? 2 : 3);
+  return rank(a) - rank(b) || byDate(a, b);
+}
+
 export function buildSegregatedPlan(rows: SegPaymentInput[]): SegregatedPlan {
   const deposits = rows.filter(isDeposit).slice().sort(byDate);
   const rentals = rows.filter(isRental).slice().sort(byDate);

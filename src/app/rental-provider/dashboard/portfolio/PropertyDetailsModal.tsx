@@ -35,6 +35,7 @@ import { type Plan } from '@/components/upnow/LayoutFinancialsModal';
 import { UnitFormModal } from '@/components/upnow/UnitFormModal';
 import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { LocationMap } from '@/components/upnow/LocationMap';
+import { PropertyStatusStrip } from '@/components/upnow/PropertyStatusStrip';
 import { saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import type { FeeRuleLite } from '@/lib/feeRules';
 
@@ -746,6 +747,9 @@ export function PropertyDetailsModal({
                   ))}
                 </div>
               )}
+
+              {/* STATUS — building inspection and market rate update for this property, simplified (owner, 7 Oct 2026). */}
+              <PropertyStatusStrip propertyId={property.id} rp={isManager ? (pricingRp ?? (Number(new URLSearchParams(fetchQuery).get('rp')) || null)) : null} />
 
               {/* ABOUT + KEY FACTS */}
               <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1.55fr 1fr', gap: 24, marginBottom: 28 }}>

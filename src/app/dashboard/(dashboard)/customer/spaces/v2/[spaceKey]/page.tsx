@@ -48,7 +48,7 @@ import type { PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, segRowsFromCustomerPlan, segRowsFromContract } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
 import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
-import { slotOfDoc, fileNameOfDoc, tagFileName, isPaymentAdviceKey } from '@/lib/planAttach';
+import { slotOfDoc, fileNameOfDoc, tagFileName, isPaymentAdviceKey, type ChequeIntake } from '@/lib/planAttach';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { NATIONALITIES, normalizeNationality } from '@/lib/nationalities';
@@ -131,6 +131,8 @@ interface ApiPaymentPlanItem {
   /** How the landlord expects this line to be paid — shown on the plan so the
    *  customer knows which rows are cheques and which are transfers. */
   paymentMethod?: 'cheque' | 'bank_transfer' | 'card' | 'cash';
+  /** The cheque number on this line — typed by the landlord or read off the cheque. */
+  reference?: string | null;
 }
 /** Method classifier for an individual payment (per-cheque on the RP side
  *  in Phase 5b). The customer never picks this — they just attach the
@@ -2968,14 +2970,25 @@ function RenewalDocumentsAction({
   // renewal can be routed here by the durable renewalDocsRequiredAt flag and have
   // nothing left flagged, and that customer must still be able to leave the step.
   const allRefreshed = outstanding.length === 0;
+  // A paper the customer cannot renew yet (a trade licence still with the
+  // authority) must not hold the renewal: they can send what they have and
+  // their rental provider decides on the review step.
+  const [sendWithout, setSendWithout] = useState(false);
+  const canSubmit = allRefreshed || sendWithout;
+  // The papers named in the declaration — one name for both sides of the Emirates ID.
+  const pendingPapers = [...new Set(outstanding.map(o => o.req.label.replace(/ — (Front|Back)$/, '')))];
 
   async function handleSubmit() {
     const id = resolved.renewalContract?.id;
     if (!id) return;
     setPrefSaving(true); setPrefError(null);
     try {
+      // The papers declared under renewal ride along, so the landlord's side can
+      // chase them (manager Action Center, "Documents promised").
+      const declared = sendWithout ? [...new Set(outstanding.map(o => o.base))] : [];
       const r = await fetch(`/api/contracts/tenant/${id}/renewal-docs-submitted`, {
-        method: 'PATCH', credentials: 'include',
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ declared }),
       });
       if (!r.ok) {
         const b = await r.json().catch(() => ({} as { message?: string }));
@@ -3020,6 +3033,19 @@ function RenewalDocumentsAction({
               : 'On file ✓ — your rental provider will confirm its expiry date'}
           </p>
         </div>
+        {/* See what is on file for this row. The row is a <label> whose control
+            is the file input; a <button> here would become the label's control
+            instead (a button is labelable, and the label picks its FIRST
+            labelable descendant), so every click on the row opened the viewer
+            and never the file picker. A span is not labelable. */}
+        {rec?.fileUrl && !isUploading && (
+          <span role="button" tabIndex={0} aria-label={`View ${req.label}`}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); openDocViewer({ fileUrl: rec.fileUrl!, caption: req.label, mimeType: (rec as { mimeType?: string | null }).mimeType ?? undefined }); }}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openDocViewer({ fileUrl: rec.fileUrl!, caption: req.label, mimeType: (rec as { mimeType?: string | null }).mimeType ?? undefined }); } }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
+            <ExternalLink size={14} /> View
+          </span>
+        )}
         {isUploading ? <Loader2 size={16} className="animate-spin" style={{ color: 'var(--jade-deep)', flexShrink: 0 }} />
           : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: accent, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               {done ? <CheckCircle2 size={16} /> : <UploadCloud size={16} />}{done ? 'Replace' : 'Upload'}
@@ -3034,9 +3060,17 @@ function RenewalDocumentsAction({
   // Handed over → waiting panel. No button: the RP's acceptance advances the flow,
   // not the customer. A rejected copy re-opens the step (slotNeedsUpload) so the
   // customer is never left waiting on a document the RP already sent back.
-  if (!docsAccepted && docsSubmitted && outstanding.length === 0) {
+  // (A paper sent "without" — not renewed yet — stays outstanding but does not
+  // re-open the step; only a rejection does.)
+  const sentBack = outstanding.some(o => coverForSlot(o.req.key)?.status === 'rejected');
+  if (!docsAccepted && docsSubmitted && !sentBack) {
     return (
       <div style={{ display: 'grid', gap: 14 }}>
+        {outstanding.length > 0 && (
+          <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+            Declared under renewal: {pendingPapers.join(', ')}. You undertook to provide the renewed documents once issued; your rental provider will decide whether to proceed on this basis.
+          </p>
+        )}
         <div style={{ background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.35)', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} />
@@ -3046,6 +3080,37 @@ function RenewalDocumentsAction({
             Your rental provider is reviewing your refreshed documents. Once they accept, you&apos;ll move on to prepare your cheques. No further action needed.
           </p>
         </div>
+        {/* Papers declared under renewal can be sent the moment they are issued —
+            the undertaking is kept here as an open upload, not hidden behind the
+            waiting panel. */}
+        {outstanding.length > 0 && (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '14px 16px', display: 'grid', gap: 8 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Still to provide</p>
+            {outstanding.map(({ base, req }) => <DocRow key={req.key} base={base} req={req} />)}
+          </div>
+        )}
+        {/* What was sent, with a way to look at each file. */}
+        {rows.length > 0 && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {rows.filter(r => !outstanding.includes(r)).map(({ req }) => {
+              const rec = coverForSlot(req.key);
+              return (
+                <div key={req.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, background: 'var(--paper)', border: '1px solid var(--mist-strong)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{req.label}</p>
+                    <p style={{ fontSize: 11, color: 'var(--mute)', margin: '2px 0 0' }}>{rec?.fileUrl ? (rec.displayName || 'On file') : 'Not sent — your rental provider will decide'}</p>
+                  </div>
+                  {rec?.fileUrl && (
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: rec.fileUrl!, caption: req.label, mimeType: (rec as { mimeType?: string | null }).mimeType ?? undefined })}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--jade-deep)', fontSize: 11, fontWeight: 700, padding: 0, border: 'none', background: 'none', cursor: 'pointer', flexShrink: 0 }}>
+                      <ExternalLink size={14} /> View
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <WaitingBadge />
       </div>
     );
@@ -3079,17 +3144,25 @@ function RenewalDocumentsAction({
       </div>
 
       <div style={{ display: 'grid', gap: 8 }}>
+        {!allRefreshed && !docsSubmitted && (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12.5, color: 'var(--ink-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={sendWithout} onChange={e => setSendWithout(e.target.checked)} style={{ marginTop: 2 }} data-testid="renewal-docs-send-without" />
+            <span>
+              <strong>Declaration.</strong> The following documents are under renewal and a valid copy is not yet available: <strong>{pendingPapers.join(', ')}</strong>. I confirm that the copies on file are the latest I hold, and I undertake to provide the renewed documents as soon as they are issued. I understand that my rental provider may proceed with, or withhold, the renewal on this basis.
+            </span>
+          </label>
+        )}
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={!allRefreshed || prefSaving}
+          disabled={!canSubmit || prefSaving}
           style={{
             width: '100%', padding: '13px 20px', borderRadius: 12, border: 'none',
             fontSize: 14.5, fontWeight: 700,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            background: allRefreshed ? 'var(--jade-deep)' : 'var(--mist)',
-            color: allRefreshed ? 'var(--paper)' : 'var(--mute)',
-            cursor: allRefreshed && !prefSaving ? 'pointer' : 'not-allowed',
+            background: canSubmit ? 'var(--jade-deep)' : 'var(--mist)',
+            color: canSubmit ? 'var(--paper)' : 'var(--mute)',
+            cursor: canSubmit && !prefSaving ? 'pointer' : 'not-allowed',
           }}
         >
           {prefSaving ? <><Loader2 size={16} className="animate-spin" /> Submitting…</> : <><CheckCircle2 size={16} /> Submit for review</>}
@@ -3316,14 +3389,84 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   const [uploads, setUploads] = useState<CustomerCheque[]>([]);
   const [uploadingFiles, setUploadingFiles] = useState(0);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
-  const chequeFileInputRef = useRef<HTMLInputElement | null>(null);
+  // The reader places each attached cheque on the plan item it pays (server
+  // side, same step as a renewal). A cheque that fits nothing is taken off
+  // again and the customer is told why; `intake` holds what gates this step.
+  const [reading, setReading] = useState(false);
+  const [intake, setIntake] = useState<ChequeIntake | null>(null);
+  const [refused, setRefused] = useState<{ name: string; reason: string }[]>([]);
+  const [readResult, setReadResult] = useState<{ ok: boolean; title: string; lines: string[]; open: string[] } | null>(null);
+  const [highlight, setHighlight] = useState<Set<string>>(new Set());
+
+  const loadUploads = useCallback(async () => {
+    if (!viewingId) return [] as CustomerCheque[];
+    const data = await fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).catch(() => []);
+    const rows = Array.isArray(data) ? data as CustomerCheque[] : [];
+    setUploads(rows);
+    return rows;
+  }, [viewingId]);
+
+  /** The attach-slot label of a plan item, as the Payment Summary names them. */
+  const slotLabelOf = (itemIndex: number): string | null => {
+    const items = plan?.items ?? [];
+    const isRent = (it: { type?: string | null }) => ['first_bundle', 'installment', 'extra_installment'].includes(it.type ?? '');
+    const rent = items.filter(isRent).slice().sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '') || a.index - b.index);
+    const at = rent.findIndex(it => it.index === itemIndex);
+    if (at >= 0) return `Rent \u2014 ${rent.length > 1 ? `Instalment ${at + 1}` : 'Rent'}`;
+    const it = items.find(x => x.index === itemIndex); if (!it) return null;
+    const d = (it.description ?? '').toLowerCase();
+    return it.type === 'security_deposit' ? 'Security Deposit' : (d.includes('admin') || d.includes('commission')) ? 'Management Fee' : 'Third Party';
+  };
+
+  async function readCheques(justUploaded?: { ids: number[]; slotLabel: string }, silent = false) {
+    if (!viewingId) return;
+    // The loading screen is for a cheque just attached; the check on opening
+    // the page (files already read, nothing new to read) runs quietly.
+    if (!silent) setReading(true);
+    try {
+      const res = await fetch(`/api/leads/my-viewings/${viewingId}/cheques/read`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json() as ChequeIntake;
+        setIntake(data);
+        if (data.removed?.length) setRefused(data.removed);
+        await loadUploads();
+        // Refreshing the space remounts this step, whose opening check would
+        // read again — and refresh again. Only a read of a NEW file refreshes.
+        if (!silent) onRefresh();
+        if (justUploaded) {
+          const fmtD = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+          const openNames = data.open.map(p => `${p.description} (AED ${p.amount.toLocaleString('en-AE')}${p.dueDate ? `, due ${fmtD(p.dueDate)}` : ''})`);
+          const mine = data.files.filter(f => justUploaded.ids.includes(f.documentId));
+          const refusedNow = data.removed ?? [];
+          if (mine.length === 0 && refusedNow.length > 0) {
+            const attachedTo = justUploaded.slotLabel.replace(/^Rent \u2014 /, '');
+            // The row the customer attached on: a rent instalment, or a fee GROUP —
+            // named as the card names it, with the group's own total.
+            const inSlot = data.open.filter(p => p.description === attachedTo || slotLabelOf(p.id) === justUploaded.slotLabel);
+            const target = inSlot[0];
+            const slotTotal = inSlot.reduce((t, p) => t + p.amount, 0);
+            const where = target ? `You attached it on ${inSlot.length > 1 ? attachedTo : target.description}, which is AED ${slotTotal.toLocaleString('en-AE')}${target.dueDate ? `, due ${fmtD(target.dueDate)}` : ''}.` : '';
+            setReadResult({ ok: false, title: "We couldn't match this cheque", lines: [...refusedNow.map(r => r.reason), ...(where ? [where] : [])], open: openNames });
+            setHighlight(new Set(data.open.map(p => slotLabelOf(p.id) ?? '').filter(Boolean)));
+          } else if (mine.length > 0) {
+            const lines = mine.flatMap(f => f.cheques.map(q => {
+              const where = q.paysFor.join(' + ');
+              const moved = !q.paymentIds.some(id => slotLabelOf(id) === justUploaded.slotLabel);
+              return `${q.chequeNumber ? `Cheque ${q.chequeNumber}` : 'Your cheque'}${q.amount != null ? ` for AED ${q.amount.toLocaleString('en-AE')}` : ''} now covers ${where}.${moved ? ` You attached it on ${justUploaded.slotLabel.replace(/^Rent \u2014 /, '')}; we moved it to where it fits.` : ''}`;
+            }));
+            setReadResult({ ok: true, title: 'Cheque received', lines, open: openNames });
+            setHighlight(new Set());
+          }
+        }
+      }
+    } catch { /* the cheques stay attached; the landlord can still review them */ }
+    finally { setReading(false); }
+  }
 
   useEffect(() => {
     if (!viewingId) return;
-    fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then((data: CustomerCheque[]) => setUploads(data))
-      .catch(() => {});
+    void loadUploads().then(rows => { if (rows.length > 0) void readCheques(undefined, true); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewingId]);
 
   if (!plan) {
@@ -3364,36 +3507,6 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     return (await regRes.json()) as CustomerCheque;
   }
 
-  async function handleChequeFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    // Each cheque photo goes through the scan modal in turn (auto-crop +
-    // clean-up); PDFs pass straight through; a cancelled scan skips that file.
-    const ready: File[] = [];
-    for (const picked of Array.from(files)) {
-      const scanned = await scan(picked);
-      if (scanned) ready.push(scanned);
-    }
-    if (ready.length === 0) {
-      if (chequeFileInputRef.current) chequeFileInputRef.current.value = '';
-      return;
-    }
-    setUploadErr(null);
-    setUploadingFiles(ready.length);
-    let nextIndex = uploads.length + 1;
-    try {
-      for (const file of ready) {
-        const saved = await uploadOneCheque(file, `Reference ${nextIndex}`);
-        if (saved) setUploads(prev => [...prev, saved]);
-        nextIndex++;
-      }
-    } catch (e) {
-      setUploadErr(e instanceof Error ? e.message : 'Upload failed');
-    } finally {
-      setUploadingFiles(0);
-      if (chequeFileInputRef.current) chequeFileInputRef.current.value = '';
-    }
-  }
-
   /**
    * Attach files to one payment. When `replaceIds` is given the control said
    * "Replace", so those earlier files are dropped — but only AFTER the new ones
@@ -3402,7 +3515,8 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
    */
   async function handleSlotFiles(slotLabel: string, files: FileList | null, replaceIds?: number[]) {
     if (!files || files.length === 0) return;
-    // Same scan-first pass as the bulk control (see handleChequeFiles).
+    // Each cheque photo goes through the scan modal in turn (auto-crop +
+    // clean-up); PDFs pass straight through; a cancelled scan skips that file.
     const ready: File[] = [];
     for (const picked of Array.from(files)) {
       const scanned = await scan(picked);
@@ -3411,6 +3525,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
     if (ready.length === 0) return;
     setUploadErr(null);
     setUploadingFiles(ready.length);
+    const savedIds: number[] = [];
     try {
       const saved: CustomerCheque[] = [];
       for (const file of ready) {
@@ -3419,21 +3534,24 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       }
       if (saved.length) setUploads(prev => [...prev, ...saved]);
       if (saved.length && replaceIds?.length) {
-        for (const id of replaceIds) await removeUpload(id);
+        for (const id of replaceIds) await removeUpload(id, false);
       }
+      savedIds.push(...saved.map(c => c.id));
     } catch (e) {
       setUploadErr(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setUploadingFiles(0);
     }
+    await readCheques({ ids: savedIds, slotLabel });
   }
 
-  async function removeUpload(chequeId: number) {
+  async function removeUpload(chequeId: number, thenRead = true) {
     if (!viewingId) return;
     const res = await fetch(`/api/leads/my-viewings/${viewingId}/cheque-uploads/${chequeId}`, {
       method: 'DELETE', credentials: 'include',
     });
     if (res.ok) setUploads(prev => prev.filter(c => c.id !== chequeId));
+    if (res.ok && thenRead) await readCheques();
   }
 
   async function confirm() {
@@ -3468,7 +3586,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
       ? g.lines.map((l, i) => ({ key: `rent-${i}`, label: `Rent — ${l.item}`, amount: l.amount, dueDate: l.dueDate }))
       : [{ key: g.key, label: g.title, amount: g.total, dueDate: g.lines.map(l => l.dueDate).filter((d): d is string => !!d).sort().pop() ?? null }],
   );
-  // Uploads NOT tagged to a specific slot — shown in the "everything together" bucket.
+  // Uploads NOT tagged to a specific slot — listed as "Not matched to a payment".
   const bulkUploads = uploads.filter(u => !paymentSlots.some(s => s.label === (u.notes ?? '')));
 
   // Note: the plan is intentionally method-agnostic on the customer side.
@@ -3480,6 +3598,32 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       {scannerModal}
+      {(uploadingFiles > 0 || reading) && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'grid', placeItems: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 16, padding: '24px 28px', display: 'grid', gap: 10, justifyItems: 'center', maxWidth: 360, textAlign: 'center' }}>
+            <Loader2 size={28} className="animate-spin" style={{ color: 'var(--jade-deep)' }} />
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{reading ? 'Reading your cheque…' : `Uploading your cheque${uploadingFiles > 1 ? 's' : ''}…`}</p>
+            <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0 }}>{reading ? 'We check the amount and date against your payment plan. A few seconds.' : 'Saving the file.'}</p>
+          </div>
+        </div>
+      )}
+      {readResult && (
+        <Modal title={readResult.title} onClose={() => setReadResult(null)}
+          footer={<PrimaryBtn onClick={() => { setReadResult(null); const el = document.querySelector('[data-open-slot]'); el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{readResult.ok ? 'OK' : 'Show me the row'}</PrimaryBtn>}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {readResult.lines.map((l, i) => (
+              <p key={i} style={{ fontSize: 14, color: readResult.ok ? 'var(--jade-deep)' : 'var(--brick, #b91c1c)', fontWeight: 600, margin: 0, lineHeight: 1.5 }}>{l}</p>
+            ))}
+            {readResult.open.length > 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+                {readResult.open.length === 1 ? 'Still waiting for a cheque: ' : 'Still waiting for cheques: '}<b>{readResult.open.join('; ')}</b>. {readResult.ok ? 'Attach the next cheque on that row.' : 'Please attach a cheque for that amount on the highlighted row.'}
+              </p>
+            ) : readResult.ok ? (
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0 }}>All payments are covered. You can now tell us the payments are ready.</p>
+            ) : null}
+          </div>
+        </Modal>
+      )}
 
       {/* The SAME Payment Summary card the lease and the landlord's lead view use
           — so the plan the customer is quoted looks like the one they sign. */}
@@ -3497,15 +3641,32 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
         // block underneath that re-listed the very same payments, so the customer
         // read the plan, then matched it line-by-line against a near-identical
         // list to work out which upload went where.
-        renderAttach={(slot) => (
-          <PlanAttachCell
-            slot={slot}
-            refs={uploads.filter(u => (u.notes ?? '') === slot.label)}
-            uploading={uploadingFiles}
-            onFiles={handleSlotFiles}
-            onRemove={removeUpload}
-          />
-        )}
+        renderAttach={(slot) => {
+          const items = plan?.items ?? [];
+          const filedHere = uploads.some(u => (u.notes ?? '') === slot.label);
+          if (!slot.label.startsWith('Rent \u2014 ') && !filedHere) {
+            // A fee group paid on a cheque that was attached elsewhere (with the
+            // rent, or with the deposit) takes no file of its own: it names that cheque.
+            const isRent = (it: { type?: string | null }) => ['first_bundle', 'installment', 'extra_installment'].includes(it.type ?? '');
+            const group = items.filter(it => !isRent(it) && slotLabelOf(it.index) === slot.label);
+            const elsewhere = new Set(items.filter(it => slotLabelOf(it.index) !== slot.label).map(it => it.reference).filter(Boolean));
+            const paidOn = group.length > 0 && group.every(it => it.reference && elsewhere.has(it.reference))
+              ? [...new Set(group.map(it => it.reference as string))] : [];
+            if (paidOn.length > 0) return <span style={{ fontSize: 11.5, color: 'var(--jade-deep)', fontWeight: 600 }}>Paid on cheque{paidOn.length > 1 ? 's' : ''} {paidOn.join(', ')}</span>;
+          }
+          const lit = highlight.has(slot.label);
+          return (
+            <div data-open-slot={lit ? '1' : undefined} style={lit ? { outline: '2px solid var(--saffron, #f59e0b)', outlineOffset: 4, borderRadius: 8 } : undefined}>
+              <PlanAttachCell
+                slot={slot}
+                refs={uploads.filter(u => (u.notes ?? '') === slot.label)}
+                uploading={uploadingFiles}
+                onFiles={handleSlotFiles}
+                onRemove={removeUpload}
+              />
+            </div>
+          );
+        }}
         headerAction={
           <>
             <span style={{ fontSize: 10, color: 'var(--mute)', fontWeight: 500 }}>Issued {fmtDateShort(plan.issuedAt)}</span>
@@ -3522,38 +3683,21 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{plan.notes}</p>
         </div>
       )}
-      {/* ── Or upload all references together (bucket) ── */}
+      {uploadErr && <ErrorBox msg={uploadErr} />}
+
+      {/* References not matched to a payment — sent before per-payment attach.
+          No "upload all together" box any more (same on a renewal): a cheque
+          attached against its own payment is the one the reader can check
+          against that payment. They stay visible and removable. */}
+      {bulkUploads.length > 0 && (
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
-            Or upload all your references together
+            Not matched to a payment
           </p>
-          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{bulkUploads.length} uploaded</span>
+          <span style={{ fontSize: 11, color: 'var(--mute)' }}>{bulkUploads.length} file{bulkUploads.length === 1 ? '' : 's'}</span>
         </div>
-        <label style={{
-          marginTop: 12,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)',
-          background: 'var(--surface)', cursor: uploadingFiles ? 'progress' : 'pointer',
-          fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)',
-        }}>
-          <input
-            ref={chequeFileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            multiple
-            disabled={uploadingFiles > 0}
-            onChange={(e) => handleChequeFiles(e.target.files)}
-            style={{ display: 'none' }}
-          />
-          {uploadingFiles > 0
-            ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploadingFiles} file{uploadingFiles === 1 ? '' : 's'}…</>
-            : <><UploadCloud size={14} /> Choose files</>}
-        </label>
-
-        {uploadErr && <div style={{ marginTop: 10 }}><ErrorBox msg={uploadErr} /></div>}
-
-        {bulkUploads.length > 0 && (
+        <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>These were sent without a payment. Remove them and attach each reference against its payment above.</p>
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
             {bulkUploads.map((c, i) => (
               <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--mist-strong)' }}>
@@ -3593,12 +3737,18 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
               </div>
             ))}
           </div>
-        )}
       </div>
+      )}
 
+      {refused.map(r => <ErrorBox key={r.name + r.reason} msg={`${r.reason} We have taken that file off (${r.name}).`} />)}
+      {intake && intake.open.length > 0 && !reading && (
+        <p style={{ fontSize: 13, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>
+          {intake.open.length === 1 ? `${intake.open[0].description} still needs its cheque.` : `${intake.open.map(p => p.description).join(', ')} still need their cheques.`}
+        </p>
+      )}
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <PrimaryBtn onClick={confirm} disabled={busy || uploadingFiles > 0}>
+        <PrimaryBtn onClick={confirm} disabled={busy || uploadingFiles > 0 || reading || uploads.length === 0 || (!!intake && (intake.open.length > 0 || !intake.ready) && !intake.files.some(f => f.documentType === 'transfer'))}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy ? 'Marking…' : 'I’ve made the payments'}
         </PrimaryBtn>
@@ -4989,17 +5139,71 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   const [pdcDocs, setPdcDocs] = useState<PdcDoc[]>([]);
   const [uploading, setUploading] = useState(0);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // The reader places each attached cheque on the payment it pays (server side).
+  // A cheque that fits nothing is taken off again and the customer is told why;
+  // the rest of what was read is the landlord's to see. `intake` holds only what
+  // gates this step: which payments still have no cheque.
+  const [reading, setReading] = useState(false);
+  const [intake, setIntake] = useState<ChequeIntake | null>(null);
+  const [refused, setRefused] = useState<{ name: string; reason: string }[]>([]);
+  /** What the last read found, shown in a popup the customer dismisses: where
+   *  the cheque was placed (and whether it was moved), or why it was refused
+   *  and which payments are still open. */
+  const [readResult, setReadResult] = useState<{ ok: boolean; title: string; lines: string[]; open: string[] } | null>(null);
+  /** Payments to highlight on the schedule after a refusal — the open ones. */
+  const [highlight, setHighlight] = useState<Set<string>>(new Set());
+
+  async function loadDocs(): Promise<PdcDoc[]> {
+    if (!child?.id) return [];
+    const rows = await fetch(`/api/documents?ownerType=tenancy_contract&ownerId=${child.id}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : []).catch(() => []);
+    const docs = Array.isArray(rows) ? (rows as PdcDoc[]).filter(d => isPaymentAdviceKey(d.documentKey)) : [];
+    setPdcDocs(docs);
+    return docs;
+  }
+
+  /** Read whatever is not yet read and place every cheque. Files already read
+   *  are not read again, so this is cheap to repeat after each change. */
+  async function readCheques(justUploaded?: { ids: number[]; slotLabel: string }) {
+    if (!child?.id) return;
+    setReading(true);
+    try {
+      const res = await fetch(`/api/contracts/tenant/${child.id}/cheques/read`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json() as ChequeIntake;
+        setIntake(data);
+        if (data.removed?.length) setRefused(data.removed);
+        await loadDocs();
+        if (justUploaded) {
+          const openNames = data.open.map(p => `${p.description} (AED ${p.amount.toLocaleString('en-AE')}${p.dueDate ? `, due ${new Date(`${p.dueDate}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''})`);
+          const mine = data.files.filter(f => justUploaded.ids.includes(f.documentId));
+          const refusedNow = data.removed ?? [];
+          if (mine.length === 0 && refusedNow.length > 0) {
+            const attachedTo = justUploaded.slotLabel.replace(/^Rent \u2014 /, '');
+            const target = data.open.find(p => p.description === attachedTo);
+            const where = target ? `You attached it on ${attachedTo}, which is AED ${target.amount.toLocaleString('en-AE')}${target.dueDate ? `, due ${new Date(`${target.dueDate}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}.` : '';
+            setReadResult({ ok: false, title: "We couldn't match this cheque", lines: [...refusedNow.map(r => r.reason), ...(where ? [where] : [])], open: openNames });
+            setHighlight(new Set(data.open.map(p => p.description)));
+          } else if (mine.length > 0) {
+            const attachedTo = justUploaded.slotLabel.replace(/^Rent \u2014 /, '');
+            const lines = mine.flatMap(f => f.cheques.map(q => {
+              const where = q.paysFor.join(' + ');
+              const moved = attachedTo && !q.paysFor.includes(attachedTo);
+              return `${q.chequeNumber ? `Cheque ${q.chequeNumber}` : 'Your cheque'}${q.amount != null ? ` for AED ${q.amount.toLocaleString('en-AE')}` : ''} now covers ${where}.${moved ? ` You attached it on ${attachedTo}; we moved it to where it fits.` : ''}`;
+            }));
+            setReadResult({ ok: true, title: 'Cheque received', lines, open: openNames });
+            setHighlight(new Set());
+          }
+        }
+      }
+    } catch { /* the cheques stay attached; the landlord can still review them */ }
+    finally { setReading(false); }
+  }
 
   useEffect(() => {
     if (!child?.id) return;
-    fetch(`/api/documents?ownerType=tenancy_contract&ownerId=${child.id}`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : [])
-      .then((rows: PdcDoc[]) => {
-        if (!Array.isArray(rows)) return;
-        setPdcDocs(rows.filter(d => isPaymentAdviceKey(d.documentKey)));
-      })
-      .catch(() => {});
+    void loadDocs().then(docs => { if (docs.length > 0 && !child.tenantChequesSubmittedAt) void readCheques(); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [child?.id]);
 
@@ -5056,46 +5260,25 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
     }
     if (ready.length === 0) return;
     setUploadErr(null); setUploading(ready.length);
+    const savedIds: number[] = [];
     try {
       const saved: PdcDoc[] = [];
       let i = 0;
       for (const file of ready) saved.push(await uploadPdc(file, i++, slotLabel));
+      savedIds.push(...saved.map(d => d.id));
       if (saved.length) setPdcDocs(prev => [...prev, ...saved]);
       if (saved.length && replaceIds?.length) {
-        for (const id of replaceIds) await removePdc(id);
+        for (const id of replaceIds) await removePdc(id, false);
       }
     } catch (e) { setUploadErr(e instanceof Error ? e.message : 'Upload failed'); }
     finally { setUploading(0); }
+    await readCheques({ ids: savedIds, slotLabel });
   }
 
-  /** Bulk drop — every file lands untagged, for customers who'd rather hand the
-   *  whole set over at once than match each cheque to its row. */
-  async function handleBulkFiles(files: FileList | null) {
-    if (!files || files.length === 0 || !child?.id) return;
-    // Same scan-first pass as the per-payment attach (see handleSlotFiles).
-    const ready: File[] = [];
-    for (const picked of Array.from(files)) {
-      const scanned = await scan(picked);
-      if (scanned) ready.push(scanned);
-    }
-    if (ready.length === 0) {
-      if (fileRef.current) fileRef.current.value = '';
-      return;
-    }
-    setUploadErr(null); setUploading(ready.length);
-    try {
-      let i = 0;
-      for (const file of ready) {
-        const saved = await uploadPdc(file, i++);
-        setPdcDocs(prev => [...prev, saved]);
-      }
-    } catch (e) { setUploadErr(e instanceof Error ? e.message : 'Upload failed'); }
-    finally { setUploading(0); if (fileRef.current) fileRef.current.value = ''; }
-  }
-
-  async function removePdc(docId: number) {
+  async function removePdc(docId: number, thenRead = true) {
     const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE', credentials: 'include' });
     if (res.ok) setPdcDocs(prev => prev.filter(d => d.id !== docId));
+    if (res.ok && thenRead) await readCheques();
   }
 
   async function submit() {
@@ -5164,9 +5347,41 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       {scannerModal}
+      {/* From the moment a file is chosen until the reader answers, the customer
+          sees what is going on: first the upload, then the read. */}
+      {(uploading > 0 || reading) && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'grid', placeItems: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 16, padding: '24px 28px', display: 'grid', gap: 10, justifyItems: 'center', maxWidth: 360, textAlign: 'center' }}>
+            <Loader2 size={28} className="animate-spin" style={{ color: 'var(--jade-deep)' }} />
+            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>{reading ? 'Reading your cheque…' : `Uploading your cheque${uploading > 1 ? 's' : ''}…`}</p>
+            <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0 }}>{reading ? 'We check the amount and date against your payment plan. A few seconds.' : 'Saving the file to your lease.'}</p>
+          </div>
+        </div>
+      )}
+      {readResult && (
+        <Modal title={readResult.title} onClose={() => setReadResult(null)}
+          footer={<PrimaryBtn onClick={() => { setReadResult(null); const el = document.querySelector('[data-open-slot]'); el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{readResult.ok ? 'OK' : 'Show me the row'}</PrimaryBtn>}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {readResult.lines.map((l, i) => (
+              <p key={i} style={{ fontSize: 14, color: readResult.ok ? 'var(--jade-deep)' : 'var(--brick, #b91c1c)', fontWeight: 600, margin: 0, lineHeight: 1.5 }}>{l}</p>
+            ))}
+            {readResult.open.length > 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
+                {readResult.open.length === 1 ? 'Still waiting for a cheque: ' : 'Still waiting for cheques: '}<b>{readResult.open.join('; ')}</b>. {readResult.ok ? 'Attach the next cheque on that row.' : 'Please attach a cheque for that amount on the highlighted row.'}
+              </p>
+            ) : readResult.ok ? (
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0 }}>All payments are covered. You can now submit your cheques for review.</p>
+            ) : null}
+          </div>
+        </Modal>
+      )}
+      {/* The customer only attaches each cheque against its payment on the
+          schedule below. The reader still runs on every file (readCheques) and
+          places it; what it found is the landlord's to see, not shown here
+          (owner, 6 Oct 2026: "we don't need to show this"). */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
         <p style={{ fontSize: 13, color: 'var(--ink-2)', margin: 0, lineHeight: 1.5 }}>
-          Attach a picture / PDF of each post-dated cheque (or transfer receipt) against the payment it covers. Your rental provider reviews and collects them before you sign.
+          Attach a photo or PDF of each post-dated cheque (or transfer receipt) against the payment it covers. Your rental provider reviews and collects them before you sign.
         </p>
       </div>
 
@@ -5178,34 +5393,45 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
         parent={resolved.contract}
         child={child}
         resolved={resolved}
-        renderAttach={(slot) => (
-          <PlanAttachCell
-            slot={slot}
-            refs={pdcDocs
-              .filter(d => slotOfDoc(d.displayName) === slot.label)
-              .map(d => ({ id: d.id, index: 0, imageUrl: d.fileUrl ?? null }))}
-            uploading={uploading}
-            onFiles={handleSlotFiles}
-            onRemove={removePdc}
-          />
-        )}
+        renderAttach={(slot) => {
+          // A fee group already paid on an instalment's cheque (rent + fees on one
+          // cheque) takes no file of its own: the control that invited a second
+          // cheque for the fees is replaced by the cheque that pays them.
+          if (!slot.label.startsWith('Rent \u2014 ')) {
+            const rows = (child.payments ?? []).filter(p => !['rental_income', 'rent', 'security_deposit'].includes((p.paymentType ?? '').toLowerCase()));
+            const rentNos = new Set((child.payments ?? []).filter(p => ['rental_income', 'rent'].includes((p.paymentType ?? '').toLowerCase())).map(p => p.chequeNumber).filter(Boolean));
+            const paidBy = rows.length > 0 && rows.every(p => p.chequeNumber && rentNos.has(p.chequeNumber)) ? rows[0].chequeNumber : null;
+            if (paidBy) return <span style={{ fontSize: 11.5, color: 'var(--jade-deep)', fontWeight: 600 }}>Paid on cheque {paidBy}</span>;
+          }
+          const lit = highlight.has(slot.label.replace(/^Rent \u2014 /, '')) || (!slot.label.startsWith('Rent \u2014 ') && [...highlight].some(h => !/^Instalment|^Rent$/.test(h)));
+          return (
+            <div data-open-slot={lit ? '1' : undefined} style={lit ? { outline: '2px solid var(--saffron, #f59e0b)', outlineOffset: 4, borderRadius: 8 } : undefined}>
+              <PlanAttachCell
+                slot={slot}
+                refs={pdcDocs
+                  .filter(d => slotOfDoc(d.displayName) === slot.label)
+                  .map(d => ({ id: d.id, index: 0, imageUrl: d.fileUrl ?? null }))}
+                uploading={uploading}
+                onFiles={handleSlotFiles}
+                onRemove={removePdc}
+              />
+            </div>
+          );
+        }}
       />
 
-      {/* Bulk alternative to the per-row controls: send the whole set at once.
-          These files stay untagged, which is also where anything uploaded before
-          per-payment attach existed — or tagged to a slot the plan no longer has
-          — shows up. They count toward submit, so they must stay visible and
-          removable rather than becoming invisible but still gating the button. */}
+      {/* Files not matched to a payment: anything uploaded before per-payment
+          attach existed, or tagged to a slot the plan no longer has. They count
+          toward submit, so they stay visible and removable. There is no "send
+          them all together" box any more — a cheque attached against its own
+          payment is the one the reader can check against that payment. */}
+      {untaggedDocs.length > 0 && (
       <div style={{ background: 'var(--paper)', border: '1px solid var(--mist-strong)', borderRadius: 14, padding: '16px 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Or send them all together</p>
-            {untaggedDocs.length > 0 && <span style={{ fontSize: 11, color: 'var(--mute)' }}>{untaggedDocs.length} file{untaggedDocs.length === 1 ? '' : 's'}</span>}
+            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Not matched to a payment</p>
+            <span style={{ fontSize: 11, color: 'var(--mute)' }}>{untaggedDocs.length} file{untaggedDocs.length === 1 ? '' : 's'}</span>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>Rather hand the whole set over at once? Attach every cheque here instead of row by row — your rental provider matches them to the schedule.</p>
-          <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: '1px dashed var(--mist-strong)', background: 'var(--surface)', cursor: uploading ? 'progress' : 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--jade-deep)' }}>
-              <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple disabled={uploading > 0} onChange={(e) => handleBulkFiles(e.target.files)} style={{ display: 'none' }} data-testid="renewal-pdc-input" />
-              {uploading > 0 ? <><Loader2 size={14} className="animate-spin" /> Uploading {uploading} file{uploading === 1 ? '' : 's'}…</> : <><UploadCloud size={14} /> Choose files</>}
-          </label>
+          <p style={{ fontSize: 12, color: 'var(--ink-2)', margin: '0 0 4px', lineHeight: 1.5 }}>These were sent without a payment. Remove them and attach each cheque against its payment above.</p>
           <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
             {untaggedDocs.map((d, i) => {
               const isPdf = (d.mimeType ?? '').includes('pdf') || (d.fileUrl ?? '').toLowerCase().split('?')[0].endsWith('.pdf');
@@ -5227,12 +5453,19 @@ function RenewalChequesAction({ resolved, onRefresh }: { resolved: Resolved; onR
             })}
         </div>
       </div>
+      )}
 
       {uploadErr && <ErrorBox msg={uploadErr} />}
+      {refused.map(r => <ErrorBox key={r.name + r.reason} msg={`${r.reason} We have taken that file off (${r.name}).`} />)}
+      {intake && intake.open.length > 0 && !reading && (
+        <p style={{ fontSize: 13, color: 'var(--saffron-deep, #b45309)', margin: 0 }}>
+          {intake.open.length === 1 ? `${intake.open[0].description} still needs its cheque.` : `${intake.open.map(p => p.description).join(', ')} still need their cheques.`}
+        </p>
+      )}
 
       {err && <ErrorBox msg={err} />}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <PrimaryBtn onClick={submit} disabled={busy || pdcDocs.length === 0}>
+        <PrimaryBtn onClick={submit} disabled={busy || reading || pdcDocs.length === 0 || (!!intake && (intake.open.length > 0 || !intake.ready) && !intake.files.some(f => f.documentType === 'transfer'))}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
           {busy ? 'Submitting…' : 'Submit cheques for review'}
         </PrimaryBtn>
@@ -5277,9 +5510,14 @@ export default function CustomerSpaceV2Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resolved, setResolved] = useState<Resolved | null>(null);
+  // The full-page spinner is for the first load. A refresh after an action
+  // (a cheque read, a document sent) keeps the step on screen — unmounting it
+  // would lose what it is showing, such as the "Cheque received" popup.
+  const loadedKey = useRef<string | null>(null);
 
   const fetchAll = useMemo(() => async () => {
-    setLoading(true); setError(null);
+    if (loadedKey.current !== spaceKey) setLoading(true);
+    setError(null);
     try {
       const [viewings, leads, contracts, docsResp] = await Promise.all([
         apiGet<ApiViewing[]>('/leads/my-viewings').catch(() => [] as ApiViewing[]),
@@ -5370,6 +5608,7 @@ export default function CustomerSpaceV2Page() {
       const stage = lead?.stage ?? viewing?.lead?.stage ?? viewing?.leadStage ?? null;
       const requestedAdditionalDocs = parseAdditionalDocs(lead?.additionalDocsNote ?? viewing?.lead?.additionalDocsNote);
       setResolved({ spaceKey, unit, viewing, lead, contract, renewalContract, paymentPlan, stage, allRequiredDocsUploaded, docsSubmitted: readDocsSubmitted(spaceKey), tenantProfileId, entityType, companyName, tradeLicenseNumber, tradeLicenseAuthority, myDocs: docs, requestedAdditionalDocs });
+      loadedKey.current = spaceKey;
       setLoading(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');

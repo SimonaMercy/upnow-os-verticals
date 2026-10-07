@@ -29,6 +29,8 @@ interface ActionItem {
   tenant?: string; unit?: string | null; building?: string | null;
   startDate?: string | null; endDate?: string | null;
   vendor?: string; category?: string | null; doc?: string; docName?: string | null;
+  /** 0379 — days since a paper was declared under renewal. */
+  daysAgo?: number;
   // Missing-KYC rows: whether the checklist insists on this document, and the
   // requirement key its upload control is keyed by on the customer's KYC page.
   required?: boolean; reqKey?: string;
@@ -68,11 +70,13 @@ interface ActionCenter {
   headOfficeEnabled?: boolean;
   amcExpired: Bucket; delayedFollowups: Bucket;
   docsExpired: Bucket; docsNoExpiry: Bucket; docsMissing: Bucket;
+  /** 0379 — papers a customer declared under renewal and undertook to provide. Optional: an older backend does not send it. */
+  docsPromised?: Bucket;
   maintenanceApprovals: Bucket; maintenanceHeld: Bucket;
 }
 /** The bucket's short name in the "all clear" strip — same words as its card label. */
 const BUCKET_WORDS: Record<string, string> = {
-  docsExpired: 'Expired documents', docsMissing: 'Missing KYC', docsNoExpiry: 'Expiry not recorded',
+  docsExpired: 'Expired documents', docsMissing: 'Missing KYC', docsNoExpiry: 'Expiry not recorded', docsPromised: 'Documents promised',
   openLeads: 'Leads', awaitingSignature: 'Signatures', moveIns: 'Move-ins', registrationPending: 'Registration',
   renewals: 'Renewals to raise', renewalOffersOut: 'Renewal offers', terminationRequests: 'Terminations',
   moveOuts: 'Move-outs', settlementPending: 'Settlements', chequesBounced: 'Bounced cheques', bounceFees: 'Bounce fees', chequesOverdue: 'Overdue cheques',
@@ -495,6 +499,21 @@ function ManagerMultiOverview() {
                       whose validity was never captured, so these read as compliant and
                       are simply unchecked. Not painted red — an unrecorded date is not
                       proof of an expired document, it is proof that nobody knows. */
+        /* Papers a customer DECLARED under renewal on the renewal's Documents step
+                      and undertook to provide once issued (0379). The undertaking has a
+                      date, so the row says how long it has been owed; red after a month.
+                      Opens the customer's KYC page, where the renewed copy is filed. */
+        { key: 'docsPromised', count: action?.docsPromised?.count ?? 0, el: (
+          <ActionBucket icon={FileWarning} color="#9f1239" label="Documents promised" href={`/dashboard/manager/tenants${scopeQ()}`}
+          loading={actionLoading} bucket={action?.docsPromised}
+          groupBy={i => i.tenant ?? 'Customer'}
+          compact={i => ({
+            unit: i.docName ?? i.doc ?? 'Document',
+            status: `Declared under renewal ${i.daysAgo === 0 ? 'today' : `${i.daysAgo} day${i.daysAgo === 1 ? '' : 's'} ago`} · chase`,
+            overdue: (i.daysAgo ?? 0) > 30,
+            href: kycHref(i),
+          })} />
+        ) },
         { key: 'docsNoExpiry', count: action?.docsNoExpiry?.count ?? 0, el: (
           <ActionBucket icon={CalendarOff} color="#a16207" label="Expiry Not Recorded" href={`/dashboard/manager/tenants${scopeQ()}`}
           loading={actionLoading} bucket={action?.docsNoExpiry}

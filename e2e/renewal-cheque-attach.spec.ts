@@ -1,7 +1,8 @@
 /**
  * Customer space v-6, renewal Cheques/PDC step — every rent instalment gets its
  * OWN attach control on the Payment Summary row (as the new-lease payment step
- * does), and the bulk "send them all together" drop is still offered alongside.
+ * does). The bulk "send them all together" drop is gone: a cheque is attached
+ * against its own payment, which is what the reader checks it against.
  * Untracked; mirrored to the session scratchpad.
  */
 import { test, expect, Page } from '@playwright/test';
@@ -76,9 +77,9 @@ test('renewal cheques step attaches per instalment and still allows bulk', async
     await expect(row.getByText(anyAttach)).toHaveCount(1);
   }
 
-  // Bulk drop still offered.
-  await expect(page.getByTestId('renewal-pdc-input')).toHaveCount(1);
-  await expect(page.getByText('Or send them all together')).toBeVisible();
+  // No bulk drop — every cheque goes against its own payment.
+  await expect(page.getByTestId('renewal-pdc-input')).toHaveCount(0);
+  await expect(page.getByText('Or send them all together')).toHaveCount(0);
 
   // The control must be ON SCREEN, not parked behind a horizontal scrollbar —
   // that clipping is what made it read as missing in the first place.

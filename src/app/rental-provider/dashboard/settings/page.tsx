@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, Receipt, FileSignature, Scale } from 'lucide-react';
+import { MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature, Scale } from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { EmailSettingsPanel } from '@/components/email/EmailSettingsPanel';
 import { WhatsAppSettingsPanel } from '@/components/whatsapp/WhatsAppSettingsPanel';
@@ -14,6 +14,7 @@ import { FeeBookEditor } from '@/components/legal/FeeBookEditor';
 import { legalApi } from '@/lib/legal';
 import { MaintenanceListWorkspace } from '../maintenance-list/page';
 import { RestorationListWorkspace } from '../restoration-list/page';
+import { BuildingInspectionsSettings } from '@/components/upnow/BuildingInspectionsSettings';
 import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
@@ -512,7 +513,7 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
 /* ─────────────────────────────────────────────────────────────
    Main page
 ───────────────────────────────────────────────────────────── */
-type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'categories' | 'legal' | 'team' | 'email' | 'whatsapp' | 'notifications';
+type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'building_inspections' | 'categories' | 'legal' | 'team' | 'email' | 'whatsapp' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
 // general KYC Documents card so they aren't shown twice.
@@ -665,11 +666,13 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
 
 // Settings tabs (owner, 12 Sep: the profile moved OUT to its own page; the
 // Maintenance List, Restoration List and AMC categories moved IN).
-const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'categories', 'legal', 'team', 'email', 'whatsapp', 'notifications'];
+const MAIN_TABS: MainTab[] = ['fee_rules', 'maintenance', 'maintenance_list', 'restoration', 'building_inspections', 'categories', 'legal', 'team', 'email', 'whatsapp', 'notifications'];
 /** The left-hand settings menu, grouped by what the landlord is doing. */
 const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   { title: 'Leasing', tabs: ['fee_rules'] },
   { title: 'Maintenance', tabs: ['maintenance', 'maintenance_list', 'restoration'] },
+  // Building inspections (0383): the walk-through checklists, each building's frequency and inspector.
+  { title: 'Buildings', tabs: ['building_inspections'] },
   { title: 'Contracts', tabs: ['categories'] },
   // The landlord's own notice periods, appeal window and filing-fee rule (0286) — the platform default applies until saved.
   { title: 'Legal', tabs: ['legal'] },
@@ -682,6 +685,7 @@ const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ siz
   // coverage = what is offered per property type and who does it; items = what a customer can raise.
   general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
   maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
+  building_inspections: { label: 'Building inspections', Icon: ClipboardCheck },
   categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, email: { label: 'Email', Icon: Mail }, whatsapp: { label: 'WhatsApp', Icon: MessageCircle }, notifications: { label: 'Notifications', Icon: Bell },
 };
 
@@ -773,6 +777,17 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   const [renewalIncSaving, setRenewalIncSaving] = useState(false);
   const [renewalIncSaved,  setRenewalIncSaved]  = useState(false);
   const [renewalIncError,  setRenewalIncError]  = useState<string | null>(null);
+
+  // ── Market rate review schedule (owner, 7 Oct 2026) ─────────
+  // How often the market rates are reviewed and the unit-mix asking rents
+  // updated before renewal offers go out, and the day of the period's first
+  // month by which it must be done. Whether a period is reviewed is read off
+  // the system (the rates actually set) — shown on Units and the Operation Plan.
+  const [reviewPeriod,     setReviewPeriod]     = useState<'monthly' | 'quarterly' | 'half_yearly' | 'yearly'>('quarterly');
+  const [reviewDueDay,     setReviewDueDay]     = useState<string>('15');
+  const [reviewSaving,     setReviewSaving]     = useState(false);
+  const [reviewSaved,      setReviewSaved]      = useState(false);
+  const [reviewError,      setReviewError]      = useState<string | null>(null);
 
   // ── Penalty Rules engine (Rules, SCRUM-578) ─────────────────
   // Six configurable penalties (Bounced Cheque + five more). One save at a time
@@ -908,6 +923,8 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
         if (Array.isArray(p.preferredStartDays)) setPreferredDays(p.preferredStartDays as number[]);
         if (Array.isArray(p.preferredChequeDays)) setChequeDays(p.preferredChequeDays as number[]);
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
+        if (typeof p.marketRateReviewPeriod === 'string') setReviewPeriod(p.marketRateReviewPeriod as 'monthly' | 'quarterly' | 'half_yearly' | 'yearly');
+        if (p.marketRateReviewDueDay != null) setReviewDueDay(String(p.marketRateReviewDueDay));
         if (Array.isArray(p.ccEmails)) setCcEmails(p.ccEmails as string[]);
         // Penalty Rules engine — round-trip each rule to its stored mode. Months
         // (Early Termination) and Daily (Late Move-out) take precedence when set;
@@ -1253,6 +1270,31 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
     }
   };
 
+  async function saveMarketRateReview() {
+    setReviewSaving(true);
+    setReviewError(null);
+    setReviewSaved(false);
+    try {
+      const day = Number(reviewDueDay);
+      if (!Number.isInteger(day) || day < 1 || day > 28) {
+        setReviewError('Enter a day between 1 and 28.');
+        return;
+      }
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketRateReviewPeriod: reviewPeriod, marketRateReviewDueDay: day }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setReviewSaved(true);
+    } catch {
+      setReviewError('Failed to save. Please try again.');
+    } finally {
+      setReviewSaving(false);
+    }
+  }
+
   const updatePenalty = (key: PenaltyRuleKey, s: PenaltyState) => {
     setPenalties(prev => ({ ...prev, [key]: s }));
     setPenaltySavedKey(k => (k === key ? null : k));
@@ -1444,6 +1486,7 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
       {/* ── Lists that moved in from the sidebar (owner, 12 Sep) ── */}
       {mainTab === 'maintenance_list' && <MaintenanceListWorkspace embedded />}
       {mainTab === 'restoration' && <RestorationListWorkspace embedded />}
+      {mainTab === 'building_inspections' && <BuildingInspectionsSettings embedded />}
       {mainTab === 'categories' && <AmcCategoriesView base="/amc" listHref="/rental-provider/dashboard/amc" embedded />}
 
       {/* ── Team tab ───────────────────────────────────────────── */}
@@ -2264,6 +2307,66 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
               <div className="h-4">
                 {vatSaving && <p className="text-xs text-[#9b9890]">Saving…</p>}
                 {vatSaved && !vatSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
+              </div>
+            </div>
+
+            {/* Market rate review schedule (owner, 7 Oct 2026): "Each quarter manager will review the
+                market rates and update the rates in the unit mix before sending the renewal." Its own
+                card — the rates serve new leases and renewals alike ("keep this separate … it's for new
+                and renewal both"). Whether a period is reviewed is read off the rates actually set
+                (Units page) and shown on Units and in the Operation Plan report. */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-[240px]">
+                  <h2 className="font-semibold text-base text-[#1a1916]">Market Rate Review</h2>
+                  <p className="text-xs text-[#9b9890] mt-0.5">
+                    How often the manager reviews the market rates and updates the asking rents in the unit mix, for new leases and renewals alike. A period counts as reviewed once a layout&apos;s rate is set in it — shown on the Units page and in the Operation Plan.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    id="market-review-period"
+                    aria-label="How often"
+                    value={reviewPeriod}
+                    onChange={e => { setReviewPeriod(e.target.value as 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'); setReviewSaved(false); }}
+                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                  >
+                    <option value="monthly">Every month</option>
+                    <option value="quarterly">Every quarter</option>
+                    <option value="half_yearly">Every half-year</option>
+                    <option value="yearly">Every year</option>
+                  </select>
+                  <span className="text-[12px] text-[#6b6860]">by day</span>
+                  <input
+                    id="market-review-due-day"
+                    aria-label="Due day of the first month"
+                    type="number"
+                    min={1}
+                    max={28}
+                    step="1"
+                    value={reviewDueDay}
+                    onChange={e => { setReviewDueDay(e.target.value); setReviewSaved(false); }}
+                    className="w-20 text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveMarketRateReview}
+                    disabled={reviewSaving}
+                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
+                    style={{ background: '#2e9f82' }}
+                  >
+                    {reviewSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+                {(() => {
+                  const day = Number(reviewDueDay) || 15;
+                  const months = reviewPeriod === 'quarterly' ? ['Jan', 'Apr', 'Jul', 'Oct'] : reviewPeriod === 'half_yearly' ? ['Jan', 'Jul'] : ['Jan'];
+                  return <p className="text-xs text-[#6b6860]">Rates updated by <b className="text-[#1a1916]">{reviewPeriod === 'monthly' ? `day ${day} of every month` : months.map(m => `${day} ${m}`).join(' · ')}</b>.</p>;
+                })()}
+                {reviewError && <p className="text-xs text-red-600">{reviewError}</p>}
+                {reviewSaved && !reviewSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
               </div>
             </div>
           </div>

@@ -43,3 +43,73 @@ export function isPaymentAdviceKey(documentKey?: string | null): boolean {
   const base = (documentKey ?? '').toLowerCase().replace(/_\d{10,}$/, '');
   return (PAYMENT_ADVICE_BASES as readonly string[]).includes(base);
 }
+
+/** What the reader found on a cheque file (backend ocr_readings, kind 'cheque').
+ *  Offered beside the file — nothing is recorded until a person records it. */
+export interface ChequeReading {
+  chequeNumber: string | null;
+  bankName: string | null;
+  amountFils: number | null;
+  /** The date written on the cheque, YYYY-MM-DD. */
+  date: string | null;
+  payeeName: string | null;
+  accountNumber: string | null;
+}
+
+/** A paper's reading as the API sends it with the document. */
+export interface DocReading {
+  kind: string;
+  status: 'pending' | 'done' | 'failed';
+  fields: Record<string, unknown> | null;
+}
+
+/** The cheque fields of a reading, or null when the file was not read as a cheque. */
+export function chequeReadingOf(reading?: DocReading | null): ChequeReading | null {
+  if (!reading || reading.kind !== 'cheque' || reading.status !== 'done' || !reading.fields) return null;
+  return reading.fields as unknown as ChequeReading;
+}
+
+/** Serials compare by their digits — "000173" on the row is "173" on the cheque. */
+export function sameChequeNumber(a?: string | null, b?: string | null): boolean {
+  const norm = (v?: string | null) => (v ?? '').replace(/\D/g, '').replace(/^0+/, '');
+  return norm(a) !== '' && norm(a) === norm(b);
+}
+
+/** One cheque found in a file, and where the matcher put it (backend
+ *  contracts.service readAndPlaceCheques). */
+export interface IntakeCheque {
+  index: number;
+  page: number | null;
+  position: string | null;
+  chequeNumber: string | null;
+  bankName: string | null;
+  amount: number | null;
+  date: string | null;
+  payeeName: string | null;
+  accountHolder: string | null;
+  outcome: 'matched' | 'unreadable' | 'no_match' | 'duplicate' | 'expired';
+  /** Placed by its order in the cheque book because it carries no date. */
+  byOrder: boolean;
+  reason: string | null;
+  paymentIds: number[];
+  /** The payments it pays, in plan words ("Instalment 1", "Admin Fee"). */
+  paysFor: string[];
+}
+
+export interface IntakeFile {
+  documentId: number;
+  name: string;
+  status: 'done' | 'failed' | 'pending' | 'not_read';
+  documentType: 'cheque' | 'transfer' | 'other' | null;
+  cheques: IntakeCheque[];
+}
+
+/** What reading + placing a lease's cheque files came back with. */
+export interface ChequeIntake {
+  files: IntakeFile[];
+  /** Files taken off the lease by this read (refused or unreadable), with the reason to show. */
+  removed?: { name: string; reason: string }[];
+  open: { id: number; description: string; amount: number; dueDate: string | null }[];
+  /** Every file read and every cheque on its payment. */
+  ready: boolean;
+}
