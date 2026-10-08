@@ -199,6 +199,14 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
   // Same fields, same order, same words as the Add form (owner, 12 Sep: "are Add and Edit aligned?").
   const frequency = c.frequency ?? 'annually';
   const [propertyId, setPropertyId] = useState(c.propertyId != null ? String(c.propertyId) : '');
+  // 0387 — the one unit of the property this contract / account is for.
+  const [unitId, setUnitId] = useState(c.unitId != null ? String(c.unitId) : '');
+  const [units, setUnits] = useState<Array<{ id: number; unitNumber: string }>>([]);
+  useEffect(() => {
+    if (!propertyId) { setUnits([]); return; }
+    apiGet<Array<{ id: number; unitNumber: string }>>(rp != null ? `/manager/properties/${propertyId}/units` : `/properties/${propertyId}/units`)
+      .then(list => setUnits(Array.isArray(list) ? list.map(u => ({ id: u.id, unitNumber: u.unitNumber })) : [])).catch(() => setUnits([]));
+  }, [propertyId, rp]);
   const [props, setProps] = useState<{ id: number; buildingName?: string | null; name?: string | null; rentalProviderId?: number }[]>([]);
   useEffect(() => { apiGet<typeof props>(rp != null ? '/manager/properties' : '/properties').then(list => setProps(rp != null ? list.filter(p => p.rentalProviderId == null || p.rentalProviderId === rp) : list)).catch(() => setProps([])); }, [rp]);
   const { active: kindList, meta: kindOf } = useKinds(base, rp);
@@ -225,6 +233,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
         vatMode, annualVatAed: vatMode !== 'none' && annualVat.trim() !== '' ? Number(annualVat) : null,
         modeOfPayment: mode || null, notes: notes.trim() || null,
         propertyId: propertyId ? Number(propertyId) : null,
+        unitId: propertyId && unitId ? Number(unitId) : null,
         kind, categoryLabel: categoryLabel.trim() || null, expenseCategoryId: newCat ? null : categoryId,
       });
       onSaved();
@@ -271,11 +280,19 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
           <div className="grid grid-cols-2 gap-2">
             <div><span className={l}>{kind === 'head_lease' ? 'Head landlord / authority' : 'Vendor'}</span><div className="text-[13px] font-semibold px-1 py-2 truncate">{c.vendorName}</div></div>
             <div><span className={l}>Property <span className="font-normal text-[#8a8f8c]">— which building</span></span>
-              <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
+              <select className={field} value={propertyId} onChange={e => { setPropertyId(e.target.value); setUnitId(''); }}>
                 <option value="">— all / none —</option>
                 {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
               </select>
             </div>
+            {propertyId && units.length > 0 && (
+              <div><span className={l}>Unit <span className="font-normal text-[#9b9890]">— only when this account is for one unit</span></span>
+                <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
+                  <option value="">— whole building —</option>
+                  {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
+                </select>
+              </div>
+            )}
           </div>
           <div><span className={l}>Account / contract no. <span className="font-normal text-[#8a8f8c]">— tells this vendor&rsquo;s contracts apart</span></span>
             <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. Etisalat account 764506535" />
@@ -844,7 +861,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               {c.contractType === 'renewal' && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full bg-[#e9effc] text-[#2a5bd7]">Renewal</span>}
             </div>
             <p className="text-[12px] text-[#5b615e] mt-1">
-              {c.propertyName ?? 'All properties'}{c.categoryLabel ? <> · {c.categoryLabel}</> : category ? <> · {category}</> : null}
+              {c.propertyName ?? 'All properties'}{c.unitNumber ? <> {c.unitNumber}</> : null}{c.categoryLabel ? <> · {c.categoryLabel}</> : category ? <> · {category}</> : null}
               {vendorHrefOf && <> · <Link href={vendorHrefOf(c.vendorId)} className="text-[#1a7a52] hover:text-[#125a3c] underline">Vendor profile</Link></>}
             </p>
           </div>

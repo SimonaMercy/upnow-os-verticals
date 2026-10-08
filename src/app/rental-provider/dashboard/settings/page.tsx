@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature, Scale } from 'lucide-react';
@@ -785,6 +785,21 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   // the system (the rates actually set) — shown on Units and the Operation Plan.
   const [reviewPeriod,     setReviewPeriod]     = useState<'monthly' | 'quarterly' | 'half_yearly' | 'yearly'>('quarterly');
   const [reviewDueDay,     setReviewDueDay]     = useState<string>('15');
+  // Bills from email (0385): how often the mailbox is checked for bills to file on AMC contracts.
+  const [billsEvery,       setBillsEvery]       = useState<string>('24');
+  const [billsSaving,      setBillsSaving]      = useState(false);
+  const [billsSaved,       setBillsSaved]       = useState(false);
+  const [billsError,       setBillsError]       = useState<string | null>(null);
+  // Reminders to WhatsApp (0386): the group, the time, and the AMC bills reminder as it would be posted today.
+  const [remGroups,        setRemGroups]        = useState<Array<{ id: number; name: string }>>([]);
+  const [remChat,          setRemChat]          = useState<string>('');
+  const [remTime,          setRemTime]          = useState<string>('08:00');
+  const [remSaving,        setRemSaving]        = useState(false);
+  const [remSaved,         setRemSaved]         = useState(false);
+  const [remError,         setRemError]         = useState<string | null>(null);
+  const [remPreview,       setRemPreview]       = useState<{ message: string; bills: number; overdue: number; signatures: { message: string; count: number } | null; chat: { id: number; name: string | null } | null; sendAt: string; last: { at: string; status: string; error: string | null; chatName: string | null } | null } | null>(null);
+  const [remSending,       setRemSending]       = useState(false);
+  const [remSendNote,      setRemSendNote]      = useState<string | null>(null);
   const [reviewSaving,     setReviewSaving]     = useState(false);
   const [reviewSaved,      setReviewSaved]      = useState(false);
   const [reviewError,      setReviewError]      = useState<string | null>(null);
@@ -925,6 +940,9 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
         if (p.renewalRentIncrementPct != null) setRenewalIncPct(String(p.renewalRentIncrementPct));
         if (typeof p.marketRateReviewPeriod === 'string') setReviewPeriod(p.marketRateReviewPeriod as 'monthly' | 'quarterly' | 'half_yearly' | 'yearly');
         if (p.marketRateReviewDueDay != null) setReviewDueDay(String(p.marketRateReviewDueDay));
+        if (p.billsEmailCheckEveryHours != null) setBillsEvery(String(p.billsEmailCheckEveryHours));
+        if (p.remindersWhatsappChatId != null) setRemChat(String(p.remindersWhatsappChatId));
+        if (typeof p.remindersSendAt === 'string') setRemTime(p.remindersSendAt);
         if (Array.isArray(p.ccEmails)) setCcEmails(p.ccEmails as string[]);
         // Penalty Rules engine — round-trip each rule to its stored mode. Months
         // (Early Termination) and Daily (Late Move-out) take precedence when set;
@@ -1292,6 +1310,73 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
       setReviewError('Failed to save. Please try again.');
     } finally {
       setReviewSaving(false);
+    }
+  }
+
+  const loadReminderPreview = useCallback(() => {
+    fetch('/api/amc/reminders/preview', { credentials: 'include' }).then(r => (r.ok ? r.json() : null)).then(j => setRemPreview(j && typeof j.message === 'string' ? j : null)).catch(() => setRemPreview(null));
+  }, []);
+  useEffect(() => {
+    fetch('/api/whatsapp/chats?kind=group&pageSize=100', { credentials: 'include' }).then(r => (r.ok ? r.json() : null))
+      .then(j => { const items = Array.isArray(j?.items) ? j.items : Array.isArray(j) ? j : []; setRemGroups(items.map((c: { id: number; savedName?: string | null; personName?: string | null; name?: string | null }) => ({ id: c.id, name: c.savedName || c.personName || c.name || `Group ${c.id}` }))); })
+      .catch(() => setRemGroups([]));
+    loadReminderPreview();
+  }, [loadReminderPreview]);
+
+  async function saveReminders() {
+    setRemSaving(true);
+    setRemError(null);
+    setRemSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remindersWhatsappChatId: remChat ? Number(remChat) : null, remindersSendAt: remTime }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setRemSaved(true);
+      loadReminderPreview();
+    } catch {
+      setRemError('Failed to save. Please try again.');
+    } finally {
+      setRemSaving(false);
+    }
+  }
+
+  async function sendReminderNow() {
+    setRemSending(true);
+    setRemSendNote(null);
+    try {
+      const res = await fetch('/api/amc/reminders/send', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const j = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(j?.message || 'failed');
+      setRemSendNote(j?.status === 'sent' ? 'Posted to the group.' : `Not sent: ${j?.error || 'WhatsApp did not accept it'}`);
+      if (j && typeof j.message === 'string') setRemPreview(j);
+    } catch (e) {
+      setRemSendNote(`Not sent: ${(e as Error).message}`);
+    } finally {
+      setRemSending(false);
+    }
+  }
+
+  async function saveBillsFromEmail() {
+    setBillsSaving(true);
+    setBillsError(null);
+    setBillsSaved(false);
+    try {
+      const res = await fetch('/api/profiles/rental-provider/me', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billsEmailCheckEveryHours: Number(billsEvery) }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setBillsSaved(true);
+    } catch {
+      setBillsError('Failed to save. Please try again.');
+    } finally {
+      setBillsSaving(false);
     }
   }
 
@@ -2368,6 +2453,125 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
                 {reviewError && <p className="text-xs text-red-600">{reviewError}</p>}
                 {reviewSaved && !reviewSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
               </div>
+            </div>
+
+            {/* Bills from email (0382/0385). Owner, 8 Oct 2026: the bills were filed after every
+                mailbox check — "it should not be each 5 minutes, let's have some flexible time to
+                sync". The landlord picks how often the mailbox is checked for bills; the AMC page
+                shows the last and next check and has a "Check now" button. */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-[240px]">
+                  <h2 className="font-semibold text-base text-[#1a1916]">Bills from Email</h2>
+                  <p className="text-xs text-[#9b9890] mt-0.5">
+                    How often the connected mailbox is checked for DEWA and e&amp; bills, which are then filed on the AMC contract holding the account number. The AMC page shows the last and next check and can check at once.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] text-[#6b6860]">Check</span>
+                  <select
+                    id="bills-email-every"
+                    aria-label="How often the mailbox is checked for bills"
+                    value={billsEvery}
+                    onChange={e => { setBillsEvery(e.target.value); setBillsSaved(false); }}
+                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                  >
+                    <option value="1">Every hour</option>
+                    <option value="3">Every 3 hours</option>
+                    <option value="6">Every 6 hours</option>
+                    <option value="12">Every 12 hours</option>
+                    <option value="24">Once a day</option>
+                    <option value="168">Once a week</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={saveBillsFromEmail}
+                    disabled={billsSaving}
+                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
+                    style={{ background: '#2e9f82' }}
+                  >
+                    {billsSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+                <p className="text-xs text-[#6b6860]">Bills are filed on their contracts <b className="text-[#1a1916]">{billsEvery === '1' ? 'every hour' : billsEvery === '24' ? 'once a day' : billsEvery === '168' ? 'once a week' : `every ${billsEvery} hours`}</b>.</p>
+                {billsError && <p className="text-xs text-red-600">{billsError}</p>}
+                {billsSaved && !billsSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
+              </div>
+            </div>
+
+            {/* Reminders to WhatsApp (0386). Owner, 8 Oct 2026: "Let's have reminders from AMC currently …
+                Account, Bill, Due date, Link to pay." The AMC bills reminder is posted to the chosen group
+                at the chosen time through the portal's own WhatsApp line; the preview is the exact text. */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex-1 min-w-[240px]">
+                  <h2 className="font-semibold text-base text-[#1a1916]">WhatsApp Reminders</h2>
+                  <p className="text-xs text-[#9b9890] mt-0.5">
+                    Posted once a day to one of your WhatsApp groups: the AMC bills to pay (account, bill, due date and a link to pay), then, when there are any, the contracts awaiting your signature with your signing link. Pick the group and the time; the text below is what goes out.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    id="reminders-group"
+                    aria-label="WhatsApp group"
+                    value={remChat}
+                    onChange={e => { setRemChat(e.target.value); setRemSaved(false); }}
+                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82] max-w-[260px]"
+                  >
+                    <option value="">Off — no group</option>
+                    {remGroups.map(g => <option key={g.id} value={String(g.id)}>{g.name}</option>)}
+                  </select>
+                  <span className="text-[12px] text-[#6b6860]">at</span>
+                  <input
+                    id="reminders-time"
+                    aria-label="Time of day"
+                    type="time"
+                    value={remTime}
+                    onChange={e => { setRemTime(e.target.value); setRemSaved(false); }}
+                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveReminders}
+                    disabled={remSaving}
+                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
+                    style={{ background: '#2e9f82' }}
+                  >
+                    {remSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+                <p className="text-xs text-[#6b6860]">
+                  {remChat ? <>Posted to <b className="text-[#1a1916]">{remGroups.find(g => String(g.id) === remChat)?.name ?? 'the group'}</b> every day at <b className="text-[#1a1916]">{remTime}</b> Dubai time.</> : 'Off until a group is picked.'}
+                  {remPreview?.last && <> Last post {new Date(remPreview.last.at).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}{remPreview.last.chatName ? ` to ${remPreview.last.chatName}` : ''}: {remPreview.last.status === 'sent' ? 'posted' : `not sent${remPreview.last.error ? ` — ${remPreview.last.error}` : ''}`}.</>}
+                </p>
+                {remError && <p className="text-xs text-red-600">{remError}</p>}
+                {remSaved && !remSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
+              </div>
+              {remPreview && (
+                <div className="mt-4 rounded-xl border border-[#e8e6e0] bg-[#f6f5f0] p-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+                    <p className="text-xs font-semibold text-[#1a1916]">AMC bills reminder for today — {remPreview.bills} {remPreview.bills === 1 ? 'bill' : 'bills'}{remPreview.overdue ? `, ${remPreview.overdue} overdue` : ''}</p>
+                    <div className="flex items-center gap-2">
+                      {remSendNote && <span className="text-xs text-[#6b6860]">{remSendNote}</span>}
+                      <button type="button" onClick={sendReminderNow} disabled={remSending || !remChat}
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium border border-[#2e9f82] text-[#2e9f82] bg-white cursor-pointer disabled:opacity-50">
+                        {remSending ? 'Sending…' : 'Send now'}
+                      </button>
+                    </div>
+                  </div>
+                  <pre id="reminders-preview" className="text-[12.5px] leading-relaxed whitespace-pre-wrap break-words font-sans text-[#1a1916] m-0">{remPreview.message}</pre>
+                </div>
+              )}
+              {remPreview?.signatures && (
+                <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#f6f5f0] p-4">
+                  <p className="text-xs font-semibold text-[#1a1916] mb-2">Second message — {remPreview.signatures.count} {remPreview.signatures.count === 1 ? 'contract' : 'contracts'} awaiting your signature. The link is your own signing link; a fresh one is issued when the message is posted if the last one has expired.</p>
+                  <pre id="reminders-signatures-preview" className="text-[12.5px] leading-relaxed whitespace-pre-wrap break-words font-sans text-[#1a1916] m-0">{remPreview.signatures.message}</pre>
+                </div>
+              )}
             </div>
           </div>
 

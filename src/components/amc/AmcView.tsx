@@ -67,7 +67,7 @@ export interface AmcContract {
   isGovernment: boolean; contractType: string | null; frequency: string | null;
   modeOfPayment: string | null; numberOfPayments: number | null;
   startDate: string | null; endDate: string | null; status: Status;
-  propertyId: number | null; propertyName: string | null; notes: string | null;
+  propertyId: number | null; propertyName: string | null; unitId?: number | null; unitNumber?: string | null; notes: string | null;
   renewalOfId: number | null; renewedById: number | null; annualValueAed?: number | null;
   /** 0299 — annualValueAed is the VAT-INCLUSIVE total; annualVatAed the VAT inside it. */
   vatMode?: VatMode; annualVatAed?: number | null;
@@ -97,6 +97,7 @@ const STATUS_STYLE: Record<Status, { bg: string; fg: string; label: string }> = 
 };
 const cap = (s?: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '—');
 const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+const fmtWhen = (d: string) => new Date(d).toLocaleString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const FREQ_MONTHS: Record<string, number> = { monthly: 1, quarterly: 3, annually: 12 };
 /** Calendar months on, held to the month's last day: 31 Jan + 1 = 28 Feb, not 3 Mar (so a month is never skipped). */
 export const addMonths = (iso: string, n: number) => {
@@ -304,6 +305,10 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   // The list in sections (owner, 30 Sep: "segregation are not clear, let's group them") — by category first, like the expenses sheet.
   const [groupBy, setGroupBy] = useState<GroupBy>('kind');
   const [contracts, setContracts] = useState<AmcContract[] | null>(null);
+  // 0382 — bills that arrived by email and found no contract to go on (listed until one holds the account).
+  const [mailBills, setMailBills] = useState<{ filed: number; schedule?: { everyHours: number; lastCheckedAt: string | null; nextCheckAt: string | null }; unmatched: Array<{ vendorName: string; accountNumber: string; bills: number; lastAt: string | null; lastAmount: number | null; lastPeriod: string | null }> } | null>(null);
+  // 0385 — "Check now": reads the mailbox and files the bills at once, outside the schedule.
+  const [checkingBills, setCheckingBills] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [renewFrom, setRenewFrom] = useState<AmcContract | null>(null);
@@ -322,6 +327,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
     setLoading(true);
     apiGet<AmcContract[]>(amcUrl(base, rp, '/contracts')).catch(() => [] as AmcContract[])
       .then(c => setContracts(c)).finally(() => setLoading(false));
+    apiGet<typeof mailBills>(amcUrl(base, rp, '/bills-from-email')).then(r => setMailBills(r && Array.isArray(r.unmatched) ? r : null)).catch(() => setMailBills(null));
   }, [base, rp]);
   useEffect(() => { load(); }, [load]);
 
@@ -382,7 +388,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
     return { text: `${c.tasks.pending} pending`, color: '#5b615e' };
   };
   const pillCls = 'text-[10px] font-bold px-[7px] py-[2px] rounded-full';
-  const subline = (c: AmcContract) => `AMC-${c.id} · ${c.propertyName ?? 'All properties'}${c.categoryLabel ? ` · ${c.categoryLabel}` : ''}${c.frequency ? ` · ${cap(c.frequency)}` : ''}`;
+  const subline = (c: AmcContract) => `AMC-${c.id} · ${c.propertyName ?? 'All properties'}${c.unitNumber ? ` ${c.unitNumber}` : ''}${c.categoryLabel ? ` · ${c.categoryLabel}` : ''}${c.frequency ? ` · ${cap(c.frequency)}` : ''}`;
   const chip = (c: AmcContract) => { const ss = STATUS_STYLE[c.status]; return <span className={pillCls} style={{ background: ss.bg, color: ss.fg }}>{ss.label}</span>; };
   const kindChip = (c: AmcContract) => { const km = kindOf(c.kind); return km.visits ? null : <span className={pillCls + ' font-semibold'} style={{ background: km.bg, color: km.fg }} title={km.hint}>{km.short}</span>; };
   /** The fourth column: visits for service contracts, the payment state for everything else. */
@@ -440,6 +446,36 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
           </div>
         ))}
       </div>
+
+      {mailBills && mailBills.schedule && (
+        <div className="mt-4 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12.5px] text-[#5b615e]">
+          <span><b className="text-[#1c1f1d]">Bills from email</b> · {mailBills.filed} filed on their contracts</span>
+          <span>· checked {mailBills.schedule.everyHours === 1 ? 'every hour' : mailBills.schedule.everyHours === 24 ? 'once a day' : mailBills.schedule.everyHours === 168 ? 'once a week' : `every ${mailBills.schedule.everyHours} hours`}</span>
+          <span>· last {mailBills.schedule.lastCheckedAt ? fmtWhen(mailBills.schedule.lastCheckedAt) : 'never'}</span>
+          <span>· next {mailBills.schedule.nextCheckAt ? fmtWhen(mailBills.schedule.nextCheckAt) : 'at the next run'}</span>
+          <button type="button" disabled={checkingBills}
+            onClick={() => { setCheckingBills(true); apiPost<typeof mailBills>(amcUrl(base, rp, '/bills-from-email/check'), {}).then(r => { if (r && Array.isArray(r.unmatched)) setMailBills(r); load(); }).catch(() => {}).finally(() => setCheckingBills(false)); }}
+            className="px-2.5 py-1 rounded-lg border border-[#e6e8e6] bg-white text-[12px] font-medium text-[#1a7a52] hover:border-[#1a7a52] disabled:opacity-50 cursor-pointer">
+            {checkingBills ? 'Checking…' : 'Check now'}
+          </button>
+        </div>
+      )}
+
+      {mailBills && mailBills.unmatched.length > 0 && (
+        <div className="mt-4 bg-[#fff8e6] border border-[#f3dca3] rounded-xl px-4 py-3.5 text-[12.5px] text-[#1c1f1d]">
+          <p className="font-semibold">Bills arriving by email with no contract to go on</p>
+          <p className="text-[#5b615e] mt-0.5">Add the contract with the account number and these bills are filed on it at the next bills check.</p>
+          <ul className="mt-2 space-y-1">
+            {mailBills.unmatched.map(u => (
+              <li key={`${u.vendorName}-${u.accountNumber}`} className="flex flex-wrap gap-x-2">
+                <span className="font-semibold">{u.vendorName}</span>
+                <span>· account {u.accountNumber}</span>
+                <span className="text-[#5b615e]">· {u.bills} {u.bills === 1 ? 'bill' : 'bills'}{u.lastAt ? `, latest ${fmt(u.lastAt)}` : ''}{u.lastAmount != null ? ` (AED ${u.lastAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })})` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex items-center gap-2.5 mt-5 flex-wrap">
         <label className="relative w-full sm:w-[260px]">
@@ -596,6 +632,14 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const [props, setProps] = useState<PropertyOpt[]>([]);
   const [vendorId, setVendorId] = useState(from ? String(from.vendorId) : '');
   const [propertyId, setPropertyId] = useState(from?.propertyId != null ? String(from.propertyId) : '');
+  // 0387 — the one unit of the property this contract / account is for (owner, 8 Oct 2026: "write the unit number").
+  const [unitId, setUnitId] = useState(from?.unitId != null ? String(from.unitId) : '');
+  const [units, setUnits] = useState<Array<{ id: number; unitNumber: string }>>([]);
+  useEffect(() => {
+    if (!propertyId) { setUnits([]); return; }
+    apiGet<Array<{ id: number; unitNumber: string }>>(rp != null ? `/manager/properties/${propertyId}/units` : `/properties/${propertyId}/units`)
+      .then(list => setUnits(Array.isArray(list) ? list.map(u => ({ id: u.id, unitNumber: u.unitNumber })) : [])).catch(() => setUnits([]));
+  }, [propertyId, rp]);
   const [contractType, setContractType] = useState(from ? 'renewal' : 'new');
   // 0279 — what this contract IS (owner, 10 Sep). Decides which sections show below.
   const { active: kindList, meta: kindOf } = useKinds(base, rp);
@@ -691,6 +735,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
       const contract = await apiPost<{ id: number }>(amcUrl(base, rp, '/contracts'), {
         serviceProviderId: spId,
         propertyId: propertyId ? Number(propertyId) : null,
+        unitId: propertyId && unitId ? Number(unitId) : null,
         kind, categoryLabel: categoryLabel.trim() || null, expenseCategoryId: newCat ? null : categoryId,
         contractType, startDate, endDate: isOngoing ? null : endDate || null, ongoing: isOngoing, frequency,
         accountNumber: accountNumber.trim() || null,
@@ -773,11 +818,19 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
                 <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. Etisalat account 764506535, DEWA premise no." />
               </div>
               <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#9b9890]">— which building this cost belongs to</span></span>
-                <select className={field} value={propertyId} onChange={e => setPropertyId(e.target.value)}>
+                <select className={field} value={propertyId} onChange={e => { setPropertyId(e.target.value); setUnitId(''); }}>
                   <option value="">— all / none —</option>
                   {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
                 </select>
               </div>
+              {propertyId && units.length > 0 && (
+                <div className="mt-3"><span className={lbl}>Unit <span className="font-normal text-[#9b9890]">— only when this account is for one unit</span></span>
+                  <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
+                    <option value="">— whole building —</option>
+                    {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
+                  </select>
+                </div>
+              )}
             </Section>
 
             <Section n={2} title="Category" hint={vendorId && categoryId != null ? `Taken from the vendor — change it here if this contract is different. ${km.hint}` : km.hint}>
@@ -938,6 +991,7 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
       await apiPost(amcUrl(base, rp, '/contracts'), {
         serviceProviderId: from.vendorId,
         propertyId: from.propertyId,
+        unitId: from.unitId ?? null,
         contractType: 'renewal',
         renewalOfId: from.id,
         startDate, endDate: endDate || null, accountNumber: from.accountNumber ?? null,
