@@ -27,6 +27,8 @@ import { useSyncExternalStore } from 'react';
 
 export type DocViewerDoc = {
   fileUrl?: string | null;
+  /** The stored document's id — an HTML document (an email filed as it was received, 0391) is fetched by id, same-origin, and shown in a sealed frame. */
+  id?: number | null;
   /** Caption shown above the document. Falls back to displayName / documentKey. */
   caption?: string | null;
   displayName?: string | null;

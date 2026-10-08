@@ -45,7 +45,7 @@ interface Task {
   quotationStatus?: string | null; quotationStatusAt?: string | null;
 }
 interface Visit { t: Task; n: number; stages: [boolean, boolean]; done: number; overdueDays: number; state: 'done' | 'overdue' | 'next' | 'upcoming' | 'closed' }
-interface InstDoc { id: number; fileUrl: string; displayName: string | null; documentKey: string }
+interface InstDoc { id: number; fileUrl: string; displayName: string | null; documentKey: string; mimeType?: string | null }
 /** 0281 — `bill` is the vendor's bill copy; `proof` is the proof of PAYMENT; `paymentMethod` how it was settled. */
 /** 0299 — amountAed is the VAT-INCLUSIVE total; vatAed the VAT inside it. */
 interface Inst { id: number | null; seq: number; dueDate: string; amountAed: number | null; vatMode?: VatMode; vatAed?: number; status: string; paidAt: string | null; reference: string | null; notes?: string | null; paymentMethod?: string | null; bill?: InstDoc | null; proof: InstDoc | null;
@@ -695,12 +695,12 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
                           <span className="min-w-0 truncate">
                             <span className={st === 'overdue' ? 'text-[#b42318] font-bold' : st === 'awaiting' ? 'text-[#c47a00] font-bold' : ''}>#{r.seq}</span> · {fmtS(r.dueDate)} · {r.amountAed == null ? <span className="text-[#c47a00]">amount on bill</span> : aed(r.amountAed)}{st === 'paid' && r.reference ? ` · ${r.reference}` : ''}
                           </span>
-                          {r.bill && <button type="button" onClick={() => openDocViewer({ fileUrl: r.bill!.fileUrl, caption: r.bill!.displayName ?? 'Bill', documentKey: r.bill!.documentKey })} className="text-[10.5px] text-[#5b615e] font-semibold underline cursor-pointer shrink-0" title="The vendor's bill copy">bill</button>}
+                          {r.bill && <button type="button" onClick={() => openDocViewer({ id: r.bill!.id, mimeType: r.bill!.mimeType, fileUrl: r.bill!.fileUrl, caption: r.bill!.displayName ?? 'Bill', documentKey: r.bill!.documentKey })} className="text-[10.5px] text-[#5b615e] font-semibold underline cursor-pointer shrink-0" title="The vendor's bill copy">bill</button>}
                           {st === 'paid' && (
                             <span className="flex items-center gap-2 shrink-0">
                               <span className="text-[10.5px] text-[#1a7a52] font-bold">paid{r.paidAt ? ` ${fmtS(r.paidAt)}` : ''}{r.paymentMethod ? ` · ${cap(r.paymentMethod)}` : ''}</span>
                               {r.proof
-                                ? <button type="button" onClick={() => openDocViewer({ fileUrl: r.proof!.fileUrl, caption: r.proof!.displayName ?? 'Proof of Payment', documentKey: r.proof!.documentKey })} className="text-[10.5px] text-[#1a7a52] font-bold underline cursor-pointer" title="Proof of payment">proof</button>
+                                ? <button type="button" onClick={() => openDocViewer({ id: r.proof!.id, mimeType: r.proof!.mimeType, fileUrl: r.proof!.fileUrl, caption: r.proof!.displayName ?? 'Proof of Payment', documentKey: r.proof!.documentKey })} className="text-[10.5px] text-[#1a7a52] font-bold underline cursor-pointer" title="Proof of payment">proof</button>
                                 : <span className="text-[10.5px] text-[#c47a00] font-semibold" title="No proof of payment on file">no proof</span>}
                               <button type="button" onClick={() => void unmarkPaid(r)} className="text-[10px] text-[#8a8f8c] hover:text-[#b42318] cursor-pointer" title="Reopen this installment">undo</button>
                             </span>

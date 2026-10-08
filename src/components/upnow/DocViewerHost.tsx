@@ -20,10 +20,47 @@ import { usePathname } from 'next/navigation';
 import { X, FileText, Files, RotateCw, ChevronLeft, ChevronRight, PanelRightClose } from 'lucide-react';
 import { useDocViewerState, closeDocViewer, type DocViewerDoc, type DocViewerState } from '@/lib/docViewer';
 import { SecureDocCanvas } from './SecureDocCanvas';
+import { cleanLayout } from '@/lib/emailLayout';
 import { useBackClose } from '@/lib/useSlideOver';
 
 const captionOf = (d: DocViewerDoc) =>
   d.caption ?? d.displayName ?? d.documentKey?.replace(/_/g, ' ') ?? null;
+
+/** 0391 — an email filed as it was received (the bill copy, the proof of payment): shown as the mailbox shows it. */
+const isHtml = (d: DocViewerDoc) =>
+  (d.mimeType ?? '').startsWith('text/html') || /\.html?(\?|$)/i.test(d.fileUrl ?? '');
+
+/**
+ * The email in a sealed frame: fetched by its document id same-origin (the bucket
+ * denies anonymous reads), cleaned like the mailbox view (no script runs, it loads
+ * nothing but pictures), with the viewer's watermark over it.
+ */
+function HtmlDocFrame({ doc, watermark }: { doc: DocViewerDoc; watermark: string }) {
+  const [html, setHtml] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = doc.id != null
+          ? await fetch(`/api/documents/${doc.id}/file`, { credentials: 'include', cache: 'no-store' })
+          : await fetch(doc.fileUrl!, { cache: 'no-store' });
+        const text = res.ok ? await res.text() : '';
+        const clean = text ? cleanLayout(text) : null;
+        if (live) setHtml(clean ? clean.full : null);
+      } catch { if (live) setHtml(null); }
+    })();
+    return () => { live = false; };
+  }, [doc.id, doc.fileUrl]);
+  if (html === undefined) return <div className="px-4 py-6 text-xs text-[#9b9890]">Opening the email…</div>;
+  if (html === null) return <div className="px-4 py-6 text-xs text-[#9b9890]">This email could not be shown.</div>;
+  return (
+    <div className="relative">
+      <iframe title="Email as it was received" srcDoc={html} sandbox="" referrerPolicy="no-referrer"
+        className="block w-full border-0 bg-white" style={{ height: '70vh' }} />
+      <div aria-hidden className="pointer-events-none absolute inset-0 flex items-end justify-end p-2 text-[10px] text-[#9b9890]/70 select-none">{watermark}</div>
+    </div>
+  );
+}
 
 const isImage = (d: DocViewerDoc) =>
   (d.mimeType ?? '').startsWith('image/') ||
@@ -123,6 +160,7 @@ function DocDock({ state, dismiss }: { state: DocViewerState; dismiss: () => voi
         onDragStart={(e) => e.preventDefault()}
         style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
       >
+        {isHtml(doc) ? <HtmlDocFrame key={doc.fileUrl} doc={doc} watermark={watermark} /> : (
         <SecureDocCanvas
           key={doc.fileUrl}
           fileUrl={doc.fileUrl!}
@@ -130,7 +168,7 @@ function DocDock({ state, dismiss }: { state: DocViewerState; dismiss: () => voi
           caption={cap}
           watermark={watermark}
           rotation={rotation}
-        />
+        />)}
       </div>
     </aside>
   );
@@ -178,13 +216,14 @@ function DocModal({ state, dismiss }: { state: DocViewerState; dismiss: () => vo
                 {multi && cap && (
                   <figcaption className="px-4 py-2 text-xs font-semibold text-[#3d3b35] border-b border-[#efeee9]">{cap}</figcaption>
                 )}
+                {isHtml(d) ? <HtmlDocFrame doc={d} watermark={watermark} /> : (
                 <SecureDocCanvas
                   fileUrl={d.fileUrl!}
                   isImage={isImage(d)}
                   caption={cap}
                   watermark={watermark}
                   rotation={rotation}
-                />
+                />)}
               </figure>
             );
           })}

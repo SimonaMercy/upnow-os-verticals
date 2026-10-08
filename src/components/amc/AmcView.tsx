@@ -306,7 +306,8 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   const [groupBy, setGroupBy] = useState<GroupBy>('kind');
   const [contracts, setContracts] = useState<AmcContract[] | null>(null);
   // 0382 — bills that arrived by email and found no contract to go on (listed until one holds the account).
-  const [mailBills, setMailBills] = useState<{ filed: number; schedule?: { everyHours: number; lastCheckedAt: string | null; nextCheckAt: string | null }; unmatched: Array<{ vendorName: string; accountNumber: string; bills: number; lastAt: string | null; lastAmount: number | null; lastPeriod: string | null }> } | null>(null);
+  // 0391 — bills cleared by the payment receipts in the mailbox, and payments for accounts no contract holds.
+  const [mailBills, setMailBills] = useState<{ filed: number; cleared?: number; schedule?: { everyHours: number; lastCheckedAt: string | null; nextCheckAt: string | null }; unmatched: Array<{ vendorName: string; accountNumber: string; bills: number; lastAt: string | null; lastAmount: number | null; lastPeriod: string | null }>; paidNoContract?: Array<{ vendorName: string; accountNumber: string; amountAed: number; paidOn: string | null; reference: string | null }> } | null>(null);
   // 0385 — "Check now": reads the mailbox and files the bills at once, outside the schedule.
   const [checkingBills, setCheckingBills] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -449,7 +450,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
 
       {mailBills && mailBills.schedule && (
         <div className="mt-4 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12.5px] text-[#5b615e]">
-          <span><b className="text-[#1c1f1d]">Bills from email</b> · {mailBills.filed} filed on their contracts</span>
+          <span><b className="text-[#1c1f1d]">Bills from email</b> · {mailBills.filed} filed on their contracts{mailBills.cleared ? ` · ${mailBills.cleared} cleared by payment receipts` : ''}</span>
           <span>· checked {mailBills.schedule.everyHours === 1 ? 'every hour' : mailBills.schedule.everyHours === 24 ? 'once a day' : mailBills.schedule.everyHours === 168 ? 'once a week' : `every ${mailBills.schedule.everyHours} hours`}</span>
           <span>· last {mailBills.schedule.lastCheckedAt ? fmtWhen(mailBills.schedule.lastCheckedAt) : 'never'}</span>
           <span>· next {mailBills.schedule.nextCheckAt ? fmtWhen(mailBills.schedule.nextCheckAt) : 'at the next run'}</span>
@@ -471,6 +472,22 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                 <span className="font-semibold">{u.vendorName}</span>
                 <span>· account {u.accountNumber}</span>
                 <span className="text-[#5b615e]">· {u.bills} {u.bills === 1 ? 'bill' : 'bills'}{u.lastAt ? `, latest ${fmt(u.lastAt)}` : ''}{u.lastAmount != null ? ` (AED ${u.lastAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })})` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {mailBills && (mailBills.paidNoContract?.length ?? 0) > 0 && (
+        <div className="mt-4 bg-[#f3f7f5] border border-[#d6e6de] rounded-xl px-4 py-3.5 text-[12.5px] text-[#1c1f1d]">
+          <p className="font-semibold">Payments received by email for accounts on no contract</p>
+          <p className="text-[#5b615e] mt-0.5">The payment receipt names these accounts, but no contract holds them, so there is no bill to mark paid. Add the contract with the account number to keep its bills and payments here.</p>
+          <ul className="mt-2 space-y-1">
+            {mailBills.paidNoContract!.map(p => (
+              <li key={`${p.accountNumber}-${p.reference}`} className="flex flex-wrap gap-x-2">
+                <span className="font-semibold">{p.vendorName}</span>
+                <span>· account {p.accountNumber}</span>
+                <span className="text-[#5b615e]">· AED {p.amountAed.toLocaleString('en-AE', { minimumFractionDigits: 2 })}{p.paidOn ? ` paid ${fmt(p.paidOn)}` : ''}{p.reference ? ` · ${p.reference}` : ''}</span>
               </li>
             ))}
           </ul>
