@@ -114,6 +114,8 @@ export const ongoingHorizon = (start: string) => {
 /** "Etisalat · 764506535" — the account tells one vendor's contracts apart (0346). */
 export const accountTag = (c: { accountNumber?: string | null }) => c.accountNumber ? `Acc ${c.accountNumber}` : null;
 const addYears = (iso: string, n: number) => addMonths(iso, n * 12);
+/** The last day of the month `iso` falls in. */
+const endOfMonth = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + 1, 0); return d.toISOString().slice(0, 10); };
 export interface PayRow {
   id?: number | null; dueDate: string; amountAed: string; status?: string; reference?: string | null;
   /** 0299 — the row as it is stored (total + the VAT inside it): shown as-is until the amount is edited. */
@@ -474,7 +476,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
                 <span className="font-semibold">{u.vendorName}</span>
                 <span>· account {u.accountNumber}</span>
                 <span className="text-[#5b615e]">· {u.bills} {u.bills === 1 ? 'bill' : 'bills'}{u.lastAt ? `, latest ${fmt(u.lastAt)}` : ''}{u.lastAmount != null ? ` (AED ${u.lastAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })})` : ''}</span>
-                {canEdit && u.vendorId != null && <button type="button" onClick={() => { setRenewFrom(null); setPrefill({ vendorId: u.vendorId!, accountNumber: u.accountNumber }); setShowAdd(true); }} className="text-[11px] font-bold text-[#1a7a52] hover:underline cursor-pointer">Add this account</button>}
+                {canEdit && u.vendorId != null && <button type="button" onClick={() => { setRenewFrom(null); setPrefill({ vendorId: u.vendorId!, accountNumber: u.accountNumber, lastPeriod: u.lastPeriod }); setShowAdd(true); }} className="text-[11px] font-bold text-[#1a7a52] hover:underline cursor-pointer">Add this account</button>}
               </li>
             ))}
           </ul>
@@ -642,7 +644,7 @@ function Section({ n, title, hint, action, children }: { n: number; title: strin
  * vendor locked, the visit plan regenerated for the new dates and editable.
  */
 /** The sender and account of a bill that arrived by email with no contract to go on (AMC page → "Add this account"). */
-export interface AddAmcPrefill { vendorId: number; accountNumber: string }
+export interface AddAmcPrefill { vendorId: number; accountNumber: string; /** The latest bill's month (YYYY-MM-01): the account starts there, so that bill is inside the contract. */ lastPeriod?: string | null }
 
 export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClose, onSaved }: {
   base: string; rp?: number | null; propertiesUrl: string; existingContracts: AmcContract[]; renewFrom?: AmcContract | null; prefill?: AddAmcPrefill | null; onClose: () => void; onSaved: () => void;
@@ -650,7 +652,8 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
   const from = renewFrom ?? null;
   // A renewal starts where the old term ends; a new contract starts today (editable) —
   // an empty start left the payment split disabled and looked broken.
-  const nextStart = from?.endDate ? from.endDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  // From "Add this account": start in the bill's month — a bill is filed only on a contract whose dates cover its month.
+  const nextStart = from?.endDate ? from.endDate.slice(0, 10) : prefill?.lastPeriod ? prefill.lastPeriod.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const [allVendors, setAllVendors] = useState<VendorOpt[]>([]);
   const [props, setProps] = useState<PropertyOpt[]>([]);
   const [vendorId, setVendorId] = useState(from ? String(from.vendorId) : prefill?.vendorId != null ? String(prefill.vendorId) : '');
@@ -892,14 +895,17 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><span className={lbl}>Billing cycle</span>
-              <select className={field} value={frequency} onChange={e => { setFrequency(e.target.value); setPayDirty(false); }}>
-                <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annually">Annually</option>
+              {/* Owner, 8 Oct 2026: some bills come once for a unit (a final bill) — One-time = a single row in the bill's month, no ongoing schedule. */}
+              <select className={field} value={frequency} onChange={e => { const f = e.target.value; setFrequency(f); setPayDirty(false); if (f === 'one_time') { setOngoing(false); if (startDate) setEndDate(endOfMonth(startDate)); } else if (frequency === 'one_time') { setOngoing(true); } }}>
+                <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annually">Annually</option><option value="one_time">One-time</option>
               </select>
             </div>
-            <div><span className={lbl}>First bill from</span><input type="date" className={field} value={startDate} onChange={e => { setStartDate(e.target.value); setPayDirty(false); }} /></div>
+            <div><span className={lbl}>{frequency === 'one_time' ? 'Bill date' : 'First bill from'}</span><input type="date" className={field} value={startDate} onChange={e => { setStartDate(e.target.value); setPayDirty(false); if (frequency === 'one_time' && e.target.value) setEndDate(endOfMonth(e.target.value)); }} /></div>
           </div>
           <div className="text-[12px] text-[#5b615e]">
-            {isOngoing
+            {frequency === 'one_time'
+              ? <>One bill only — its row waits in {startDate ? new Date(startDate + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : 'that month'}; nothing recurs.</>
+              : isOngoing
               ? <>Ongoing — no end date. <button type="button" onClick={() => { setOngoing(false); setPayDirty(false); }} className={link}>Set an end date</button></>
               : <span className="flex items-center gap-2 flex-wrap">Ends on <input type="date" className={field + ' w-auto'} value={endDate} onChange={e => { setEndDate(e.target.value); setPayDirty(false); }} /> <button type="button" onClick={() => { setOngoing(true); setPayDirty(false); }} className={link}>No end date</button></span>}
           </div>
