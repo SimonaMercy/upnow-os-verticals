@@ -287,6 +287,11 @@ interface CardVM {
   /** Who the card is about — what unread emails and WhatsApp messages are counted by. */
   tenantId?: number | null;
   leadId?: number | null;
+  /** Contract cards: the term's start date as 'YYYY-MM-DD' (Dubai time). The
+   *  Renewal tab orders its lanes by this — September's renewals, then October's,
+   *  then November's, day by day inside a month — and prints a month divider
+   *  where the month changes. */
+  termStart?: string | null;
   /** Breach cards only: the one action the board offers inline — a deep link
    *  that opens the lease's Breaches section with the Escalate dialog up. */
   escalateHref?: string | null;
@@ -312,6 +317,21 @@ function fmtShort(d: string | null) {
   return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short', year: '2-digit' });
 }
 function fmtAed(n: number) { return n.toLocaleString('en-AE'); }
+// 'YYYY-MM-DD' of a date in Dubai time — sorts as text, so dates line up in order.
+function dayKeyOf(d: string | null | undefined): string | null {
+  if (!d) return null;
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(t);
+  const get = (k: string) => parts.find(p => p.type === k)?.value;
+  const y = get('year'), m = get('month'), dd = get('day');
+  return y && m && dd ? `${y}-${m}-${dd}` : null;
+}
+// "September 2026" for a month divider, from a 'YYYY-MM…' key.
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-AE', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+}
 function initials(name: string | null) {
   if (!name) return '—';
   return name.split(' ').map(p => p[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
@@ -403,6 +423,7 @@ function contractToCard(c: OpsContract, stages: StageDef[], href: string, nowMs:
     ref: c.ref,
     rentAed: c.annualRent || null,
     term: `${fmtShort(c.startDate)} – ${fmtShort(c.endDate)}`,
+    termStart: dayKeyOf(c.startDate),
     done: c.doneCount,
     total: c.totalCount,
     href,
@@ -897,23 +918,38 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
 
   const activeCards = cardsByTab[tab];
   const stages = stagesForTab[tab];
+  // The Renewal tab runs month by month — the renewals starting in September,
+  // then October, then November, day by day inside a month — so a lane reads
+  // like a calendar. The other tabs keep their "waiting first, then furthest
+  // along" order.
+  const byMonth = tab === 'renewal';
+  const monthCmp = (a: CardVM, b: CardVM) => byMonth ? (a.termStart ?? '9999').localeCompare(b.termStart ?? '9999') : 0;
   const byStage = useMemo(() => {
     const m = new Map<string, CardVM[]>();
     for (const c of activeCards) { const a = m.get(c.stageKey) ?? []; a.push(c); m.set(c.stageKey, a); }
-    // Someone waiting for an answer comes first; then the furthest along.
-    for (const a of m.values()) a.sort((x, y) => (Number(waitingCount(y) > 0) - Number(waitingCount(x) > 0)) || ((y.done / y.total) - (x.done / x.total)));
+    // Month first on Renewal; then someone waiting for an answer; then the furthest along.
+    for (const a of m.values()) a.sort((x, y) => monthCmp(x, y) || (Number(waitingCount(y) > 0) - Number(waitingCount(x) > 0)) || ((y.done / y.total) - (x.done / x.total)));
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCards, unread]);
+  }, [activeCards, unread, byMonth]);
 
   // Flat, stage-ordered list for the List + Grid views (kanban uses byStage).
   const orderIndex = new Map(stages.map((s, i) => [s.key, i]));
   const sortedCards = useMemo(() =>
     [...activeCards].sort((a, b) =>
       ((orderIndex.get(a.stageKey) ?? 0) - (orderIndex.get(b.stageKey) ?? 0))
+      || monthCmp(a, b)
       || (Number(waitingCount(b) > 0) - Number(waitingCount(a) > 0)) || ((b.done / b.total) - (a.done / a.total))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeCards, tab, unread]);
+    [activeCards, tab, unread, byMonth]);
+  // Month divider printed above a card when its month differs from the card before
+  // it (Renewal tab only). Cards with no term date fall under "No date".
+  const monthDivider = (c: CardVM, prev: CardVM | undefined) => {
+    if (!byMonth) return null;
+    const key = c.termStart?.slice(0, 7) ?? 'none';
+    if (prev && (prev.termStart?.slice(0, 7) ?? 'none') === key) return null;
+    return <div key={`m-${key}`} className="month-div">{key === 'none' ? 'No date' : monthLabel(key)}</div>;
+  };
   const stageTitleOf = (key: string) => stages.find(s => s.key === key)?.title ?? key;
   // Full details for the hover tooltip — so anything clipped in the compact
   // cards (name, unit, building, term) is still readable on hover.
@@ -1098,7 +1134,7 @@ export default function OperationsPipelines({ contractsPath, leadsPath, contract
                     <span className="lane-count">{cards.length}</span>
                   </header>
                   <div className="lane-body">
-                    {cards.map(c => vcard(c, false))}
+                    {cards.map((c, i) => [monthDivider(c, cards[i - 1]), vcard(c, false)])}
                     {cards.length === 0 && <div className="lane-empty">No records</div>}
                   </div>
                 </section>
@@ -1223,6 +1259,8 @@ export function OpsPipelineStyle() {
       .opsp-page .lane-count{ font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:6px; flex:0 0 auto; color:var(--green-d); background:var(--green-t2); }
       .opsp-page .lane-body{ padding:0 6px 8px; display:flex; flex-direction:column; gap:6px; min-height:44px; }
       .opsp-page .lane-empty{ text-align:center; font-size:10px; color:var(--mute); padding:10px 0; }
+      .opsp-page .month-div{ font-size:9.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); padding:6px 2px 1px; border-top:1px solid var(--line-2); margin-top:2px; }
+      .opsp-page .month-div:first-child{ border-top:0; margin-top:0; padding-top:2px; }
 
       .opsp-page .card{ position:relative; background:#fff; border:1px solid #e9ece8; border-radius:9px; padding:8px; box-shadow:0 1px 2px rgba(20,40,30,.04); }
       /* Deep-link highlight (e.g. "Open lease" from a converted lead) */
