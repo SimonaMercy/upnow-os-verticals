@@ -11,7 +11,7 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  * maintenance plan (done/pending). Add-AMC supports picking an existing vendor
  * (auto-prefills a renewal for next year) or creating a new vendor, with notes.
  */
-import { Fragment, useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Wrench, Loader2, Plus, Search, X, UploadCloud } from 'lucide-react';
@@ -307,7 +307,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   const [contracts, setContracts] = useState<AmcContract[] | null>(null);
   // 0382 — bills that arrived by email and found no contract to go on (listed until one holds the account).
   // 0391 — bills cleared by the payment receipts in the mailbox, and payments for accounts no contract holds.
-  const [mailBills, setMailBills] = useState<{ filed: number; cleared?: number; schedule?: { everyHours: number; lastCheckedAt: string | null; nextCheckAt: string | null }; unmatched: Array<{ vendorName: string; accountNumber: string; bills: number; lastAt: string | null; lastAmount: number | null; lastPeriod: string | null }>; paidNoContract?: Array<{ vendorName: string; accountNumber: string; amountAed: number; paidOn: string | null; reference: string | null }> } | null>(null);
+  const [mailBills, setMailBills] = useState<{ filed: number; cleared?: number; schedule?: { everyHours: number; lastCheckedAt: string | null; nextCheckAt: string | null }; unmatched: Array<{ vendorId?: number | null; vendorName: string; accountNumber: string; bills: number; lastAt: string | null; lastAmount: number | null; lastPeriod: string | null }>; paidNoContract?: Array<{ vendorName: string; accountNumber: string; amountAed: number; paidOn: string | null; reference: string | null }> } | null>(null);
   // 0385 — "Check now": reads the mailbox and files the bills at once, outside the schedule.
   const [checkingBills, setCheckingBills] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -375,7 +375,9 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
     </div>
   );
 
-  const closeModal = () => { setShowAdd(false); setRenewFrom(null); };
+  // A bill that arrived with no contract: "Add this account" opens the Add form with the sender and the account filled in.
+  const [prefill, setPrefill] = useState<AddAmcPrefill | null>(null);
+  const closeModal = () => { setShowAdd(false); setRenewFrom(null); setPrefill(null); };
   const detailHrefOf = (c: AmcContract) => base === '/amc'
     ? `/rental-provider/dashboard/amc/${c.id}`
     : `/dashboard/manager/amc/${c.id}${rp != null ? `?rp=${rp}` : ''}`;
@@ -431,7 +433,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
           className="text-[12px] font-semibold px-3.5 py-[9px] rounded-lg border border-[#1a7a52] bg-[#1a7a52] text-white hover:bg-[#156643] whitespace-nowrap cursor-pointer">+ Add AMC</button>}
       </div>
 
-      {showAdd && !renewFrom && <AddAmcModal base={base} rp={rp} propertiesUrl={propertiesUrl} existingContracts={contracts ?? []} onClose={closeModal} onSaved={() => { closeModal(); load(); }} />}
+      {showAdd && !renewFrom && <AddAmcModal base={base} rp={rp} propertiesUrl={propertiesUrl} existingContracts={contracts ?? []} prefill={prefill} onClose={closeModal} onSaved={() => { closeModal(); load(); }} />}
       {showAdd && renewFrom && <AddAmcModal base={base} rp={rp} propertiesUrl={propertiesUrl} existingContracts={contracts ?? []} renewFrom={renewFrom} onClose={closeModal} onSaved={() => { closeModal(); load(); }} />}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-[22px]">
@@ -465,13 +467,14 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
       {mailBills && mailBills.unmatched.length > 0 && (
         <div className="mt-4 bg-[#fff8e6] border border-[#f3dca3] rounded-xl px-4 py-3.5 text-[12.5px] text-[#1c1f1d]">
           <p className="font-semibold">Bills arriving by email with no contract to go on</p>
-          <p className="text-[#5b615e] mt-0.5">Add the contract with the account number and these bills are filed on it at the next bills check.</p>
+          <p className="text-[#5b615e] mt-0.5">Add the account — sender, account number, property — and these bills are filed on it at the next bills check.</p>
           <ul className="mt-2 space-y-1">
             {mailBills.unmatched.map(u => (
               <li key={`${u.vendorName}-${u.accountNumber}`} className="flex flex-wrap gap-x-2">
                 <span className="font-semibold">{u.vendorName}</span>
                 <span>· account {u.accountNumber}</span>
                 <span className="text-[#5b615e]">· {u.bills} {u.bills === 1 ? 'bill' : 'bills'}{u.lastAt ? `, latest ${fmt(u.lastAt)}` : ''}{u.lastAmount != null ? ` (AED ${u.lastAmount.toLocaleString('en-AE', { minimumFractionDigits: 2 })})` : ''}</span>
+                {canEdit && u.vendorId != null && <button type="button" onClick={() => { setRenewFrom(null); setPrefill({ vendorId: u.vendorId!, accountNumber: u.accountNumber }); setShowAdd(true); }} className="text-[11px] font-bold text-[#1a7a52] hover:underline cursor-pointer">Add this account</button>}
               </li>
             ))}
           </ul>
@@ -638,8 +641,11 @@ function Section({ n, title, hint, action, children }: { n: number; title: strin
  * every field prefilled from the contract being renewed for the next term, the
  * vendor locked, the visit plan regenerated for the new dates and editable.
  */
-export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSaved }: {
-  base: string; rp?: number | null; propertiesUrl: string; existingContracts: AmcContract[]; renewFrom?: AmcContract | null; onClose: () => void; onSaved: () => void;
+/** The sender and account of a bill that arrived by email with no contract to go on (AMC page → "Add this account"). */
+export interface AddAmcPrefill { vendorId: number; accountNumber: string }
+
+export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClose, onSaved }: {
+  base: string; rp?: number | null; propertiesUrl: string; existingContracts: AmcContract[]; renewFrom?: AmcContract | null; prefill?: AddAmcPrefill | null; onClose: () => void; onSaved: () => void;
 }) {
   const from = renewFrom ?? null;
   // A renewal starts where the old term ends; a new contract starts today (editable) —
@@ -647,7 +653,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const nextStart = from?.endDate ? from.endDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const [allVendors, setAllVendors] = useState<VendorOpt[]>([]);
   const [props, setProps] = useState<PropertyOpt[]>([]);
-  const [vendorId, setVendorId] = useState(from ? String(from.vendorId) : '');
+  const [vendorId, setVendorId] = useState(from ? String(from.vendorId) : prefill?.vendorId != null ? String(prefill.vendorId) : '');
   const [propertyId, setPropertyId] = useState(from?.propertyId != null ? String(from.propertyId) : '');
   // 0387 — the one unit of the property this contract / account is for (owner, 8 Oct 2026: "write the unit number").
   const [unitId, setUnitId] = useState(from?.unitId != null ? String(from.unitId) : '');
@@ -670,7 +676,10 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   const [endDate, setEndDate] = useState(nextStart ? addYears(nextStart, 1) : '');
   // 0346 — no end date (owner, 30 Sep: Etisalat, Dubai Holding). Bills and recurring costs start ongoing; a visit plan needs an end.
   const [ongoing, setOngoing] = useState(false);
-  const [accountNumber, setAccountNumber] = useState(from?.accountNumber ?? '');
+  const [accountNumber, setAccountNumber] = useState(from?.accountNumber ?? prefill?.accountNumber ?? '');
+  // Owner, 8 Oct 2026: "while adding AMC for a bill we don't need so much of details" — a bill-type kind shows the short form
+  // (sender, account, property, cycle, start) until "show all details" is asked for.
+  const [showAll, setShowAll] = useState(false);
   const [frequency, setFrequency] = useState(from?.frequency ?? 'annually');
   const [modeOfPayment, setModeOfPayment] = useState(from?.modeOfPayment ?? '');
   const [payRows, setPayRows] = useState<PayRow[]>([]);
@@ -736,6 +745,19 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
   }, [startDate, termEnd, frequency, annualValue, annualTotal, payDirty, payCount, kind, km.schedule, isOngoing]);
   // Picking a bill-type kind defaults the cadence to monthly; ad-hoc has no schedule. Bills and ad-hoc start ongoing, the rest dated.
   const pickKind = (k: ContractKind) => { const m = kindOf(k); setKind(k); setPayDirty(false); if (m.schedule === 'bills') setFrequency('monthly'); if (!from) setOngoing(!m.visits && m.schedule !== 'fixed'); };
+
+  // Opened from "Add this account": the sender is picked as a vendor would be (its category and cadence fill in) and,
+  // unless the vendor's own category is already a bill type, the form is a utility account.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!prefill || from || prefilled.current || !allVendors.length) return;
+    prefilled.current = true;
+    onPickVendor(String(prefill.vendorId));
+    const v = allVendors.find(x => x.id === prefill.vendorId);
+    const linked = v?.expenseCategoryKind && kindList.some(k => k.key === v.expenseCategoryKind) ? kindOf(v.expenseCategoryKind) : null;
+    if (!linked || linked.schedule !== 'bills') { const bill = kindList.find(k => k.key === 'utility' && k.schedule === 'bills') ?? kindList.find(k => k.schedule === 'bills'); if (bill) pickKind(bill.key); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill, allVendors]);
 
   const editRow = (i: number, patch: Partial<PlanRow>) => { setPlanDirty(true); setPlan(p => p.map((r, j) => j === i ? { ...r, ...patch } : r)); };
   const removeRow = (i: number) => { setPlanDirty(true); setPlan(p => p.filter((_, j) => j !== i)); };
@@ -807,17 +829,84 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
 
   const field = 'w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
   const lbl = 'text-xs font-medium text-[#6b6860] mb-1 block';
+  const link = 'text-[#1a7a52] font-semibold hover:underline cursor-pointer';
+  // The short form: a bill-type kind (utility account, recurring cost) being added, not renewed, with the details not asked for.
+  const simple = !from && km.schedule === 'bills' && !showAll;
+  const kindChips = (
+    <div className="flex flex-wrap gap-1.5">
+      {kindList.filter(k => k.isActive !== false || k.key === kind).map(k => (
+        <button key={k.key} type="button" onClick={() => pickKind(k.key)} title={k.hint}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-full border cursor-pointer"
+          style={kind === k.key ? { background: k.fg, color: '#fff', borderColor: k.fg } : { background: '#fff', color: '#5b615e', borderColor: '#e6e8e6' }}>{k.label}</button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className={`bg-white rounded-2xl w-full ${simple ? 'max-w-lg' : 'max-w-3xl'} max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef] sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-sm font-bold text-[#1a1916]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : 'Add a contract or expense'}</h2>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{accountNumber.trim() ? ` · Acc ${accountNumber.trim()}` : ''}{isOngoing ? ' · ongoing' : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>
+            <h2 className="text-sm font-bold text-[#1a1916]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : simple ? `Add ${km.label.toLowerCase()}` : 'Add a contract or expense'}</h2>
+            {simple
+              ? <p className="text-[11px] text-[#9b9890] mt-0.5">Sender, account and schedule — each bill fills its amount in as it arrives.</p>
+              : <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{accountNumber.trim() ? ` · Acc ${accountNumber.trim()}` : ''}{isOngoing ? ' · ongoing' : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>}
           </div>
           <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916]"><X size={18} /></button>
         </div>
+        {simple ? (
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <span className={lbl}>What it is</span>
+            {kindChips}
+            <p className="text-[11px] text-[#9b9890] mt-1">{km.hint}</p>
+          </div>
+          <div>
+            <span className={lbl}>{kind === 'recurring' ? 'Payee' : 'Vendor'}</span>
+            <select className={field} value={vendorId} onChange={e => onPickVendor(e.target.value)}>
+              <option value="">Select…</option>
+              {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.serviceCategory ? ` · ${v.serviceCategory.replace(/_/g,' ')}` : ''}</option>)}
+            </select>
+            <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <Link href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</Link> first.</p>
+          </div>
+          <div>
+            <span className={lbl}>Account number <span className="font-normal text-[#9b9890]">— as printed on the bill</span></span>
+            <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. 2042391123" />
+            <p className="text-[11px] text-[#9b9890] mt-1">Bills that arrive by email are filed on this account.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><span className={lbl}>Property</span>
+              <select className={field} value={propertyId} onChange={e => { setPropertyId(e.target.value); setUnitId(''); }}>
+                <option value="">— all / none —</option>
+                {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
+              </select>
+            </div>
+            {propertyId && units.length > 0 && (
+              <div><span className={lbl}>Unit <span className="font-normal text-[#9b9890]">— if for one unit</span></span>
+                <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
+                  <option value="">— whole building —</option>
+                  {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><span className={lbl}>Billing cycle</span>
+              <select className={field} value={frequency} onChange={e => { setFrequency(e.target.value); setPayDirty(false); }}>
+                <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annually">Annually</option>
+              </select>
+            </div>
+            <div><span className={lbl}>First bill from</span><input type="date" className={field} value={startDate} onChange={e => { setStartDate(e.target.value); setPayDirty(false); }} /></div>
+          </div>
+          <div className="text-[12px] text-[#5b615e]">
+            {isOngoing
+              ? <>Ongoing — no end date. <button type="button" onClick={() => { setOngoing(false); setPayDirty(false); }} className={link}>Set an end date</button></>
+              : <span className="flex items-center gap-2 flex-wrap">Ends on <input type="date" className={field + ' w-auto'} value={endDate} onChange={e => { setEndDate(e.target.value); setPayDirty(false); }} /> <button type="button" onClick={() => { setOngoing(true); setPayDirty(false); }} className={link}>No end date</button></span>}
+          </div>
+          <p className="text-[11px] text-[#9b9890]">Annual value, VAT, mode of payment, the bill rows and a contract copy can be added on the contract page later — or <button type="button" onClick={() => setShowAll(true)} className={link}>show all details</button> now.</p>
+          {error && <p className="text-xs text-[#b91c1c] bg-[#fef2f2] rounded-lg px-3 py-2">{error}</p>}
+        </div>
+        ) : (
         <div className="px-5 py-4 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-x-6 gap-y-4">
           {/* ── left: what it is, who it is with, the term ── */}
           <div className="space-y-4 min-w-0">
@@ -851,13 +940,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
             </Section>
 
             <Section n={2} title="Category" hint={vendorId && categoryId != null ? `Taken from the vendor — change it here if this contract is different. ${km.hint}` : km.hint}>
-              <div className="flex flex-wrap gap-1.5">
-                {kindList.filter(k => k.isActive !== false || k.key === kind).map(k => (
-                  <button key={k.key} type="button" onClick={() => pickKind(k.key)} title={k.hint}
-                    className="text-[11px] font-semibold px-2.5 py-1 rounded-full border cursor-pointer"
-                    style={kind === k.key ? { background: k.fg, color: '#fff', borderColor: k.fg } : { background: '#fff', color: '#5b615e', borderColor: '#e6e8e6' }}>{k.label}</button>
-                ))}
-              </div>
+              {kindChips}
               <div className="mt-3">
                 <span className={lbl}>Sub-category <span className="font-normal text-[#9b9890]">— report grouping</span></span>
                 {newCat ? (
@@ -966,6 +1049,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, onClose, onSav
 
           {error && <p className="lg:col-span-2 text-xs text-[#b91c1c] bg-[#fef2f2] rounded-lg px-3 py-2">{error}</p>}
         </div>
+        )}
         <div className="px-5 py-4 border-t border-[#f4f3ef] flex justify-end gap-2 sticky bottom-0 bg-white">
           <button onClick={onClose} className="text-xs font-medium px-4 py-2 rounded-xl border border-[#e8e6e0] text-[#6b6860]">Cancel</button>
           <button onClick={submit} disabled={saving} className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60" style={{ background: '#2e9f82' }}>
