@@ -1,6 +1,6 @@
 /**
- * Maintenance request photos — the same presign → PUT → persist cycle as the
- * booking evidence photos (bookingEvidence.ts), against the request:
+ * Maintenance request photos and short videos — the same presign → PUT → persist
+ * cycle as the booking evidence photos (bookingEvidence.ts), against the request:
  *
  *   1. POST /maintenance/my/:id/media/upload-url → presigned PUT + raw fileUrl
  *   2. PUT the binary to uploadUrl (Content-Type = the file's mime)
@@ -10,18 +10,27 @@
  * provider's job page briefs the crew with the customer's own pictures.
  */
 
+import { isVideoFile } from '@/lib/media';
+
 export interface MaintenancePhoto {
   id: number;
+  mediaType?: 'photo' | 'video';
   caption: string | null;
   viewUrl: string;
   createdAt: string;
 }
 
-const MAX_BYTES = 10 * 1024 * 1024; // matches the KYC / booking ceiling
+const MAX_BYTES = 10 * 1024 * 1024; // photos — matches the KYC / booking ceiling
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // a phone clip of the problem (under the local-dev 120mb raw-body cap)
 export const MAX_REQUEST_PHOTOS = 6;
+export const MAX_PHOTO_MB = 10;
+export const MAX_VIDEO_MB = 100;
 
 export async function uploadMaintenancePhoto(requestId: number, file: File, caption?: string): Promise<MaintenancePhoto> {
-  if (file.size > MAX_BYTES) throw new Error(`${file.name}: too large — 10 MB max.`);
+  const video = isVideoFile(file);
+  if (file.size > (video ? MAX_VIDEO_BYTES : MAX_BYTES)) {
+    throw new Error(`${file.name}: too large — ${video ? MAX_VIDEO_MB : MAX_PHOTO_MB} MB max for a ${video ? 'video' : 'photo'}.`);
+  }
   const presignRes = await fetch(`/api/maintenance/my/${requestId}/media/upload-url`, {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mimeType: file.type, originalName: file.name }),
@@ -39,7 +48,7 @@ export async function uploadMaintenancePhoto(requestId: number, file: File, capt
   });
   if (!saveRes.ok) {
     const body = await saveRes.json().catch(() => null);
-    throw new Error(body?.message ?? `${file.name}: could not save the photo.`);
+    throw new Error(body?.message ?? `${file.name}: could not save the ${video ? 'video' : 'photo'}.`);
   }
   return (await saveRes.json()) as MaintenancePhoto;
 }

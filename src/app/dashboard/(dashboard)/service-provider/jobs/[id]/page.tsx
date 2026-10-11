@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { isVideoUrl } from '@/lib/media';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost, apiPatch } from '@/lib/api';
@@ -76,9 +77,16 @@ function EvidenceBlock({ title, photos, onUpload, busy }: {
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
         {photos.map((p) => (
-          <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer" title={p.caption ?? title}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={p.viewUrl} alt={p.caption ?? title} style={{ width: 74, height: 74, objectFit: 'cover', borderRadius: 10, border: BORDER, display: 'block' }} />
+          <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer" title={p.caption ?? (isVideoUrl(p.viewUrl) ? 'Play video' : title)} style={{ position: 'relative', display: 'block' }}>
+            {isVideoUrl(p.viewUrl) ? (
+              <>
+                <video src={p.viewUrl} muted playsInline preload="metadata" style={{ width: 74, height: 74, objectFit: 'cover', borderRadius: 10, border: BORDER, display: 'block', background: '#000' }} />
+                <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 22, pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>▶</span>
+              </>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={p.viewUrl} alt={p.caption ?? title} style={{ width: 74, height: 74, objectFit: 'cover', borderRadius: 10, border: BORDER, display: 'block' }} />
+            )}
           </a>
         ))}
         {photos.length === 0 && !onUpload && <span style={{ fontSize: 12.5, color: FAINT }}>None yet</span>}

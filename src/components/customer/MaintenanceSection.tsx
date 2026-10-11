@@ -17,7 +17,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Wrench, Plus, X, CheckCircle2, Camera, ImageIcon, ShoppingBag } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
-import { uploadMaintenancePhoto, MAX_REQUEST_PHOTOS } from '@/lib/maintenanceEvidence';
+import { uploadMaintenancePhoto, MAX_REQUEST_PHOTOS, MAX_PHOTO_MB, MAX_VIDEO_MB } from '@/lib/maintenanceEvidence';
+import { isVideoFile } from '@/lib/media';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 interface Cat { id: number; name: string; parentId?: number | null; coverage?: string | null; note?: string | null; oneTime?: boolean }
@@ -131,7 +132,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
       for (const f of files) {
         try { await uploadMaintenancePhoto(made.id, f); } catch (e) { failed.push(e instanceof Error ? e.message : f.name); }
       }
-      setUploadNote(failed.length ? `Request sent, but ${failed.length} photo${failed.length > 1 ? 's' : ''} did not upload: ${failed.join('; ')}` : null);
+      setUploadNote(failed.length ? `Request sent, but ${failed.length} file${failed.length > 1 ? 's' : ''} did not upload: ${failed.join('; ')}` : null);
       setSent({ ref: made?.ref ?? 'your request', coverage: made?.coverage ?? null });
       setOpen(false); setCatId(''); setTitle(''); setDesc(''); setProviderId(''); setFiles([]); setWhenMode('asap'); setWhenAt(''); load();
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not send the request.'); }
@@ -332,25 +333,27 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 </div>
                 <p className="text-[10px] text-[#9b9890] mt-1">The provider schedules the visit around this and confirms the exact slot with you.</p>
               </div>
-              {/* Photos — the provider's crew is briefed with these on the job page. */}
+              {/* Photos or short videos — the provider's crew is briefed with these on the job page. */}
               <div className="border border-dashed border-[#e8e6e0] rounded-lg px-3 py-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1a7a5a] cursor-pointer">
-                    <Camera size={13} /> {files.length ? 'Add more photos' : 'Add photos'}
-                    <input type="file" accept="image/*" multiple className="hidden" disabled={busy}
+                    <Camera size={13} /> {files.length ? 'Add more photos or videos' : 'Add photos or videos'}
+                    <input type="file" accept="image/*,video/*" multiple className="hidden" disabled={busy}
                       onChange={e => {
                         const picked = Array.from(e.target.files ?? []);
                         setFiles(prev => [...prev, ...picked].slice(0, MAX_REQUEST_PHOTOS));
                         e.target.value = '';
                       }} />
                   </label>
-                  <span className="text-[11px] text-[#9b9890]">{files.length}/{MAX_REQUEST_PHOTOS} · JPG, PNG or HEIC, 10 MB each</span>
+                  <span className="text-[11px] text-[#9b9890]">{files.length}/{MAX_REQUEST_PHOTOS} · JPG, PNG, HEIC up to {MAX_PHOTO_MB} MB · MP4, MOV up to {MAX_VIDEO_MB} MB</span>
                 </div>
                 {files.length > 0 && (
                   <ul className="flex gap-2 flex-wrap mt-2">
                     {files.map((f, i) => (
                       <li key={`${f.name}-${i}`} className="relative">
-                        <img src={URL.createObjectURL(f)} alt={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e8e6e0]" />
+                        {isVideoFile(f)
+                          ? <video src={URL.createObjectURL(f)} muted playsInline preload="metadata" title={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e8e6e0] bg-black" />
+                          : <img src={URL.createObjectURL(f)} alt={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e8e6e0]" />}
                         <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} disabled={busy}
                           className="absolute -top-1.5 -right-1.5 bg-white border border-[#e8e6e0] rounded-full p-0.5 text-[#6b6860] hover:text-[#b91c1c] cursor-pointer" aria-label={`Remove ${f.name}`}>
                           <X size={10} />
@@ -429,7 +432,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
               ) : (
               <button type="button" disabled={busy} onClick={submit}
                 className="w-full py-2.5 rounded-xl text-sm font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
-                {busy ? (files.length ? 'Sending + uploading photos…' : 'Sending…') : 'Send request'}
+                {busy ? (files.length ? 'Sending + uploading files…' : 'Sending…') : 'Send request'}
               </button>
               )}
               <p className="text-[11px] text-[#9b9890]">Pick the item and we'll tell you straight away whether it's your landlord's scope or a marketplace booking.</p>

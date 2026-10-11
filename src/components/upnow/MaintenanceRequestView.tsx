@@ -19,12 +19,13 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, CheckCircle2, XCircle, RefreshCw, ShieldCheck,
-  Clock, FileText, AlertTriangle,
+  Clock, FileText, AlertTriangle, Play,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { InHouseJobPanel, type InHouseBill, type InHouseTask } from './InHouseJobPanel';
 import { PhotoLightbox, type GalleryPhoto } from './PhotoGallery';
+import { isVideoUrl } from '@/lib/media';
 import { tenantDisplayName } from '@/lib/tenantName';
 import { SCOPE_LABEL, maintenanceLocation, maintenanceNoCustomerLabel, type MaintenanceScope } from '@/lib/maintenanceScope';
 
@@ -62,7 +63,7 @@ interface Detail {
   cancelledAt: string | null; closedAt: string | null;
   createdAt: string; updatedAt: string;
   timeline: { id: number; type: string; actorRole: string | null; payload: Record<string, unknown> | null; at: string }[];
-  photos?: { id: number; kind?: string; caption: string | null; viewUrl: string; createdAt: string }[];
+  photos?: { id: number; kind?: string; mediaType?: 'photo' | 'video'; caption: string | null; viewUrl: string; createdAt: string }[];
   /** 0298 — the landlord's own team's job: run from this page (photos, bills, mark done). */
   inHouse?: boolean;
   bills?: InHouseBill[];
@@ -291,17 +292,24 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-5 mt-5 items-start">
       <div className="space-y-4 min-w-0">
-      {/* ── photos from the customer ── */}
+      {/* ── photos and videos from the customer ── */}
       {!d.inHouse && (d.photos?.length ?? 0) > 0 && (
         <div className={card}>
-          <h2 className="text-[14px] font-bold text-[#1c1f1d]">Photos from the customer · {d.photos!.length}</h2>
+          <h2 className="text-[14px] font-bold text-[#1c1f1d]">{d.photos!.some(p => isVideoUrl(p.viewUrl)) ? 'Photos & videos' : 'Photos'} from the customer · {d.photos!.length}</h2>
           <p className="text-xs text-[#6b6860] mt-1">The same pictures brief the provider on their job page.</p>
           <ul className="flex gap-2 flex-wrap mt-3">
             {d.photos!.map((p, k) => (
               <li key={p.id}>
-                <button type="button" title={p.caption ?? 'View photo'} className="block cursor-pointer"
-                  onClick={() => setGallery({ photos: d.photos!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? 'Customer photo' })), start: k })}>
-                  <img src={p.viewUrl} alt={p.caption ?? 'Customer photo'} className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
+                <button type="button" title={p.caption ?? (isVideoUrl(p.viewUrl) ? 'Play video' : 'View photo')} className="block cursor-pointer relative"
+                  onClick={() => setGallery({ photos: d.photos!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? (isVideoUrl(r.viewUrl) ? 'Customer video' : 'Customer photo') })), start: k })}>
+                  {isVideoUrl(p.viewUrl) ? (
+                    <>
+                      <video src={p.viewUrl} muted playsInline preload="metadata" className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] bg-black hover:opacity-90" />
+                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none"><span className="w-8 h-8 rounded-full bg-black/55 text-white flex items-center justify-center"><Play size={14} fill="currentColor" /></span></span>
+                    </>
+                  ) : (
+                    <img src={p.viewUrl} alt={p.caption ?? 'Customer photo'} className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
+                  )}
                 </button>
               </li>
             ))}

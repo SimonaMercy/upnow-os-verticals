@@ -12,6 +12,7 @@ import {
   CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Clock, Loader2,
   MapPin, Plus, Wrench, XCircle,
 } from 'lucide-react';
+import { isVideoUrl } from '@/lib/media';
 import { uploadBookingPhoto } from '@/lib/bookingEvidence';
 import { TechnicianTrackerMap } from '@/components/upnow/TechnicianTrackerMap';
 import { ReschedulePanel } from '@/components/upnow/ReschedulePanel';
@@ -557,9 +558,16 @@ export default function CustomerServicesPage() {
                       const m = mediaMap[b.id];
                       const canAttach = !['completed', 'cancelled', 'dispute'].includes(b.status);
                       const thumbs = (ps: EvidencePhoto[]) => ps.map((p) => (
-                        <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={p.viewUrl} alt={p.caption ?? 'photo'} className="rounded-lg border object-cover" style={{ width: 60, height: 60, borderColor: 'var(--color-base-200)' }} />
+                        <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer" className="relative block">
+                          {isVideoUrl(p.viewUrl) ? (
+                            <>
+                              <video src={p.viewUrl} muted playsInline preload="metadata" className="rounded-lg border object-cover bg-black" style={{ width: 60, height: 60, borderColor: 'var(--color-base-200)' }} />
+                              <span className="absolute inset-0 flex items-center justify-center text-white text-lg pointer-events-none" style={{ textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>▶</span>
+                            </>
+                          ) : (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={p.viewUrl} alt={p.caption ?? 'photo'} className="rounded-lg border object-cover" style={{ width: 60, height: 60, borderColor: 'var(--color-base-200)' }} />
+                          )}
                         </a>
                       ));
                       return (

@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, CheckCircle2, ChevronLeft, Coffee, Loader2, MapPin, Navigation, Phone, PlayCircle, Power, Radio } from 'lucide-react';
+import { isVideoUrl } from '@/lib/media';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { uploadBookingPhoto } from '@/lib/bookingEvidence';
@@ -471,9 +472,16 @@ function PhotoRow({ items }: { items: MediaItem[] }) {
   return (
     <div className="flex gap-2 flex-wrap" style={{ marginTop: 6 }}>
       {items.map((m) => (
-        <a key={m.id} href={m.viewUrl} target="_blank" rel="noreferrer" title={m.caption ?? ''}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={m.viewUrl} alt={m.caption ?? m.kind} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: BORDER, display: 'block', background: CANVAS }} />
+        <a key={m.id} href={m.viewUrl} target="_blank" rel="noreferrer" title={m.caption ?? (isVideoUrl(m.viewUrl) ? 'Play video' : '')} style={{ position: 'relative', display: 'block' }}>
+          {isVideoUrl(m.viewUrl) ? (
+            <>
+              <video src={m.viewUrl} muted playsInline preload="metadata" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: BORDER, display: 'block', background: '#000' }} />
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 22, pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>▶</span>
+            </>
+          ) : (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={m.viewUrl} alt={m.caption ?? m.kind} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: BORDER, display: 'block', background: CANVAS }} />
+          )}
         </a>
       ))}
     </div>
