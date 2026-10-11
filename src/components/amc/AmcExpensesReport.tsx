@@ -16,7 +16,7 @@ import { kindMeta, kindMetaFromRow, type KindMeta } from './AmcView';
 
 interface MonthCell { due: number; paid: number; /** 0299 — the VAT inside due / paid. */ dueVat?: number; paidVat?: number; count: number; unbilled: number; overdue: number; paidCount: number }
 interface Row {
-  contractId: number; kind: string; categoryLabel: string | null; vendorName: string; accountNumber?: string | null; propertyName: string | null;
+  contractId: number; kind: string; categoryLabel: string | null; vendorName: string; accountNumber?: string | null; propertyName: string | null; propertyPlot?: string | null;
   startDate: string | null; endDate: string | null; annualValueAed: number | null; frequency: string | null; cancelled: boolean;
   spread?: boolean; recoverable?: boolean;
   months: MonthCell[]; ytdDue: number; ytdPaid: number;
@@ -45,7 +45,7 @@ export function AmcExpensesReport({ base, rp, listHref, detailHrefOf }: { base: 
   // Property → rows, with a subtotal line per property and a grand total.
   const groups = useMemo(() => {
     const m = new Map<string, Row[]>();
-    for (const r of data?.rows ?? []) { const k = r.propertyName ?? 'No property on the contract'; m.set(k, [...(m.get(k) ?? []), r]); }
+    for (const r of data?.rows ?? []) { const k = r.propertyName ? `${r.propertyName}${r.propertyPlot ? ` · Plot ${r.propertyPlot}` : ''}` : 'No property on the contract'; m.set(k, [...(m.get(k) ?? []), r]); }
     return [...m.entries()].map(([name, rows]) => ({
       name, rows,
       sub: MONTHS.map((_, i) => rows.reduce((n, r) => n + r.months[i][basis], 0)),

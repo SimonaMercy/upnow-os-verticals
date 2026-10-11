@@ -861,7 +861,7 @@ export function AmcContractDetail({ contractId, base, rp, listHref, detailHrefOf
               {c.contractType === 'renewal' && <span className="text-[10.5px] font-semibold px-2 py-[3px] rounded-full bg-[#e9effc] text-[#2a5bd7]">Renewal</span>}
             </div>
             <p className="text-[12px] text-[#5b615e] mt-1">
-              {c.propertyName ?? 'All properties'}{c.unitNumber ? <> {c.unitNumber}</> : null}{c.categoryLabel ? <> · {c.categoryLabel}</> : category ? <> · {category}</> : null}
+              {c.propertyName ?? 'All properties'}{c.propertyPlot && c.propertyPlot !== c.accountNumber ? <> · Plot {c.propertyPlot}</> : null}{c.unitNumber ? <> {c.unitNumber}</> : null}{c.categoryLabel ? <> · {c.categoryLabel}</> : category ? <> · {category}</> : null}
               {vendorHrefOf && <> · <Link href={vendorHrefOf(c.vendorId)} className="text-[#1a7a52] hover:text-[#125a3c] underline">Vendor profile</Link></>}
             </p>
           </div>

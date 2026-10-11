@@ -67,7 +67,7 @@ export interface AmcContract {
   isGovernment: boolean; contractType: string | null; frequency: string | null;
   modeOfPayment: string | null; numberOfPayments: number | null;
   startDate: string | null; endDate: string | null; status: Status;
-  propertyId: number | null; propertyName: string | null; unitId?: number | null; unitNumber?: string | null; notes: string | null;
+  propertyId: number | null; propertyName: string | null; propertyPlot?: string | null; unitId?: number | null; unitNumber?: string | null; notes: string | null;
   renewalOfId: number | null; renewedById: number | null; annualValueAed?: number | null;
   /** 0299 — annualValueAed is the VAT-INCLUSIVE total; annualVatAed the VAT inside it. */
   vatMode?: VatMode; annualVatAed?: number | null;
@@ -352,7 +352,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
   const shown = (contracts ?? [])
     .filter(c => tab === 'expired' ? c.status === 'expired' : tab === 'cancelled' ? c.status === 'cancelled' : c.status !== 'expired' && c.status !== 'cancelled')
     .filter(c => !propFilter || (propFilter === 'none' ? c.propertyId == null : String(c.propertyId) === propFilter))
-    .filter(c => !needle || [c.vendorName, c.accountNumber, c.propertyName, c.categoryLabel, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
+    .filter(c => !needle || [c.vendorName, c.accountNumber, c.propertyName, c.propertyPlot, c.categoryLabel, c.serviceCategory, `amc-${c.id}`].some(v => (v ?? '').toLowerCase().includes(needle)))
     // Ongoing contracts never run out — they sit after the dated ones.
     .sort((a, b) => (a.endDate ?? '9999').localeCompare(b.endDate ?? '9999'));
   // The sections: categories in the landlord's own order (Settings → Categories); the rest A–Z, the "none" bucket last.
@@ -393,7 +393,7 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
     return { text: `${c.tasks.pending} pending`, color: '#5b615e' };
   };
   const pillCls = 'text-[10px] font-bold px-[7px] py-[2px] rounded-full';
-  const subline = (c: AmcContract) => `AMC-${c.id} · ${c.propertyName ?? 'All properties'}${c.unitNumber ? ` ${c.unitNumber}` : ''}${c.categoryLabel ? ` · ${c.categoryLabel}` : ''}${c.frequency ? ` · ${cap(c.frequency)}` : ''}`;
+  const subline = (c: AmcContract) => `AMC-${c.id} · ${c.propertyName ?? 'All properties'}${c.propertyPlot && c.propertyPlot !== c.accountNumber ? ` · Plot ${c.propertyPlot}` : ''}${c.unitNumber ? ` ${c.unitNumber}` : ''}${c.categoryLabel ? ` · ${c.categoryLabel}` : ''}${c.frequency ? ` · ${cap(c.frequency)}` : ''}`;
   const chip = (c: AmcContract) => { const ss = STATUS_STYLE[c.status]; return <span className={pillCls} style={{ background: ss.bg, color: ss.fg }}>{ss.label}</span>; };
   const kindChip = (c: AmcContract) => { const km = kindOf(c.kind); return km.visits ? null : <span className={pillCls + ' font-semibold'} style={{ background: km.bg, color: km.fg }} title={km.hint}>{km.short}</span>; };
   /** The fourth column: visits for service contracts, the payment state for everything else. */
