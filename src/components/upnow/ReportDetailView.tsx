@@ -222,7 +222,7 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Plan - Monthly',
-  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
+  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer: Status is the lane the renewal sits in on the Operations board (Draft, Notice sent, KYC, Payment plan, Cheques, Signatures, Registration), Active once the new term is running with its Contract Registration certificate on file, and Notes is the last note on the tenancy\'s journal. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
   endpoint: '/api/reports/renewal-forecast',
   buildingLeaseFilter: true,
   layout: 'grouped',
@@ -252,22 +252,28 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     titleKey: 'monthLabel',
     countLabel: 'leases',
     contractIdKey: 'contractId',
-    itemsMinWidth: '62rem',
+    itemsMinWidth: '74rem',
     // Widths declared so every month's table is cut the same way and the months
     // read down the page as one sheet.
     columns: [
-      { key: 'contractRef', label: 'Contract', width: '9%' },
-      { key: 'tenantName', label: 'Customer', width: '17%' },
-      { key: 'unitLabel', label: 'Unit', width: '8%' },
-      { key: 'buildingName', label: 'Property', width: '14%' },
+      { key: 'contractRef', label: 'Contract', width: '8%' },
+      { key: 'tenantName', label: 'Customer', width: '14%' },
+      { key: 'unitLabel', label: 'Unit', width: '7%' },
+      { key: 'buildingName', label: 'Property', width: '12%' },
       // The lease on file — always the CURRENT term. A row bucketed into a future
       // month shows the term it is renewing FROM, which is the only term that
       // actually exists; the month heading carries the when.
-      { key: 'term', label: 'Term', width: '14%' },
-      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '10%' },
+      { key: 'term', label: 'Term', width: '13%' },
+      { key: 'annualRentFils', label: 'Annual rent', align: 'right', type: 'aed', width: '9%' },
       // Market Rent beside contracted rent = the uplift available at renewal.
-      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed', width: '10%' },
-      { key: 'stage', label: 'Renewal', type: 'stage', width: '11%' },
+      { key: 'marketRentFils', label: 'Market Rent', align: 'right', type: 'aed', width: '9%' },
+      // The Operations lane the renewal's card sits in (the same wording as the
+      // board and Contract Status - Monthly), Active once the new term runs with
+      // its registration certificate on file — owner, 11 Oct 2026. The renewal
+      // marker (`stage`) still drives the counts; it is no longer a column.
+      { key: 'status', label: 'Status', type: 'stage', width: '10%' },
+      // The last note on the tenancy's journal: the note, then who wrote it and when.
+      { key: 'lastNote', label: 'Notes', type: 'stack', width: '18%' },
     ],
   },
 };

@@ -52,6 +52,12 @@ const ROW_CLASS: Record<Tone, string> = { orange: 'bg-[#fff4e5]', red: 'bg-[#fee
 const TONE_FILL: Record<Tone, { fill: string; font: string } | null> = { orange: { fill: 'FFFFF4E5', font: 'FFB45309' }, red: { fill: 'FFFEE2E2', font: 'FFB91C1C' }, neutral: null };
 /** "— Maria Eloisa, 6 Oct 2026" */
 const noteSign = (n: Note) => [n.by, fmtAt(n.at)].filter(Boolean).join(', ');
+/** A month's renewal summary heads the renewals listed under it — a highlighted group row, on screen and
+ *  in the Excel sheet alike (owner, 11 Oct 2026: "show proper highlighted row so while exporting excel it
+ *  will look correct"). */
+const isGroupRow = (r: Row) => r.key.startsWith('renewals:');
+const GROUP_ROW_CLASS = 'bg-[#e9f5f0] font-semibold';
+const GROUP_FILL = 'FFE9F5F0';
 
 /** Where a row's record lives on this portal. */
 function hrefOf(link: PlanLink | null, managerRp?: number): string | null {
@@ -129,6 +135,7 @@ export function OperationPlanReport({
         const row = ws.addRow([sec.title, dash(r?.property), dash(r?.party), dash(r?.unit), dash(r?.system), dash(r?.nextStep), dash(r?.responsible), dash(r ? [r.state, pendingFor(r.since)].filter(Boolean).join(' · ') : null), dash(r?.note ? `${r.note.body}\n— ${noteSign(r.note)}` : null)]);
         row.eachCell({ includeEmpty: true }, c => { c.font = font; c.border = border; c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; });
         if (r) { const t = TONE_FILL[toneOf(r.since, r.tone)]; if (t) { row.eachCell({ includeEmpty: true }, c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: t.fill } }; }); const cell = row.getCell(8); cell.font = { ...font, bold: true, color: { argb: t.font } }; } }
+        if (r && isGroupRow(r)) row.eachCell({ includeEmpty: true }, c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: GROUP_FILL } }; c.font = { ...font, bold: true }; });
       }
       if (rows.length > 1) ws.mergeCells(start, 1, ws.rowCount, 1);
     }
@@ -187,7 +194,7 @@ export function OperationPlanReport({
                       {sec.rows.map(r => {
                         const href = hrefOf(r.link, managerRp);
                         return (
-                          <tr key={r.key} className={`border-b border-[#f1efe9] last:border-0 ${ROW_CLASS[toneOf(r.since, r.tone)]}`}>
+                          <tr key={r.key} className={`border-b border-[#f1efe9] last:border-0 ${isGroupRow(r) ? GROUP_ROW_CLASS : ROW_CLASS[toneOf(r.since, r.tone)]}`}>
                             <td className="py-2 pl-4 pr-3 text-[#3d3b35]">{r.property ?? '—'}</td>
                             <td className="py-2 px-3 text-[#26241f]">
                               {r.party && <span className="font-medium">{r.party}</span>}
