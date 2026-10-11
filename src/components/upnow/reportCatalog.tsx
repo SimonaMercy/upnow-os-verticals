@@ -6,7 +6,7 @@
 import {
   FileText, BarChart2, Building2, CalendarClock,
   RefreshCw, MapPin, Wallet, ShieldCheck, Users, FileBarChart, ScrollText,
-  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck, LogOut, Scale,
+  Banknote, TrendingUp, ListChecks, CalendarDays, Activity, ClipboardCheck, LogOut, Scale, Ban,
 } from 'lucide-react';
 
 export type GroupKey = 'portfolio' | 'leasing' | 'renewals' | 'collections' | 'financial' | 'operations' | 'missingdata';
@@ -125,6 +125,7 @@ export const REPORT_TILES: ReportTile[] = [
   // ── Rent & Collections ─────────────────────────────────────────────────
   { slug: 'rent-receivable',    title: 'Cash Management', description: 'Every occupied unit with all its rent payments month by month \u2014 no calendar cut, so a tenancy is never split across two years. Bounced cheques that were made good are kept out of the totals.', Icon: BarChart2,    available: true,  group: 'collections' },
   { slug: 'cheques-management', title: 'Cheques Management', description: 'Every cheque you are holding \u2014 one row per occupied unit, grouped by property, with each cheque\'s due date and a month-by-month grid. No calendar cut; a bounce that was made good is kept out of the value.', Icon: CalendarDays, available: true,  group: 'collections' },
+  { slug: 'bounced-cheques',    title: 'Bounced Cheques', description: 'The statement of every rent cheque that bounced in a year \u2014 what came back against it and whether the money is in the bank. Filter to Pending, Cleared or All; bounce fees beside each cheque.', Icon: Ban, available: true, group: 'collections' },
   { slug: 'executive-cashflow', title: 'Executive Cashflow',        description: 'The month-by-month cashflow dashboard — the selected year of Cash Management read down the months: rent expected (received + pending) vs collected, and the penalty income, with full-year totals. Anchored on the cheque date, same earning leases; a bounce is reported beside Expected, never inside it.', Icon: TrendingUp, available: true, group: 'collections' },
   // ── Financial & Compliance ─────────────────────────────────────────────
   { slug: 'security-deposits',  title: 'Security Deposits Report', description: 'Deposit register with lifecycle — held, returned, forfeited.',         Icon: ShieldCheck,  available: true,  group: 'financial' },

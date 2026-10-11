@@ -31,6 +31,7 @@ import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
 import { LeaseRevenueByYearReport } from '@/components/upnow/LeaseRevenueByYearReport';
 import { MarketComparisonReport } from '@/components/upnow/MarketComparisonReport';
+import { BouncedChequesReport } from '@/components/upnow/BouncedChequesReport';
 import { DataGapsView } from '@/components/upnow/DataGapsView';
 import { MissingDataView, MISSING_REPORTS } from '@/components/upnow/MissingDataView';
 
@@ -167,6 +168,18 @@ export default function ManagerReportsPage() {
   if (openSlug === 'move-out-reasons') {
     return (
       <MoveOutReasonsReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        managerRp={effectiveRp}
+      />
+    );
+  }
+  // Bounced Cheques — its own statement component, scoped to this managed
+  // landlord's book via rp=N; lease links carry the landlord scope.
+  if (openSlug === 'bounced-cheques') {
+    return (
+      <BouncedChequesReport
         endpointBase="/api/manager/reports"
         extraQuery={`rp=${effectiveRp}`}
         onBack={() => navigate(null)}
