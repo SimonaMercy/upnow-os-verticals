@@ -12,6 +12,7 @@ import shell from './DashboardShell.module.css';
 import { getSpOnboardingReady, subscribeSpOnboardingReady } from './shellChrome';
 import { apiGet } from '@/lib/api';
 import { EMAILS_SYNCED_EVENT, useEmailSyncOnLogin } from '@/lib/useEmailSyncOnLogin';
+import { useBrowserAlerts } from '@/lib/useBrowserAlerts';
 import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 import { whatsappEnabled } from '@/lib/whatsappApi';
 
@@ -1024,6 +1025,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
   // Mailboxes are read when somebody arrives in the portal — not on a server timer.
   useEmailSyncOnLogin(loading || !user ? null : user.role);
+  // Browser alerts for new WhatsApp messages and emails — when switched on in Settings → Notifications.
+  useBrowserAlerts(loading || !user ? null : user.role);
 
   if (loading || !user) {
     return (

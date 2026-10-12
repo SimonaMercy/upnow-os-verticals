@@ -8,6 +8,7 @@ import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/
 import { EmailSettingsPanel } from '@/components/email/EmailSettingsPanel';
 import { WhatsAppSettingsPanel } from '@/components/whatsapp/WhatsAppSettingsPanel';
 import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
+import { BrowserAlertsCard } from '@/components/dashboard/BrowserAlertsCard';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { JurisdictionSettingsForm } from '@/components/legal/JurisdictionSettingsForm';
 import { FeeBookEditor } from '@/components/legal/FeeBookEditor';
@@ -1709,6 +1710,9 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
           </div>
         </div>
         )}
+
+        {/* Browser alerts — WhatsApp / email notifications from this browser while a portal tab is open. */}
+        <BrowserAlertsCard showWhatsapp={waOn} />
         </div>
       )}
 

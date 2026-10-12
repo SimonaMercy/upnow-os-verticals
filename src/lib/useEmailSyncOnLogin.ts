@@ -10,7 +10,8 @@
  * morning on the same session), every connected mailbox is read until nothing
  * is left — days of mail, however long that takes, in the background while they
  * work. After that it is looked at again every few minutes for as long as the
- * tab is open and visible.
+ * tab is open and visible — or open at all, when browser alerts for email are
+ * switched on here: being told about new mail while in another tab is the point.
  *
  * The server does the protecting: one reader per mailbox at a time, not more
  * often than once a minute, a bounded wait per call. A second tab, or a second
@@ -18,6 +19,7 @@
  */
 import { useEffect } from 'react';
 import { apiGet, apiPost } from '@/lib/api';
+import { alertsOnFor } from '@/lib/browserAlertPrefs';
 
 type Sync = { ran: boolean; imported: number; remaining: number; error?: string };
 type MyRp = { rentalProviderId: number; permissions?: { canReadEmails?: boolean } };
@@ -63,8 +65,9 @@ export function useEmailSyncOnLogin(role: string | null | undefined): void {
     };
     // Arriving in the portal: everything that was missed while nobody was here.
     const first = window.setTimeout(() => { void pass(true); }, 1500);
-    // Staying in it: a look every few minutes, only while the tab is being looked at.
-    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void pass(false); }, WHILE_OPEN_MS);
+    // Staying in it: a look every few minutes while the tab is being looked at —
+    // or in the background too, when this browser wants email alerts.
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible' || alertsOnFor('email')) void pass(false); }, WHILE_OPEN_MS);
     return () => { alive = false; window.clearTimeout(first); window.clearInterval(timer); };
   }, [role]);
 }

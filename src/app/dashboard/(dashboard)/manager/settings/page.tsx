@@ -8,27 +8,32 @@
  */
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Lock, Building2, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature } from 'lucide-react';
+import { Lock, Building2, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature, BellRing } from 'lucide-react';
 import { useManagerLandlordScope } from '@/components/dashboard/managerLandlordScope';
 import { MaintenanceCoveragePanel } from '@/components/dashboard/rp/MaintenanceCoveragePanel';
 import { MaintenanceListWorkspace } from '@/app/rental-provider/dashboard/maintenance-list/page';
 import { RestorationListWorkspace } from '@/app/rental-provider/dashboard/restoration-list/page';
 import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
 import { BuildingInspectionsSettings } from '@/components/upnow/BuildingInspectionsSettings';
+import { BrowserAlertsCard } from '@/components/dashboard/BrowserAlertsCard';
+import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 
-type Tab = 'maintenance' | 'maintenance_list' | 'restoration' | 'building_inspections' | 'categories';
-type Flag = 'canManageMaintenance' | 'canManageInspections' | 'canManageAmc';
-const TABS: { key: Tab; label: string; flag: Flag; Icon: React.ComponentType<{ size?: number }> }[] = [
+type Tab = 'maintenance' | 'maintenance_list' | 'restoration' | 'building_inspections' | 'categories' | 'browser_alerts';
+type Flag = 'canManageMaintenance' | 'canManageInspections' | 'canManageAmc' | 'canReadEmails' | 'canReadWhatsapp';
+// `flag`: one permission, or any of several (browser alerts: either channel the landlord lets them read).
+const TABS: { key: Tab; label: string; flag: Flag | Flag[]; Icon: React.ComponentType<{ size?: number }> }[] = [
   { key: 'maintenance', label: 'Coverage', flag: 'canManageMaintenance', Icon: Wrench },
   { key: 'maintenance_list', label: 'Items', flag: 'canManageMaintenance', Icon: ClipboardList },
   { key: 'restoration', label: 'Restoration list', flag: 'canManageInspections', Icon: Receipt },
   { key: 'building_inspections', label: 'Building inspections', flag: 'canManageInspections', Icon: ClipboardCheck },
   { key: 'categories', label: 'AMC categories', flag: 'canManageAmc', Icon: FileSignature },
+  { key: 'browser_alerts', label: 'Browser alerts', flag: ['canReadEmails', 'canReadWhatsapp'], Icon: BellRing },
 ];
 const MENU: { title: string; tabs: Tab[] }[] = [
   { title: 'Maintenance', tabs: ['maintenance', 'maintenance_list', 'restoration'] },
   { title: 'Buildings', tabs: ['building_inspections'] },
   { title: 'Contracts', tabs: ['categories'] },
+  { title: 'Notifications', tabs: ['browser_alerts'] },
 ];
 
 export default function ManagerSettingsPage() {
@@ -37,7 +42,8 @@ export default function ManagerSettingsPage() {
   const flag = TABS.find(t => t.key === tab)!.flag;
   const { effectiveRp, allowed, permsLoading, needsLandlord, canForRp } = useManagerLandlordScope(flag);
   // Only the entries this landlord has granted.
-  const granted = (f: Flag) => effectiveRp != null && canForRp(f, effectiveRp);
+  const granted = (f: Flag | Flag[]) => effectiveRp != null && (Array.isArray(f) ? f : [f]).some(x => canForRp(x, effectiveRp));
+  const waOn = useWhatsappEnabled('manager');
   useEffect(() => {
     const url = new URL(window.location.href); url.searchParams.set('tab', tab); window.history.replaceState(null, '', url.toString());
   }, [tab]);
@@ -93,6 +99,7 @@ export default function ManagerSettingsPage() {
               {tab === 'restoration' && <RestorationListWorkspace manager={{ rp: effectiveRp }} embedded />}
               {tab === 'building_inspections' && <BuildingInspectionsSettings manager={{ rp: effectiveRp }} embedded />}
               {tab === 'categories' && <AmcCategoriesView base="/manager/amc" rp={effectiveRp} listHref={`/dashboard/manager/amc?rp=${effectiveRp}`} embedded />}
+              {tab === 'browser_alerts' && <BrowserAlertsCard forManager showWhatsapp={waOn && canForRp('canReadWhatsapp', effectiveRp)} />}
             </>
           )}
         </div>
