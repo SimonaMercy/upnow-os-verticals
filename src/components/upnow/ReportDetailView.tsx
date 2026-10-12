@@ -54,6 +54,11 @@ interface DrilldownSpec {
    *  Operations worklist entry rather than the lease page — the record is still
    *  being progressed there, which is where the work happens. */
   opsLinkKey?: string;
+  /** Item field holding the id of the record's Operations card. When set, the
+   *  row opens THAT card in Operations — on a renewal, the renewal lease, not
+   *  the term it renews from — and the lease page only when nothing is on the
+   *  board. */
+  opsIdKey?: string;
   /** When set, the lines are broken into sub-blocks under this field's value —
    *  e.g. a property sub-heading inside each month. Items must already arrive
    *  sorted by it. */
@@ -234,7 +239,7 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Plan - Monthly',
-  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer: Status is the lane the renewal sits in on the Operations board (Draft, Notice sent, KYC, Payment plan, Cheques, Signatures, Registration), Active once the new term is running with its Contract Registration certificate on file, and Notes is the last note on the tenancy\'s journal. Pick the year above — it matches the year filter on Renewal Plan - Yearly. Renewals → Pending action hides the Active ones, and the months and tiles then count only the renewals still to work.',
+  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer: Status is the lane the renewal sits in on the Operations board (Draft, Notice sent, KYC, Payment plan, Cheques, Signatures, Registration), Active once the new term is running with its Contract Registration certificate on file, and Notes is the last note on the tenancy\'s journal. Pick the year above — it matches the year filter on Renewal Plan - Yearly. Renewals → Pending action hides the Active ones, and the months and tiles then count only the renewals still to work. A renewal under way opens on its Operations card (the renewal lease); a row with nothing on the board opens the lease.',
   endpoint: '/api/reports/renewal-forecast',
   buildingLeaseFilter: true,
   renewalPendingFilter: true,
@@ -267,6 +272,9 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
     titleKey: 'monthLabel',
     countLabel: 'leases',
     contractIdKey: 'contractId',
+    // A renewal opens on its Operations card (the renewal lease), not on the
+    // expiring term listed in the row — owner, 12 Oct 2026.
+    opsIdKey: 'opsContractId',
     itemsMinWidth: '74rem',
     // Widths declared so every month's table is cut the same way and the months
     // read down the page as one sheet.
@@ -3528,11 +3536,12 @@ export function ReportDetailView({
                                 {it[dd.contractIdKey] != null && (() => {
                                   // While the record is still on the Operations
                                   // worklist, that is where the work happens.
-                                  const inOps = !!(dd.opsLinkKey && it[dd.opsLinkKey]);
+                                  const opsId = dd.opsIdKey ? it[dd.opsIdKey] : null;
+                                  const inOps = opsId != null || !!(dd.opsLinkKey && it[dd.opsLinkKey]);
                                   return (
                                     <Link
                                       href={inOps
-                                        ? `${contractsBase.replace(/\/contracts$/, '/operations')}/${it[dd.contractIdKey]}`
+                                        ? `${contractsBase.replace(/\/contracts$/, '/operations')}/${opsId ?? it[dd.contractIdKey]}`
                                         : `${contractsBase}/${it[dd.contractIdKey]}/v2`}
                                       className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
                                       title={inOps ? 'Open in Operations' : 'Open contract'}>
