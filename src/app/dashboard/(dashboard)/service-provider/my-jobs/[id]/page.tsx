@@ -10,7 +10,8 @@ import Link from 'next/link';
 import { ArrowLeft, Camera, MapPin, Square, CheckSquare, Receipt, Paperclip, MessageSquare, ClipboardList } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
-import { PhotoLightbox, type GalleryPhoto } from '@/components/upnow/PhotoGallery';
+import { PhotoLightbox, MediaThumb, type GalleryPhoto } from '@/components/upnow/PhotoGallery';
+import { mediaSizeError, isVideoUrl } from '@/lib/media';
 
 interface Finding { id?: string; label: string; doneAt?: string | null }
 interface Task { id: number; label: string; doneAt: string | null; findings: Finding[] }
@@ -77,7 +78,8 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
     if (!files.length) return;
     await run(kind, async () => {
       for (const f of files) {
-        if (f.size > MAX_BYTES) throw new Error(`${f.name}: too large — 10 MB max.`);
+        const tooBig = mediaSizeError(f);
+        if (tooBig) throw new Error(tooBig);
         const { uploadUrl, fileUrl } = await apiPost<{ uploadUrl: string; fileUrl: string }>(
           `${base}/photos/upload-url`, { mimeType: f.type, originalName: f.name });
         const put = await fetch(uploadUrl, { method: 'PUT', body: f, headers: { 'Content-Type': f.type } });
@@ -169,11 +171,11 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
       {(['before', 'after'] as const).map(kind => (
         <div key={kind} className={card}>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[14px] font-bold text-[#1c1f1d] capitalize">{kind} photos</h2>
+            <h2 className="text-[14px] font-bold text-[#1c1f1d] capitalize">{kind} photos &amp; videos</h2>
             {!closed && (
               <label className="text-[12px] font-semibold text-[#1a7a5a] inline-flex items-center gap-1 cursor-pointer">
                 <Camera size={13} /> {busy === kind ? 'Uploading…' : 'Add'}
-                <input type="file" accept="image/*" multiple className="hidden" disabled={!!busy} onChange={upload(kind)} />
+                <input type="file" accept="image/*,video/*" multiple className="hidden" disabled={!!busy} onChange={upload(kind)} />
               </label>
             )}
           </div>
@@ -184,10 +186,9 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                 {shot(kind).map((p, k) => (
                   <div key={p.id} className="relative group">
                     {/* Tap to open — the same viewer the landlord's job page uses, with the caption. */}
-                    <button type="button" title={p.caption ?? 'View photo'} className="block w-full cursor-pointer"
-                      onClick={() => setGallery({ photos: shot(kind).map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} photo` })), start: k })}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e8e6e0] hover:opacity-90" />
+                    <button type="button" title={p.caption ?? (isVideoUrl(p.viewUrl) ? 'Play video' : 'View photo')} className="block w-full cursor-pointer"
+                      onClick={() => setGallery({ photos: shot(kind).map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} ${isVideoUrl(r.viewUrl) ? 'video' : 'photo'}` })), start: k })}>
+                      <MediaThumb url={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e8e6e0] hover:opacity-90" />
                     </button>
                     {!closed && p.mine && (
                       <button

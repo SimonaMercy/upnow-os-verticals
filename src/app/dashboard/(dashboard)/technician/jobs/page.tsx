@@ -432,8 +432,8 @@ function JobDetailView({ bookingId, presence, onBack }: { bookingId: number; pre
                 <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: FAINT }}>{kind === 'before' ? 'Before' : 'After'} · {kind === 'before' ? before.length : after.length}/6</p>
                 {job.status !== 'completed' && job.status !== 'cancelled' && (
                   <label className="flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 600, color: '#92400E', background: '#FEF6E7', border: '1px dashed #F5D9A6', borderRadius: 8, padding: '5px 9px', cursor: 'pointer' }}>
-                    {uploading === kind ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />} Add {kind} photo
-                    <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void addPhoto(kind, e.target.files?.[0])} />
+                    {uploading === kind ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />} Add {kind} photo / video
+                    <input type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void addPhoto(kind, e.target.files?.[0])} />
                   </label>
                 )}
               </div>

@@ -15,3 +15,14 @@ export function isVideoUrl(url: string | null | undefined): boolean {
 export function isVideoFile(file: File): boolean {
   return file.type.startsWith('video/') || isVideoUrl(file.name);
 }
+
+/** Size ceilings: a photo 10 MB (the KYC ceiling), a phone clip 100 MB (under the local-dev 120mb raw-body cap). */
+export const MAX_PHOTO_MB = 10;
+export const MAX_VIDEO_MB = 100;
+
+/** Why this file is too big to upload, or null when it fits. */
+export function mediaSizeError(file: File): string | null {
+  const video = isVideoFile(file);
+  const mb = video ? MAX_VIDEO_MB : MAX_PHOTO_MB;
+  return file.size > mb * 1024 * 1024 ? `${file.name}: too large — ${mb} MB max for a ${video ? 'video' : 'photo'}.` : null;
+}

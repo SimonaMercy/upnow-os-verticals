@@ -1,5 +1,7 @@
+import { mediaSizeError } from '@/lib/media';
+
 /**
- * Booking evidence photos (SP-258) — the shared upload cycle every surface
+ * Booking evidence photos / short videos (SP-258) — the shared upload cycle every surface
  * uses (customer problem photos, provider before/after proof; the technician
  * app reuses this in Sprint 3):
  *
@@ -31,15 +33,14 @@ export interface EvidenceGroups {
 
 export const EMPTY_EVIDENCE: EvidenceGroups = { problem: [], before: [], after: [], quote: [] };
 
-const MAX_BYTES = 10 * 1024 * 1024; // matches the KYC upload ceiling
-
 export async function uploadBookingPhoto(
   bookingId: number,
   kind: EvidenceKind,
   file: File,
   caption?: string,
 ): Promise<EvidencePhoto> {
-  if (file.size > MAX_BYTES) throw new Error('Photo is too large — 10 MB max.');
+  const tooBig = mediaSizeError(file);
+  if (tooBig) throw new Error(tooBig);
 
   const presignRes = await fetch(`/api/bookings/${bookingId}/media/upload-url`, {
     method: 'POST',
@@ -54,7 +55,7 @@ export async function uploadBookingPhoto(
   const { uploadUrl, fileUrl } = (await presignRes.json()) as { uploadUrl: string; fileUrl: string };
 
   const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-  if (!put.ok) throw new Error('Photo upload failed — please try again.');
+  if (!put.ok) throw new Error(`${file.name}: upload failed — please try again.`);
 
   const saveRes = await fetch(`/api/bookings/${bookingId}/media`, {
     method: 'POST',
@@ -64,7 +65,7 @@ export async function uploadBookingPhoto(
   });
   if (!saveRes.ok) {
     const body = await saveRes.json().catch(() => null);
-    throw new Error(body?.message ?? 'Could not save the photo.');
+    throw new Error(body?.message ?? `${file.name}: could not be saved.`);
   }
   return (await saveRes.json()) as EvidencePhoto;
 }

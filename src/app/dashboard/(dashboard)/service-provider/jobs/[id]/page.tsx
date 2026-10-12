@@ -93,7 +93,7 @@ function EvidenceBlock({ title, photos, onUpload, busy }: {
         {onUpload && (
           <label style={{ width: 74, height: 74, borderRadius: 10, border: '1.5px dashed #C9D2CB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: FAINT, cursor: busy ? 'default' : 'pointer', background: '#FAFBFA' }}>
             {busy ? '…' : '+'}
-            <input type="file" accept="image/*" style={{ display: 'none' }} disabled={busy}
+            <input type="file" accept="image/*,video/*" style={{ display: 'none' }} disabled={busy}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); e.currentTarget.value = ''; }} />
           </label>
         )}

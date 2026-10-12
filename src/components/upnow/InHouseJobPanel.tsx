@@ -22,7 +22,8 @@ import { useBackClose } from '@/lib/useSlideOver';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { type VatMode } from '@/lib/vatSplit';
 import { AmountWithVat } from './VatChoice';
-import { PhotoLightbox, type GalleryPhoto } from './PhotoGallery';
+import { PhotoLightbox, MediaThumb, type GalleryPhoto } from './PhotoGallery';
+import { mediaSizeError, isVideoUrl } from '@/lib/media';
 
 export interface InHousePhoto { id: number; kind?: string; caption: string | null; viewUrl: string; createdAt: string }
 /** The unit's last condition — its latest move-out inspection's photos, per item. */
@@ -123,7 +124,9 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
   const moveOutLeft = moveOut ? moveOut.items.reduce((n, it) => n + it.photos.filter(p => !p.imported).length, 0) : 0;
 
   const putFile = async (file: File, presignPath: string): Promise<string> => {
-    if (file.size > MAX_BYTES) throw new Error(`${file.name}: too large — 10 MB max.`);
+    // A before/after clip may run to 100 MB; a bill stays a 10 MB photo or PDF.
+    const tooBig = presignPath === '/photos/upload-url' ? mediaSizeError(file) : file.size > MAX_BYTES ? `${file.name}: too large — 10 MB max.` : null;
+    if (tooBig) throw new Error(tooBig);
     const { uploadUrl, fileUrl } = await apiPost<{ uploadUrl: string; fileUrl: string }>(url(presignPath), { mimeType: file.type, originalName: file.name });
     const put = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
     if (!put.ok) throw new Error(`${file.name}: upload failed — please try again.`);
@@ -199,7 +202,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           <h3 className="text-xs font-bold uppercase tracking-wide text-[#6b6860]">{kind === 'before' ? 'Before' : 'After'} · {rows.length}</h3>
           {open && (
             <>
-              <input ref={ref} type="file" accept="image/*" multiple hidden onChange={e => { addPhotos(kind, e.target.files); e.target.value = ''; }} />
+              <input ref={ref} type="file" accept="image/*,video/*" multiple hidden onChange={e => { addPhotos(kind, e.target.files); e.target.value = ''; }} />
               <span className="flex items-center gap-3">
                 {kind === 'before' && moveOutLeft > 0 && (
                   <button type="button" disabled={!!busy} onClick={() => setPicking(true)} className="inline-flex items-center gap-1 text-xs font-semibold text-[#1a7a5a] cursor-pointer disabled:opacity-50">
@@ -207,7 +210,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                   </button>
                 )}
                 <button type="button" disabled={!!busy} onClick={() => ref.current?.click()} className="inline-flex items-center gap-1 text-xs font-semibold text-[#1a7a5a] cursor-pointer disabled:opacity-50">
-                  <Camera size={13} /> {busy === kind ? 'Uploading…' : 'Add photos'}
+                  <Camera size={13} /> {busy === kind ? 'Uploading…' : 'Add photos or videos'}
                 </button>
               </span>
             </>
@@ -221,12 +224,12 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           <ul className="flex gap-1.5 flex-wrap mt-2">
             {visible.map((p, k) => (
               <li key={p.id} className="relative group">
-                <button type="button" title={p.caption ?? 'View photo'} className="block cursor-pointer"
-                  onClick={() => setGallery({ photos: rows.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} photo` })), start: k })}>
-                  <img src={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-[60px] h-[60px] object-cover rounded-lg border border-[#e6e8e6] hover:opacity-90" />
+                <button type="button" title={p.caption ?? (isVideoUrl(p.viewUrl) ? 'Play video' : 'View photo')} className="block cursor-pointer"
+                  onClick={() => setGallery({ photos: rows.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} ${isVideoUrl(r.viewUrl) ? 'video' : 'photo'}` })), start: k })}>
+                  <MediaThumb url={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-[60px] h-[60px] object-cover rounded-lg border border-[#e6e8e6] hover:opacity-90" />
                 </button>
                 {open && (
-                  <button type="button" title="Remove photo" disabled={!!busy}
+                  <button type="button" title={isVideoUrl(p.viewUrl) ? 'Remove video' : 'Remove photo'} disabled={!!busy}
                     onClick={() => run('rm-photo', async () => { await apiDelete(url(`/photos/${p.id}`)); })}
                     className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center w-5 h-5 rounded-full bg-white border border-[#f1d5d5] text-[#b91c1c] cursor-pointer">
                     <Trash2 size={11} />

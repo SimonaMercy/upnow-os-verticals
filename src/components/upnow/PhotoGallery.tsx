@@ -64,3 +64,17 @@ export function PhotoLightbox({ photos, start, onClose }: { photos: GalleryPhoto
     </div>
   );
 }
+
+/** One thumbnail: a photo, or a video's first frame with a ▶ over it. `className` sizes and frames it. */
+export function MediaThumb({ url, alt, className }: { url: string; alt: string; className: string }) {
+  if (!isVideoUrl(url)) {
+    /* eslint-disable-next-line @next/next/no-img-element */
+    return <img src={url} alt={alt} className={className} />;
+  }
+  return (
+    <span className="relative block">
+      <video src={url} muted playsInline preload="metadata" title={alt} className={`${className} bg-black`} />
+      <span className="absolute inset-0 flex items-center justify-center text-white text-[20px] pointer-events-none [text-shadow:0_1px_3px_rgba(0,0,0,.6)]">▶</span>
+    </span>
+  );
+}

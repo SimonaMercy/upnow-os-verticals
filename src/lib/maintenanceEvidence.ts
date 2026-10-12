@@ -10,7 +10,7 @@
  * provider's job page briefs the crew with the customer's own pictures.
  */
 
-import { isVideoFile } from '@/lib/media';
+import { isVideoFile, mediaSizeError, MAX_PHOTO_MB, MAX_VIDEO_MB } from '@/lib/media';
 
 export interface MaintenancePhoto {
   id: number;
@@ -20,17 +20,12 @@ export interface MaintenancePhoto {
   createdAt: string;
 }
 
-const MAX_BYTES = 10 * 1024 * 1024; // photos — matches the KYC / booking ceiling
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // a phone clip of the problem (under the local-dev 120mb raw-body cap)
 export const MAX_REQUEST_PHOTOS = 6;
-export const MAX_PHOTO_MB = 10;
-export const MAX_VIDEO_MB = 100;
+export { MAX_PHOTO_MB, MAX_VIDEO_MB };
 
 export async function uploadMaintenancePhoto(requestId: number, file: File, caption?: string): Promise<MaintenancePhoto> {
-  const video = isVideoFile(file);
-  if (file.size > (video ? MAX_VIDEO_BYTES : MAX_BYTES)) {
-    throw new Error(`${file.name}: too large — ${video ? MAX_VIDEO_MB : MAX_PHOTO_MB} MB max for a ${video ? 'video' : 'photo'}.`);
-  }
+  const tooBig = mediaSizeError(file);
+  if (tooBig) throw new Error(tooBig);
   const presignRes = await fetch(`/api/maintenance/my/${requestId}/media/upload-url`, {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mimeType: file.type, originalName: file.name }),
@@ -48,7 +43,7 @@ export async function uploadMaintenancePhoto(requestId: number, file: File, capt
   });
   if (!saveRes.ok) {
     const body = await saveRes.json().catch(() => null);
-    throw new Error(body?.message ?? `${file.name}: could not save the ${video ? 'video' : 'photo'}.`);
+    throw new Error(body?.message ?? `${file.name}: could not save the ${isVideoFile(file) ? 'video' : 'photo'}.`);
   }
   return (await saveRes.json()) as MaintenancePhoto;
 }

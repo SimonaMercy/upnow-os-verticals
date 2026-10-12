@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { MediaThumb } from '@/components/upnow/PhotoGallery';
 
 const INK = '#141412';
 const MUTE = '#5f5f5a';
@@ -437,8 +438,7 @@ export default function AdminBookingDetailPage() {
                     {data.media[kind].length === 0 && <span style={{ fontSize: 12, color: FAINT }}>None</span>}
                     {data.media[kind].map((p) => (
                       <a key={p.id} href={p.viewUrl} target="_blank" rel="noreferrer" title={p.caption ?? label}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={p.viewUrl} alt={p.caption ?? label} style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 10, border: BORDER, display: 'block' }} />
+                        <MediaThumb url={p.viewUrl} alt={p.caption ?? label} className="block w-[84px] h-[84px] object-cover rounded-[10px] border border-[#e8e8e4]" />
                       </a>
                     ))}
                   </div>
