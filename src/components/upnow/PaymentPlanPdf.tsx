@@ -21,7 +21,7 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 import type { PlanContract, PlanPayment } from '@/lib/currentPlan';
-import { buildSegregatedPlan, segRowsFromContract, type SegPaymentInput } from '@/lib/segregatedPlan';
+import { buildSegregatedPlan, rentDiscountFromContract, segRowsFromContract, type RentDiscount, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { SegregatedSections } from '@/components/upnow/SegregatedSections';
 
 // Roboto — the same clean sans the receipts use (no Bold ttf shipped → bold maps to
@@ -58,10 +58,17 @@ export interface PaymentPlanMeta {
   /** How to pay. A plan telling someone to transfer or hand over cheques is
    *  incomplete without the account / payee, and the PDF is the copy they keep. */
   bankDetails?: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
+  /** Rent discount, shown on the Rental Income group — see SegregatedPlan.rentDiscount. */
+  rentDiscount?: RentDiscount | null;
 }
 
 /** A contract shape sufficient to derive the plan rows + heading metadata. */
 export interface PlanViewerContract extends PlanContract {
+  /** Rent discount, as the lease stores it: listedRent − discountAmount = annualRent. */
+  listedRent?: number | null;
+  discountType?: 'percent' | 'fixed' | string | null;
+  discountValue?: number | null;
+  discountAmount?: number | null;
   id?: number;
   ref?: string | null;
   planRefNo?: string | null;
@@ -87,7 +94,8 @@ export { segRowsFromContract };
 // values are deliberately tight; a plan with genuinely many line items is still
 // free to run over — that is the table growing, not the chrome.
 const s = StyleSheet.create({
-  page: { paddingTop: 26, paddingBottom: 26, paddingHorizontal: 38, fontSize: 10, color: INK, fontFamily: 'Roboto' },
+  // Bottom padding leaves room for the pinned small print (see `muted`).
+  page: { paddingTop: 26, paddingBottom: 40, paddingHorizontal: 38, fontSize: 10, color: INK, fontFamily: 'Roboto' },
   headTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 2, borderBottomColor: GREEN, paddingBottom: 6 },
   h1: { fontSize: 17, fontWeight: 700, color: GREEN },
   pill: { fontSize: 8, fontWeight: 700, color: GREEN, backgroundColor: '#e4efeb', paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 },
@@ -102,7 +110,9 @@ const s = StyleSheet.create({
   metaRow: { flexDirection: 'row', marginTop: 8 },
   metaCol: { width: '33.33%', paddingRight: 10 },
   v: { fontSize: 11, fontWeight: 700, color: INK },
-  muted: { fontSize: 8.5, color: FAINT, marginTop: 10 },
+  // Pinned to the page foot, out of the flow: as a flowing line it was the one
+  // element that spilled onto a second page once the plan filled the first.
+  muted: { position: 'absolute', bottom: 18, left: 38, right: 38, fontSize: 8.5, color: FAINT },
 });
 
 /** Renewal → "Renewal" pill; else "New Lease". */
@@ -134,6 +144,7 @@ export function PaymentPlanDoc({ rows, refLabel, planRefNo, meta }: {
   rows: SegPaymentInput[]; refLabel?: string | null; planRefNo?: string | null; meta?: PaymentPlanMeta;
 }) {
   const plan = buildSegregatedPlan(rows);
+  if (meta?.rentDiscount) plan.rentDiscount = meta.rentDiscount;
   return (
     <Document title={refLabel ? `Payment summary — ${refLabel}` : 'Payment summary'}>
       <Page size="A4" style={s.page}>
@@ -175,9 +186,7 @@ export function PaymentPlanDoc({ rows, refLabel, planRefNo, meta }: {
 
         <PayTo plan={plan} meta={meta} />
 
-        {/* Kept with the block above it so a one-page plan never spills a second
-            page for this single line of small print. */}
-        <Text style={s.muted} wrap={false}>System-generated payment plan. Amounts in UAE Dirhams (AED).</Text>
+        <Text style={s.muted} fixed>System-generated payment plan. Amounts in UAE Dirhams (AED).</Text>
       </Page>
     </Document>
   );
@@ -218,6 +227,7 @@ export function planFromContract(contract: PlanViewerContract): { rows: SegPayme
     planRefNo: contract.planRefNo ?? null,
     meta: {
       contractType: contract.contractType ?? null,
+      rentDiscount: rentDiscountFromContract(contract),
       buildingName: contract.property?.buildingName ?? null,
       unitNumber: contract.unit?.number ?? null,
       community: contract.property?.community ?? contract.property?.emirate ?? null,

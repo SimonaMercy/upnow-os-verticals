@@ -49,9 +49,22 @@ export interface SegGroup {
   total: number;                  // AED
 }
 
+/** A rent discount the landlord granted: the rent the unit was listed at, what
+ *  came off it, and how it was expressed. The instalment lines already carry the
+ *  NET rent — this is the one place the plan says where that figure came from. */
+export interface RentDiscount {
+  listedRent: number;             // AED, before the discount
+  discountAmount: number;         // AED taken off the listed rent
+  discountType?: 'percent' | 'fixed' | null;
+  discountPercent?: number | null;
+}
+
 export interface SegregatedPlan {
   groups: SegGroup[];             // non-empty groups only, in display order
   grandTotal: number;            // AED
+  /** Set when the rent was discounted — rendered as a "Listed rent · Discount ·
+   *  Net rent" line on the Rental Income group, on screen and on the PDF. */
+  rentDiscount?: RentDiscount | null;
 }
 
 const round2 = (v: number) => Math.round((Number.isFinite(v) ? v : 0) * 100) / 100;
@@ -173,6 +186,11 @@ export function segRowsFromOfferPlan(plan: {
  *  are shown as their own lines, never folded into the first cheque). */
 export interface AggregatePlanInput {
   rentFils?: number | null;
+  /** Rent before the discount; set only when a discount was applied. */
+  originalRentFils?: number | null;
+  discountFils?: number | null;
+  discountType?: 'percent' | 'fixed' | null;
+  discountPercent?: number | null;
   rentVatFils?: number | null;
   securityDepositFils?: number | null;
   adminFeeFils?: number | null; adminFeeVatFils?: number | null;
@@ -184,6 +202,33 @@ export interface AggregatePlanInput {
    *  each row (see PaymentPlanItem.paymentMethod), and the amount, which is read
    *  for the extra rows (they exist ONLY here, not in the category totals). */
   items?: Array<{ dueDate?: string | null; type?: string | null; description?: string | null; paymentMethod?: string | null; amountFils?: number | null }> | null;
+}
+
+/** The rent discount on an aggregate plan, or null when none was granted. The
+ *  Payment Summary showed only the NET instalments, so a customer given AED 2,000
+ *  off read a rent of 58,000 with no sign of the 60,000 it was cut from. */
+export function rentDiscountFromAggregatePlan(p: Pick<AggregatePlanInput, 'rentFils' | 'originalRentFils' | 'discountFils' | 'discountType' | 'discountPercent'> | null | undefined): RentDiscount | null {
+  if (!p) return null;
+  const listedFils = p.originalRentFils ?? 0;
+  const discountFils = p.discountFils ?? (listedFils > 0 ? listedFils - (p.rentFils ?? 0) : 0);
+  if (listedFils <= 0 || discountFils <= 0) return null;
+  return {
+    listedRent: listedFils / 100,
+    discountAmount: discountFils / 100,
+    discountType: p.discountType ?? null,
+    discountPercent: p.discountType === 'percent' ? (p.discountPercent ?? null) : null,
+  };
+}
+
+/** The rent discount a LEASE carries (listed_rent − discount_amount = annual_rent),
+ *  or null when it has none. For the lease's own Payment Summary and VAT plan. */
+export function rentDiscountFromContract(c: { listedRent?: number | null; discountType?: string | null; discountValue?: number | null; discountAmount?: number | null } | null | undefined): RentDiscount | null {
+  if (!c) return null;
+  const listed = Number(c.listedRent ?? 0);
+  const amount = Number(c.discountAmount ?? 0);
+  if (listed <= 0 || amount <= 0) return null;
+  const type = c.discountType === 'percent' || c.discountType === 'fixed' ? c.discountType : null;
+  return { listedRent: listed, discountAmount: amount, discountType: type, discountPercent: type === 'percent' ? Number(c.discountValue ?? 0) || null : null };
 }
 
 export function segRowsFromAggregatePlan(p: AggregatePlanInput): SegPaymentInput[] {

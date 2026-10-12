@@ -15,7 +15,7 @@
 import type { OfferPlan } from '@/components/upnow/OfferReceiptModal';
 import { PaymentPlanDownloadLink } from '@/components/upnow/PaymentPlanPdf';
 import { SegregatedPlanView, type PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
-import { buildSegregatedPlan, segRowsFromOfferPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
+import { buildSegregatedPlan, rentDiscountFromAggregatePlan, segRowsFromOfferPlan, type RentDiscount, type SegPaymentInput } from '@/lib/segregatedPlan';
 
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
@@ -56,6 +56,10 @@ export interface PaymentPlanCardProps {
   periodEnd?: string | null;
   /** Landlord's account — rendered under the plan when a row is paid by transfer. */
   bankDetails?: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
+  /** Rent discount to state on the Rental Income group ("Listed rent · Discount ·
+   *  Net rent"). Derived from `plan` when omitted; a rows-only card (a lead's
+   *  proposed plan) passes it explicitly. */
+  rentDiscount?: RentDiscount | null;
   /** Extra control for the header (e.g. the customer's "Print / Save PDF"). */
   headerAction?: React.ReactNode;
   /** Per-payment attach control rendered inside the plan — see SegregatedPlanView.
@@ -63,9 +67,11 @@ export interface PaymentPlanCardProps {
   renderAttach?: (slot: PlanAttachSlot) => React.ReactNode;
 }
 
-export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd, bankDetails, headerAction, renderAttach }: PaymentPlanCardProps) {
+export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType, tenantName, landlordName, unitNumber, buildingName, community, periodStart, periodEnd, bankDetails, rentDiscount, headerAction, renderAttach }: PaymentPlanCardProps) {
   const dlRows = rows ?? (plan ? segRowsFromOfferPlan(plan) : []);
   const seg = buildSegregatedPlan(dlRows);
+  const disc = rentDiscount ?? rentDiscountFromAggregatePlan(plan);
+  if (disc) seg.rentDiscount = disc;
   const isRenewal = (contractType ?? '').toLowerCase() === 'renewal';
   const pill = contractType == null ? null
     : isRenewal ? { label: 'Renewal', bg: '#eaf2fb', fg: '#1e5fae' }
@@ -116,7 +122,7 @@ export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType,
         )}
       </div>
 
-      <PaymentPlanDownloadLink rows={dlRows} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd, bankDetails }} />
+      <PaymentPlanDownloadLink rows={dlRows} refLabel={refLabel} planRefNo={planRefNo} meta={{ contractType, tenantName, landlordName, buildingName, unitNumber, community, periodStart, periodEnd, bankDetails, rentDiscount: disc }} />
 
       <SegregatedPlanView plan={seg} bankDetails={bankDetails} renderAttach={renderAttach} style={{ padding: '6px 14px 14px' }} />
     </div>

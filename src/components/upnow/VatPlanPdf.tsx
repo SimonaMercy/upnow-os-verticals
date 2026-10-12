@@ -18,6 +18,7 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { segRowsFromContract, type SegPaymentInput } from '@/lib/segregatedPlan';
 import { buildVatPlan } from '@/lib/vatPlan';
+import { rentDiscountFromContract, type RentDiscount } from '@/lib/segregatedPlan';
 import type { PlanViewerContract } from '@/components/upnow/PaymentPlanPdf';
 
 Font.register({
@@ -74,6 +75,8 @@ export interface VatPlanHead {
   contractRef: string | null;
   isRenewal: boolean;
   bank: { accountName?: string | null; bankName?: string | null; iban?: string | null } | null;
+  /** Rent discount on the lease — "Discounted" on Rental Income, Subtotal · Discount · Total Payable at the foot. */
+  rentDiscount: RentDiscount | null;
 }
 
 export function vatPlanFromContract(c: VatPlanContract): { rows: SegPaymentInput[]; head: VatPlanHead } {
@@ -109,6 +112,7 @@ export function vatPlanFromContract(c: VatPlanContract): { rows: SegPaymentInput
       contractRef: ref,
       isRenewal: (c.contractType ?? '').toLowerCase() === 'renewal',
       bank: c.landlord?.bankDetails ?? null,
+      rentDiscount: rentDiscountFromContract(c),
     },
   };
 }
@@ -138,6 +142,9 @@ const s = StyleSheet.create({
   totTd: { fontSize: 8.5, fontWeight: 700, color: INK },
   grand: { flexDirection: 'row', marginTop: 14, paddingVertical: 8, paddingHorizontal: 7, backgroundColor: GREEN, borderRadius: 4 },
   grandTd: { fontSize: 9.5, fontWeight: 700, color: '#ffffff' },
+  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 7, borderTopWidth: 0.5, borderTopColor: HAIR_SOFT, backgroundColor: '#fafaf8' },
+  recTd: { fontSize: 8.5, color: MUTE },
+  discTag: { marginLeft: 6, marginTop: 8, fontSize: 6.5, fontWeight: 700, letterSpacing: 0.5, color: '#b91c1c', backgroundColor: '#fdede7', borderWidth: 0.5, borderColor: '#f3cabb', borderRadius: 6, paddingVertical: 1.5, paddingHorizontal: 5 },
   foot: { fontSize: 8, color: FAINT, marginTop: 10 },
   payTo: { marginTop: 12, padding: 8, borderWidth: 1, borderColor: HAIR, borderRadius: 4 },
   payRow: { flexDirection: 'row', marginTop: 4 },
@@ -196,7 +203,11 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
           const gVat = g.lines.reduce((t, l) => t + (l.vat ?? 0), 0);
           return (
             <View key={g.key} wrap={false}>
-              <Text style={s.gTitle}>{g.title}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={s.gTitle}>{g.title}</Text>
+                {/* Same tag as the Payment Summary: the rent here is the discounted one. */}
+                {g.key === 'rental' && head.rentDiscount ? <Text style={s.discTag}>DISCOUNTED</Text> : null}
+              </View>
               <View style={s.table}>
                 <View style={s.thead}>
                   <Text style={[s.th, { width: W.item }]}>Item</Text>
@@ -222,8 +233,25 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
                     </View>
                   );
                 })}
+                {/* Rent as listed, less the discount, equals the section total below. */}
+                {g.key === 'rental' && head.rentDiscount ? (
+                  <>
+                    <View style={s.recRow}>
+                      <Text style={[s.recTd, { width: '62%' }]}>Rental amount</Text>
+                      <Text style={[s.recTd, num, { width: W.net }]}>{aed(head.rentDiscount.listedRent)}</Text>
+                      <Text style={[s.recTd, num, { width: W.vat }]}>-</Text>
+                      <Text style={[s.recTd, num, { width: W.total }]}>{aed(head.rentDiscount.listedRent)}</Text>
+                    </View>
+                    <View style={s.recRow}>
+                      <Text style={[s.recTd, { width: '62%', color: '#b91c1c' }]}>Discount{head.rentDiscount.discountType === 'percent' && head.rentDiscount.discountPercent ? ` (${head.rentDiscount.discountPercent}%)` : ''}</Text>
+                      <Text style={[s.recTd, num, { width: W.net, color: '#b91c1c' }]}>- {aed(head.rentDiscount.discountAmount)}</Text>
+                      <Text style={[s.recTd, num, { width: W.vat }]}>-</Text>
+                      <Text style={[s.recTd, num, { width: W.total, color: '#b91c1c' }]}>- {aed(head.rentDiscount.discountAmount)}</Text>
+                    </View>
+                  </>
+                ) : null}
                 <View style={s.totRow}>
-                  <Text style={[s.totTd, { width: '62%' }]}>Total</Text>
+                  <Text style={[s.totTd, { width: '62%' }]}>{g.key === 'rental' && head.rentDiscount ? 'Net rent · Total' : 'Total'}</Text>
                   <Text style={[s.totTd, num, { width: W.net }]}>{aed(g.total - gVat)}</Text>
                   <Text style={[s.totTd, num, { width: W.vat }]}>{aed(gVat)}</Text>
                   <Text style={[s.totTd, num, { width: W.total }]}>{aed(g.total)}</Text>
@@ -234,7 +262,7 @@ export function VatPlanDoc({ rows, head }: { rows: SegPaymentInput[]; head: VatP
         })}
 
         <View style={s.grand} wrap={false}>
-          <Text style={[s.grandTd, { width: '62%' }]}>GRAND TOTAL (AED)</Text>
+          <Text style={[s.grandTd, { width: '62%' }]}>TOTAL PAYABLE (AED)</Text>
           <Text style={[s.grandTd, num, { width: W.net }]}>{aed(plan.grandNet)}</Text>
           <Text style={[s.grandTd, num, { width: W.vat }]}>{aed(plan.grandVat)}</Text>
           <Text style={[s.grandTd, num, { width: W.total }]}>{aed(plan.grandTotal)}</Text>

@@ -43,7 +43,11 @@ const s = StyleSheet.create({
   cAmt: { width: '16%', fontSize: 8.5, textAlign: 'right', fontWeight: 700, color: INK },
   totalRow: { flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 9, borderTopWidth: 1 },
   totalLab: { fontSize: 7, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700, color: MUTE },
-  grand: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, borderColor: '#cfdcd6', backgroundColor: '#eef2f0' },
+  discTag: { marginLeft: 6, fontSize: 6.5, fontWeight: 700, letterSpacing: 0.5, color: '#b91c1c', backgroundColor: '#fdede7', borderWidth: 0.5, borderColor: '#f3cabb', borderRadius: 6, paddingVertical: 1.5, paddingHorizontal: 5 },
+  grandBox: { marginTop: 12, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, borderColor: '#cfdcd6', backgroundColor: '#eef2f0' },
+  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 9, backgroundColor: '#fafaf8' },
+  recLab: { fontSize: 8, fontWeight: 500, color: MUTE },
+  grand: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   grandLab: { fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: MUTE },
   grandVal: { fontSize: 13, fontWeight: 700, color: '#1a5a4a' },
 });
@@ -72,7 +76,14 @@ export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
         return (
           <View key={g.key} style={s.group} wrap={false}>
             <View style={[s.head, { borderLeftColor: c.accent, backgroundColor: c.tint }]}>
-              <Text style={s.name}>{g.title}</Text>
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={s.name}>{g.title}</Text>
+                  {g.key === 'rental' && plan.rentDiscount
+                    ? <Text style={s.discTag}>DISCOUNTED</Text>
+                    : null}
+                </View>
+              </View>
               {g.key === 'rental' && g.lines.length > 1
                 ? <Text style={s.count}>{g.lines.length} payments</Text>
                 : null}
@@ -93,19 +104,35 @@ export function SegregatedSections({ plan }: { plan: SegregatedPlan }) {
                 <Text style={[s.cAmt, { width: wAmt }]}>{aed(l.amount)}</Text>
               </View>
             ))}
+            {/* Same reconciliation as on screen: rent as listed, less the
+                discount, equals the section total the instalments add up to. */}
+            {g.key === 'rental' && plan.rentDiscount ? (
+              <>
+                <View style={[s.recRow, { borderTopWidth: 1, borderTopColor: c.accent }]}>
+                  <Text style={[s.recLab, { width: wTotalLab }]}>Rental amount</Text>
+                  <Text style={[s.cAmt, { width: wAmt, color: MUTE }]}>{aed(plan.rentDiscount.listedRent)}</Text>
+                </View>
+                <View style={s.recRow}>
+                  <Text style={[s.recLab, { width: wTotalLab, color: '#b91c1c' }]}>Discount{plan.rentDiscount.discountType === 'percent' && plan.rentDiscount.discountPercent ? ` (${plan.rentDiscount.discountPercent}%)` : ''}</Text>
+                  <Text style={[s.cAmt, { width: wAmt, color: '#b91c1c' }]}>- {aed(plan.rentDiscount.discountAmount)}</Text>
+                </View>
+              </>
+            ) : null}
             {/* Single-line groups don't repeat a total that just restates the line. */}
-            {g.lines.length > 1 ? (
+            {g.lines.length > 1 || (g.key === 'rental' && plan.rentDiscount) ? (
               <View style={[s.totalRow, { borderTopColor: c.accent }]}>
-                <Text style={[s.totalLab, { width: wTotalLab }]}>Total</Text>
+                <Text style={[s.totalLab, { width: wTotalLab }]}>{g.key === 'rental' && plan.rentDiscount ? 'Net rent · Total' : 'Total'}</Text>
                 <Text style={[s.cAmt, { width: wAmt, color: c.accent }]}>{aed(g.total)}</Text>
               </View>
             ) : null}
           </View>
         );
       })}
-      <View style={s.grand}>
-        <Text style={s.grandLab}>Grand Total</Text>
-        <Text style={s.grandVal}>AED {aed(plan.grandTotal)}</Text>
+      <View style={s.grandBox}>
+        <View style={s.grand}>
+          <Text style={s.grandLab}>Total Payable</Text>
+          <Text style={s.grandVal}>AED {aed(plan.grandTotal)}</Text>
+        </View>
       </View>
     </View>
   );

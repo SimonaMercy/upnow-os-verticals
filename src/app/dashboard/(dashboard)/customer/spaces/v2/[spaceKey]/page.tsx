@@ -45,7 +45,7 @@ import { MaintenanceSection } from '@/components/customer/MaintenanceSection';
 import { LocationMap } from '@/components/upnow/LocationMap';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import type { PlanAttachSlot } from '@/components/upnow/SegregatedPlanView';
-import { buildSegregatedPlan, segRowsFromCustomerPlan, segRowsFromContract } from '@/lib/segregatedPlan';
+import { buildSegregatedPlan, rentDiscountFromAggregatePlan, segRowsFromCustomerPlan, segRowsFromContract } from '@/lib/segregatedPlan';
 import { openDocViewer } from '@/lib/docViewer';
 import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
 import { slotOfDoc, fileNameOfDoc, tagFileName, isPaymentAdviceKey, type ChequeIntake } from '@/lib/planAttach';
@@ -148,6 +148,9 @@ interface ApiPaymentPlan {
   totalAmountFils: number;
   rentFils: number;
   originalRentFils?: number;
+  discountFils?: number;
+  discountType?: 'percent' | 'fixed';
+  discountPercent?: number;
   securityDepositFils?: number;
   adminFeeFils?: number;
   ejariFils?: number;
@@ -3629,6 +3632,7 @@ function PaymentPlanAction({ resolved, onRefresh }: { resolved: Resolved; onRefr
           — so the plan the customer is quoted looks like the one they sign. */}
       <PaymentPlanCard
         rows={segRows}
+        rentDiscount={rentDiscountFromAggregatePlan(plan)}
         contractType="new"
         tenantName={resolved.contract?.tenantCompanyName || personName(user) || null}
         landlordName={planMeta.landlordName}

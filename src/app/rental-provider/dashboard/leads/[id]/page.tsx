@@ -43,7 +43,7 @@ import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { PaymentPlanCard } from '@/components/upnow/PaymentPlanCard';
 import { PlanAttachCell } from '@/components/upnow/PlanAttachCell';
 import type { ChequeIntake } from '@/lib/planAttach';
-import { segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
+import { rentDiscountFromAggregatePlan, segRowsFromAggregatePlan, type SegKey } from '@/lib/segregatedPlan';
 import { recomputeSubleaseCharges } from '@/lib/subleaseCharges';
 import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows';
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
@@ -3003,6 +3003,7 @@ function PlanTable({ plan, advice, lead, latestViewing, cheques, busy, onAttachC
       <div className="subhead"><Wallet size={13} /> Payment plan{advice ? ' · advice submitted' : ' · proposed to customer'}</div>
       <PaymentPlanCard
         rows={segRows}
+        rentDiscount={rentDiscountFromAggregatePlan(plan)}
         contractType="new"
         tenantName={lead ? leadDisplayName(lead) : null}
         // Same source the lease card uses for its Landlord line — the payee name

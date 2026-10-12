@@ -89,7 +89,15 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
         return (
           <div key={g.key} style={{ marginTop: 10, border: '1px solid #e7e2d9', borderRadius: 10, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '7px 12px', borderLeft: `3px solid ${c.accent}`, background: c.tint }}>
-              <span style={{ fontSize: 13.5, fontWeight: 750, letterSpacing: '-.01em' }}>{g.title}</span>
+              <div style={{ minWidth: 0 }}>
+                {/* A discounted rent is flagged in the heading: a small red tag. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 750, letterSpacing: '-.01em' }}>{g.title}</span>
+                  {g.key === 'rental' && plan.rentDiscount && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#b91c1c', background: '#fdede7', border: '1px solid #f3cabb', borderRadius: 999, padding: '2px 8px', lineHeight: 1.3 }}>Discounted</span>
+                  )}
+                </div>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                 {/* "payments", not "cheques" — a plan can mix transfers and cheques. */}
                 {g.key === 'rental' && g.lines.length > 1 && <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9b9890' }}>{g.lines.length} payments</span>}
@@ -129,12 +137,30 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
                       )}
                     </tr>
                   ))}
-                  {g.lines.length > 1 && (
+                  {/* A discounted rent reconciles inside its own section, the way a
+                      proforma does: rent as listed, less the discount, equals the
+                      section total the instalments add up to. Nothing is deducted
+                      again at the foot, so the sections always sum to Total Payable. */}
+                  {g.key === 'rental' && plan.rentDiscount && (
+                    <>
+                      <tr>
+                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8', fontSize: 11.5, fontWeight: 600, color: '#6b6860' }}>Rental amount</td>
+                        <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8', textAlign: 'right', fontWeight: 700, color: '#6b6860', fontVariantNumeric: 'tabular-nums' }}>{aed(plan.rentDiscount.listedRent)}</td>
+                        {perLineAttach && <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8' }} />}
+                      </tr>
+                      <tr>
+                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderBottom: 0, background: '#fafaf8', fontSize: 11.5, fontWeight: 600, color: '#b91c1c' }}>Discount{plan.rentDiscount.discountType === 'percent' && plan.rentDiscount.discountPercent ? ` (${plan.rentDiscount.discountPercent}%)` : ''}</td>
+                        <td style={{ ...tdCss, borderBottom: 0, background: '#fafaf8', textAlign: 'right', fontWeight: 700, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>- {aed(plan.rentDiscount.discountAmount)}</td>
+                        {perLineAttach && <td style={{ ...tdCss, borderBottom: 0, background: '#fafaf8' }} />}
+                      </tr>
+                    </>
+                  )}
+                  {(g.lines.length > 1 || (g.key === 'rental' && !!plan.rentDiscount)) && (
                     <tr>
                       {/* Span every column except Amount, whatever the optional
                           columns add up to — otherwise the total drifts left out
                           of the Amount column it is supposed to sum. */}
-                      <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total</td>
+                      <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>{g.key === 'rental' && plan.rentDiscount ? 'Net rent · Total' : 'Total'}</td>
                       <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, textAlign: 'right', fontWeight: 800, color: c.accent, fontVariantNumeric: 'tabular-nums' }}>{aed(g.total)}</td>
                       {perLineAttach && <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0 }} />}
                     </tr>
@@ -145,9 +171,11 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
           </div>
         );
       })}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
-        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
-        <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>AED {aed(plan.grandTotal)}</span>
+      <div style={{ marginTop: 14, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total Payable</span>
+          <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>AED {aed(plan.grandTotal)}</span>
+        </div>
       </div>
       {/* Where the transfers go. The cheque payee is not repeated — it is the
           landlord, already named at the top of the summary. */}
