@@ -430,6 +430,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const statusPill = (u: UnitRecord): { label: string; bg: string; fg: string } => {
     if (letNotStarted(u)) return { label: `Leased · from ${fmtShort(u.nextLeaseStart!)}`, bg: '#e0e7ff', fg: '#3730a3' };
     if (isOccupied(u))    return { label: 'Occupied',   bg: '#e0e7ff', fg: '#3730a3' };
+    // HELD UNTIL THE MOVE-OUT IS SIGNED (owner, 12 Oct 2026, unit 302: "it should be vacated only
+    // once the move-out is signed"): the tenancy ended, but the unit is handed back only by the
+    // counter-signed move-out inspection — so it is neither vacant nor ready to lease.
+    if (u.moveOutPending) return { label: u.moveOutEndedOn ? `Move-out pending · since ${fmtShort(u.moveOutEndedOn)}` : 'Move-out pending', bg: '#fde68a', fg: '#78350f' };
     if (restoration[u.id]?.open.length) return { label: 'Under restoration', bg: '#ffedd5', fg: '#9a3412' };
     if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
     if (u.availability === 'reserved')    return { label: 'Reserved',   bg: '#fef3c7', fg: '#92400e' };
@@ -602,7 +606,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // Status buckets for the By-unit status tabs (mock's three buckets): occupied
   // wins, then a live "published" listing, else "Draft" (anything not yet live).
   const unitBucket = (u: UnitRecord): 'Occupied' | 'Published' | 'Draft' =>
-    isOccupied(u) ? 'Occupied'
+    isOccupied(u) || !!u.moveOutPending ? 'Occupied'
     : u.listingStatus === 'published' ? 'Published'
     : 'Draft';
   const statusCounts = scopedUnitRows.reduce(

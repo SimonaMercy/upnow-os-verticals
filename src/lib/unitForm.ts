@@ -59,6 +59,11 @@ export interface UnitRecord {
   occupiedByLease?: boolean | null;
   /** Start date (YYYY-MM-DD) of a confirmed lease that has not begun — the unit is let, though empty today. */
   nextLeaseStart?: string | null;
+  /** The tenancy ended but the move-out inspection is not counter-signed: the unit is HELD, not vacant (owner, 12 Oct 2026). */
+  moveOutPending?: boolean | null;
+  moveOutLeaseId?: number | null;
+  /** YYYY-MM-DD the tenancy ended (termination date first). */
+  moveOutEndedOn?: string | null;
   securityDeposit: number | null;
   adminFee: number | null;
   ejariFeeFils: number | null;
