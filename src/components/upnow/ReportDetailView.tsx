@@ -16,7 +16,7 @@ import {
   BarChart2, AlertCircle, TrendingUp, TrendingDown, Minus, ChevronRight, X, ExternalLink,
   Info, RefreshCw,
 } from 'lucide-react';
-import { getReportsYear, useReportsYear, yearToRange, yearForMatrix, REPORT_YEARS } from '@/components/upnow/reportsYear';
+import { getReportsYear, useReportsYear, yearToRange, yearForMatrix, REPORT_YEARS, CURRENT_YEAR } from '@/components/upnow/reportsYear';
 import { ManagerPerformanceCharts, LeaseActivityCharts, ExecutiveCashflowCharts } from '@/components/upnow/ReportCharts';
 import { DateRangePicker } from '@/components/upnow/DateRangePicker';
 import { MemberActivityView, type MemberRow } from '@/components/upnow/MemberActivityView';
@@ -117,6 +117,15 @@ interface ReportDef {
    *  honours an `occupancy=occupied|vacant|all` query param (default all).
    *  Occupied narrows Annual Rent to passing/in-place rent; Vacant to hold-over. */
   occupancyFilter?: boolean;
+  /** When set, render a Renewals dropdown: All · Pending action. Pending action
+   *  sends `renewals=pending`, and the backend leaves out every Active renewal
+   *  before counting, so the months and tiles add up to the rows listed. */
+  renewalPendingFilter?: boolean;
+  /** Offer NEXT year in the Year picker as well. The reports module stops at the
+   *  current year on purpose (reportsYear.ts — a future year reads as contracted
+   *  when nothing is); a renewal plan is the exception, since next year's
+   *  renewals falling due are exactly what it plans, each with its Status. */
+  nextYear?: boolean;
   /** Contract Status — expose the derived states (status, who has signed,
    *  cheques on file, registration) as server-side filters. */
   contractStatusFilters?: boolean;
@@ -174,6 +183,9 @@ interface Column {
   tone?: 'red' | 'green';
   /** Show this column even when every value is 0 — its 0 is meaningful (e.g. "Days left"). */
   keep?: boolean;
+  /** Drop this column when the picked year is still to come — e.g. a renewal's
+   *  Notes, which in a future year would only repeat the running term's journal. */
+  hideInFutureYear?: boolean;
   /** Decimal places for a 'rate'. Defaults to 1, which is right for an occupancy
    *  or a collection rate. Set 2 where a tenth of a percent is real money — on a
    *  9.85M book that is ~10,000, and rounding it away makes the percentage
@@ -222,9 +234,12 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
 
 const RENEWAL_FORECAST_DEF: ReportDef = {
   title: 'Renewal Plan - Monthly',
-  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer: Status is the lane the renewal sits in on the Operations board (Draft, Notice sent, KYC, Payment plan, Cheques, Signatures, Registration), Active once the new term is running with its Contract Registration certificate on file, and Notes is the last note on the tenancy\'s journal. Pick the year above — it matches the year filter on Renewal Plan - Yearly.',
+  description: 'The detailed companion to Renewal Plan - Yearly — the same renewals for the selected year, but month by month with the individual leases. Each let unit is listed once: in the month its renewal falls due this year (the day after the term ends, so a lease ending 31 Jul renews in August), or, when nothing more falls due this year, in the month its new term began, whether a renewal or a new customer. To renew counts the units whose renewal falls due this year; Renewed counts the units listed by their new term. The two add up to Renewals, and so do the months. Expand a month to see every lease by customer: Status is the lane the renewal sits in on the Operations board (Draft, Notice sent, KYC, Payment plan, Cheques, Signatures, Registration), Active once the new term is running with its Contract Registration certificate on file, and Notes is the last note on the tenancy\'s journal. Pick the year above — it matches the year filter on Renewal Plan - Yearly. Renewals → Pending action hides the Active ones, and the months and tiles then count only the renewals still to work.',
   endpoint: '/api/reports/renewal-forecast',
   buildingLeaseFilter: true,
+  renewalPendingFilter: true,
+  // Owner, 12 Oct 2026: "can I have 2027 filter also?"
+  nextYear: true,
   layout: 'grouped',
   controlKey: 'year',
   columns: [
@@ -273,7 +288,9 @@ const RENEWAL_FORECAST_DEF: ReportDef = {
       // marker (`stage`) still drives the counts; it is no longer a column.
       { key: 'status', label: 'Status', type: 'stage', width: '10%' },
       // The last note on the tenancy's journal: the note, then who wrote it and when.
-      { key: 'lastNote', label: 'Notes', type: 'stack', width: '18%' },
+      // Not in a future year (owner, 12 Oct 2026: "In 2027 don't show the comments
+      // because no active for 2027 leases") — the journal there is the running term's.
+      { key: 'lastNote', label: 'Notes', type: 'stack', width: '18%', hideInFutureYear: true },
     ],
   },
 };
@@ -1783,7 +1800,15 @@ export function ReportDetailView({
   const pathname = usePathname();
   const sp = useSearchParams();
   const slug = slugProp as ReportSlug;
-  const def = REPORTS[slug];
+  const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
+  const baseDef = REPORTS[slug];
+  // A future year's view leaves out the columns that only describe work already
+  // under way (hideInFutureYear) — on screen, in the CSV and in print alike.
+  const def = useMemo(() => {
+    const dd = baseDef?.drilldown;
+    if (!dd || year <= CURRENT_YEAR || !dd.columns.some(c => c.hideInFutureYear)) return baseDef;
+    return { ...baseDef, drilldown: { ...dd, columns: dd.columns.filter(c => !c.hideInFutureYear) } };
+  }, [baseDef, year]);
 
   const [data, setData] = useState<{ generatedAt: string; totals: Record<string, number>; rows: Record<string, unknown>[]; windowDays?: number; months?: string[]; monthKeys?: string[]; currentMonth?: string; columnTotals?: number[]; maxCheques?: number; year?: number; buildings?: BuildingOption[]; unitTypes?: string[]; items?: Record<string, unknown>[]; availableYears?: number[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1799,7 +1824,6 @@ export function ReportDetailView({
   const [from, setFrom] = useState<string>(() => sp?.get('from') ?? (DAILY_DEFAULT_SLUGS.has(slug) ? todayRange().from : yearToRange(getReportsYear()).from));
   const [to, setTo]     = useState<string>(() => sp?.get('to') ?? (DAILY_DEFAULT_SLUGS.has(slug) ? todayRange().to : yearToRange(getReportsYear()).to));
   // Matrix (rent-roll) year selector — defaults to the hub year (current if "All").
-  const [year, setYear] = useState<number>(() => Number(sp?.get('year')) || yearForMatrix(getReportsYear()));
   // Tenant scope — show active customers only (default) or include ended tenants.
   // Security Deposits opens on the FULL register: a settled deposit belongs, by
   // definition, to a customer who has left, so the active-only default emptied
@@ -1823,6 +1847,10 @@ export function ReportDetailView({
   // All = every unit summed together. The param is always sent so 'all' is explicit.
   const [occupancy, setOccupancy] = useState<'all' | 'occupied' | 'vacant'>(
     () => (sp?.get('occupancy') === 'all' ? 'all' : sp?.get('occupancy') === 'vacant' ? 'vacant' : 'occupied'),
+  );
+  // Renewal Plan - Monthly: All · Pending action (Active renewals hidden).
+  const [renewalsShow, setRenewalsShow] = useState<'all' | 'pending'>(
+    () => (sp?.get('renewals') === 'pending' ? 'pending' : 'all'),
   );
   // Contract Status: the derived states as filters (status / who has signed /
   // cheques on file / registration). All default to 'all' and are only sent when
@@ -1885,17 +1913,19 @@ export function ReportDetailView({
   // the period and opts out. Reports without a year/date control simply ignore it.
   const hubYear = useReportsYear();
   const periodPinnedRef = useRef(!!(sp?.get('from') || sp?.get('to') || sp?.get('year')));
+  // Keyed on the report itself (baseDef), not the year-shaped `def`: `def` changes
+  // when a future year is picked, and re-running this would snap the year back.
   useEffect(() => {
-    if (periodPinnedRef.current || !def) return;
-    if (def.controlKey === 'dateRange' || def.controlKey === 'yearRange') {
+    if (periodPinnedRef.current || !baseDef) return;
+    if (baseDef.controlKey === 'dateRange' || baseDef.controlKey === 'yearRange') {
       // Daily-default reports stay on today regardless of the hub year.
       const r = DAILY_DEFAULT_SLUGS.has(slug) ? todayRange() : yearToRange(hubYear);
       setFrom(r.from); setTo(r.to);
-    } else if (def.controlKey === 'year') {
+    } else if (baseDef.controlKey === 'year') {
       setYear(yearForMatrix(hubYear));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hubYear, def]);
+  }, [hubYear, baseDef]);
 
   useEffect(() => {
     if (!def) return;
@@ -1947,6 +1977,7 @@ export function ReportDetailView({
     if (def.unitTypeFilter && unitTypeSel) url += (url.includes('?') ? '&' : '?') + 'unitType=' + encodeURIComponent(unitTypeSel);
     if (def.leaseStatusFilter && leaseStatus !== 'all') url += (url.includes('?') ? '&' : '?') + 'status=' + leaseStatus;
     if (def.occupancyFilter) url += (url.includes('?') ? '&' : '?') + 'occupancy=' + occupancy;
+    if (def.renewalPendingFilter && renewalsShow === 'pending') url += (url.includes('?') ? '&' : '?') + 'renewals=pending';
     if (def.contractStatusFilters) {
       const st = new URLSearchParams();
       if (csStatus !== 'all') st.set('cstatus', csStatus);
@@ -1964,13 +1995,13 @@ export function ReportDetailView({
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope, feeBasis]);
+  }, [def, slug, leaseWindow, forecastMonths, from, to, year, scope, unitTypeSel, leaseStatus, occupancy, renewalsShow, csStatus, csSignature, csCheques, csRegistration, csStage, csMonth, endpointBase, extraQuery, selectedBuildings, selectedLeaseTypes, granularity, vatScope, feeBasis]);
 
   // Keep the chosen filters in the URL. A refresh — or a link pasted to someone
   // else — then lands on the same view instead of resetting to the default. Only
   // narrowed values are written, so a clean report keeps a clean address.
   useEffect(() => {
-    if ((!def?.contractStatusFilters && !def?.feeTaxationControls) || !pathname) return;
+    if ((!def?.contractStatusFilters && !def?.feeTaxationControls && !def?.renewalPendingFilter) || !pathname) return;
     const qs = new URLSearchParams();
     if (def.contractStatusFilters) {
       if (csMonth !== 'all') qs.set('month', csMonth);
@@ -1993,6 +2024,7 @@ export function ReportDetailView({
       if (feeBasis === 'due') qs.set('basis', 'due');
       if (scope === 'all') qs.set('scope', 'all');
     }
+    if (def.renewalPendingFilter && renewalsShow === 'pending') qs.set('renewals', 'pending');
     if (def.controlKey === 'year') qs.set('year', String(year));
     if (selectedBuildings.length) qs.set('buildings', selectedBuildings.join(','));
     if (selectedLeaseTypes.length > 0 && selectedLeaseTypes.length < ALL_LEASE_TYPES.length)
@@ -2000,7 +2032,7 @@ export function ReportDetailView({
     const next = qs.toString();
     if (next === (sp?.toString() ?? '')) return;
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
-  }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, selectedBuildings, selectedLeaseTypes, from, to, granularity, vatScope, feeBasis, scope]);
+  }, [def, pathname, router, sp, year, csMonth, csStatus, csStage, csSignature, csCheques, csRegistration, renewalsShow, selectedBuildings, selectedLeaseTypes, from, to, granularity, vatScope, feeBasis, scope]);
 
   const buildingOptions = data?.buildings ?? [];
   // A report may declare which years actually have data (availableYears); when it
@@ -2962,7 +2994,7 @@ export function ReportDetailView({
             <div className={fGroup}>
               <span className={fLabel}>Year</span>
               <select className={fSelect} value={year} onChange={e => setYear(Number(e.target.value))} aria-label="Year">
-                {(dataYears ? [...dataYears].reverse() : REPORT_YEARS).map(y => <option key={y} value={y}>{y}</option>)}
+                {(dataYears ? [...dataYears].reverse() : def.nextYear ? [CURRENT_YEAR + 1, ...REPORT_YEARS] : REPORT_YEARS).map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           )}
@@ -3177,6 +3209,15 @@ export function ReportDetailView({
                 </select>
               </div>
             </>
+          )}
+          {def.renewalPendingFilter && (
+            <div className={fGroup}>
+              <span className={fLabel}>Renewals</span>
+              <select className={fSelect} aria-label="Renewals" value={renewalsShow} onChange={e => setRenewalsShow(e.target.value as 'all' | 'pending')}>
+                <option value="all">All</option>
+                <option value="pending">Pending action</option>
+              </select>
+            </div>
           )}
           {def.occupancyFilter && (
             <div className={fGroup}>
