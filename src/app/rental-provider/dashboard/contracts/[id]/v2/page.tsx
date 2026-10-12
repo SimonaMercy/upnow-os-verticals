@@ -1625,7 +1625,7 @@ function RenewalDocReview({ h }: { h: StepHandlers }) {
             variant="inline"
             label={`Send upload link (${uploadSlots.length})`}
             presetDocs={uploadSlots.map(s => ({
-              key: s.key, label: s.label, category: s.category, required: true,
+              key: s.key, label: s.label, category: s.category,
             }))}
           />
         </div>

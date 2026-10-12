@@ -37,7 +37,7 @@ export function DocsLinkButton({
   tenantId: number;
   contractId?: number | null;
   label?: string;
-  presetDocs?: Array<{ key: string; label: string; category?: string; required?: boolean }>;
+  presetDocs?: Array<{ key: string; label: string; category?: string }>;
   /** 'dialog' — the pick-then-send modal. 'inline' — press once and the link
    *  appears in place, matching the signing links on the Signatures step. Only
    *  meaningful with `presetDocs`: there is nothing to press with an empty list. */
@@ -103,8 +103,10 @@ export function DocsLinkButton({
         body: JSON.stringify({
           ownerType: 'customer', ownerId: tenantId, documentKey,
           displayName: name, category: preset?.category ?? 'contract', notes: notes.trim() || undefined,
-          // Typed by hand → undefined → the customer sees it as required.
-          required: preset?.required,
+          // Every document the landlord asks for is required — checklist slots
+          // (identity, supporting, occupants) and names typed by hand alike. The
+          // customer's upload page shows no "Optional" on a requested document.
+          required: true,
         }),
       });
       if (!res.ok) {

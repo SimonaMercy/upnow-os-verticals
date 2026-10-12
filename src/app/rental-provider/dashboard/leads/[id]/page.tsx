@@ -1806,11 +1806,13 @@ function DocsSection({
   // so they see the same complete picture the RP is looking at here. Each goes
   // under its own key, so an upload lands in the slot these rows read.
   const checklistDocs = [
-    ...reqDocs.map(d => ({ key: d.key, label: d.label, category: d.category, required: d.required })),
-    // Additional documents were asked for by name — always mandatory.
+    // Every document on the link is requested as required — the checklist's
+    // supporting documents included (owner, 11 Oct 2026).
+    ...reqDocs.map(d => ({ key: d.key, label: d.label, category: d.category })),
+    // Additional documents were asked for by name.
     ...noteItems.map(item => ({
       key: resolveRequestedDocKey(item) ?? additionalDocKey(item),
-      label: item, category: 'other', required: true,
+      label: item, category: 'other',
     })),
   ].filter((d, i, arr) => arr.findIndex(x => x.key === d.key) === i);
 
