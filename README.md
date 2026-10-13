@@ -5,12 +5,25 @@ UAE dual marketplace web client (rentals + home services). Next.js 15 (App Route
 ## Quick start
 
 ```bash
-cp .env.example .env.local    # fill in NEXT_PUBLIC_API_URL, etc.
-npm install
-npm run dev                   # http://localhost:3001
+cp .env.example .env.local    # already points at the staging API
+npm ci
+npm run dev                   # http://localhost:3000
 ```
 
-Backend must be running on `http://localhost:3000` (see `../upnow-backend`).
+Sign in with the staging account you were given (`…@staging.com`). The API
+(NestJS, separate private repo) is not part of this repository; the frontend
+talks to it over HTTP only, at `NEXT_PUBLIC_API_URL`.
+
+## Working in this repository
+
+- Branch from `main`, commit, push, open a pull request here. Do not push to `main` directly.
+- Keep changes inside this repo's scope: UI, components, pages, styles, e2e specs.
+  If a change needs a new or changed API endpoint, describe it in the PR; the API is
+  built on the other side.
+- Paths like `../upnow-backend`, `../docs` or `../Mockups` in AGENTS.md refer to the
+  main monorepo and are not available here.
+- `main` is synced both ways with the main repository (`git subtree`), so your commits
+  keep their author and message when they land there.
 
 ## Project docs (read in this order)
 
