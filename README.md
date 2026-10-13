@@ -25,6 +25,18 @@ talks to it over HTTP only, at `NEXT_PUBLIC_API_URL`.
 - `main` is synced both ways with the main repository (`git subtree`), so your commits
   keep their author and message when they land there.
 
+## Staging sandbox
+
+`.env.example` points at the staging API. Staging holds test data only, so feel free to
+create, edit and delete anything there.
+
+- Open http://localhost:3000/login, enter one of the accounts below, and the one-time
+  code is shown on the screen (staging does not send email).
+- Accounts, one per role: `admin@staging.com` · `rp@staging.com` (landlord, "Marasi
+  Property Management") · `manager@staging.com` · `customer@staging.com` · `sp@staging.com`
+  (service provider).
+- Uploaded files are proxied from the same API, so photos and documents work locally.
+
 ## Project docs (read in this order)
 
 1. [AGENTS.md](AGENTS.md) — project rules, conventions, folder map, workflow
