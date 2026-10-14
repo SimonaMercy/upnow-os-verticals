@@ -28,7 +28,7 @@
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment, Children, isValidElement } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { REQUESTABLE_DOCS, groupRequestNames, requestedDocKey } from '@/lib/requestableDocs';
@@ -40,8 +40,8 @@ import {
   ChevronRight, ChevronDown, MapPin, Clock, Bell, Search,
   User, Building2, Calendar, CreditCard, Paperclip,
   ClipboardList, ListChecks, RotateCcw, X, AlertCircle, Check, StickyNote,
-  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet,
-  Trash2, Plus, Link2, Scale, Mail, MessageCircle } from 'lucide-react';
+  UploadCloud, Eye, Download, ExternalLink, Pencil, ClipboardCheck, Send, Wallet, Banknote,
+  Trash2, Plus, Link2, Scale, Mail, MessageCircle, Phone, AlertTriangle } from 'lucide-react';
 import { DirhamSign } from '@/components/ui/DirhamSign';
 import { CustomerDocsModal } from '@/components/upnow/CustomerDocsModal';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
@@ -2562,6 +2562,9 @@ const INCURRED_FEE_TYPES = new Set<string>(RULE_FEE_DEFS.map(d => d.pt));
  * (Contract Registration, fees VAT, service charges, ad-hoc "other").
  */
 /** Bounced / cancelled cheques are void — never counted in any total. */
+/** Money actually received in a section — the cleared cheques/payments only. */
+const clearedSum = (rows: { chequeStatus?: string | null; amount?: number | null }[]) =>
+  rows.reduce((t, p) => t + ((p.chequeStatus ?? '').toLowerCase() === 'cleared' ? Number(p.amount || 0) : 0), 0);
 const feeActive = (p: { chequeStatus?: string | null }) =>
   !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
 /** The combined VAT cheque on admin/commission fees is a pass-through tax — it
@@ -2582,6 +2585,96 @@ const PAY_STATUS_CELL: React.CSSProperties = {
 
 /** Shared fixed column widths for BOTH payment tables (deposit/rent + fees) so
  *  every section's columns — amounts especially — line up in one vertical grid. */
+/**
+ * A status pill with its own menu — replaces the browser's native <select> for
+ * cheque / deposit / custody statuses. It is a drop-in: the SAME <option>
+ * children (so every row keeps its own option list, labels and disabled rules)
+ * and the SAME onChange handler, called with a select-shaped { target: { value } }
+ * — so "Cancelled…" still opens the reason picker and "Returned" the return
+ * dialog. Fixed-position menu, so no card's overflow can clip it. While open it
+ * is a role="dialog", which the report's J/K/Esc lease navigation stands down for.
+ */
+function StatusMenu({ className, style, value, disabled, title, onChange, children }: {
+  className?: string; style?: React.CSSProperties; value: string; disabled?: boolean; title?: string;
+  onChange: (e: { target: { value: string } }) => void; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const opts = Children.toArray(children)
+    .filter((c): c is React.ReactElement<{ value: string; disabled?: boolean; children?: React.ReactNode }> => isValidElement(c))
+    .map(c => ({ value: String(c.props.value), label: c.props.children, disabled: !!c.props.disabled }));
+  const current = opts.find(o => o.value === value);
+  const toggle = () => {
+    if (disabled) return;
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const h = opts.length * 34 + 10;
+      const below = window.innerHeight - r.bottom > h + 8;
+      setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 196)), top: below ? r.bottom + 6 : Math.max(8, r.top - h - 6) });
+    }
+    setOpen(o => !o);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const items = () => [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [])];
+    (menuRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)') ?? items()[0])?.focus();
+    const down = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node) || btnRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); btnRef.current?.focus(); return; }
+      if (e.key === 'Tab') { setOpen(false); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const list = items();
+        const i = list.indexOf(document.activeElement as HTMLButtonElement);
+        list[(i + (e.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus();
+      }
+    };
+    const shut = (e: Event) => { if (!menuRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', down);
+    document.addEventListener('keydown', key, true);
+    window.addEventListener('scroll', shut, true);
+    window.addEventListener('resize', () => setOpen(false), { once: true });
+    return () => {
+      document.removeEventListener('mousedown', down);
+      document.removeEventListener('keydown', key, true);
+      window.removeEventListener('scroll', shut, true);
+    };
+  }, [open]);
+  return (
+    <>
+      <button ref={btnRef} type="button" className={(className ?? '') + ' cstat-btn'} style={style} disabled={disabled} title={title}
+        aria-haspopup="listbox" aria-expanded={open} onClick={toggle}
+        onKeyDown={e => { if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !open) { e.preventDefault(); toggle(); } }}>
+        <span>{current?.label ?? value}</span>
+        <ChevronDown size={12} className={'cstat-chev' + (open ? ' up' : '')} />
+      </button>
+      {open && pos && (
+        <div ref={menuRef} role="dialog" aria-label={title ?? 'Change status'} className="cstat-menu" style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 130 }}>
+          <div role="listbox">
+            {opts.map(o => {
+              const on = o.value === value;
+              return (
+                <button key={o.value} type="button" role="option" aria-selected={on} disabled={o.disabled}
+                  className={'cstat-opt' + (on ? ' on' : '')}
+                  onClick={() => { setOpen(false); btnRef.current?.focus(); if (!on) onChange({ target: { value: o.value } }); }}>
+                  <span className={'cstat-dot ' + o.value} aria-hidden />
+                  <span className="lb">{o.label}</span>
+                  {on && <Check size={13} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function PayCols() {
   return (
     <colgroup>
@@ -2601,12 +2694,12 @@ function PayCols() {
  *  read-only plan view, so the working (editable) table reads in the same four groups. */
 function PaySegRail({ title, extra, onAdd }: { title: string; extra?: React.ReactNode; onAdd?: () => void }) {
   return (
-    <tr>
+    <tr className="segrail">
       <td colSpan={7} style={{ borderLeft: '3px solid #1a5a4a', background: 'var(--jade-tint, #eef2f0)', padding: '6px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontWeight: 750, fontSize: 13, letterSpacing: '-.01em' }}>{title}</span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            {extra != null && <span className="note" style={{ fontWeight: 400 }}>{extra}</span>}
+            {extra != null && <span className="note segcount" style={{ fontWeight: 400 }}>{extra}</span>}
             {onAdd && <button type="button" className="mini-btn view" onClick={onAdd}><Plus size={11} /> Add</button>}
           </span>
         </div>
@@ -2750,31 +2843,31 @@ function ContractDepositSection({
             )}
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-              <div>
+          <div className="dep-body" style={{ display: 'grid', gap: 10 }}>
+            <div className="dep-top" style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+              <div className="dep-amt">
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--jade-deep)', letterSpacing: '-.02em' }}>
                   {sd.amount ? fmtAed(sd.amount) : <span style={{ color: '#9b9890', fontSize: 15 }}>amount not recorded</span>}
                 </div>
                 {sd.depositId != null && <ReceiptRefTag refs={refs} id={sd.depositId} kind="deposit" />}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, auto))', gap: '4px 22px', marginLeft: 'auto' }}>
+              <div className="dep-facts" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(120px, auto))', gap: '4px 22px', marginLeft: 'auto' }}>
                 <DRow k="Reference" v={sd.chequeNumber ?? '—'} />
                 <DRow k="Method"    v={sd.paymentMethod ? fmtMethod(sd.paymentMethod) : '—'} />
                 <DRow k={sd.recordedDate ? 'Received' : 'Cheque date'} v={fmtDate(sd.recordedDate ?? sd.dueDate) || '—'} />
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className="dep-acts" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               {editable && sd.amount ? (
-                <select className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
+                <StatusMenu className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ cursor: 'pointer' }}
                   title="Cheque / banking status" value={sd.chequeStatus ?? 'pending'} disabled={statusBusy}
                   onChange={e => onChangeStatus(sd.depositId!, e.target.value)}>
                   <option value="pending">Pending</option>
                   <option value="cleared">Cleared</option>
                   <option value="bounced">Bounced</option>
                   <option value="cancelled">Cancelled</option>
-                </select>
+                </StatusMenu>
               ) : (
                 <span className={'cstat ' + (sd.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
                   {(sd.chequeStatus ?? 'pending')}
@@ -2800,7 +2893,7 @@ function ContractDepositSection({
             </div>
 
             {settled && (sd.settledRefundAmount != null || sd.settledDeductionAmount != null) && (
-              <p className="note" style={{ fontSize: 12 }}>
+              <p className="note dep-note" style={{ fontSize: 12 }}>
                 Refunded {fmtAed(sd.settledRefundAmount ?? 0)} · kept {fmtAed(sd.settledDeductionAmount ?? 0)}
                 {sd.settledOn ? ` · ${fmtDate(sd.settledOn)}` : ''}
                 {sd.settledViaSettlementId != null ? ' · via the move-out settlement' : ''}
@@ -2817,7 +2910,7 @@ function ContractDepositSection({
 /** Per-section subtotal row — closes each segment (Security Deposit / Rental Income /
  *  Management Fee / Third Party) with its own total, so no section is left un-summed
  *  and the totals never get lumped together. Optional sub-lines (e.g. Net rent / VAT). */
-function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amount: number; sub?: { label: string; amount: number }[] }) {
+function PaySegTotalRow({ label = 'Total', amount, sub, collected }: { label?: string; amount: number; sub?: { label: string; amount: number }[]; collected?: number }) {
   const tot: React.CSSProperties = { borderTop: '2px solid #bfe3d5', background: 'var(--jade-tint, #eef2f0)' };
   return (
     <>
@@ -2828,10 +2921,26 @@ function PaySegTotalRow({ label = 'Total', amount, sub }: { label?: string; amou
           <td colSpan={4} />
         </tr>
       ))}
-      <tr>
+      <tr className="segtot">
         <td colSpan={2} style={{ ...tot, fontWeight: 800, fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.04em', color: '#6b6860' }}>{label}</td>
         <td className="amt" style={{ ...tot, fontWeight: 800, color: 'var(--jade-deep)' }}>{fmtAed(amount)}</td>
-        <td colSpan={4} style={tot} />
+        {/* The rest of the band says where the section stands — collected vs
+            still to come — so the total row is a status line, not dead space. */}
+        <td colSpan={4} style={tot}>
+          {collected != null && amount > 0 && (() => {
+            const got = Math.min(collected, amount);
+            const left = amount - got;
+            const pct = Math.round((got / amount) * 100);
+            return (
+              <div className="segtot-prog">
+                <span className="segtot-bar" aria-hidden><i style={{ width: `${pct}%` }} /></span>
+                {left <= 0
+                  ? <span className="segtot-done"><Check size={13} /> Fully collected</span>
+                  : <span className="segtot-txt"><b>{fmtAed(got)}</b> collected · <b className="due">{fmtAed(left)}</b> outstanding</span>}
+              </div>
+            );
+          })()}
+        </td>
       </tr>
     </>
   );
@@ -2910,10 +3019,10 @@ function CustodyCell({ p, can, headOffice, onCustody, onReturn, proof }: {
   return (
     <div style={{ marginTop: 4 }}>
       {can && onCustody ? (
-        <select className={'cstat ' + tone} style={{ cursor: 'pointer', maxWidth: '100%' }} value={c} disabled={busy} onChange={e => void change(e.target.value)}
+        <StatusMenu className={'cstat ' + tone} style={{ cursor: 'pointer', maxWidth: '100%' }} value={c} disabled={busy} onChange={e => void change(e.target.value)}
           title={c === 'not_recorded' ? 'Collected before custody was tracked — say where it is' : atHeadOffice && toReturn ? 'At head office — take it back first, then return it to the customer' : 'Where the cheque / cash is'}>
           {opts.map(v => <option key={v} value={v} disabled={v === 'returned' && atHeadOffice}>{label(v)}</option>)}
-        </select>
+        </StatusMenu>
       ) : (
         <span className={'cstat ' + tone}>{label(c)}</span>
       )}
@@ -2953,10 +3062,10 @@ function ReceiptRefTag({ refs, id, kind = 'payment' }: { refs: PaymentRefs; id: 
   if (!ref) return null;
   const isVoid = kind === 'deposit' ? refs.voidedDepositIds.has(id) : refs.voidedPaymentIds.has(id);
   return (
-    <span className="note"
+    <span className={'note rcpt-ref' + (isVoid ? ' void' : '')}
       title={isVoid ? 'Receipt voided — cheque reverted to a non-cleared status; number retained for the gapless series' : 'Issued receipt number — for bank reconciliation'}
       style={{ display: 'block', fontSize: 11, fontFamily: 'ui-monospace,Menlo,monospace', color: isVoid ? '#b3261e' : '#1a5a4a', marginTop: 2, textDecoration: isVoid ? 'line-through' : 'none' }}>
-      Receipt {ref}{isVoid ? ' · VOID' : ''}
+      Receipt <span style={{ whiteSpace: 'nowrap' }}>{ref}</span>{isVoid ? ' · VOID' : ''}
     </span>
   );
 }
@@ -2984,7 +3093,12 @@ function DetailsDrawer({
   // via Edit / Status, never deleted, so the drawer no longer offers Delete.
   onRecordPayment, onUpdatePayment, onUpdateDeposit, onCreateDeposit, onSaveClauses, onConfirmPdc, onUploadDoc, onRequestDoc,
   notes, onAddNote, perms, onDocsChanged, paymentRefs = EMPTY_PAYMENT_REFS, showExtras = true, editLocked = false, legal, emails, financeOnly = false, onCustody,
+  tabbed = false,
 }: {
+  /** Record page (owner, 13 Oct 2026 — the Leases design): the inline sections
+   *  shown one at a time under a tab bar instead of stacked. Every section and
+   *  every action inside it is the same; only which one is on screen changes. */
+  tabbed?: boolean;
   /** Hand a cheque to head office / take it back / hand it back to the customer (0323, 0324). */
   onCustody?: CustodyHandler;
   /** The accountant's record: payments + deposit only — no documents, notes,
@@ -4056,8 +4170,30 @@ function DetailsDrawer({
       setReqBusy(false);
     }
   };
+  // Which sections are on screen: all of them inline, the active tab in the
+  // drawer — and in tabbed mode (inline layout) only the active tab.
+  const show = (k: DrawerTab) => (tabbed ? tab === k : (inline || tab === k));
+  const recordTabs = tabbed ? ([
+    { key: 'payments' as DrawerTab, label: 'Payments', count: null as number | null },
+    ...(!financeOnly ? [{ key: 'documents' as DrawerTab, label: 'Documents', count: null }] : []),
+    ...(!financeOnly ? [{ key: 'notes' as DrawerTab, label: 'Notes & activity', count: notes.length }] : []),
+    ...(!financeOnly && emails?.showEmails && contract.tenant.id != null ? [{ key: 'emails' as DrawerTab, label: 'Emails', count: null }] : []),
+    ...(!financeOnly && emails?.showWhatsapp && contract.tenant.id != null ? [{ key: 'whatsapp' as DrawerTab, label: 'WhatsApp', count: null }] : []),
+    ...(!financeOnly && legal ? [{ key: 'breaches' as DrawerTab, label: 'Breaches', count: null }] : []),
+  ]) : [];
   return (
     <>
+      {tabbed && recordTabs.length > 1 && (
+        <div className="rtabs" role="tablist">
+          {recordTabs.map(t => (
+            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key}
+              className={'rtab ' + (tab === t.key ? 'on' : '')} onClick={() => setTab(t.key)}>
+              {(() => { const Ic = DRAWER_TABS.find(d => d.key === t.key)?.icon; return Ic ? <Ic size={15} aria-hidden="true" /> : null; })()}
+              {t.label}{t.count != null && <span className="n">{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {/* Backdrop only exists in drawer mode — in inline mode it would cover
           the whole page and swallow every click. */}
       {!inline && <div className={'scrim ' + (open ? 'open' : '')} onClick={onClose} />}
@@ -4077,7 +4213,7 @@ function DetailsDrawer({
             ))}
           </div>
         )}
-        <div className={inline ? 'dbody-inline' : 'dbody'}>
+        <div className={inline ? ('dbody-inline' + (tabbed ? ' tabbed' : '')) : 'dbody'}>
           {/* Parties section removed (CEO: customer name + phone live in the
               page header; landlord details live on the settings page). */}
           {!inline && tab === 'property' && (
@@ -4096,7 +4232,7 @@ function DetailsDrawer({
             </div>
           )}
           {/* Rental period moved to the page-top info bar (next to the customer). */}
-          {(inline || tab === 'payments') && (
+          {show('payments') && (
             <>
               {/* ── Security deposit — its OWN section, above the payments ledger ──
                   It used to be the first rail INSIDE the Payments table, which put
@@ -4232,7 +4368,7 @@ function DetailsDrawer({
                               <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>
                             )}
                           </td>
-                          <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}> · {p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
+                          <td className="ref" style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span className="bank" style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}><span className="dot"> · </span>{p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
                           <td>{fmtMethod(p.paymentMethod)}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                           <td>{fmtDate(p.transactionDate)}</td>
                           <td>
@@ -4257,7 +4393,7 @@ function DetailsDrawer({
                                   {chequeStatusDisplay(p).label}
                                 </span>
                               ) : perms.collections ? (
-                                <select
+                                <StatusMenu
                                   className={'cstat ' + (p.chequeStatus ?? 'pending')}
                                   style={{ cursor: 'pointer' }}
                                   value={p.chequeStatus ?? 'pending'}
@@ -4274,7 +4410,7 @@ function DetailsDrawer({
                                   <option value="cleared">Cleared</option>
                                   <option value="bounced">Bounced</option>
                                   <option value="cancelled">Cancelled…</option>
-                                </select>
+                                </StatusMenu>
                               ) : (
                                 <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
                                   {p.chequeStatus ?? 'pending'}
@@ -4301,7 +4437,7 @@ function DetailsDrawer({
                               {perms.collections && ((p.chequeStatus ?? '') === 'bounced' || isSwapped(p)) && shortfallOf(p) > 1 && (
                                 <button
                                   type="button"
-                                  className="mini-btn view"
+                                  className="mini-btn view row-act"
                                   title="Record the money the customer handed over against this cheque"
                                   onClick={() => openReplacementFor(p)}
                                 >
@@ -4320,7 +4456,7 @@ function DetailsDrawer({
                                 && (linkTargetsFor(p.id).length > 0 || p.replacesPaymentId != null) && (
                                 <button
                                   type="button"
-                                  className="mini-btn view"
+                                  className="mini-btn view row-act"
                                   title={p.replacesPaymentId != null
                                     ? 'Change or remove which cheque this payment goes against'
                                     : 'Record that this payment goes against a bounced or swapped cheque'}
@@ -4488,6 +4624,7 @@ function DetailsDrawer({
                         <PaySegTotalRow
                           label={showVat ? 'Rental Income total (incl. VAT)' : 'Rental Income total'}
                           amount={rentGross}
+                          collected={clearedSum(rentScheduleRows)}
                           sub={showVat ? [{ label: 'Net rent', amount: rentNet }, { label: `VAT${(contract.rentVatRate ?? 0) > 0 ? ` (${contract.rentVatRate}%)` : ''}`, amount: rentVat }] : undefined}
                         />
                       )}
@@ -4505,7 +4642,7 @@ function DetailsDrawer({
                         </button>
                       </div>
                     )}
-                    <table className="ptable" style={{ tableLayout: 'fixed' }}>
+                    <table className="ptable ptable-fees" style={{ tableLayout: 'fixed' }}>
                       <PayCols />
                       <thead><tr><th>Fee</th><th>Description</th><th>Amount</th><th>Reference</th><th>Method</th><th>Due date</th><th>Status</th></tr></thead>
                       <tbody>
@@ -4514,22 +4651,29 @@ function DetailsDrawer({
                           {i === 0 && managementFeeRows.length > 0 && <PaySegRail title="Management Fee" onAdd={perms.collections ? () => openFeeFor('admin_fee') : undefined} />}
                           {i === managementFeeRows.length && thirdPartyFeeRows.length > 0 && <PaySegRail title="Third Party" onAdd={perms.collections ? () => openFeeFor('ejari_fee') : undefined} />}
                           <tr>
+                            <td className="feecol"><span>{feeLabel(f.paymentType)}</span></td>
+                            {/* Receipt number under the description, as on the rent rows — the
+                                first column is too narrow to hold it. The record view hides
+                                the Fee column and names the fee here instead, only when the
+                                description doesn't already say it. */}
                             <td>
-                              {feeLabel(f.paymentType)}
+                              {f.description ?? feeLabel(f.paymentType)}
+                              {f.description && f.description.trim().toLowerCase() !== feeLabel(f.paymentType).toLowerCase() && (
+                                <span className="note fee-kind" style={{ display: 'none', fontSize: 11 }}>{feeLabel(f.paymentType)}</span>
+                              )}
                               <ReceiptRefTag refs={paymentRefs} id={f.id} />
                             </td>
-                            <td>{f.description ?? '—'}</td>
                             <td className="amt">
                               {fmtAed(f.amount)}
                               {f.vatAmount ? <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(f.vatAmount)} VAT</span> : null}
                             </td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{f.chequeNumber ?? '—'}{attachmentOf(f.documentId)}</td>
+                            <td className="ref" style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{f.chequeNumber ?? '—'}{attachmentOf(f.documentId)}</td>
                             <td>{f.paymentMethod ? fmtMethod(f.paymentMethod) : '—'}<CustodyCell p={f} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(f.returnedToCustomerDocumentId)} /></td>
                             <td>{fmtDate(f.transactionDate)}</td>
                             <td>
                               <div style={PAY_STATUS_CELL}>
                                 {perms.collections ? (
-                                  <select
+                                  <StatusMenu
                                     className={'cstat ' + (f.chequeStatus ?? 'pending')}
                                     style={{ cursor: 'pointer' }}
                                     value={f.chequeStatus ?? 'pending'}
@@ -4540,7 +4684,7 @@ function DetailsDrawer({
                                     <option value="cleared">Cleared</option>
                                     <option value="bounced">Bounced</option>
                                     <option value="cancelled">Cancelled</option>
-                                  </select>
+                                  </StatusMenu>
                                 ) : (
                                   <span className={'cstat ' + (f.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>
                                     {f.chequeStatus ?? 'pending'}
@@ -4623,7 +4767,7 @@ function DetailsDrawer({
                               </td>
                             </tr>
                           )}
-                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 1 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} />}
+                          {i === managementFeeRows.length - 1 && managementFeeRows.length > 1 && <PaySegTotalRow label="Management Fee total" amount={managementFeeTotal} collected={clearedSum(managementFeeRows)} />}
                           </Fragment>
                         ))}
                         {/* Custom "Other" charges (payment_type 'other') — per-unit taxes
@@ -4633,7 +4777,7 @@ function DetailsDrawer({
                         {otherPaymentRows.map(p => (
                           <Fragment key={p.id}>
                           <tr>
-                            <td>Other</td>
+                            <td className="feecol"><span>Other</span></td>
                             <td>
                               {p.description ?? '—'}
                               {paymentRefs.receiptByPaymentId[p.id] && (
@@ -4646,13 +4790,13 @@ function DetailsDrawer({
                               {fmtAed(p.amount)}
                               {(p.vatAmount ?? 0) > 0 && <span className="note" style={{ display: 'block', fontSize: 11 }}>incl. {fmtAed(p.vatAmount ?? 0)} VAT</span>}
                             </td>
-                            <td style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}> · {p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
+                            <td className="ref" style={{ fontFamily: 'ui-monospace,Menlo,monospace' }}>{p.chequeNumber ?? '—'}{p.bankName ? <span className="bank" style={{ fontFamily: 'inherit', color: 'var(--mute)', fontSize: 11 }}><span className="dot"> · </span>{p.bankName}</span> : null}{attachmentOf(p.documentId)}</td>
                             <td>{p.paymentMethod ? fmtMethod(p.paymentMethod) : '—'}<CustodyCell p={p} can={perms.collections} headOffice={perms.headOffice} onCustody={onCustody} onReturn={setReturnFor} proof={attachmentOf(p.returnedToCustomerDocumentId)} /></td>
                             <td>{fmtDate(p.transactionDate)}</td>
                             <td>
                               <div style={PAY_STATUS_CELL}>
                                 {perms.collections ? (
-                                  <select
+                                  <StatusMenu
                                     className={'cstat ' + (p.chequeStatus ?? 'pending')}
                                     style={{ cursor: 'pointer' }}
                                     value={p.chequeStatus ?? 'pending'}
@@ -4663,7 +4807,7 @@ function DetailsDrawer({
                                     <option value="cleared">Cleared</option>
                                     <option value="bounced">Bounced</option>
                                     <option value="cancelled">Cancelled</option>
-                                  </select>
+                                  </StatusMenu>
                                 ) : (
                                   <span className={'cstat ' + (p.chequeStatus ?? 'pending')} style={{ textTransform: 'capitalize' }}>{p.chequeStatus ?? 'pending'}</span>
                                 )}
@@ -4726,7 +4870,7 @@ function DetailsDrawer({
                           )}
                           </Fragment>
                         ))}
-                        {(thirdPartyFeeRows.length + otherPaymentRows.length) > 1 && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} />}
+                        {(thirdPartyFeeRows.length + otherPaymentRows.length) > 1 && <PaySegTotalRow label="Third Party total" amount={thirdPartyTotal} collected={clearedSum([...thirdPartyFeeRows, ...otherPaymentRows])} />}
                         {feeRows.length === 0 && otherPaymentRows.length === 0 && !showAddFee && (
                           <tr><td colSpan={7}><span className="note">No fees recorded. Use <strong>Add fee</strong> to enter admin, contract registration, or commission charges — amounts are not auto-calculated.</span></td></tr>
                         )}
@@ -4800,7 +4944,7 @@ function DetailsDrawer({
                       above it: one number cannot answer both "what was this agreed at?"
                       and "what has been charged on it?", and collapsing them let a
                       bounced cheque restate the rent. */}
-                  <div style={{ marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
+                  <div className="gtot" style={{ marginTop: 16, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
                     {incurredChargesTotal > 0 && (
                       <>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 7 }}>
@@ -4813,7 +4957,7 @@ function DetailsDrawer({
                         </div>
                       </>
                     )}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: incurredChargesTotal > 0 ? 9 : 0 }}>
+                    <div className="gtot-main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: incurredChargesTotal > 0 ? 9 : 0 }}>
                       <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Grand Total</span>
                       <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>{fmtAed(paymentsGrandTotal)}</span>
                     </div>
@@ -4951,7 +5095,7 @@ function DetailsDrawer({
                   Documents card below, under its Financial tab. */}
             </>
           )}
-          {(inline || tab === 'documents') && (() => {
+          {show('documents') && (() => {
             // Requested-but-not-uploaded placeholders (empty fileUrl) are open
             // asks, not files — keep them out of the lists; checklist slots
             // show "Requested — awaiting upload" for them instead.
@@ -5199,6 +5343,15 @@ function DetailsDrawer({
                   </div>
                 </div>
             );
+            // What the header counts: every binder paper that can be opened now —
+            // generated ones (summary, receipts, agreement, live inspection pages)
+            // as well as uploaded files — not just uploads, which read "0" on a
+            // binder full of documents.
+            const slotReady = (b: BinderSlot) => b.kind === 'link'
+              ? (b.key === 'offer' ? currentPlan.totalAmountFils > 0 : !!b.href)
+              : matchDocs(b.key).length > 0 || !!b.fallbackHref;
+            const readyCount = binderSeq.filter(slotReady).length;
+            const toUpload = binderSeq.length - readyCount;
             if (financeOnly) {
               // The accountant's documents are the money papers only — the payment
               // summary, the customer's payment confirmation and the one Receipts
@@ -5222,16 +5375,24 @@ function DetailsDrawer({
               <div className="sec">
                 <div className="sech">
                   <span className="si"><Paperclip size={16} /></span>
-                  <span className="st">Documents ({all.length})</span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                    <Link href={`${contractBase}/documents`} target="_blank" rel="noopener noreferrer" className="mini-btn view">
-                      <ExternalLink size={12} /> View all
+                  <span className="st">
+                    Documents
+                    <span className="doc-count" title={`${readyCount} of ${binderSeq.length} contract documents can be opened now${all.length ? ` · ${all.length} uploaded file${all.length === 1 ? '' : 's'}` : ''}`}>
+                      <b>{readyCount}</b> of {binderSeq.length} ready
+                    </span>
+                    {toUpload > 0 && <span className="doc-count todo">{toUpload} to upload</span>}
+                  </span>
+                  {/* Each missing row carries its own Upload / Request — these are
+                      for anything NOT on the list, so they stay quiet. */}
+                  <div className="doc-hacts" style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    <Link href={`${contractBase}/documents`} target="_blank" rel="noopener noreferrer" className="mini-btn view" title="Every file on this contract, including ones not in the list below">
+                      <ExternalLink size={12} /> All files
                     </Link>
-                    <button type="button" className="mini-btn ok" onClick={() => { setShowUpload(s => !s); setUpErr(null); setUpReplaceOf(null); }}>
-                      <UploadCloud size={12} /> Upload
+                    <button type="button" className="mini-btn view" title="Upload a document that isn't in the list below" onClick={() => { setShowUpload(s => !s); setUpErr(null); setUpReplaceOf(null); }}>
+                      <UploadCloud size={12} /> Upload other
                     </button>
-                    <button type="button" className="mini-btn view" onClick={openBlankRequest}>
-                      <Send size={12} /> Request
+                    <button type="button" className="mini-btn view" title="Ask the customer for a document that isn't in the list below" onClick={openBlankRequest}>
+                      <Send size={12} /> Request other
                     </button>
                   </div>
                 </div>
@@ -5244,8 +5405,8 @@ function DetailsDrawer({
                     {/* Checklist — new lease: full pack + the two universal
                         contract docs; renewal: only Contract Registration +
                         Payment Advice. Always non-empty (CONTRACT_DOCS). */}
-                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
-                      Contract documents · in order
+                    <div className="doc-cap" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                      Contract binder
                     </div>
                     {isRenewal && (
                       <p className="note" style={{ margin: '0 0 8px' }}>
@@ -5256,7 +5417,7 @@ function DetailsDrawer({
                       {binderSeq.map(s => s.kind === 'doc' ? renderDocSlot(s) : s.key === 'offer' ? renderOfferSlot(s) : renderLinkSlot(s))}
                     </div>
                     {/* Everything else on this contract — one link, no inline dump. */}
-                    <p className="note" style={{ marginTop: 8 }}>
+                    <p className="note doc-foot" style={{ marginTop: 8 }}>
                       {contract.tenant.id != null && (
                         <button type="button" className="chain-link" style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }} onClick={() => setShowDocsHistory(true)}>
                           Document History
@@ -5270,7 +5431,7 @@ function DetailsDrawer({
                       the customer sees as their re-upload prompt (matches leads). */}
                   {kycDocs.length > 0 && (
                     <div style={{ marginTop: 12 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
+                      <div className="doc-cap" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--color-neutral-400, #9b9890)', margin: '2px 0 6px' }}>
                         Customer KYC · review
                       </div>
                       <div className="doclist">
@@ -5771,9 +5932,9 @@ function DetailsDrawer({
               A running, append-only journal staff keep about this tenancy so
               whoever picks it up next sees the full history. Shared across the
               whole renewal chain, and never locks (unlike the clauses note). */}
-          {(inline || tab === 'notes') && !financeOnly && (
+          {show('notes') && !financeOnly && (
             <div className="sec" id="sec-notes">
-              <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes</span></div>
+              <div className="sech"><span className="si"><StickyNote size={16} /></span><span className="st">Notes{notes.length > 0 && <span className="sec-count">{notes.length}</span>}</span></div>
               <div className="secb">
                 <p className="note" style={{ marginTop: 0, marginBottom: 10 }}>
                   An internal log for your team — record what is going on with this tenant so the next person to handle it is up to speed. Shared across this lease and its renewals. Not visible to the customer.
@@ -5813,7 +5974,7 @@ function DetailsDrawer({
                             {new Date(n.createdAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
                           </span>
                         </div>
-                        <div style={{ fontSize: 13, color: 'var(--ink-1)', whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                        <div style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--ink-1)', whiteSpace: 'pre-wrap' }}>{n.body}</div>
                       </div>
                     ))}
                   </div>
@@ -5824,9 +5985,10 @@ function DetailsDrawer({
           {/* ── Emails with this lease's customer — the landlord's own mailbox
               (Settings → Email). Renders nothing for a manager without the
               "Email customers and leads" authority. */}
-          {(inline || tab === 'emails') && !financeOnly && emails?.showEmails && contract.tenant.id != null && (
+          {show('emails') && !financeOnly && emails?.showEmails && contract.tenant.id != null && (
             <div id="sec-emails" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
               <EmailsCard
+                section
                 rp={emails.rp}
                 tenantId={contract.tenant.id}
                 isManager={emails.isManager}
@@ -5839,9 +6001,10 @@ function DetailsDrawer({
           {/* ── WhatsApp with this lease's customer — the conversation(s) matched to
               their number on the landlord's linked numbers (or linked by hand).
               Same authority as Emails; renders nothing when no number is linked. */}
-          {(inline || tab === 'whatsapp') && !financeOnly && emails?.showWhatsapp && contract.tenant.id != null && (
+          {show('whatsapp') && !financeOnly && emails?.showWhatsapp && contract.tenant.id != null && (
             <div id="sec-whatsapp" style={{ gridColumn: '1 / -1', minWidth: 0, maxWidth: '100%' }}>
               <WhatsAppCard
+                section
                 rp={emails.rp}
                 tenantId={contract.tenant.id}
                 isManager={emails.isManager}
@@ -5849,7 +6012,7 @@ function DetailsDrawer({
               />
             </div>
           )}
-          {(inline || tab === 'breaches') && !financeOnly && legal && (
+          {show('breaches') && !financeOnly && legal && (
             <div className="sec" id="sec-breaches">
               <BreachesSection leaseId={contract.id} leaseStatus={contract.status} base={legal.base} rp={legal.rp} disputeHrefOf={legal.disputeHrefOf} />
             </div>
@@ -6867,24 +7030,15 @@ function PassField({ label, value }: { label: string; value: React.ReactNode }) 
  * = property / unit / parties; right stub = period + annual rent. Payment + KYC
  * detail render below it (the DetailsDrawer).
  */
-function ContractPass({ contract, payments, tenantHref }: { contract: ContractDetail; payments: ContractPayment[]; tenantHref?: string | null }) {
+/**
+ * The agreed figures of a tenancy — what the pass (and the record's summary
+ * rail) states. Sums the ACTUAL payment rows (gross incl. VAT): rent
+ * installments + any extra "other" charges + admin/ejari/commission fees + the
+ * security deposit. Falls back to the contract's net rent + computed VAT for a
+ * draft that has no rows yet, so the summary is never blank.
+ */
+function passFigures(contract: ContractDetail, payments: ContractPayment[]) {
   const isRenewal = contract.contractType === 'renewal';
-  const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
-  const building = contract.property.buildingName ?? 'Property';
-  const unitLabel = contract.unit.number ? `Unit ${contract.unit.number}` : (contract.unit.name ?? '—');
-  const location = [contract.property.community, contract.property.emirate].filter(Boolean).join(' , ')
-    || contract.property.fullAddress || '—';
-  const landlordName = contract.landlord.name ?? contract.landlord.companyName ?? '—';
-  const months = contract.durationYears ? contract.durationYears * 12 : 12;
-  const badge = winding ? { bg: 'var(--brick)', label: 'Move-out scheduled' }
-    : contract.status === 'active' ? { bg: 'var(--jade-deep)', label: 'Active tenancy' }
-    : contract.status === 'expired' ? { bg: 'var(--mute)', label: 'Lease ended' }
-    : contract.status === 'terminated' ? { bg: 'var(--brick-deep)', label: 'Terminated' }
-    : { bg: 'var(--saffron-deep)', label: 'In setup' };
-  // Accurate payment summary — sums the ACTUAL payment rows (gross incl. VAT):
-  // rent installments + any extra "other" charges + admin/ejari/commission fees +
-  // the security deposit. Falls back to the contract's net rent + computed VAT for
-  // a draft that has no rows yet, so the banner is never blank.
   const aed = (n: number) => `AED ${Math.round(n || 0).toLocaleString('en-AE')}`;
   // Bounced / cancelled cheques are void (replaced) — never count them in a total.
   const activePmt = (p: ContractPayment) => !['bounced', 'cancelled'].includes((p.chequeStatus ?? '').toLowerCase());
@@ -6920,6 +7074,24 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
     (s, p) => s + (activePmt(p) ? taxPortionOf(p, Number(p.amount) || 0) : 0), 0);
   const totalVat = rentVat + otherVat + v(feeItems);
   const totalPayable = rentGross + otherGross + feesGross + deposit;
+  return { aed, rentGross, rentVat, otherGross, feesGross, deposit, totalVat, totalPayable, incurredGross, isRenewal };
+}
+
+function ContractPass({ contract, payments, tenantHref }: { contract: ContractDetail; payments: ContractPayment[]; tenantHref?: string | null }) {
+  const isRenewal = contract.contractType === 'renewal';
+  const winding = contract.termination?.response === 'accepted' || !!contract.vacateAtEnd;
+  const building = contract.property.buildingName ?? 'Property';
+  const unitLabel = contract.unit.number ? `Unit ${contract.unit.number}` : (contract.unit.name ?? '—');
+  const location = [contract.property.community, contract.property.emirate].filter(Boolean).join(' , ')
+    || contract.property.fullAddress || '—';
+  const landlordName = contract.landlord.name ?? contract.landlord.companyName ?? '—';
+  const months = contract.durationYears ? contract.durationYears * 12 : 12;
+  const badge = winding ? { bg: 'var(--brick)', label: 'Move-out scheduled' }
+    : contract.status === 'active' ? { bg: 'var(--jade-deep)', label: 'Active tenancy' }
+    : contract.status === 'expired' ? { bg: 'var(--mute)', label: 'Lease ended' }
+    : contract.status === 'terminated' ? { bg: 'var(--brick-deep)', label: 'Terminated' }
+    : { bg: 'var(--saffron-deep)', label: 'In setup' };
+  const { aed, rentGross, rentVat, otherGross, feesGross, deposit, totalVat, totalPayable, incurredGross } = passFigures(contract, payments);
   return (
     <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1.6fr 24px 1fr', background: 'var(--surface)', borderRadius: 22, border: '1px solid var(--mist-strong)', boxShadow: 'var(--sh-hero)', overflow: 'hidden', marginBottom: 22 }}>
       {/* LEFT: identity */}
@@ -6985,6 +7157,221 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
   );
 }
 
+
+/** Days between two dates, counted on calendar days (no DST / hour drift). */
+const dayCount = (a: Date, b: Date) =>
+  Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86_400_000);
+const isoDay = (s: string) => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+
+/** Money actually received on this lease: cleared rent / fee / charge rows,
+ *  plus the deposit once cleared (a renewal's carried deposit is not new money). */
+function collectedOf(contract: ContractDetail, payments: ContractPayment[]): number {
+  const cleared = (p: ContractPayment) => String(p.effectiveStatus ?? p.chequeStatus ?? '').toLowerCase() === 'cleared';
+  const rows = [...(payments ?? []).filter(p => p.paymentType !== 'security_deposit'), ...(contract.fees ?? [])];
+  const money = rows.filter(cleared).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const dep = contract.securityDeposit;
+  const depCleared = contract.contractType !== 'renewal' && !!dep && !dep.isCarried
+    && String(dep.chequeStatus ?? '').toLowerCase() === 'cleared';
+  return money + (depCleared ? Number(dep!.amount) || 0 : 0);
+}
+
+/** Record page, top: the renewal nudge and the four headline figures — one
+ *  compact strip, each figure with the thing you would do next about it. */
+function RecordGlance({ contract, renewHref, onTab, showDocs = true }: {
+  contract: ContractDetail; renewHref: string | null; onTab?: (t: DrawerTab) => void; showDocs?: boolean;
+}) {
+  const today = new Date();
+  const start = isoDay(contract.startDate), end = isoDay(contract.endDate);
+  const total = Math.max(1, dayCount(start, end));
+  const pct = Math.max(0, Math.min(100, (dayCount(start, today) / total) * 100));
+  const left = dayCount(today, end);
+  const upcoming = start > today;
+  const ending = contract.status === 'active' && left >= 0 && left <= 120;
+  const months = Math.round(total / 30.4);
+  const f = passFigures(contract, contract.payments ?? []);
+  const collected = collectedOf(contract, contract.payments ?? []);
+  const collPct = f.totalPayable > 0 ? Math.min(100, (collected / f.totalPayable) * 100) : 0;
+  const rentCheques = (contract.payments ?? []).filter(p => (p.paymentType ?? 'rental_income') === 'rental_income'
+    && !['cancelled', 'replaced'].includes(String(p.effectiveStatus ?? p.chequeStatus ?? '').toLowerCase())).length
+    || contract.numberOfInstallments || 0;
+  const files = (contract.documents ?? []).filter(d => !!d.fileUrl).length;
+  const asks = (contract.documents ?? []).filter(d => !d.fileUrl).length;
+  // What is owed next — the earliest open (not cleared / void) payment or fee.
+  const open = [...(contract.payments ?? []), ...(contract.fees ?? [])]
+    .filter(p => {
+      const st = String(p.effectiveStatus ?? p.chequeStatus ?? 'pending').toLowerCase();
+      return !!p.transactionDate && !['cleared', 'cancelled', 'replaced', 'bounced', 'deposited'].includes(st) && !st.startsWith('bounced');
+    })
+    .sort((a, b) => String(a.transactionDate).localeCompare(String(b.transactionDate)));
+  const overdue = open.filter(p => isoDay(p.transactionDate!) < new Date(today.getFullYear(), today.getMonth(), today.getDate()));
+  const overdueAmt = overdue.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const next = open.find(p => !overdue.includes(p)) ?? null;
+  const go = (t: DrawerTab) => onTab?.(t);
+  return (
+    <>
+      {ending && (
+        <div className="rbanner">
+          <AlertTriangle size={16} />
+          <div><b>Lease ends in {left} days</b> — {fmtDate(contract.endDate)}. Send a renewal offer at least 90 days before expiry.</div>
+          {renewHref
+            ? <Link href={renewHref} className="btn btn-ghost btn-sm">Propose renewal</Link>
+            : hasRenewalInFlight(contract) && <span className="pill celebrate">Renewal under way</span>}
+        </div>
+      )}
+      <div className="rglance2">
+        <div className="g2 g2-term">
+          <div className="g2-k"><Clock size={13} /> {contract.contractType === 'renewal' ? 'Renewal term' : 'Lease term'} <span className="g2-tag">{months} mo</span></div>
+          <div className="g2-v">
+            {upcoming ? <>{dayCount(today, start)}<small> days to start</small></>
+              : left < 0 ? <>Ended<small> {-left} days ago</small></>
+              : <>{left}<small> days left</small></>}
+          </div>
+          <div className="g2-track" title={`${Math.round(pct)}% of the term elapsed`}>
+            <i className={ending ? 'warn' : ''} style={{ width: `${pct}%` }} />
+          </div>
+          <div className="g2-s">{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</div>
+          {ending && renewHref && <Link href={renewHref} className="g2-act warn">Propose renewal <ChevronRight size={13} /></Link>}
+        </div>
+        <div className="g2">
+          <div className="g2-k"><Banknote size={13} /> Annual rent</div>
+          <div className="g2-v">{fmtAed(contract.annualRent)}</div>
+          <div className="g2-s">{rentCheques > 0 ? `${rentCheques} cheque${rentCheques === 1 ? '' : 's'} × ${fmtAed((contract.annualRent || 0) / rentCheques)}` : 'No cheques recorded'}</div>
+          {onTab && <button type="button" className="g2-act" onClick={() => go('payments')}>Payment schedule <ChevronRight size={13} /></button>}
+        </div>
+        <div className={'g2' + (overdue.length ? ' g2-alert' : '')}>
+          <div className="g2-k"><Wallet size={13} /> Collected <span className={'g2-tag' + (collPct >= 100 ? ' ok' : '')}>{Math.round(collPct)}%</span></div>
+          <div className="g2-v">{fmtAed(collected)}<small> of {fmtAed(f.totalPayable)}</small></div>
+          <div className="g2-track slim"><i className="ok" style={{ width: `${collPct}%` }} /></div>
+          {overdue.length > 0
+            ? <button type="button" className="g2-act bad" onClick={() => go('payments')}>{overdue.length} overdue · {fmtAed(overdueAmt)} <ChevronRight size={13} /></button>
+            : next
+              ? <button type="button" className="g2-act next" onClick={() => go('payments')}>Next {fmtAed(next.amount)} · {fmtDate(next.transactionDate)} <ChevronRight size={13} /></button>
+              : <div className="g2-s">{collPct >= 100 ? 'Fully collected' : `${fmtAed(Math.max(0, f.totalPayable - collected))} still to collect`}</div>}
+        </div>
+        <div className="g2">
+          <div className="g2-k"><FileText size={13} /> Documents {asks > 0 && <span className="g2-tag warn">{asks} requested</span>}</div>
+          <div className="g2-v">{files}<small> on file</small></div>
+          <div className="g2-s">{asks ? `${asks} awaiting upload from the customer` : 'Agreement & receipts are generated'}</div>
+          {onTab && showDocs && <button type="button" className="g2-act" onClick={() => go('documents')}>Open documents <ChevronRight size={13} /></button>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Record page, right rail: who, what was agreed, and where. */
+function RecordRail({ contract, payments, tenantHref, propertyHref, unitHref, hideContact }: {
+  contract: ContractDetail; payments: ContractPayment[]; tenantHref: string | null;
+  propertyHref: string | null; unitHref: string | null; hideContact: boolean;
+}) {
+  const f = passFigures(contract, payments);
+  const collected = collectedOf(contract, payments);
+  const pct = f.totalPayable > 0 ? Math.min(100, (collected / f.totalPayable) * 100) : 0;
+  const name = contract.tenant.name ?? 'Customer';
+  const ini = name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const landlord = contract.landlord.companyName || contract.landlord.name || '—';
+  const area = [contract.property.community, contract.property.emirate].filter(Boolean).join(', ') || '—';
+  const beds = contract.unit.bedrooms != null ? (contract.unit.bedrooms === 0 ? 'Studio' : `${contract.unit.bedrooms} BR`) : '—';
+  const unitType = contract.unit.type ? contract.unit.type.replace(/_/g, ' ') : null;
+  const outstanding = Math.max(0, f.totalPayable - collected);
+  // "AED 24,225" → small currency code + large figure for the hero amount.
+  const money = (n: number) => {
+    const s = f.aed(n);
+    const m = s.match(/^([A-Z]{3})\s*(.+)$/);
+    return m ? <><span className="cur">{m[1]}</span>{m[2]}</> : s;
+  };
+  // Composition of the total — one segment per payable bucket, in list order.
+  const parts = [
+    { key: 'rent', label: f.rentVat > 0 ? 'Rent (incl. VAT)' : 'Rent', value: f.rentGross, show: true },
+    { key: 'other', label: 'Other charges', value: f.otherGross, show: f.otherGross > 0 },
+    { key: 'fees', label: 'Fees (incl. VAT)', value: f.feesGross, show: f.feesGross > 0 },
+    { key: 'dep', label: 'Security deposit', value: f.deposit, show: !f.isRenewal },
+  ].filter(x => x.show);
+  const partsSum = parts.reduce((a, x) => a + Math.max(0, x.value), 0);
+  return (
+    <aside className="rrail">
+      <div className="rcard">
+        <div className="rh"><span className="rhi"><User size={13} /></span>Parties</div>
+        <div className="party">
+          <span className="av">{ini}</span>
+          <div className="who">
+            {tenantHref ? <Link href={tenantHref} className="chain-link nm">{name}</Link> : <b className="nm">{name}</b>}
+            <small>Customer</small>
+          </div>
+          {!hideContact && contract.tenant.email && <a className="ib" href={`mailto:${contract.tenant.email}`} title={contract.tenant.email} aria-label={`Email ${name}`}><Mail size={14} /></a>}
+          {!hideContact && contract.tenant.phone && <a className="ib" href={`tel:${contract.tenant.phone.replace(/\s/g, '')}`} title={contract.tenant.phone} aria-label={`Call ${name}`}><Phone size={14} /></a>}
+        </div>
+        <div className="party">
+          <span className="av sq"><Building2 size={15} /></span>
+          <div className="who"><b className="nm">{landlord}</b><small>Landlord</small></div>
+        </div>
+      </div>
+      <div className="rcard">
+        <div className="rh"><span className="rhi"><Wallet size={13} /></span>Payment summary
+          <span className={'ps-pct' + (pct >= 100 ? ' ok' : '')}>{Math.round(pct)}%</span>
+        </div>
+        <div className="ps-hero has-ring">
+          <small>Collected</small>
+          <div className="ps-amt">{money(collected)}</div>
+          <div className="ps-of">of {f.aed(f.totalPayable)}</div>
+          {/* The share collected, drawn as a ring (green into gold). */}
+          <div className="ps-ring" aria-hidden>
+            <svg viewBox="0 0 64 64">
+              <defs><linearGradient id="ps-ring-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#25946a" /><stop offset="1" stopColor="#f5c26b" /></linearGradient></defs>
+              <circle cx="32" cy="32" r="27" fill="none" stroke="#e4e9e5" strokeWidth="7" />
+              {pct > 0 && <circle className="fg" cx="32" cy="32" r="27" fill="none" stroke="url(#ps-ring-grad)" strokeWidth="7" strokeLinecap="round"
+                style={{ '--c': 2 * Math.PI * 27, '--off': 2 * Math.PI * 27 * (1 - pct / 100) } as React.CSSProperties} />}
+            </svg>
+            <b>{Math.round(pct)}%</b>
+          </div>
+          <div className="ps-bar"><i style={{ width: `${pct}%` }} /></div>
+          <div className={'ps-out' + (outstanding > 0 ? '' : ' ok')}>
+            {outstanding > 0
+              ? <><span className="dot" />{f.aed(outstanding)} outstanding</>
+              : <><Check size={13} />Nothing outstanding</>}
+          </div>
+        </div>
+        <div className="ps-list">
+          {partsSum > 0 && (
+            <div className="ps-mix" aria-hidden>
+              {parts.map(x => x.value > 0 && <i key={x.key} className={x.key} style={{ flexGrow: x.value }} />)}
+            </div>
+          )}
+          {parts.map(x => (
+            <div className="ps-row" key={x.key}>
+              <span><i className={'sw ' + x.key} />{x.label}</span>
+              <b>{x.value > 0 ? f.aed(x.value) : '—'}</b>
+            </div>
+          ))}
+        </div>
+        <div className="ps-total">
+          <div><span>Total payable</span>{f.totalVat > 0 && <small>incl. {f.aed(f.totalVat)} VAT</small>}</div>
+          <b>{f.aed(f.totalPayable)}</b>
+        </div>
+        {f.incurredGross > 0 && <div className="ps-inc">+ {f.aed(f.incurredGross)} charges incurred — see Fees</div>}
+      </div>
+      <div className="rcard">
+        <div className="rh"><span className="rhi"><MapPin size={13} /></span>Unit</div>
+        <div className="uf-head">
+          <span className="uf-ic"><Building2 size={18} /></span>
+          <div className="uf-who">
+            {propertyHref
+              ? <Link href={propertyHref} className="chain-link uf-name" title={contract.property.buildingName ?? undefined}>{contract.property.buildingName ?? '—'}</Link>
+              : <b className="uf-name">{contract.property.buildingName ?? '—'}</b>}
+            <small><MapPin size={11} />{area}</small>
+          </div>
+        </div>
+        <div className="uf-grid">
+          <div><small>Unit</small>{unitHref ? <Link href={unitHref} className="chain-link">{contract.unit.number ?? '—'}</Link> : <b>{contract.unit.number ?? '—'}</b>}</div>
+          <div><small>Floor</small><b>{contract.unit.floor ?? '—'}</b></div>
+          <div><small>Beds</small><b>{beds}</b></div>
+        </div>
+        {unitType && <div className="uf-type"><span>{unitType}</span></div>}
+      </div>
+    </aside>
+  );
+}
+
 /**
  * The contract detail component, rendered in one of three VIEWS:
  *   - 'full'     — the legacy whole page (default; unchanged behaviour).
@@ -6995,7 +7382,12 @@ function ContractPass({ contract, payments, tenantHref }: { contract: ContractDe
  * `contractId` lets it be mounted outside its own route (e.g. in Operations);
  * it falls back to the route param on its own page.
  */
-export function ContractV2View({ contractId: cidProp, view = 'full' }: { contractId?: number; view?: 'full' | 'pipeline' | 'record' }) {
+export function ContractV2View({ contractId: cidProp, view = 'full', onBack }: {
+  contractId?: number; view?: 'full' | 'pipeline' | 'record';
+  /** Where the header's back button goes when the view is embedded (e.g. inside
+   *  the Leases - Monthly report). Omitted → browser back, as on its own route. */
+  onBack?: () => void;
+}) {
   const params = useParams<{ id: string }>();
   const id = cidProp != null ? String(cidProp) : params?.id;
   const router = useRouter();
@@ -7046,6 +7438,15 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selKey, setSelKey] = useState<StepKey | null>(null);
+  // Record page tabs — remembered per viewer (a convenience, never required).
+  const [recTab, setRecTabState] = useState<DrawerTab>(() => {
+    if (typeof window === 'undefined') return 'payments';
+    try {
+      const t = window.localStorage.getItem('upnow.leaseRecord.tab') as DrawerTab | null;
+      return t && ['payments', 'documents', 'notes', 'emails', 'whatsapp', 'breaches'].includes(t) ? t : 'payments';
+    } catch { return 'payments'; }
+  });
+  const setRecTab = (t: DrawerTab) => { setRecTabState(t); try { window.localStorage.setItem('upnow.leaseRecord.tab', t); } catch { /* ignore */ } };
   const [modal, setModal] = useState<'sign' | 'terminate' | 'renew' | 'direct-terminate' | 'cancel-lease' | 'reject-utility' | null>(null);
 
   // Deep-link from the Leases (record) view: ?action=renew / ?action=terminate
@@ -8049,7 +8450,8 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     onDocsChanged: () => void reload(),
     setState: setLocalState,
     openModal: setModal,
-    openDrawer: (t) => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    // In the tabbed record the section may be on another tab — switch to it first.
+    openDrawer: (t) => { if (view === 'record') setRecTab(t); setTimeout(() => document.getElementById('sec-' + t)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0); },
     patchContract,
     onActivate, onIssue, onUploadEjari, onMarkEjari, onUploadUtility, onMarkUtility, onMarkSignedOnFile, onVerifyUtility, onRejectUtility, onConfirmPdc, onUploadCheques, onAttachChequeForSlot, onRemoveChequeDoc, onTagChequeDoc, onMarkChequesOnFile, chequeIntake, chequeReading, onReadCheques, onAcceptDocs, onApproveDoc, onRejectDoc, onApproveDocWithExpiry, onUpdatePayment, onRevertToDraft,
     onRenewalDraft,
@@ -8273,14 +8675,15 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
     : `/rental-provider/dashboard/tenants/${contract.tenant.id}`;
 
   return (
-    <div className="quest-page">
+    <div className={'quest-page' + (view === 'record' ? ' is-record' : '')}>
       <div className="wrap">
         <div className="qhead">
           <div className="lhs">
-            <button className="backbtn" onClick={() => router.back()}><ArrowLeft size={18} /></button>
+            <button className="backbtn" onClick={() => (onBack ? onBack() : router.back())}><ArrowLeft size={18} /></button>
             <div>
               <h1>
-                CID-{contract.id} <span className={'pill ' + pill.tone}>{pill.label}</span>
+                {/* The record reads as the place it is about; the CID stays in the chain below. */}
+                {view === 'record' ? `Unit ${contract.unit.number ?? '—'}` : `CID-${contract.id}`} <span className={'pill ' + pill.tone}>{pill.label}</span>
               </h1>
               {/* Chain: Property → Unit → Contract — property and unit are
                   clickable (their details live on their own pages; nothing is
@@ -8375,6 +8778,14 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
               const cancelIsRenewal = isRenewalChild(contract);
               return (
                 <>
+                  {/* The full workflow — sign, registration, utility, inspections,
+                      settlement, edit terms, cancel / restore — lives in
+                      Operations; this keeps every one of those actions one click
+                      away from the record instead of leaving it a dead end. */}
+                  <Link href={`${opsBase}${isManagerView && mgrRpQ ? `?${mgrRpQ}` : ''}`} className="btn btn-ghost btn-sm"
+                    title="Open the full workflow for this lease in Operations">
+                    <ListChecks size={14} /> Work on this lease
+                  </Link>
                   {canRenew && (
                     <Link href={`${opsBase}?action=renew`} className="btn btn-jade btn-sm">
                       <RotateCcw size={14} /> Propose renewal
@@ -8486,7 +8897,12 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
         {/* Record view: boarding-pass contract summary (Unit + parties + term +
             rent). Payment + document detail render below. The full/pipeline view
             keeps the compact info row instead. */}
-        {(view === 'record' || financeOnly) && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={customerHref} />}
+        {view === 'record'
+          ? <RecordGlance contract={contract} renewHref={contract.status === 'active' && !hasRenewalInFlight(contract) && contract.termination?.response !== 'accepted' && perms.renewals
+              ? `${isManagerView ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}/${contract.id}?action=renew` : null}
+              showDocs={!financeOnly}
+              onTab={t => { setRecTab(t); requestAnimationFrame(() => document.querySelector('.quest-page .rtabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); }} />
+          : financeOnly && <ContractPass contract={contract} payments={contract.payments ?? []} tenantHref={customerHref} />}
 
         {/* Customer + rental period — ONE info row under the header (replaces
             the old Parties and Rental period sections). */}
@@ -8760,16 +9176,20 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
             stacked; property info is NOT duplicated here — the header chain
             links to the property / unit detail pages instead. */}
         {showRecord && (
-        <div className="details-wrap">
+        <div className={'details-wrap' + (view === 'record' ? ' rec-grid' : '')}>
+          <div className="rec-main">
+          {view !== 'record' && (
           <div className="section-eyebrow">
             <span className="se-t">Contract details</span>
             <span className="se-line" />
           </div>
+          )}
           <DetailsDrawer
             inline
             open
-            tab="payments"
-            setTab={() => undefined}
+            tabbed={view === 'record'}
+            tab={view === 'record' ? recTab : 'payments'}
+            setTab={view === 'record' ? setRecTab : () => undefined}
             onClose={() => undefined}
             contract={contract}
             payments={contract.payments ?? []}
@@ -8805,6 +9225,11 @@ export function ContractV2View({ contractId: cidProp, view = 'full' }: { contrac
               disputeHrefOf: (id: number) => isManagerView ? `/dashboard/manager/legal/${id}${rpScope !== '' ? `?rp=${rpScope}` : ''}` : `/rental-provider/dashboard/legal/${id}`,
             }}
           />
+          </div>
+          {view === 'record' && (
+            <RecordRail contract={contract} payments={contract.payments ?? []} tenantHref={customerHref}
+              propertyHref={propertyHref} unitHref={unitHref} hideContact={financeOnly} />
+          )}
         </div>
         )}
       </div>
@@ -9025,6 +9450,498 @@ function GlobalStyle() {
       .quest-page .upbox .uf .ufi { width: 34px; height: 34px; border-radius: 9px; background: #fff; border: 1px solid var(--mist-strong); display: grid; place-items: center; color: var(--jade-deep); }
 
       .quest-page .details-wrap { margin-top: 32px; }
+      /* ── Record page (tabs · stats · rail) — the Leases design ── */
+      .quest-page .rbanner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: var(--r-sm); background: #fdf3dc; color: #8a5a00; border: 1px solid #f3e2b8; margin-bottom: 14px; font-size: 13px; }
+      .quest-page .rbanner b { color: #5f3e00; }
+      .quest-page .rbanner > div { flex: 1; min-width: 220px; }
+      .quest-page .rstats { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; background: #fff; border: 1px solid var(--mist-strong); border-radius: var(--r-sm); margin-bottom: 20px; }
+      .quest-page .rstats .rs { padding: 16px 20px; min-width: 0; }
+      .quest-page .rstats .rs + .rs { border-left: 1px solid var(--mist); }
+      .quest-page .rstats .k { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--mute); font-weight: 700; }
+      .quest-page .rstats .v { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+      .quest-page .rstats .v small { font-size: 13px; font-weight: 500; color: var(--mute); }
+      .quest-page .rstats .s { font-size: 12.5px; color: var(--mute); margin-top: 3px; }
+      .quest-page .rstats .bar, .quest-page .rrail .bar { height: 6px; border-radius: 4px; background: var(--mist); overflow: hidden; margin-top: 12px; }
+      .quest-page .rstats .bar i, .quest-page .rrail .bar i { display: block; height: 100%; background: var(--jade-deep); border-radius: 4px; }
+      .quest-page .rstats .bar i.warn { background: #d4a017; }
+      .quest-page .rstats .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-top: 7px; font-variant-numeric: tabular-nums; }
+      .quest-page .rstats .ends .m { color: var(--mute); }
+      @media (max-width: 1100px) { .quest-page .rstats { grid-template-columns: 1fr 1fr; } .quest-page .rstats .rs.wide { grid-column: 1 / -1; } .quest-page .rstats .rs + .rs { border-left: 0; border-top: 1px solid var(--mist); } }
+      .quest-page .details-wrap.rec-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; margin-top: 0; }
+      @media (max-width: 1100px) { .quest-page .details-wrap.rec-grid { grid-template-columns: 1fr; } }
+      .quest-page .rec-main { min-width: 0; }
+      .quest-page .rtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--mist-strong); margin-bottom: 16px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+      .quest-page .rtabs::-webkit-scrollbar { display: none; }
+      .quest-page .rtab { position: relative; border: 0; background: none; padding: 10px 12px 12px; font-size: 14px; font-weight: 600; color: var(--mute); display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; cursor: pointer; }
+      .quest-page .rtab:hover { color: var(--ink); }
+      .quest-page .rtab.on { color: var(--ink); }
+      .quest-page .rtab.on::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--jade-deep); border-radius: 2px; }
+      .quest-page .rtab .n { font-size: 11px; background: var(--mist); border-radius: 10px; padding: 1px 7px; color: var(--ink-2); font-weight: 600; }
+      .quest-page .dbody-inline.tabbed { grid-template-columns: 1fr; }
+      .quest-page .rrail { display: grid; gap: 16px; position: sticky; top: 84px; }
+      @media (max-width: 1100px) { .quest-page .rrail { position: static; } }
+      /* Laptop widths: the rail would leave the ledger ~620px, too narrow for its
+         seven columns. Below 1340px it moves under the tabs, its cards side by side. */
+      @media (max-width: 1340px) {
+        .quest-page .details-wrap.rec-grid { grid-template-columns: 1fr; }
+        .quest-page .rrail { position: static; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+      }
+      @media (max-width: 900px) { .quest-page .rrail { grid-template-columns: 1fr; } }
+      .quest-page .rcard { background: #fff; border: 1px solid var(--mist-strong); border-radius: var(--r-sm); padding-bottom: 6px; }
+      .quest-page .rcard .rh { padding: 14px 18px 6px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--mute); font-weight: 700; }
+      .quest-page .rcard .party { display: flex; align-items: center; gap: 12px; padding: 9px 18px; }
+      .quest-page .rcard .party .av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--jade-soft); color: var(--jade-deep); flex-shrink: 0; }
+      .quest-page .rcard .party .av.sq { border-radius: 9px; background: var(--mist); color: var(--ink-2); }
+      .quest-page .rcard .party .who { min-width: 0; flex: 1; }
+      .quest-page .rcard .party .nm { display: block; font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .rcard .party small { color: var(--mute); font-size: 12px; }
+      .quest-page .rcard .ib { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--mist-strong); display: grid; place-items: center; color: var(--ink-2); flex-shrink: 0; }
+      .quest-page .rcard .ib:hover { color: var(--ink); border-color: var(--mute-2); }
+      .quest-page .rcard .coll { padding: 4px 18px 12px; border-bottom: 1px solid var(--mist); margin-bottom: 4px; }
+      .quest-page .rcard .coll .row { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); }
+      .quest-page .rcard .coll .row b { color: var(--ink); font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .coll .row small { color: var(--mute); font-weight: 500; }
+      .quest-page .rcard .coll .bar { margin-top: 8px; }
+      .quest-page .rcard .kv { display: flex; justify-content: space-between; gap: 10px; padding: 7px 18px; font-size: 13px; color: var(--ink-2); }
+      .quest-page .rcard .kv b { color: var(--ink); font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .kv.tot { border-top: 1px solid var(--mist); margin-top: 4px; padding-top: 11px; font-size: 15px; font-weight: 700; color: var(--ink); }
+      .quest-page .rcard .fine { padding: 0 18px 6px; font-size: 11px; color: var(--mute); text-align: right; }
+      .quest-page .rcard .facts { display: grid; grid-template-columns: 1fr 1fr; padding: 2px 8px 8px; }
+      .quest-page .rcard .facts > div { padding: 7px 10px; min-width: 0; }
+      .quest-page .rcard .facts > div.full { grid-column: 1 / -1; }
+      .quest-page .rcard .facts small { display: block; color: var(--mute); font-size: 11.5px; }
+      .quest-page .rcard .facts b, .quest-page .rcard .facts a { font-weight: 600; font-size: 13.5px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; }
+
+      /* ── Record view round 3 ─────────────────────────────────────────────── */
+      /* Status pill + menu (replaces the native select everywhere it was used). */
+      .quest-page .cstat-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px 0 11px; border: 1px solid transparent; border-radius: 99px;
+        font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; font-family: inherit; white-space: nowrap; transition: box-shadow .15s, filter .15s; }
+      .quest-page .cstat-btn:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(46,159,130,.12); }
+      .quest-page .cstat-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(46,159,130,.28); }
+      .quest-page .cstat-btn:disabled { opacity: .6; cursor: progress; }
+      .quest-page .cstat-btn .cstat-chev { opacity: .65; transition: transform .15s; }
+      .quest-page .cstat-btn .cstat-chev.up { transform: rotate(180deg); }
+      .cstat-menu { background: #fff; border: 1px solid rgba(26,25,22,.08); border-radius: 12px; padding: 4px; min-width: 188px;
+        box-shadow: 0 18px 40px -14px rgba(16,24,20,.28), 0 3px 8px -3px rgba(16,24,20,.10); animation: cstat-pop .14s cubic-bezier(.2,.8,.2,1); font-family: inherit; }
+      @keyframes cstat-pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .cstat-menu { animation: none; } }
+      .cstat-menu .cstat-opt { width: 100%; height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 8px; background: none;
+        font: inherit; font-size: 13px; color: #1a1916; text-align: left; cursor: pointer; }
+      .cstat-menu .cstat-opt:hover:not(:disabled), .cstat-menu .cstat-opt:focus-visible { background: #f4f3ee; outline: none; }
+      .cstat-menu .cstat-opt.on { font-weight: 600; color: #1f5a3f; background: #eef8f4; }
+      .cstat-menu .cstat-opt:disabled { color: #bdbab2; cursor: not-allowed; }
+      .cstat-menu .cstat-opt .lb { flex: 1; }
+      .cstat-menu .cstat-dot { width: 8px; height: 8px; border-radius: 50%; background: #bdbab2; flex-shrink: 0; }
+      .cstat-menu .cstat-dot.cleared, .cstat-menu .cstat-dot.held, .cstat-menu .cstat-dot.with_us { background: #2e9f82; }
+      .cstat-menu .cstat-dot.pending, .cstat-menu .cstat-dot.with_head_office, .cstat-menu .cstat-dot.partial_return { background: #f59e0b; }
+      .cstat-menu .cstat-dot.bounced, .cstat-menu .cstat-dot.forfeited { background: #c8492c; }
+
+      /* Tabs — the active one is unmistakable: a filled pill in a soft track. */
+      /* The ONLY record-tab rules (edit here, don't add another block): clean
+         underline tabs — icon · label · count; the active tab is dark with a
+         green underline, the rest are quiet until hovered. */
+      .quest-page.is-record .rtabs { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 4px; padding: 0; border: 0; border-bottom: 1px solid var(--mist-strong); border-radius: 0; background: none; margin-bottom: 18px; width: 100%; }
+      .quest-page.is-record .rtab { position: relative; height: 46px; padding: 0 12px; border-radius: 0; background: none; font-size: 14px; font-weight: 600; color: var(--mute); gap: 8px; transition: color .15s; }
+      .quest-page.is-record .rtab svg { opacity: .75; transition: color .15s, opacity .15s; }
+      .quest-page.is-record .rtab:hover { color: var(--ink); }
+      .quest-page.is-record .rtab:hover::before { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--mist-strong); }
+      .quest-page.is-record .rtab:focus-visible { outline: none; color: var(--ink); box-shadow: inset 0 0 0 2px rgba(46,159,130,.3); border-radius: 8px 8px 0 0; }
+      .quest-page.is-record .rtab.on { color: #047246; background: none; font-weight: 700; }
+      .quest-page.is-record .rtab.on svg { opacity: 1; color: #047246; }
+      .quest-page.is-record .rtab.on::before { display: none; }
+      .quest-page.is-record .rtab.on::after { display: block; left: 10px; right: 10px; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: #047246; }
+      .quest-page.is-record .rtab .n { min-width: 20px; height: 20px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 99px; font-size: 11.5px; font-weight: 600; background: #f0eee8; color: var(--ink-3); }
+      .quest-page.is-record .rtab.on .n { background: #047246; color: #fff; }
+      /* One count chip for every tab's section header (Notes, Emails, WhatsApp — Documents has its own ready/total). */
+      /* One type scale across the record tabs: 15px section titles, 13px intro
+         copy (it was 11.5px fine print), counts sitting beside the title. */
+      .quest-page.is-record .sec .sech .st { font-size: 15px; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; flex-wrap: wrap; row-gap: 4px; }
+      .quest-page.is-record .sec .secb > p.note { font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+      .quest-page.is-record .sec .sech .st .pill { font-size: 12px !important; font-weight: 600; }
+      /* Emails / WhatsApp rows reuse the Documents row: date + "N new" on the right. */
+      .quest-page.is-record .doclist > .docitem.unread .dn { font-weight: 700; }
+      .quest-page.is-record .doclist > .docitem .dacts:has(.em-when) { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+      .quest-page.is-record .doclist .em-when { font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .quest-page.is-record .doclist .em-unread { height: 20px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 99px; background: #047246; color: #fff; font-size: 11.5px; font-weight: 600; }
+      /* Breaches header: same button family as the other tabs — Report breach is the
+         green primary, Move to legal a quiet outline. Purple stays inside the
+         list, where it marks a breach that has actually gone to legal. */
+      .quest-page.is-record #sec-breaches .sech .btn { height: 30px; padding: 0 12px; border-radius: 99px; font-size: 12.5px; font-weight: 600; gap: 5px;
+        background: #fff !important; color: var(--ink-2) !important; border: 1px solid var(--mist-strong) !important; box-shadow: none; }
+      .quest-page.is-record #sec-breaches .sech .btn:hover { border-color: #047246 !important; color: #047246 !important; background: var(--jade-tint) !important; }
+      .quest-page.is-record #sec-breaches .sech .btn.btn-ghost { background: #047246 !important; color: #fff !important; border-color: #047246 !important; }
+      .quest-page.is-record #sec-breaches .sech .btn.btn-ghost:hover { background: #035c38 !important; color: #fff !important; }
+      .quest-page.is-record #sec-breaches .sech .btn svg { width: 13px; height: 13px; }
+      /* A tab header's main action (New email, New message): the same filled
+         #047246 pill as Report breach. */
+      .quest-page.is-record .sec .sech .mini-btn.ok { height: 30px; padding: 0 12px; border-radius: 99px; font-size: 12.5px; font-weight: 600; gap: 5px; border: 1px solid #047246; background: #047246; color: #fff; }
+      .quest-page.is-record .sec .sech .mini-btn.ok:hover { background: #035c38; border-color: #035c38; }
+      .quest-page .sech .sec-count { margin-left: 8px; display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 99px; background: var(--mist); color: var(--ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+      /* Fee table: room for the fee name; receipt numbers in the UI face fit one line. */
+      .quest-page.is-record .ptable.ptable-fees tbody tr:not(.segrail):not(.segtot) > td:first-child { font-size: 13px; font-weight: 600; color: var(--ink-2); line-height: 1.35; }
+      .quest-page.is-record .rcpt-ref { font-family: inherit !important; font-size: 11.5px !important; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+      /* Grand total — the ledger's bottom line, as a strong band. */
+      .quest-page.is-record .gtot { margin-top: 18px !important; padding: 14px 18px !important; border-radius: 14px !important; background: #f6f5f1 !important; border: 1px solid var(--mist-strong) !important; }
+      .quest-page.is-record .gtot-main { margin: 0 -18px -14px; padding: 16px 18px !important; background: var(--jade-deep); border-radius: 0 0 13px 13px; color: #fff; }
+      .quest-page.is-record .gtot > .gtot-main:first-child { margin-top: -14px; border-radius: 13px; }
+      .quest-page.is-record .gtot-main > span:first-child { color: rgba(255,255,255,.8) !important; font-size: 13px !important; letter-spacing: .02em !important; text-transform: none !important; font-weight: 600 !important; }
+      .quest-page.is-record .gtot-main > span:last-child { color: #fff !important; font-size: 22px !important; font-weight: 700 !important; letter-spacing: -.02em; }
+      .quest-page.is-record .gtot:has(> .gtot-main:first-child) { padding: 0 !important; border: 0 !important; background: none !important; }
+      .quest-page.is-record .gtot:has(> .gtot-main:first-child) > .gtot-main { margin: 0; }
+
+      /* Side cards — headers with an icon, a tinted total, clearer hierarchy. */
+      .quest-page.is-record .rcard { border-radius: 16px; border-color: rgba(26,25,22,.08); box-shadow: 0 1px 2px rgba(16,24,20,.04), 0 8px 20px -16px rgba(16,24,20,.14); overflow: hidden; padding-bottom: 0; }
+      .quest-page.is-record .rcard .rh { display: flex; align-items: center; gap: 8px; padding: 14px 18px 8px; font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--ink); font-weight: 700; }
+      .quest-page.is-record .rcard .rh .rhi { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--jade-tint); color: var(--jade-deep); }
+      .quest-page.is-record .rcard .party { padding: 10px 18px; }
+      .quest-page.is-record .rcard .party + .party { border-top: 1px solid #f3f1ec; }
+      .quest-page.is-record .rcard .party .av { width: 38px; height: 38px; font-size: 13px; }
+      .quest-page.is-record .rcard .party .nm { font-size: 14px; }
+      .quest-page.is-record .rcard .ib { border-radius: 99px; }
+      .quest-page.is-record .rcard .ib:hover { border-color: var(--jade); color: var(--jade-deep); background: var(--jade-tint); }
+      .quest-page.is-record .rcard .coll { margin: 2px 14px 8px; padding: 12px 14px; border: 0; border-radius: 12px; background: #f6f5f1; }
+      .quest-page.is-record .rcard .coll .row.sub { margin-top: 7px; font-size: 12px; color: var(--mute); }
+      .quest-page.is-record .rcard .coll .bar { height: 7px; background: #e6e3db; }
+      .quest-page.is-record .rcard .coll .bar i { background: linear-gradient(90deg, #3fb595, #1f5a3f); }
+      .quest-page.is-record .rcard .kv { padding: 7px 18px; }
+      .quest-page.is-record .rcard .kv.tot { margin: 8px 0 0; padding: 14px 18px; border-top: 0; background: var(--jade-tint); color: var(--jade-deep); font-size: 15px; }
+      .quest-page.is-record .rcard .kv.tot b { color: var(--jade-deep); font-size: 17px; }
+      .quest-page.is-record .rcard .fine { background: var(--jade-tint); margin: 0; padding: 0 18px 10px; color: #4f7d6c; }
+      .quest-page.is-record .rcard .facts { padding: 2px 8px 12px; }
+
+      /* Record rail — Payment summary + Unit cards */
+      .quest-page .rcard .rh .ps-pct { margin-left: auto; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: #fdf3e1; color: #9a6412; font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .rh .ps-pct.ok { background: var(--jade-tint); color: var(--jade-deep); }
+      .quest-page .rcard .ps-hero { margin: 4px 14px 6px; padding: 14px 16px 13px; border-radius: 14px; background: linear-gradient(135deg, #f3faf7 0%, #f7f6f2 100%); border: 1px solid #e5efe9; }
+      .quest-page .rcard .ps-hero > small { display: block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); }
+      .quest-page .rcard .ps-amt { margin-top: 4px; font-size: 26px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .ps-amt .cur { font-size: 13px; font-weight: 600; color: var(--mute); margin-right: 5px; letter-spacing: 0; }
+      .quest-page .rcard .ps-of { margin-top: 2px; font-size: 12.5px; color: var(--mute); font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .ps-bar { margin-top: 12px; height: 8px; border-radius: 99px; background: #e4e9e5; overflow: hidden; }
+      .quest-page .rcard .ps-bar i { display: block; height: 100%; min-width: 8px; border-radius: 99px; background: linear-gradient(90deg, #3fb595, #1f5a3f); }
+      .quest-page .rcard .ps-out { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: #9a6412; font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .ps-out .dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+      .quest-page .rcard .ps-out.ok { color: var(--jade-deep); }
+      .quest-page .rcard .ps-list { padding: 8px 18px 6px; }
+      .quest-page .rcard .ps-mix { display: flex; gap: 2px; height: 6px; border-radius: 99px; overflow: hidden; margin: 4px 0 8px; }
+      .quest-page .rcard .ps-mix i { display: block; flex-basis: 0; min-width: 4px; }
+      .quest-page .rcard .ps-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--ink-2); }
+      .quest-page .rcard .ps-row + .ps-row { border-top: 1px dashed #ece9e2; }
+      .quest-page .rcard .ps-row > span { display: inline-flex; align-items: center; gap: 9px; }
+      .quest-page .rcard .ps-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .sw { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+      .quest-page .rcard .rent { background: #1f5a3f; }
+      .quest-page .rcard .other { background: #7c8cc4; }
+      .quest-page .rcard .fees { background: #e0a43a; }
+      .quest-page .rcard .dep { background: #8fc7b3; }
+      .quest-page .rcard .ps-total { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 6px 0 0; padding: 14px 18px; background: var(--jade-deep); color: #fff; }
+      .quest-page .rcard .ps-total span { display: block; font-size: 13.5px; font-weight: 700; }
+      .quest-page .rcard .ps-total small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
+      .quest-page .rcard .ps-total b { font-size: 18px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .quest-page .rcard .ps-inc { padding: 8px 18px 10px; font-size: 11.5px; color: var(--mute); background: #f6f5f1; }
+      .quest-page .rcard .uf-head { display: flex; align-items: center; gap: 12px; padding: 6px 18px 12px; }
+      .quest-page .rcard .uf-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; flex-shrink: 0; background: var(--jade-tint); color: var(--jade-deep); }
+      .quest-page .rcard .uf-who { min-width: 0; flex: 1; }
+      .quest-page .rcard .uf-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 700; font-size: 14px; line-height: 1.3; }
+      .quest-page .rcard .uf-who small { display: flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 12px; color: var(--mute); }
+      .quest-page .rcard .uf-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 14px 12px; }
+      .quest-page .rcard .uf-grid > div { min-width: 0; padding: 9px 11px; border-radius: 10px; background: #f6f5f1; }
+      .quest-page .rcard .uf-grid small { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--mute); }
+      .quest-page .rcard .uf-grid b, .quest-page .rcard .uf-grid a { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .rcard .uf-type { padding: 0 18px 14px; }
+      .quest-page .rcard .uf-type span { display: inline-block; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--mist-strong); font-size: 11.5px; font-weight: 600; color: var(--ink-2); text-transform: capitalize; }
+
+      /* ── Record view: modern pass ─────────────────────────────────────── */
+      /* Header — the status reads as a calm pill with a coloured dot; actions are
+         rounded and only the primary one is filled. */
+      .quest-page.is-record .qhead h1 { font-size: 26px; letter-spacing: -.025em; }
+      /* ── Marketspace look for the lease record (the UpNow marketspace design):
+         its palette, Plus Jakarta Sans for the interface and a Roboto Serif title.
+         Fonts are self-hosted (globals.css). Record view only. ── */
+      .quest-page.is-record {
+        --ink: #14201a; --ink-2: #46534c; --ink-3: #5f6b63; --mute: #6f7a73; --mute-2: #b9c2bc;
+        --surface: #f4faf7; --mist: #edf1ee; --mist-strong: #e4e9e5;
+        --jade: #047246; --jade-deep: #0b3d2a; --jade-soft: #d8efe3; --jade-tint: #eef7f2;
+        --sh-card: 0 1px 2px rgba(15,40,28,.06), 0 4px 16px rgba(15,40,28,.06);
+        font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+        background: #f6f8f6; /* the page behind the cards */
+      }
+      .quest-page.is-record .qhead h1 { font-family: 'Roboto Serif', Georgia, serif; font-weight: 700; font-size: 30px; letter-spacing: -.015em; color: var(--jade-deep); }
+      .quest-page.is-record .qhead h1 .pill { font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif; }
+      /* Grand total: pale mint with dark-green text. (The rail's Total payable keeps its solid jade band so it stands out.) */
+      .quest-page.is-record .gtot-main { background: #e6f4ed; color: #0b3d2a; border: 1px solid #cfe8da; }
+      .quest-page.is-record .gtot-main > span:first-child { color: #46534c !important; }
+      /* Motion + infographics, as in the marketspace portals: the page rises in
+         card by card, meters fill from the left, the collected ring draws round,
+         and gold marks what needs attention (renewal window, next payment due). */
+      @keyframes rec-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+      @keyframes rec-grow-x { from { transform: scaleX(0); } }
+      @keyframes rec-ring { to { stroke-dashoffset: var(--off); } }
+      @keyframes rec-zoom { from { opacity: 0; transform: scale(.7); } }
+      @keyframes rec-glow { 50% { box-shadow: 0 0 0 5px rgba(245,194,107,.22); } }
+      .quest-page.is-record .qhead, .quest-page.is-record .rbanner, .quest-page.is-record .rglance2, .quest-page.is-record .rtabs { animation: rec-up .5s cubic-bezier(.2,.7,.2,1) both; }
+      .quest-page.is-record .rglance2 { animation-delay: .06s; }
+      .quest-page.is-record .rglance2 .g2 { animation: rec-up .45s cubic-bezier(.2,.7,.2,1) both; }
+      .quest-page.is-record .rglance2 .g2:nth-child(2) { animation-delay: .1s; } .quest-page.is-record .rglance2 .g2:nth-child(3) { animation-delay: .17s; } .quest-page.is-record .rglance2 .g2:nth-child(4) { animation-delay: .24s; }
+      .quest-page.is-record .rtabs { animation-delay: .12s; }
+      .quest-page.is-record .sections-inline > * { animation: rec-up .45s cubic-bezier(.2,.7,.2,1) both; animation-delay: .18s; }
+      .quest-page.is-record .sections-inline > * + * { animation-delay: .26s; }
+      .quest-page.is-record .rrail > .rcard { animation: rec-up .5s cubic-bezier(.2,.7,.2,1) both; }
+      .quest-page.is-record .rrail > .rcard:nth-child(1) { animation-delay: .14s; } .quest-page.is-record .rrail > .rcard:nth-child(2) { animation-delay: .22s; } .quest-page.is-record .rrail > .rcard:nth-child(n+3) { animation-delay: .3s; }
+      .quest-page.is-record .ptable tbody tr { animation: rec-up .35s cubic-bezier(.2,.7,.2,1) both; animation-delay: .3s; }
+      .quest-page.is-record .g2-track i, .quest-page.is-record .ps-bar i, .quest-page.is-record .rcard .coll .bar i { transform-origin: left; animation: rec-grow-x 1s .35s cubic-bezier(.3,.8,.2,1) both; }
+      .quest-page.is-record .ps-mix { transform-origin: left; animation: rec-grow-x 1s .45s cubic-bezier(.3,.8,.2,1) both; }
+      /* Gold: the term inside the renewal window, the next payment due, what is outstanding. */
+      .quest-page.is-record .rglance2 .g2-track i.warn { background: linear-gradient(90deg, #f5c26b, #e0a526); }
+      .quest-page.is-record .rglance2 .g2-act.next { padding: 4px 10px; margin-top: auto; border-radius: 99px; background: #fdf3dc; color: #5a3a06; box-shadow: inset 0 0 0 1px #f3dca6; }
+      .quest-page.is-record .rglance2 .g2-act.next:hover { text-decoration: none; background: #fbe7b8; }
+      .quest-page.is-record .rglance2 .g2-term .g2-act.warn { padding: 4px 10px; border-radius: 99px; background: linear-gradient(135deg, #f5c26b, #e0a526); color: #5a3a06; animation: rec-glow 2.4s ease-in-out infinite; }
+      .quest-page.is-record .rglance2 .g2-term .g2-act.warn:hover { text-decoration: none; }
+      .quest-page.is-record .rcard .ps-out .dot { background: #e0a526; box-shadow: 0 0 0 3px rgba(245,194,107,.3); }
+      .quest-page.is-record .rcard .fees { background: #e0a526; }
+      .quest-page.is-record .ps-hero.has-ring { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+      .quest-page.is-record .ps-hero.has-ring > .ps-bar, .quest-page.is-record .ps-hero.has-ring > .ps-out { grid-column: 1 / -1; }
+      .quest-page.is-record .ps-ring { position: relative; width: 64px; height: 64px; grid-column: 2; grid-row: 1 / span 3; }
+      .quest-page.is-record .ps-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .quest-page.is-record .ps-ring .fg { stroke-dasharray: var(--c); stroke-dashoffset: var(--c); animation: rec-ring 1.4s .35s cubic-bezier(.3,.8,.2,1) forwards; }
+      .quest-page.is-record .ps-ring > b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 14px; font-weight: 700; color: var(--jade-deep); font-variant-numeric: tabular-nums; animation: rec-zoom .6s .55s cubic-bezier(.3,1.4,.5,1) both; }
+      .quest-page.is-record .ps-hero.has-ring > small, .quest-page.is-record .ps-hero.has-ring > .ps-amt, .quest-page.is-record .ps-hero.has-ring > .ps-of { grid-column: 1; }
+      @media (prefers-reduced-motion: reduce) {
+        .quest-page.is-record *, .quest-page.is-record *::before, .quest-page.is-record *::after { animation: none !important; }
+        .quest-page.is-record .ps-ring .fg { stroke-dashoffset: var(--off); }
+      }
+      @media print {
+        .quest-page.is-record *, .quest-page.is-record *::before, .quest-page.is-record *::after { animation: none !important; }
+        .quest-page.is-record .ps-ring .fg { stroke-dashoffset: var(--off) !important; }
+      }
+      .quest-page.is-record .gtot-main > span:last-child { color: #0b3d2a !important; }
+      .quest-page.is-record .qhead h1 .pill { vertical-align: 4px; margin-left: 6px; font-size: 11.5px; font-weight: 600; padding: 3px 10px 3px 9px; background: #f0eee8 !important; color: var(--ink-2) !important; display: inline-flex; align-items: center; gap: 6px; }
+      .quest-page.is-record .qhead h1 .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--mute-2, #bdbab2); }
+      .quest-page.is-record .qhead h1 .pill.action::before { background: var(--brick); }
+      .quest-page.is-record .qhead h1 .pill.waiting::before { background: #f59e0b; }
+      .quest-page.is-record .qhead h1 .pill.celebrate::before { background: var(--jade); }
+      .quest-page.is-record .qhead .rhs .btn { border-radius: 99px; height: 38px; padding: 0 16px; font-size: 13.5px; }
+      .quest-page.is-record .qhead .rhs .btn-ghost { background: #fff; border-color: rgba(26,25,22,.12); }
+      .quest-page.is-record .qhead .rhs .btn-ghost:hover { border-color: var(--jade); color: var(--jade-deep); }
+      .quest-page.is-record .qhead .rhs .btn-ghost[style*="brick"] { background: transparent; border-color: transparent !important; }
+      .quest-page.is-record .qhead .rhs .btn-ghost[style*="brick"]:hover { background: var(--brick-soft); }
+      .quest-page.is-record .qhead .rhs .btn-jade { box-shadow: 0 1px 2px rgba(16,24,20,.12), 0 6px 14px -8px rgba(46,159,130,.6); }
+
+      /* No typewriter face — figures in the UI font with even digit widths. */
+      .quest-page.is-record .ptable td.ref { font-family: inherit !important; font-variant-numeric: tabular-nums; }
+
+      /* One ledger: both tables share the same columns; the fee table's repeated
+         header row goes (its section titles already say what each block is). */
+      /* Sized so the widest figure ("AED 65,000" total) fits its cell — an amount
+         wider than its column overflows by a different amount per row and the
+         right edges stop lining up. Below ~760px the ledger scrolls instead. */
+      .quest-page.is-record .ptable { min-width: 760px; }
+      /* The ONE set of record-ledger column widths — two older sets further down
+         used to override these and were removed. Col 1 holds the fee names. */
+      /* Col 1 is only the instalment number (fee rows name their fee under the
+         description instead), so it stays a slim gutter; Status is sized to the
+         pill + its icon buttons, and the space goes to the description. */
+      .quest-page.is-record .ptable col:nth-child(1) { width: 44px !important; }
+      .quest-page.is-record .ptable col:nth-child(2) { width: 28% !important; }
+      .quest-page.is-record .ptable col:nth-child(3) { width: 14% !important; }
+      .quest-page.is-record .ptable col:nth-child(4) { width: 13% !important; }
+      .quest-page.is-record .ptable col:nth-child(5) { width: 9% !important; }
+      .quest-page.is-record .ptable col:nth-child(6) { width: 12% !important; }
+      .quest-page.is-record .ptable col:nth-child(7) { width: auto !important; }  /* takes the remainder (~18%) — fixed % here plus the 44px gutter summed past 100% and pushed the row actions off the card */
+      .quest-page.is-record .ptable.ptable-fees thead { display: none; }
+      .quest-page.is-record .ptable.ptable-fees td.feecol > span { display: none; }
+      .quest-page.is-record .ptable.ptable-fees .fee-kind { display: block !important; }
+
+      /* Money aligns right — the way a ledger is read. */
+      .quest-page.is-record .ptable th:nth-child(3),
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot) > td:nth-child(3),
+      .quest-page.is-record .ptable tr.segtot > td.amt { text-align: right; padding-right: 16px !important; padding-left: 8px !important; }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot) > td:nth-child(3) .note { text-align: right; }
+
+      /* Receipt number: quiet grey text under the description, no box. */
+      .quest-page.is-record .rcpt-ref { background: none !important; border: 0 !important; padding: 0 !important; margin-top: 3px !important;
+        color: var(--mute) !important; font-size: 11.5px !important; letter-spacing: -.005em; }
+      .quest-page.is-record .rcpt-ref.void { color: var(--brick) !important; }
+
+      /* Headline strip — one compact card, each figure with its next action. */
+      .quest-page .rglance2 { display: grid; grid-template-columns: 1.3fr 1fr 1.15fr 1fr; background: #fff; border: 1px solid rgba(26,25,22,.08); border-radius: 16px; margin-bottom: 18px;
+        box-shadow: 0 1px 2px rgba(16,24,20,.04), 0 8px 20px -16px rgba(16,24,20,.14); overflow: hidden; }
+      .quest-page .rglance2 .g2 { padding: 14px 18px 13px; min-width: 0; display: flex; flex-direction: column; }
+      .quest-page .rglance2 .g2 + .g2 { border-left: 1px solid #f0eee8; }
+      .quest-page .rglance2 .g2-alert { background: linear-gradient(180deg, #fff6f3, #fff); }
+      .quest-page .rglance2 .g2-k { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+      .quest-page .rglance2 .g2-k svg { color: var(--jade-deep); }
+      .quest-page .rglance2 .g2-tag { margin-left: auto; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: var(--mist); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+      .quest-page .rglance2 .g2-tag.ok { background: var(--jade-soft); color: var(--jade-deep); }
+      .quest-page .rglance2 .g2-tag.warn { background: #fdf3dc; color: #8a5a00; }
+      .quest-page .rglance2 .g2-v { margin-top: 8px; font-size: 22px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .rglance2 .g2-v small { font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: var(--mute); }
+      .quest-page .rglance2 .g2-s { margin-top: 6px; font-size: 12px; color: var(--mute); font-variant-numeric: tabular-nums; }
+      .quest-page .rglance2 .g2-track { position: relative; height: 6px; border-radius: 99px; background: var(--mist); margin-top: 10px; overflow: hidden; }
+      .quest-page .rglance2 .g2-track i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: linear-gradient(90deg, #3fb595, #1f5a3f); }
+      .quest-page .rglance2 .g2-track i.warn { background: linear-gradient(90deg, #f3cf6a, #d4a017); }
+      .quest-page .rglance2 .g2-act { margin-top: auto; padding-top: 10px; align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; border: 0; background: none; font: inherit;
+        font-size: 12.5px; font-weight: 600; color: var(--jade-deep); cursor: pointer; text-decoration: none; }
+      .quest-page .rglance2 .g2-act:hover { text-decoration: underline; }
+      .quest-page .rglance2 .g2-act.warn { color: #8a5a00; }
+      .quest-page .rglance2 .g2-act.bad { color: var(--brick); }
+      @media (max-width: 1100px) { .quest-page .rglance2 { grid-template-columns: 1fr 1fr; } .quest-page .rglance2 .g2:nth-child(3) { border-left: 0; } .quest-page .rglance2 .g2:nth-child(n+3) { border-top: 1px solid #f0eee8; } }
+      @media (max-width: 560px) { .quest-page .rglance2 { grid-template-columns: 1fr; } .quest-page .rglance2 .g2 + .g2 { border-left: 0; border-top: 1px solid #f0eee8; } }
+
+      /* ── Record view: headline cards ─────────────────────────────────────── */
+      .quest-page .rglance { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+      .quest-page .rg { background: #fff; border: 1px solid rgba(26,25,22,.07); border-radius: 16px; padding: 16px 18px 15px; min-width: 0;
+        box-shadow: 0 1px 2px rgba(16,24,20,.04), 0 8px 20px -14px rgba(16,24,20,.14); transition: box-shadow .2s ease, transform .2s ease; }
+      .quest-page .rg:hover { box-shadow: 0 1px 2px rgba(16,24,20,.05), 0 14px 28px -16px rgba(16,24,20,.22); transform: translateY(-1px); }
+      .quest-page .rg-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .quest-page .rg-i { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: var(--jade-tint); color: var(--jade-deep); flex-shrink: 0; }
+      .quest-page .rg-k { font-size: 13px; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+      .quest-page .rg-tag { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--mist); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .quest-page .rg-tag.ok { background: var(--jade-soft); color: var(--jade-deep); }
+      .quest-page .rg-tag.warn { background: #fdf3dc; color: #8a5a00; }
+      .quest-page .rg-v { font-size: 26px; line-height: 1; font-weight: 700; letter-spacing: -.025em; margin-top: 14px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .quest-page .rg-v small { font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--mute); }
+      .quest-page .rg-s { font-size: 12.5px; color: var(--mute); margin-top: 9px; }
+      .quest-page .rg-s b { color: var(--ink-2); font-weight: 600; }
+      .quest-page .rg-track { position: relative; height: 8px; border-radius: 99px; background: var(--mist); margin-top: 16px; }
+      .quest-page .rg-track.slim { height: 6px; margin-top: 12px; }
+      .quest-page .rg-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: linear-gradient(90deg, #3fb595, #1f5a3f); }
+      .quest-page .rg-track i.warn { background: linear-gradient(90deg, #f3cf6a, #d4a017); }
+      .quest-page .rg-track b { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--jade-deep); transform: translate(-50%, -50%); box-shadow: 0 1px 3px rgba(16,24,20,.25); }
+      .quest-page .rg-track b.warn { border-color: #d4a017; }
+      .quest-page .rg-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); margin-top: 10px; font-variant-numeric: tabular-nums; }
+      .quest-page .rg-ends .m { color: var(--mute); }
+      @media (max-width: 1100px) { .quest-page .rglance { grid-template-columns: 1fr 1fr; } .quest-page .rg-term { grid-column: 1 / -1; } }
+      @media (max-width: 560px) { .quest-page .rglance { grid-template-columns: 1fr; } }
+      .quest-page.is-record .rbanner { border-radius: 14px; padding: 12px 16px; }
+
+      /* ── Record view: payments ledger — calm, modern table. Record-only, so
+         the full contract page keeps its working look. Overrides beat the
+         rows' inline styles with !important on purpose. ─────────────────── */
+      .quest-page.is-record .sec { border-radius: 16px; border-color: rgba(26,25,22,.08); box-shadow: 0 1px 2px rgba(16,24,20,.04), 0 8px 20px -16px rgba(16,24,20,.12); }
+      .quest-page.is-record .sec .sech { padding: 16px 20px; }
+      .quest-page.is-record .sec .secb { padding: 4px 8px 10px; }
+      .quest-page.is-record .ptable { font-size: 13.5px; }
+      .quest-page.is-record .ptable th { font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--mute); padding: 10px 12px; background: transparent; border-bottom: 1px solid var(--mist); }
+      .quest-page.is-record .ptable td { padding: 14px 12px; border-bottom: 1px solid #f3f1ec; vertical-align: middle; color: var(--ink-2); }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot):not(.replgrp) > td { transition: background .12s; }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot):not(.replgrp):hover > td { background: #fbfaf7; }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot) > td:first-child { color: var(--mute); font-weight: 600; font-variant-numeric: tabular-nums; }
+      .quest-page.is-record .ptable .amt { font-size: 14px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+      .quest-page.is-record .ptable .amt .note { font-size: 11.5px !important; font-weight: 500; color: var(--mute); white-space: normal; margin-top: 2px; }
+      /* Segment header: a quiet section title, count pill and a ghost Add. */
+      .quest-page.is-record .ptable tr.segrail > td { border-left: 0 !important; background: transparent !important; padding: 22px 12px 10px !important; border-bottom: 1px solid var(--mist); }
+      .quest-page.is-record .ptable tr.segrail:first-child > td { padding-top: 10px !important; }
+      .quest-page.is-record .ptable tr.segrail > td > div > span:first-child { font-size: 15px !important; font-weight: 700 !important; letter-spacing: -.01em; color: var(--ink); }
+      .quest-page.is-record .ptable tr.segrail .segcount { font-size: 11.5px !important; font-weight: 600 !important; color: var(--ink-2) !important; background: var(--mist); padding: 2px 9px; border-radius: 99px; }
+      .quest-page.is-record .ptable .mini-btn.view { background: #fff; border: 1px solid var(--mist-strong); color: var(--ink-2); border-radius: 99px; padding: 5px 11px; font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s, background .15s; }
+      .quest-page.is-record .ptable .mini-btn.view:hover { border-color: var(--jade); color: var(--jade-deep); background: var(--jade-tint); }
+      /* Section total: a light summary line, not a shouting band. */
+      .quest-page.is-record .ptable tr.segtot > td { background: #faf9f6 !important; border-top: 1px solid var(--mist) !important; border-bottom: 0; padding: 13px 12px !important; }
+      .quest-page.is-record .ptable tr.segtot > td:first-child { text-transform: none !important; letter-spacing: 0 !important; font-size: 13px !important; font-weight: 600 !important; color: var(--ink-3) !important; border-radius: 10px 0 0 10px; }
+      .quest-page.is-record .ptable tr.segtot > td:last-child { border-radius: 0 10px 10px 0; }
+      .quest-page.is-record .ptable tr.segtot .amt { font-size: 15px !important; font-weight: 700 !important; color: var(--ink) !important; }
+      .quest-page .segtot-prog { display: flex; align-items: center; gap: 12px; justify-content: flex-end; font-size: 12.5px; color: var(--mute); white-space: nowrap; }
+      .quest-page .segtot-bar { position: relative; flex: 0 1 120px; min-width: 60px; height: 6px; border-radius: 99px; background: #e9e6de; overflow: hidden; }
+      .quest-page .segtot-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: linear-gradient(90deg, #3fb595, #1f5a3f); }
+      .quest-page .segtot-txt b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+      .quest-page .segtot-txt b.due { color: #8a5a00; }
+      .quest-page .segtot-done { display: inline-flex; align-items: center; gap: 4px; color: var(--jade-deep); font-weight: 600; }
+      /* Reference: cheque number, the bank beneath — no dangling separator. */
+      .quest-page.is-record .ptable td.ref { font-size: 13px; color: var(--ink); letter-spacing: -.01em; }
+      .quest-page.is-record .ptable td.ref .bank { display: block; font-size: 11.5px !important; margin-top: 3px; letter-spacing: .02em; font-family: inherit; }
+      .quest-page.is-record .ptable td.ref .bank .dot { display: none; }
+      /* Receipt number: a small neutral tag under the description. */
+      .quest-page.is-record .rcpt-ref { display: inline-block !important; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top;
+        margin-top: 6px !important; padding: 1px 7px; border-radius: 6px; background: #f6f5f1; border: 1px solid var(--mist);
+        font-size: 11px !important; color: var(--ink-3) !important; font-family: ui-monospace, Menlo, monospace; }
+      .quest-page.is-record .rcpt-ref.void { color: var(--brick) !important; background: var(--brick-soft); border-color: var(--brick-edge); }
+      /* Status: a pill that is visibly a control (chevron), actions beside it. */
+      .quest-page.is-record .ptable .cstat { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; line-height: 1.2; }
+      .quest-page.is-record .ptable select.cstat { -webkit-appearance: none; appearance: none; height: 28px; padding: 0 26px 0 11px; border: 1px solid transparent;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6860' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px; transition: box-shadow .15s; }
+      .quest-page.is-record .ptable select.cstat:hover { box-shadow: 0 0 0 3px rgba(46,159,130,.12); }
+      .quest-page.is-record .ptable select.cstat:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(46,159,130,.25); }
+      /* Keep words whole in the record ledger. The base .ptable cells may break
+         anywhere, and fixed column widths left "Cheque" / "Commission" split
+         mid-word and receipt numbers cut to "Rece…". Keep the column widths,
+         wrap only between words, and let a ledger wider than its card scroll. */
+      .quest-page.is-record .sec .secb:has(> .ptable), .quest-page.is-record .sec .secb:has(.ptable) { overflow-x: auto; }
+      .quest-page.is-record .ptable td, .quest-page.is-record .ptable th { overflow-wrap: normal; word-break: normal; }
+      .quest-page.is-record .ptable td:nth-child(3), .quest-page.is-record .ptable td:nth-child(5),
+      .quest-page.is-record .ptable td:nth-child(6), .quest-page.is-record .ptable th { white-space: nowrap; }
+      .quest-page.is-record .rcpt-ref { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: normal; word-break: keep-all; }
+
+      /* ── Record view: deposit as one aligned row — amount · facts · status & actions ── */
+      .quest-page.is-record .dep-body { grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto !important; align-items: center; gap: 14px 28px !important; }
+      .quest-page.is-record .dep-top { display: contents !important; }
+      .quest-page.is-record .dep-amt > div:first-child { font-size: 26px !important; font-weight: 700 !important; color: var(--ink) !important; letter-spacing: -.025em !important; line-height: 1.1; font-variant-numeric: tabular-nums; }
+      .quest-page.is-record .dep-facts { margin-left: 0 !important; display: flex !important; flex-wrap: wrap; gap: 10px 0 !important; }
+      .quest-page.is-record .dep-facts .drow2 { display: flex; flex-direction: column; gap: 3px; padding: 2px 22px; border: 0; border-left: 1px solid var(--mist); margin: 0; }
+      .quest-page.is-record .dep-facts .drow2 .k { font-size: 12px; font-weight: 500; color: var(--mute); text-transform: none; letter-spacing: 0; }
+      .quest-page.is-record .dep-facts .drow2 .v { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .quest-page.is-record .dep-acts { justify-content: flex-end; flex-wrap: nowrap !important; }
+      .quest-page.is-record .dep-note { grid-column: 1 / -1; margin: 0; }
+      @media (max-width: 900px) {
+        .quest-page.is-record .dep-body { grid-template-columns: 1fr !important; }
+        .quest-page.is-record .dep-facts .drow2:first-child { border-left: 0; padding-left: 0; }
+        .quest-page.is-record .dep-acts { justify-content: flex-start; flex-wrap: wrap !important; }
+      }
+      /* Same status pill + ghost buttons as the ledger. */
+      .quest-page.is-record .dep-acts .cstat { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; line-height: 1.2; }
+      .quest-page.is-record .dep-acts select.cstat { -webkit-appearance: none; appearance: none; height: 30px; padding: 0 26px 0 12px; border: 1px solid transparent; cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6860' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px; }
+      .quest-page.is-record .dep-acts .mini-btn.view, .quest-page.is-record .ptable .mini-btn.view { height: 30px; padding: 0 12px; }
+      .quest-page.is-record .dep-acts .mini-btn.view { background: #fff; border: 1px solid var(--mist-strong); color: var(--ink-2); border-radius: 99px; font-size: 12px; font-weight: 600; }
+      .quest-page.is-record .dep-acts .mini-btn.view:hover { border-color: var(--jade); color: var(--jade-deep); background: var(--jade-tint); }
+
+      /* ── Record view: ledger rows on one line — status, Edit and receipt side by side.
+         Column widths stay FIXED (auto layout pushed Status off the card at 1280);
+         Status gets a little more of them, and the row's Edit becomes a compact
+         pencil button (its title still says what it edits). ── */
+      .quest-page.is-record .ptable td { padding-top: 12px; padding-bottom: 12px; }
+      .quest-page.is-record .ptable td:last-child > div { gap: 6px !important; }
+      /* Status cell: the status and its buttons on one line; a follow-up action
+         (Record replacement / Link to cheque) on its own line as a quiet link —
+         it used to sit beside them and run off the card. */
+      .quest-page.is-record .ptable td:last-child > div { flex-wrap: wrap !important; align-items: center; column-gap: 4px !important; row-gap: 6px !important; max-width: 100%; }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot) > td:last-child { padding-left: 8px; padding-right: 8px; }
+      /* The pill hugs its label + chevron — the old 22px right padding was room
+         for a native <select> arrow that no longer exists. */
+      .quest-page.is-record .ptable td:last-child button.cstat-btn { padding: 0 8px 0 11px; gap: 4px; }
+      /* Status hugs the right edge — the same edge as each section's "+ Add" —
+         so no dead gap is left between the actions and the card. */
+      .quest-page.is-record .ptable th:last-child { text-align: right; padding-right: 8px; }
+      .quest-page.is-record .ptable tbody tr:not(.segrail):not(.segtot) > td:last-child > div { justify-content: flex-end; }
+      /* Row actions (Edit, receipt download) are one family: the same 28px round
+         icon button, side by side. Edit's label stays in its title/tooltip. */
+      .quest-page.is-record .ptable td:last-child button.mini-btn.view[title^="Edit"],
+      .quest-page.is-record .ptable td:last-child a.mini-btn.view[href*="pid="] {
+        display: flex !important; justify-content: center; place-items: center; width: 28px; height: 28px; padding: 0 !important; gap: 0;
+        border: 1px solid var(--mist-strong); background: #fff; border-radius: 99px; color: var(--ink-2); font-size: 0; }
+      .quest-page.is-record .ptable td:last-child button.mini-btn.view[title^="Edit"]:hover,
+      .quest-page.is-record .ptable td:last-child a.mini-btn.view[href*="pid="]:hover { border-color: var(--jade); color: var(--jade-deep); background: var(--jade-tint); }
+      .quest-page.is-record .ptable .mini-btn.view.row-act { justify-content: flex-start; height: 24px; padding: 0 4px; border: 0; background: none; border-radius: 6px;
+        color: var(--jade-deep); font-size: 12px; font-weight: 600; gap: 4px; white-space: nowrap; }
+      .quest-page.is-record .ptable .mini-btn.view.row-act:hover { background: var(--jade-tint); color: var(--jade-deep); }
+      /* One icon size everywhere in the ledger, never squashed. */
+      .quest-page.is-record .ptable .mini-btn svg { flex-shrink: 0; width: 13px; height: 13px; }
+      /* Cheque custody ("With us", "Head office") under the method — a small chip,
+         not a second status-sized pill. */
+      .quest-page.is-record .ptable td:nth-child(5) button.cstat-btn { height: 22px; min-height: 0; font-size: 11px; padding: 0 8px; margin-top: 2px; }
+      /* Section total: one right-aligned line — a short bar, then collected · outstanding. */
+      .quest-page.is-record .segtot-prog { flex-direction: row; align-items: center; justify-content: flex-end; gap: 12px; padding-right: 4px; }
+      .quest-page.is-record .segtot-bar { flex: none; width: 110px; }
+      /* A bounced cheque is the row that needs work — tint it so it can't be missed. */
+      .quest-page.is-record .ptable tbody tr:has(> td button.cstat.bounced) > td { background: #fdf4f2; }
+      .quest-page.is-record .ptable tbody tr:has(> td button.cstat.bounced) > td:first-child { box-shadow: inset 3px 0 0 #e0866f; }
+      .quest-page.is-record .segtot-txt { font-size: 12.5px; letter-spacing: .005em; }
+      .quest-page.is-record .segtot-txt b { font-weight: 700; }
+
       .quest-page .section-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
       .quest-page .section-eyebrow .se-t { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
       .quest-page .section-eyebrow .se-line { flex: 1; height: 1px; background: var(--mist-strong); }
@@ -9203,6 +10120,9 @@ function GlobalStyle() {
          Class is "docmiss" (NOT "missing") to avoid inheriting the journey
          MissingStrip's padding/margin rules. */
       .quest-page .docitem.docmiss { background: #fff; border-style: dashed; border-color: var(--saffron-edge); }
+      .quest-page .doc-count { margin-left: 8px; display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 9px; border-radius: 99px; background: var(--jade-tint); color: var(--jade-deep); font-size: 12px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .quest-page .doc-count b { font-weight: 700; }
+      .quest-page .doc-count.todo { margin-left: 6px; background: #fdf3dc; color: #8a5a00; font-weight: 600; }
       .quest-page .docitem.docmiss svg, .quest-page .docitem.docmiss .ds { color: var(--saffron-deep); }
       .quest-page .docitem.docmiss .dn { color: var(--mute); }
       .quest-page .docitem.docmiss.req { border-color: var(--brick-edge); }
@@ -9210,6 +10130,39 @@ function GlobalStyle() {
       .quest-page .docitem .dacts { margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
       .quest-page .docitem .mini-btn { padding: 3px 8px; }
       .quest-page .docitem .mini-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+      /* ── Record view: documents as one clean list — icon tile · name over
+         status · actions. Dividers instead of a stack of tinted boxes; colour
+         only where it means something (missing-required red, review amber). ── */
+      .quest-page.is-record .doc-cap { text-transform: none !important; letter-spacing: 0 !important; font-size: 12.5px !important; font-weight: 600 !important; color: var(--mute) !important; margin: 4px 2px 8px !important; }
+      .quest-page.is-record .doclist { display: block; border: 1px solid var(--mist-strong); border-radius: 14px; overflow: hidden; background: #fff; }
+      .quest-page.is-record .doclist > .docitem { border: 0 !important; border-bottom: 1px solid #f3f1ec !important; border-radius: 0 !important; background: #fff !important;
+        padding: 11px 14px; min-height: 60px; gap: 12px; margin: 0; transition: background .12s; }
+      .quest-page.is-record .doclist > .docitem:last-child { border-bottom: 0 !important; }
+      .quest-page.is-record .doclist > .docitem:hover { background: #fbfaf7 !important; }
+      .quest-page.is-record .doclist > .docitem > svg:first-child { box-sizing: content-box; width: 16px; height: 16px; padding: 9px; border-radius: 10px; background: var(--jade-tint); color: var(--jade-deep) !important; }
+      .quest-page.is-record .doclist > .docitem > div:not(.dacts) { flex-direction: column; align-items: flex-start !important; gap: 2px !important; flex: 1 1 auto; }
+      .quest-page.is-record .doclist > .docitem .dn { font-size: 14px; font-weight: 600; color: var(--ink) !important; }
+      .quest-page.is-record .doclist > .docitem .ds { font-size: 12.5px; font-weight: 500; color: var(--mute) !important; white-space: normal; }
+      .quest-page.is-record .doclist > .docitem.pending > svg:first-child { background: var(--saffron-soft); color: var(--saffron-deep) !important; }
+      .quest-page.is-record .doclist > .docitem.pending .ds { color: var(--saffron-deep) !important; }
+      .quest-page.is-record .doclist > .docitem.rejected > svg:first-child { background: var(--brick-soft); color: var(--brick) !important; }
+      .quest-page.is-record .doclist > .docitem.rejected .ds { color: var(--brick) !important; }
+      .quest-page.is-record .doclist > .docitem.docmiss > svg:first-child { background: #fff; color: var(--mute-2, #bdbab2) !important; outline: 1.5px dashed #dcd9cf; outline-offset: -1.5px; }
+      .quest-page.is-record .doclist > .docitem.docmiss .dn { color: var(--ink-2) !important; font-weight: 500; }
+      .quest-page.is-record .doclist > .docitem.docmiss.req > svg:first-child { color: var(--brick) !important; outline-color: var(--brick-edge); }
+      .quest-page.is-record .doclist > .docitem.docmiss.req .ds { color: var(--brick) !important; font-weight: 600; }
+      .quest-page.is-record .doclist > .docitem .dacts { gap: 6px; }
+      .quest-page.is-record .doclist .mini-btn, .quest-page.is-record .doc-hacts .mini-btn {
+        height: 30px; padding: 0 12px; border-radius: 99px; font-size: 12px; font-weight: 600; background: #fff; border: 1px solid var(--mist-strong); color: var(--ink-2); transition: border-color .15s, color .15s, background .15s; }
+      .quest-page.is-record .doclist .mini-btn:hover, .quest-page.is-record .doc-hacts .mini-btn:hover { border-color: var(--jade); color: var(--jade-deep); background: var(--jade-tint); }
+      .quest-page.is-record .doclist .mini-btn.ok { border-color: #bfe3d5; color: var(--jade-deep); }
+      .quest-page.is-record .doc-hacts .mini-btn.ok { background: var(--jade); border-color: var(--jade); color: #fff; }
+      .quest-page.is-record .doc-hacts .mini-btn.ok:hover { background: #268d72; color: #fff; }
+      .quest-page.is-record .doc-foot { margin-top: 10px !important; padding-left: 2px; }
+      .quest-page.is-record .doc-foot .chain-link { font-size: 12.5px; font-weight: 600; color: var(--jade-deep); text-decoration: none; }
+      .quest-page.is-record .doc-foot .chain-link:hover { text-decoration: underline; }
+      @media (max-width: 640px) { .quest-page.is-record .doclist > .docitem { flex-wrap: wrap; } .quest-page.is-record .doclist > .docitem .dacts { width: 100%; justify-content: flex-end; } }
       /* Inline expiry capture on an undated KYC copy. The date field + Approve don't fit
          beside the status text in a narrow panel, so this row alone is allowed to wrap its
          action strip onto a second line rather than overflow the card. */

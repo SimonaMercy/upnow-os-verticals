@@ -26,6 +26,8 @@ import ReportSheetView, { SHEET_SLUGS, type SheetSlug } from '@/components/upnow
 import { GROUPS, REPORT_TILES } from '@/components/upnow/reportCatalog';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { ReportDetailView } from '@/components/upnow/ReportDetailView';
+import { LeasesMonthlyReport } from '@/components/upnow/LeasesMonthlyReport';
+import { LeasesYearlyReport } from '@/components/upnow/LeasesYearlyReport';
 import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 import { OperationsByStageReport } from '@/components/upnow/OperationsByStageReport';
@@ -65,6 +67,15 @@ export default function ManagerReportsPage() {
     if (effectiveRp != null) qs.set('rp', String(effectiveRp));
     if (slug) qs.set('slug', slug);
     router.replace(`/dashboard/manager/reports?${qs.toString()}`);
+  };
+  // Monthly | Yearly switch between the two lease reports: write the carried
+  // filters into the address first, so the report that mounts seeds from them.
+  const switchReport = (slug: string, carry: URLSearchParams) => {
+    const qs = new URLSearchParams(carry);
+    if (effectiveRp != null) qs.set('rp', String(effectiveRp));
+    qs.set('slug', slug);
+    window.history.replaceState(window.history.state, '', `/dashboard/manager/reports?${qs.toString()}`);
+    setOpenSlug(slug);
   };
 
   if (!permsLoading && needsLandlord) {
@@ -207,6 +218,31 @@ export default function ManagerReportsPage() {
         extraQuery={`rp=${effectiveRp}`}
         onBack={() => navigate(null)}
         contractsBase="/dashboard/manager/contracts"
+      />
+    );
+  }
+  // Leases - Monthly renders its own register page, scoped to this managed
+  // landlord's book via rp=N.
+  if (openSlug === 'leases-by-year') {
+    return (
+      <LeasesMonthlyReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        contractsBase="/dashboard/manager/contracts"
+        onSwitchView={switchReport}
+      />
+    );
+  }
+  // Lease Summary - Yearly — its own property × month page, same rp=N scoping.
+  if (openSlug === 'new-leases-matrix') {
+    return (
+      <LeasesYearlyReport
+        endpointBase="/api/manager/reports"
+        extraQuery={`rp=${effectiveRp}`}
+        onBack={() => navigate(null)}
+        contractsBase="/dashboard/manager/contracts"
+        onSwitchView={switchReport}
       />
     );
   }

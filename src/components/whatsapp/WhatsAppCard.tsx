@@ -29,7 +29,9 @@ function ChatSlideOver({ rp, chatId, isManager, onClose, onChanged }: { rp: Rp; 
   );
 }
 
-export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager = false }: {
+export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager = false, section = false }: {
+  /** Render in the contract record's tab frame instead of a standalone card. */
+  section?: boolean;
   rp: Rp;
   tenantId?: number | null;
   leadId?: number | null;
@@ -72,20 +74,8 @@ export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager
     : null;
   const unread = chats.reduce((n, c) => n + c.unreadCount, 0);
 
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-base font-semibold text-[#1a1916] flex items-center gap-2 flex-1">
-          <MessageCircle size={16} className="text-[#2e9f82]" /> WhatsApp
-          {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
-        </h2>
-        {connected && canSend && preset?.phone && (
-          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">
-            <Plus size={14} /> New message
-          </button>
-        )}
-      </div>
-
+  const body = (
+    <>
       {chats.length === 0 && (
         <p className="text-sm text-[#9b9890]">
           {preset?.phone
@@ -116,6 +106,73 @@ export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager
 
       {composing && preset && <WaNewChat rp={rp} lines={lines} preset={preset} onClose={() => setComposing(false)} onStarted={(id) => { void load(); setOpenChat(id); }} />}
       {openChat != null && <ChatSlideOver rp={rp} chatId={openChat} isManager={isManager} onClose={() => { setOpenChat(null); void load(); }} onChanged={() => { void load(); }} />}
+    </>
+  );
+  // Same rows as the Documents tab when shown in the contract record's frame.
+  const sectionBody = (
+    <>
+      {chats.length === 0 && (
+        <p className="note">
+          {preset?.phone
+            ? <>No WhatsApp conversation with {prettyPhone(preset.phone)} yet. If they write from another number, open that conversation on the WhatsApp page and link it to them.</>
+            : 'No phone number on file for this customer, so no conversation can be matched to them.'}
+        </p>
+      )}
+      {chats.length > 0 && (
+        <div className="doclist">
+          {chats.map((c) => (
+            <button key={c.id} type="button" onClick={() => setOpenChat(c.id)} className={`docitem approved${c.unreadCount > 0 ? ' unread' : ''}`}
+              style={{ width: '100%', textAlign: 'left', cursor: 'pointer', font: 'inherit' }}>
+              <MessageCircle size={14} />
+              <div>
+                <div className="dn">{prettyPhone(c.phone) || c.name}</div>
+                <div className="ds" dir="auto">{c.lastDirection === 'out' ? 'You: ' : ''}{c.lastSnippet ?? '—'} · {c.messageCount} {c.messageCount === 1 ? 'message' : 'messages'} · on {c.lineLabel}</div>
+              </div>
+              <div className="dacts">
+                {c.unreadCount > 0 && <span className="em-unread">{c.unreadCount} new</span>}
+                <span className="em-when">{waListWhen(c.lastMessageAt)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {composing && preset && <WaNewChat rp={rp} lines={lines} preset={preset} onClose={() => setComposing(false)} onStarted={(id) => { void load(); setOpenChat(id); }} />}
+      {openChat != null && <ChatSlideOver rp={rp} chatId={openChat} isManager={isManager} onClose={() => { setOpenChat(null); void load(); }} onChanged={() => { void load(); }} />}
+    </>
+  );
+  // `section`: the contract record's tab frame (.sec / .sech / .secb) so this
+  // reads like the Payments, Documents, Notes and Breaches tabs beside it.
+  if (section) return (
+    <div className="sec min-w-0 max-w-full">
+      <div className="sech">
+        <span className="si"><MessageCircle size={16} /></span>
+        <span className="st">WhatsApp{unread > 0 && <span className="sec-count">{unread} unread</span>}</span>
+        {connected && canSend && preset?.phone && (
+          <button type="button" onClick={() => setComposing(true)} className="mini-btn ok" style={{ marginLeft: 'auto' }}>
+            <Plus size={12} /> New message
+          </button>
+        )}
+      </div>
+      <div className="secb">{sectionBody}</div>
+    </div>
+  );
+  return (
+    // min-w-0 / max-w-full: inside a flex or grid column the long one-line
+    // preview would otherwise set the card's width and stretch the whole page.
+    <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="text-base font-semibold text-[#1a1916] flex items-center gap-2 flex-1">
+          <MessageCircle size={16} className="text-[#2e9f82]" /> WhatsApp
+          {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
+        </h2>
+        {connected && canSend && preset?.phone && (
+          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">
+            <Plus size={14} /> New message
+          </button>
+        )}
+      </div>
+
+      {body}
     </div>
   );
 }
