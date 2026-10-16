@@ -1,0 +1,202 @@
+/*
+ * PROTOTYPE ONLY — MarketSpace theme for the UpNow OS prototype.
+ *
+ * Tokens are copied from upnow-marketspace, not invented:
+ *   pages/provider-dashboard/css/styles.css   (:root --g*, --ink*, --line*, --bg, --r, --sh, fonts)
+ *   pages/provider-dashboard/pw/site.css      (--g7 = website --color-primary #047246, --g6, --g5)
+ *   pages/provider-dashboard/pw/app.css       (readability pass: --ink3 #65716a, 15px body)
+ *
+ * Everything is scoped under `.ms` so nothing leaks into production pages.
+ */
+.ms {
+  --g9: #0b3d2a;
+  --g8: #0f4f36;
+  --g7: #047246;
+  --g6: #1a7a53;
+  --g5: #25946a;
+  --g2: #d8efe3;
+  --g1: #eef7f2;
+  --ink: #14201a;
+  --ink2: #46534c;
+  --ink3: #65716a;
+  --line: #e4e9e5;
+  --line2: #d3dad5;
+  --bg: #f6f8f6;
+  --kc: #eef2ef;
+  --wa: #1faa59;
+  --amber: #b7791f;
+  --red: #c2413b;
+  --r: 14px;
+  --r-sm: 10px;
+  --sh: 0 1px 2px rgba(15, 40, 28, 0.06), 0 4px 16px rgba(15, 40, 28, 0.06);
+  --sh-lg: 0 12px 40px rgba(15, 40, 28, 0.16);
+
+  font-family: var(--ms-sans), 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings in the MarketSpace dashboard use the serif display face (.ph h1, .ich h1, .wz .side h3). */
+.ms .ms-serif {
+  font-family: var(--ms-serif), 'DM Serif Display', Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+.ms :focus-visible {
+  outline: 2px solid var(--g6);
+  outline-offset: 2px;
+}
+
+/* Native selects get the dashboard's `.tsel` chevron. */
+.ms select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2346534c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+.ms input[type='checkbox'],
+.ms input[type='radio'] {
+  accent-color: var(--g7);
+}
+
+/* Sidebar scrolls without a visible scrollbar (pw/app.css "sidebar: no visible scrollbar"). */
+.ms .ms-noscroll {
+  scrollbar-width: none;
+}
+.ms .ms-noscroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Hosted production screens (/prototype/os/rp/**) ────────────────────────
+ * GENERATED from the production Spaces code: the old OS palette mapped onto the
+ * MarketSpace tokens above, only inside the bridge frame (.ms-bridge). Reds and
+ * ambers keep their meaning. Production CSS is not touched. */
+.ms .ms-bridge { font-family: var(--ms-sans), system-ui, sans-serif; }
+.ms .ms-bridge .accent-\[\#1a7a52\] { accent-color: var(--g8); }
+.ms .ms-bridge .accent-\[\#2e9f82\] { accent-color: var(--g7); }
+.ms .ms-bridge .bg-\[\#047246\] { background-color: var(--g7); }
+.ms .ms-bridge .bg-\[\#14201a\] { background-color: var(--ink); }
+.ms .ms-bridge .bg-\[\#1a1916\] { background-color: var(--ink); }
+.ms .ms-bridge .bg-\[\#1a7a52\] { background-color: var(--g8); }
+.ms .ms-bridge .bg-\[\#1a7a5a\] { background-color: var(--g8); }
+.ms .ms-bridge .bg-\[\#1c1f1d\] { background-color: var(--ink); }
+.ms .ms-bridge .bg-\[\#2e9f82\] { background-color: var(--g7); }
+.ms .ms-bridge .bg-\[\#6b6860\] { background-color: var(--ink2); }
+.ms .ms-bridge .bg-\[\#8a8f8c\] { background-color: var(--ink3); }
+.ms .ms-bridge .bg-\[\#9b9890\] { background-color: var(--ink3); }
+.ms .ms-bridge .bg-\[\#c8c6c0\] { background-color: var(--line2); }
+.ms .ms-bridge .bg-\[\#d8f2e8\] { background-color: var(--g2); }
+.ms .ms-bridge .bg-\[\#e4e9e5\] { background-color: var(--line); }
+.ms .ms-bridge .bg-\[\#e8e6e0\] { background-color: var(--line); }
+.ms .ms-bridge .bg-\[\#eef0ee\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#eef9f4\] { background-color: var(--g1); }
+.ms .ms-bridge .bg-\[\#f0ede8\] { background-color: var(--line); }
+.ms .ms-bridge .bg-\[\#f0eee7\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#f0faf6\] { background-color: var(--g1); }
+.ms .ms-bridge .bg-\[\#f1f3f1\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#f4f3ef\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#f7f6f2\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#f9f8f6\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#fafaf8\] { background-color: var(--bg); }
+.ms .ms-bridge .bg-\[\#fafbfa\] { background-color: var(--bg); }
+.ms .ms-bridge .border-\[\#047246\] { border-color: var(--g7); }
+.ms .ms-bridge .border-\[\#166651\] { border-color: var(--g7); }
+.ms .ms-bridge .border-\[\#1a1916\] { border-color: var(--ink); }
+.ms .ms-bridge .border-\[\#1a7a52\] { border-color: var(--g8); }
+.ms .ms-bridge .border-\[\#1a7a5a\] { border-color: var(--g8); }
+.ms .ms-bridge .border-\[\#1c1f1d\] { border-color: var(--ink); }
+.ms .ms-bridge .border-\[\#2e9f82\] { border-color: var(--g7); }
+.ms .ms-bridge .border-\[\#6b6860\] { border-color: var(--ink2); }
+.ms .ms-bridge .border-\[\#8a8f8c\] { border-color: var(--ink3); }
+.ms .ms-bridge .border-\[\#e4e9e5\] { border-color: var(--line); }
+.ms .ms-bridge .border-\[\#e6e8e6\] { border-color: var(--line); }
+.ms .ms-bridge .border-\[\#e8e6e0\] { border-color: var(--line); }
+.ms .ms-bridge .border-\[\#eef0ee\] { border-color: var(--bg); }
+.ms .ms-bridge .border-\[\#f0ede8\] { border-color: var(--line); }
+.ms .ms-bridge .border-\[\#f0eee7\] { border-color: var(--bg); }
+.ms .ms-bridge .border-\[\#f1f3f1\] { border-color: var(--bg); }
+.ms .ms-bridge .border-\[\#f4f3ef\] { border-color: var(--bg); }
+.ms .ms-bridge .border-\[\#f9f8f6\] { border-color: var(--bg); }
+.ms .ms-bridge .border-l-\[\#2e9f82\] { border-color: var(--g7); }
+.ms .ms-bridge .from-\[\#14201c\] { --tw-gradient-from: var(--ink); }
+.ms .ms-bridge .from-\[\#d8f2e8\] { --tw-gradient-from: var(--g2); }
+.ms .ms-bridge .ring-\[\#047246\] { --tw-ring-color: var(--g7); }
+.ms .ms-bridge .ring-\[\#1a1916\] { --tw-ring-color: var(--ink); }
+.ms .ms-bridge .ring-\[\#2e9f82\] { --tw-ring-color: var(--g7); }
+.ms .ms-bridge .ring-\[\#d8f2e8\] { --tw-ring-color: var(--g2); }
+.ms .ms-bridge .text-\[\#047246\] { color: var(--g7); }
+.ms .ms-bridge .text-\[\#14201a\] { color: var(--ink); }
+.ms .ms-bridge .text-\[\#166651\] { color: var(--g7); }
+.ms .ms-bridge .text-\[\#1a1916\] { color: var(--ink); }
+.ms .ms-bridge .text-\[\#1a7a52\] { color: var(--g8); }
+.ms .ms-bridge .text-\[\#1a7a5a\] { color: var(--g8); }
+.ms .ms-bridge .text-\[\#1c1f1d\] { color: var(--ink); }
+.ms .ms-bridge .text-\[\#2e9f82\] { color: var(--g7); }
+.ms .ms-bridge .text-\[\#3d3b35\] { color: var(--ink2); }
+.ms .ms-bridge .text-\[\#4a4842\] { color: var(--ink2); }
+.ms .ms-bridge .text-\[\#4a554f\] { color: var(--ink2); }
+.ms .ms-bridge .text-\[\#5b615e\] { color: var(--ink2); }
+.ms .ms-bridge .text-\[\#6b6860\] { color: var(--ink2); }
+.ms .ms-bridge .text-\[\#6b7a74\] { color: var(--ink3); }
+.ms .ms-bridge .text-\[\#6f7a73\] { color: var(--ink3); }
+.ms .ms-bridge .text-\[\#8a8780\] { color: var(--ink3); }
+.ms .ms-bridge .text-\[\#8a8f8c\] { color: var(--ink3); }
+.ms .ms-bridge .text-\[\#9b9890\] { color: var(--ink3); }
+.ms .ms-bridge .text-\[\#c8c6c0\] { color: var(--line2); }
+.ms .ms-bridge .text-\[\#e8e6e0\] { color: var(--line); }
+.ms .ms-bridge .to-\[\#047246\] { --tw-gradient-to: var(--g7); }
+.ms .ms-bridge .focus\:bg-\[\#f0faf6\]:focus { background-color: var(--g1); }
+.ms .ms-bridge .focus\:border-\[\#1a7a52\]:focus { border-color: var(--g8); }
+.ms .ms-bridge .focus\:border-\[\#2e9f82\]:focus { border-color: var(--g7); }
+.ms .ms-bridge .focus\:border-\[\#e8e6e0\]:focus { border-color: var(--line); }
+.ms .ms-bridge .focus\:ring-\[\#2e9f82\]:focus { --tw-ring-color: var(--g7); }
+.ms .ms-bridge .group:hover .group-hover\:bg-\[\#2e9f82\] { background-color: var(--g7); }
+.ms .ms-bridge .group:hover .group-hover\:text-\[\#047246\] { color: var(--g7); }
+.ms .ms-bridge .group:hover .group-hover\:text-\[\#1a7a5a\] { color: var(--g8); }
+.ms .ms-bridge .group:hover .group-hover\:text-\[\#2e9f82\] { color: var(--g7); }
+.ms .ms-bridge .group:hover .group-hover\:to-\[\#047246\] { --tw-gradient-to: var(--g7); }
+.ms .ms-bridge .hover\:bg-\[\#047246\]:hover { background-color: var(--g7); }
+.ms .ms-bridge .hover\:bg-\[\#1a7a5a\]:hover { background-color: var(--g8); }
+.ms .ms-bridge .hover\:bg-\[\#2e9f82\]:hover { background-color: var(--g7); }
+.ms .ms-bridge .hover\:bg-\[\#d8f2e8\]:hover { background-color: var(--g2); }
+.ms .ms-bridge .hover\:bg-\[\#e4e9e5\]:hover { background-color: var(--line); }
+.ms .ms-bridge .hover\:bg-\[\#e8e6e0\]:hover { background-color: var(--line); }
+.ms .ms-bridge .hover\:bg-\[\#eef0ee\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-\[\#eef9f4\]:hover { background-color: var(--g1); }
+.ms .ms-bridge .hover\:bg-\[\#f0ede8\]:hover { background-color: var(--line); }
+.ms .ms-bridge .hover\:bg-\[\#f0faf6\]:hover { background-color: var(--g1); }
+.ms .ms-bridge .hover\:bg-\[\#f4f3ef\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-\[\#f7f6f2\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-\[\#f9f8f6\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-\[\#fafaf8\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-\[\#fafbfa\]:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-base-100:hover { background-color: var(--bg); }
+.ms .ms-bridge .hover\:bg-base-200:hover { background-color: var(--line); }
+.ms .ms-bridge .hover\:border-\[\#1a7a52\]:hover { border-color: var(--g8); }
+.ms .ms-bridge .hover\:border-\[\#2e9f82\]:hover { border-color: var(--g7); }
+.ms .ms-bridge .hover\:border-\[\#9b9890\]:hover { border-color: var(--ink3); }
+.ms .ms-bridge .hover\:border-\[\#c8c6c0\]:hover { border-color: var(--line2); }
+.ms .ms-bridge .hover\:border-\[\#cfe7da\]:hover { border-color: var(--g2); }
+.ms .ms-bridge .hover\:border-\[\#e8e6e0\]:hover { border-color: var(--line); }
+.ms .ms-bridge .hover\:decoration-\[\#2e9f82\]:hover { text-decoration-color: var(--g7); }
+.ms .ms-bridge .hover\:text-\[\#047246\]:hover { color: var(--g7); }
+.ms .ms-bridge .hover\:text-\[\#14201a\]:hover { color: var(--ink); }
+.ms .ms-bridge .hover\:text-\[\#1a1916\]:hover { color: var(--ink); }
+.ms .ms-bridge .hover\:text-\[\#1a7a52\]:hover { color: var(--g8); }
+.ms .ms-bridge .hover\:text-\[\#1a7a5a\]:hover { color: var(--g8); }
+.ms .ms-bridge .hover\:text-\[\#1c1f1d\]:hover { color: var(--ink); }
+.ms .ms-bridge .hover\:text-\[\#2e9f82\]:hover { color: var(--g7); }
+.ms .ms-bridge .hover\:text-\[\#3d3b35\]:hover { color: var(--ink2); }
+.ms .ms-bridge .hover\:text-\[\#5b615e\]:hover { color: var(--ink2); }
+.ms .ms-bridge .hover\:text-\[\#6b6860\]:hover { color: var(--ink2); }
+.ms .ms-bridge .hover\:text-primary:hover { color: var(--g7); }
+
+/* The production Leases page draws a decorative top bar (crumb, inert bell, "A" avatar) that the
+ * manager portal also suppresses; inside the new shell it duplicates the real header. */
+.ms .ms-bridge .orders-page > header.topbar { display: none; }
