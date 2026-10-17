@@ -4,11 +4,11 @@
  * Operations home for a non-Spaces vertical — PREVIEW data only (no backend for these verticals yet).
  * Gate 2 lock when the business is not authorised for the vertical.
  *
- * Spaces shows live counts from the PREVIEW booking engine (short stays, venues, courts,
- * charters) instead. Note: /v/spaces currently redirects to the lease board (page.tsx), so this
- * branch only renders if that redirect is lifted.
+ * Spaces (the Spaces pack Overview) shows live counts from the PREVIEW booking engine (short
+ * stays, venues, courts, charters) plus one compact row of long-term lease counts (real API,
+ * GET /api/contracts, read-only) linking to Long-term leases.
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import {
   Btn, Callout, Card, Kpi, Kpis, OsPage, PageHead, Pill, PreviewBanner, PreviewPill, ScopeStrip, fmtAedK,
@@ -27,19 +27,64 @@ export default function VerticalHome() {
   return <OtherVerticalHome vertical={vertical} />;
 }
 
+type LeaseRow = { status: string; endDate: string | null };
+
+/** READ-ONLY lease counts for the Spaces Overview (same GET the contracts list makes). */
+function LeaseCountsRow() {
+  const [c, setC] = useState<{ active: number; issued: number; pending: number; ending: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/contracts', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => {
+        if (!alive) return;
+        const list: LeaseRow[] = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
+        const now = Date.now();
+        const soon = now + 90 * 86_400_000;
+        setC({
+          active: list.filter((x) => x.status === 'active').length,
+          issued: list.filter((x) => x.status === 'issued').length,
+          pending: list.filter((x) => x.status === 'pending').length,
+          ending: list.filter((x) => x.status === 'active' && x.endDate && new Date(x.endDate).getTime() >= now && new Date(x.endDate).getTime() <= soon).length,
+        });
+      })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; };
+  }, []);
+  const cell = (k: string, v: number | string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+      <b style={{ fontSize: 15, fontWeight: 800, color: 'var(--ms-ink)' }}>{v}</b>
+      <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>{k}</span>
+    </span>
+  );
+  const dash = c == null ? (failed ? '—' : '…') : null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 18px', padding: '10px 14px', marginBottom: 14, border: '1px solid var(--ms-border)', borderRadius: 10, background: 'var(--ms-surface)' }}>
+      <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ms-primary)' }}>Long-term leases</span>
+      {cell('active', dash ?? c?.active ?? 0)}
+      {cell('issued', dash ?? c?.issued ?? 0)}
+      {cell('pending', dash ?? c?.pending ?? 0)}
+      {cell('ending in 90 days', dash ?? c?.ending ?? 0)}
+      <span style={{ marginLeft: 'auto' }}><Btn size="xs" href={`${RP_BASE}/orders`}>Open long-term leases <ArrowRight size={12} aria-hidden /></Btn></span>
+    </div>
+  );
+}
+
 function SpacesHome() {
   return (
     <OsPage>
       <PageHead
-        eyebrow="Operations"
-        title="Spaces bookings"
-        lede="Short stays, venues, courts and yacht charters — live from the booking engine. Long-term leases stay on the lease board."
+        eyebrow="Spaces pack"
+        title="Overview"
+        lede="Long-term leases at a glance, plus short stays, venues, courts and yacht charters — live from the booking engine."
         actions={<>
           <Btn href={`${RP_BASE}/orders`}>Long-term leases</Btn>
           <Btn href={`${RP_BASE}/v/spaces/calendar`}>Calendar</Btn>
           <Btn variant="primary" href={`${RP_BASE}/requests`}>Booking requests</Btn>
         </>}
       />
+      <LeaseCountsRow />
       <BookingsPreview />
       <SpacesBookingSummary />
     </OsPage>

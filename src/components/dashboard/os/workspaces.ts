@@ -1,17 +1,19 @@
 /**
- * UpNow OS workspace navigation — the approved Genspark Stage 2 structure applied to the
- * real dashboards.
+ * UpNow OS workspace navigation — the provider rail in two sections (owner sketch, Oct 2026):
  *
- *   Provider (rental provider / manager / service provider): 8 workspaces — Overview · Demand · Operations ·
- *   Catalogue · Finance · Business · Insights · Settings. Operations and Catalogue are the
- *   vertical-scoped workspaces; the rest are shared.
+ *   SHARED UPNOW OS (dark-green items, tone 'shared') — the same for every pack:
+ *     Home · Demand · Communications · Calendar · Account Settings
+ *   <VERTICAL> PACK (light-green items, tone 'vertical') — the active vertical's own work,
+ *     switched with the pack selector in the rail. For Spaces:
+ *     Overview · Portfolio · Operations · Tasks · Finance & Ledger · Business · Cases · Reports · Settings
+ *
  *   Admin: a separate portal — Overview · Verification (Gate 1) · Vertical authorisation
  *   (Gate 2) · Listing approval (Gate 3) · People · Spaces · Services · Categories · Platform.
  *
- * Every existing route keeps exactly one home here (parity gate). Children marked `soon`
- * are workflows the Genspark design calls for that have no backend yet (short-stay
- * bookings, venue/court/charter boards, vertical authorisation). They render dimmed with a
- * "Soon" chip and never link — no page pretends to work.
+ * Every existing route keeps a home here or a link from a page that is in the menu (parity
+ * gate). The old Emails / WhatsApp pages and the two old calendars are no longer menu entries —
+ * the unified Communications inbox and Calendar replace them — but their routes still work and
+ * still light up the right workspace (`match` / hidden children).
  */
 import type { UserRole } from '@/contexts/AuthContext';
 import { verticalOf, type MsVerticalId } from '@/lib/catalog';
@@ -43,8 +45,9 @@ export type OsChild = {
 export type OsGroup = {
   id: string;
   label: string;
-  /** lucide icon name, resolved in OsRail. */
+  /** lucide icon name, resolved in OsRail (used by the collapsed rail). */
   icon: string;
+  /** 'shared' = SHARED UPNOW OS section; 'vertical' = the <VERTICAL> PACK section. */
   tone: NavTone;
   badgeKey?: NavBadgeKey;
   children: OsChild[];
@@ -58,157 +61,238 @@ const S = '/dashboard/service-provider';
 /** A sub-heading row inside a workspace's children. */
 const H = (label: string): OsChild => ({ label, heading: true });
 
-// The Spaces operating models the Genspark design adds beside the lease board. No backend
-// yet — they run on preview data (src/lib/os/preview) and say so on the page.
+// The Spaces booking models beside the lease board — no backend yet, they run on preview data.
+const SPACES_MODEL_LABEL: Record<string, string> = {
+  shortstay: 'Holiday homes', venue: 'Venues', court: 'Courts', charter: 'Yachts',
+};
 const modelKids = (v: MsVerticalId): OsChild[] =>
-  MODELS_OF[v].map((m) => ({ label: MODEL_INFO[m].name, href: `${R}/v/${v}/${m}`, preview: true }));
+  MODELS_OF[v].map((m) => ({ label: SPACES_MODEL_LABEL[m] ?? MODEL_INFO[m].name, href: `${R}/v/${v}/${m}`, preview: true }));
 
-const RENTAL_PROVIDER: OsGroup[] = [
-  { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'shared', children: [
-    { label: 'Overview', href: R },
+// ---------------------------------------------------------------------------- rental provider
+
+/** SHARED UPNOW OS — the same five workspaces whichever pack is active. */
+const RP_SHARED: OsGroup[] = [
+  { id: 'home', label: 'Home', icon: 'home', tone: 'shared', children: [
+    { label: 'Home', href: R },
   ] },
   { id: 'demand', label: 'Demand', icon: 'trending', tone: 'shared', badgeKey: 'leads', children: [
-    H('Long-term leasing'),
-    // Long-term rental pipeline (real API).
-    { label: 'Leads & enquiries', href: `${R}/leads`, badgeKey: 'leads' },
+    // ONE page for every lead: long-term leases + holiday homes, venues, courts, yachts (tabs inside).
+    { label: 'All demand', href: `${R}/requests` },
+    { label: 'Lease pipeline', href: `${R}/leads`, badgeKey: 'leads' },
     { label: 'Customers', href: `${R}/tenants` },
-    H('All demand — leases + bookings'),
-    // ONE inbox: long-term leads (read-only, live) + short stays, venues, courts, yachts (preview engine).
-    { label: 'All demand', href: `${R}/requests`, preview: true },
-    H('Inbox'),
-    { label: 'Emails', href: `${R}/communications`, badgeKey: 'emails' },
-    { label: 'WhatsApp', href: `${R}/whatsapp`, badgeKey: 'whatsapp' },
   ] },
-  { id: 'operations', label: 'Operations', icon: 'calendar', tone: 'vertical', badgeKey: 'operations', children: [
-    // Two operating families, each under its own sub-heading so the menu never reads as one
-    // jumbled list: the long-term lease lifecycle (real API) and the booking models (preview).
-    H('Long-term leases'),
-    // The lead/viewing calendar is a view of the Leads page.
-    { label: 'Viewings calendar', href: `${R}/leads?view=calendar` },
-    { label: 'Long-term leases', href: `${R}/orders`, match: [`${R}/contracts`] },
-    { label: 'Ended leases', href: `${R}/ended-leases` },
-    { label: 'Ops board', href: `${R}/operations`, badgeKey: 'operations' },
-    { label: 'Maintenance', href: `${R}/maintenance`, match: [`${R}/maintenance/`] },
-    { label: 'Building inspections', href: `${R}/building-inspections`, match: [`${R}/building-inspections/`] },
-    { label: 'AMC contracts', href: `${R}/amc`, match: [`${R}/amc/expenses`] },
-    { label: 'Breaches', href: `${R}/breaches` },
-    { label: 'Legal cases', href: `${R}/legal` },
-    H('Bookings — stays, venues, courts, yachts'),
-    // Calendar of short-stay / venue / court / yacht bookings (preview engine).
-    { label: 'Bookings calendar', href: `${R}/v/spaces/calendar`, preview: true },
-    ...modelKids('spaces'),
+  { id: 'communications', label: 'Communications', icon: 'message', tone: 'shared', children: [
+    // Unified inbox: email + WhatsApp + booking messages + lead notes. The old Emails and
+    // WhatsApp pages stay reachable from it and still light this workspace up.
+    { label: 'Inbox', href: `${R}/inbox`, match: [`${R}/communications`, `${R}/whatsapp`] },
   ] },
-  { id: 'catalogue', label: 'Catalogue', icon: 'box', tone: 'vertical', children: [
+  { id: 'calendar', label: 'Calendar', icon: 'calendar', tone: 'shared', children: [
+    // Every dated event in one calendar. The old viewings / bookings calendars still work.
+    { label: 'Calendar', href: `${R}/calendar` },
+    { label: 'Viewings calendar', href: `${R}/leads?view=calendar`, hidden: true },
+  ] },
+  { id: 'account', label: 'Account Settings', icon: 'account', tone: 'shared', children: [
+    { label: 'Profile & verification', href: `${R}/profile` },
+    { label: 'KYC documents', href: `${R}/documents` },
+    { label: 'Team', href: `${R}/team` },
+    { label: 'Vertical authorisations', href: `${R}/authorisations`, preview: true },
+  ] },
+];
+
+/** SPACES PACK — the existing Spaces pages, regrouped and renamed. */
+const SPACES_PACK: OsGroup[] = [
+  { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'vertical', children: [
+    { label: 'Overview', href: `${R}/v/spaces` },
+  ] },
+  { id: 'portfolio', label: 'Portfolio', icon: 'building', tone: 'vertical', children: [
     { label: 'Properties', href: `${R}/portfolio`, badgeKey: 'properties' },
     { label: 'Units & listings', href: `${R}/units`, badgeKey: 'units' },
     { label: 'Add units', href: `${R}/units/add` },
+    { label: 'Booking listings', href: `${R}/v/spaces/listings`, preview: true },
     { label: 'Subcategory fields', href: `${R}/v/spaces/catalogue` },
   ] },
-  { id: 'finance', label: 'Finance', icon: 'wallet', tone: 'shared', children: [
+  { id: 'operations', label: 'Operations', icon: 'clipboard', tone: 'vertical', children: [
+    H('Leases'),
+    { label: 'Long-term leases', href: `${R}/orders`, match: [`${R}/contracts`] },
+    { label: 'Ended leases', href: `${R}/ended-leases` },
+    H('Bookings'),
+    ...modelKids('spaces'),
+    { label: 'Bookings calendar', href: `${R}/v/spaces/calendar`, hidden: true },
+    H('Property care'),
+    { label: 'Maintenance', href: `${R}/maintenance`, match: [`${R}/maintenance/`] },
+    { label: 'Building inspections', href: `${R}/building-inspections`, match: [`${R}/building-inspections/`] },
+    { label: 'AMC contracts', href: `${R}/amc`, match: [`${R}/amc/expenses`] },
+  ] },
+  { id: 'tasks', label: 'Tasks', icon: 'tasks', tone: 'vertical', badgeKey: 'operations', children: [
+    // The Today queue lives on Home; the Ops board is the task board.
+    { label: 'Ops board', href: `${R}/operations`, badgeKey: 'operations' },
+  ] },
+  { id: 'finance', label: 'Finance & Ledger', icon: 'wallet', tone: 'vertical', children: [
     // Deposits are a tab inside Payments (/deposits redirects there).
     { label: 'Payments & deposits', href: `${R}/payments`, match: [`${R}/deposits`] },
     { label: 'Receivables', href: `${R}/receivables` },
   ] },
-  { id: 'business', label: 'Business', icon: 'building', tone: 'shared', children: [
-    { label: 'Profile & verification', href: `${R}/profile` },
-    { label: 'KYC documents', href: `${R}/documents` },
-    { label: 'Vertical authorisations', href: `${R}/authorisations`, preview: true },
-    { label: 'Team', href: `${R}/team` },
+  { id: 'business', label: 'Business', icon: 'briefcase', tone: 'vertical', children: [
     { label: 'Vendors', href: `${R}/vendors` },
+    { label: 'Templates', href: `${R}/templates` },
   ] },
-  { id: 'insights', label: 'Insights', icon: 'chart', tone: 'shared', children: [
+  { id: 'cases', label: 'Cases', icon: 'scale', tone: 'vertical', children: [
+    { label: 'Breaches', href: `${R}/breaches` },
+    { label: 'Legal cases', href: `${R}/legal` },
+  ] },
+  { id: 'reports', label: 'Reports', icon: 'chart', tone: 'vertical', children: [
     { label: 'Reports', href: `${R}/reports`, match: [`${R}/reports/`] },
     { label: 'Analytics', href: `${R}/analytics`, hidden: true },
   ] },
-  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'shared', children: [
+  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'vertical', children: [
     { label: 'Settings', href: `${R}/settings`, match: [`${R}/maintenance-list`, `${R}/restoration-list`, `${R}/amc/categories`] },
-    { label: 'Templates', href: `${R}/templates` },
   ] },
 ];
 
+/** SERVICES PACK for a landlord: the service work on their own buildings (real maintenance,
+ *  vendor and AMC pages) and a read-only view of the public service catalogue. */
+const SERVICES_PACK: OsGroup[] = [
+  { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'vertical', children: [
+    { label: 'Overview', href: `${R}/v/services` },
+  ] },
+  { id: 'operations', label: 'Operations', icon: 'clipboard', tone: 'vertical', children: [
+    { label: 'Maintenance board', href: `${R}/operations?tab=maintenance` },
+    { label: 'Maintenance requests', href: `${R}/maintenance`, match: [`${R}/maintenance/`] },
+    { label: 'Vendors', href: `${R}/vendors`, match: [`${R}/vendors/`] },
+    { label: 'AMC contracts', href: `${R}/amc`, match: [`${R}/amc/expenses`] },
+    { label: 'Building inspections', href: `${R}/building-inspections`, match: [`${R}/building-inspections/`] },
+  ] },
+  { id: 'catalogue', label: 'Catalogue', icon: 'box', tone: 'vertical', children: [
+    { label: 'Service catalogue', href: `${R}/v/services/catalogue` },
+  ] },
+];
+
+/** Any other vertical's pack (preview data; Gate 2 lock until authorised). */
+function otherPack(v: MsVerticalId): OsGroup[] {
+  const label = verticalOf(v)?.label ?? v;
+  return [
+    { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'vertical', children: [
+      { label: 'Overview', href: `${R}/v/${v}` },
+    ] },
+    { id: 'operations', label: 'Operations', icon: 'clipboard', tone: 'vertical', children: [
+      { label: 'Calendar', href: `${R}/v/${v}/calendar`, preview: true },
+      ...modelKids(v),
+    ] },
+    { id: 'catalogue', label: 'Catalogue', icon: 'box', tone: 'vertical', children: [
+      { label: `${label} offerings`, href: `${R}/v/${v}/catalogue`, preview: true },
+      { label: 'Listings', href: `${R}/v/${v}/listings`, preview: true },
+      { label: 'Create listing', href: `${R}/v/${v}/listings/new`, preview: true },
+    ] },
+  ];
+}
+
+const RENTAL_PROVIDER: OsGroup[] = [...RP_SHARED, ...SPACES_PACK];
+
+// ---------------------------------------------------------------------------- manager
+
+/** Asset manager: same two sections; always the Spaces pack (they act for landlords).
+ *  Communications links to the existing Emails / WhatsApp pages and Calendar to the
+ *  viewings calendar — no unified pages for the manager portal yet. */
 const MANAGER: OsGroup[] = [
-  { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'shared', children: [
-    { label: 'Overview', href: M },
+  { id: 'home', label: 'Home', icon: 'home', tone: 'shared', children: [
+    { label: 'Home', href: M },
   ] },
   { id: 'demand', label: 'Demand', icon: 'trending', tone: 'shared', children: [
-    { label: 'Leads & enquiries', href: `${M}/leads`, requirePerm: 'canManageViewings', match: [`${M}/viewings`] },
+    { label: 'Lease pipeline', href: `${M}/leads`, requirePerm: 'canManageViewings', match: [`${M}/viewings`] },
     { label: 'Customers', href: `${M}/tenants`, requirePerm: 'canManageAgreements' },
+  ] },
+  { id: 'communications', label: 'Communications', icon: 'message', tone: 'shared', children: [
     { label: 'Emails', href: `${M}/communications`, requirePerm: 'canReadEmails' },
     { label: 'WhatsApp', href: `${M}/whatsapp`, requirePerm: 'canReadWhatsapp' },
   ] },
-  { id: 'operations', label: 'Operations', icon: 'calendar', tone: 'vertical', children: [
-    { label: 'Calendar', href: `${M}/leads?view=calendar`, requirePerm: 'canManageViewings' },
+  { id: 'calendar', label: 'Calendar', icon: 'calendar', tone: 'shared', children: [
+    { label: 'Viewings calendar', href: `${M}/leads?view=calendar`, requirePerm: 'canManageViewings' },
+  ] },
+  { id: 'account', label: 'Account Settings', icon: 'account', tone: 'shared', children: [
+    { label: 'My profile', href: `${M}/profile` },
+  ] },
+  { id: 'portfolio', label: 'Portfolio', icon: 'building', tone: 'vertical', children: [
+    { label: 'Properties', href: `${M}/properties`, requirePerm: 'canListProperties', match: [`${M}/properties/`] },
+    { label: 'Units & listings', href: `${M}/units`, requirePerm: 'canListProperties', financeHidden: true, match: [`${M}/units/`] },
+  ] },
+  { id: 'operations', label: 'Operations', icon: 'clipboard', tone: 'vertical', children: [
+    H('Leases'),
     { label: 'Long-term leases', href: `${M}/contracts`, requirePerm: 'canManageAgreements' },
     { label: 'Ended leases', href: `${M}/ended-leases`, requirePerm: 'canManageAgreements' },
-    { label: 'Ops board', href: `${M}/operations`, requirePerm: 'canManageAgreements' },
+    H('Property care'),
     { label: 'Maintenance', href: `${M}/maintenance`, requirePerm: 'canManageMaintenance', match: [`${M}/maintenance/`] },
     { label: 'Building inspections', href: `${M}/building-inspections`, requirePerm: 'canManageInspections', match: [`${M}/building-inspections/`] },
     // Either flag opens AMC: the coordinator or the finance manager (0319).
     { label: 'AMC contracts', href: `${M}/amc`, requirePerm: ['canManageAmc', 'canRecordVendorPayments'], match: [`${M}/amc/expenses`] },
+  ] },
+  { id: 'tasks', label: 'Tasks', icon: 'tasks', tone: 'vertical', children: [
+    { label: 'Ops board', href: `${M}/operations`, requirePerm: 'canManageAgreements' },
+  ] },
+  { id: 'finance', label: 'Finance & Ledger', icon: 'wallet', tone: 'vertical', children: [
+    { label: 'Payments & deposits', href: `${M}/payments`, requirePerm: 'canManageDeposits', match: [`${M}/deposits`] },
+  ] },
+  { id: 'business', label: 'Business', icon: 'briefcase', tone: 'vertical', children: [
+    { label: 'Vendors', href: `${M}/vendors`, requirePerm: 'canManageVendors' },
+    { label: 'Templates', href: `${M}/templates`, requirePerm: 'canManageTemplates' },
+  ] },
+  { id: 'cases', label: 'Cases', icon: 'scale', tone: 'vertical', children: [
     { label: 'Breaches', href: `${M}/breaches`, requirePerm: 'canManageLegal' },
     { label: 'Legal cases', href: `${M}/legal`, requirePerm: 'canManageLegal' },
   ] },
-  { id: 'catalogue', label: 'Catalogue', icon: 'box', tone: 'vertical', children: [
-    { label: 'Properties', href: `${M}/properties`, requirePerm: 'canListProperties', match: [`${M}/properties/`] },
-    { label: 'Units & listings', href: `${M}/units`, requirePerm: 'canListProperties', financeHidden: true, match: [`${M}/units/`] },
-  ] },
-  { id: 'finance', label: 'Finance', icon: 'wallet', tone: 'shared', children: [
-    { label: 'Payments & deposits', href: `${M}/payments`, requirePerm: 'canManageDeposits', match: [`${M}/deposits`] },
-  ] },
-  { id: 'business', label: 'Business', icon: 'building', tone: 'shared', children: [
-    { label: 'My profile', href: `${M}/profile` },
-    { label: 'Vendors', href: `${M}/vendors`, requirePerm: 'canManageVendors' },
-  ] },
-  { id: 'insights', label: 'Insights', icon: 'chart', tone: 'shared', children: [
+  { id: 'reports', label: 'Reports', icon: 'chart', tone: 'vertical', children: [
     { label: 'Reports', href: `${M}/reports`, requirePerm: 'canViewReports' },
     { label: 'Analytics', href: `${M}/analytics`, requirePerm: 'canViewReports', hidden: true },
   ] },
-  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'shared', children: [
+  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'vertical', children: [
     // Delegated lists (maintenance coverage, restoration, AMC categories) — not for finance-only.
     { label: 'Settings', href: `${M}/settings`, financeHidden: true, match: [`${M}/maintenance-coverage`, `${M}/maintenance-list`, `${M}/restoration-list`, `${M}/amc/categories`] },
-    { label: 'Templates', href: `${M}/templates`, requirePerm: 'canManageTemplates' },
   ] },
 ];
 
+// ---------------------------------------------------------------------------- service provider
+
 /**
- * Service provider (home services) — the Genspark Services pack mapped onto the real SP
- * pages. The active vertical is always Services. Demand and Operations are two views of the
- * one booking board (/operations): Requests + Quotes lanes are demand, Active + Closure the
- * work. `requirePerm: 'spSetupOpen'` = shown only while the account is not yet approved.
+ * Service provider (home services): the shared section over its real pages + the SERVICES
+ * PACK. Demand and Operations are two views of the one booking board (/operations): Requests
+ * + Quotes lanes are demand, Active + Closure the work. `requirePerm: 'spSetupOpen'` = shown
+ * only while the account is not yet approved. There is no SP messaging page, so the SP rail
+ * has no Communications entry.
  */
 const SERVICE_PROVIDER: OsGroup[] = [
-  { id: 'overview', label: 'Overview', icon: 'gauge', tone: 'shared', children: [
-    { label: 'Overview', href: S },
+  { id: 'home', label: 'Home', icon: 'home', tone: 'shared', children: [
+    { label: 'Home', href: S },
   ] },
   { id: 'demand', label: 'Demand', icon: 'trending', tone: 'shared', children: [
     { label: 'Job requests', href: `${S}/operations?tab=requests` },
     { label: 'Quotes', href: `${S}/operations?tab=quotes` },
   ] },
-  { id: 'operations', label: 'Operations', icon: 'calendar', tone: 'vertical', children: [
+  { id: 'calendar', label: 'Calendar', icon: 'calendar', tone: 'shared', children: [
+    { label: 'Schedule & shifts', href: `${S}/schedule` },
+  ] },
+  { id: 'account', label: 'Account Settings', icon: 'account', tone: 'shared', children: [
+    { label: 'Business profile', href: `${S}/settings?tab=profile`, match: [`${S}/profile`] },
+    { label: 'Documents & verification', href: `${S}/documents` },
+    { label: 'Team & technicians', href: `${S}/settings?tab=team`, match: [`${S}/team`] },
+    { label: 'Onboarding', href: `${S}/onboarding`, requirePerm: 'spSetupOpen' },
+  ] },
+  { id: 'operations', label: 'Operations', icon: 'clipboard', tone: 'vertical', children: [
     // The booking board (Active + Closure lanes); /jobs redirects here, /jobs/[id] is a card.
     { label: 'Dispatch board', href: `${S}/operations`, match: [`${S}/jobs`] },
     // Jobs a landlord runs from their own page — no booking, so never on the board.
     { label: 'My jobs', href: `${S}/my-jobs` },
-    { label: 'Schedule & shifts', href: `${S}/schedule` },
     { label: 'Live map', href: `${S}/live` },
   ] },
   { id: 'catalogue', label: 'Catalogue', icon: 'box', tone: 'vertical', children: [
     { label: 'Services & pricing', href: `${S}/services` },
     { label: 'Add service', href: `${S}/services/new` },
   ] },
-  { id: 'finance', label: 'Finance', icon: 'wallet', tone: 'shared', children: [
+  { id: 'finance', label: 'Finance & Ledger', icon: 'wallet', tone: 'vertical', children: [
     { label: 'Earnings & payouts', href: `${S}/earnings` },
   ] },
-  { id: 'business', label: 'Business', icon: 'building', tone: 'shared', children: [
-    { label: 'Business profile', href: `${S}/settings?tab=profile`, match: [`${S}/profile`] },
-    { label: 'Documents & verification', href: `${S}/documents` },
-    { label: 'Team & technicians', href: `${S}/settings?tab=team` },
-    { label: 'Onboarding', href: `${S}/onboarding`, requirePerm: 'spSetupOpen' },
-  ] },
-  { id: 'insights', label: 'Insights', icon: 'chart', tone: 'shared', children: [
+  { id: 'reports', label: 'Reviews', icon: 'chart', tone: 'vertical', children: [
     { label: 'Reviews', href: `${S}/reviews` },
   ] },
-  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'shared', children: [
+  { id: 'settings', label: 'Settings', icon: 'settings', tone: 'vertical', children: [
     { label: 'Settings', href: `${S}/settings` },
     { label: 'Job rules & readiness', href: `${S}/settings?tab=rules`, match: [`${S}/job-ready`] },
   ] },
@@ -264,48 +348,17 @@ const ADMIN: OsGroup[] = [
   ] },
 ];
 
-/** Services for a landlord: the service work on their own buildings (real maintenance,
- *  vendor and AMC pages) and a read-only view of the public service catalogue. */
-function servicesGroups(): OsGroup[] {
-  return RENTAL_PROVIDER.map((g) => {
-    if (g.id === 'operations') return { ...g, badgeKey: undefined, children: [
-      { label: 'Services overview', href: `${R}/v/services` },
-      { label: 'Maintenance board', href: `${R}/operations?tab=maintenance` },
-      { label: 'Maintenance requests', href: `${R}/maintenance`, match: [`${R}/maintenance/`] },
-      { label: 'Vendors', href: `${R}/vendors`, match: [`${R}/vendors/`] },
-      { label: 'AMC contracts', href: `${R}/amc`, match: [`${R}/amc/expenses`] },
-      { label: 'Building inspections', href: `${R}/building-inspections`, match: [`${R}/building-inspections/`] },
-    ] };
-    if (g.id === 'catalogue') return { ...g, children: [
-      { label: 'Service catalogue', href: `${R}/v/services/catalogue` },
-    ] };
-    // Vendors moved into Operations for this vertical — one home in the menu.
-    if (g.id === 'business') return { ...g, children: g.children.filter((c) => c.href !== `${R}/vendors`) };
-    return g;
-  });
-}
 
-/** A non-Spaces vertical: Operations and Catalogue swap to that vertical (preview data). */
-function verticalGroups(v: MsVerticalId): OsGroup[] {
-  if (v === 'services') return servicesGroups();
-  const label = verticalOf(v)?.label ?? v;
-  return RENTAL_PROVIDER.map((g) => {
-    if (g.id === 'operations') return { ...g, badgeKey: undefined, children: [
-      { label: 'Calendar', href: `${R}/v/${v}/calendar`, preview: true },
-      ...modelKids(v),
-    ] };
-    if (g.id === 'catalogue') return { ...g, children: [
-      { label: `${label} offerings`, href: `${R}/v/${v}/catalogue`, preview: true },
-      { label: 'Listings', href: `${R}/v/${v}/listings`, preview: true },
-      { label: 'Create listing', href: `${R}/v/${v}/listings/new`, preview: true },
-    ] };
-    return g;
-  });
+/** The pack groups for a rental provider's active vertical. */
+export function packGroups(v: MsVerticalId): OsGroup[] {
+  if (v === 'spaces') return SPACES_PACK;
+  if (v === 'services') return SERVICES_PACK;
+  return otherPack(v);
 }
 
 /** Workspaces for a role, scoped to the active vertical (rental providers only). */
 export function workspacesFor(role: UserRole, vertical: MsVerticalId = 'spaces'): OsGroup[] {
-  if (role === 'rental_provider' && vertical !== 'spaces') return verticalGroups(vertical);
+  if (role === 'rental_provider') return [...RP_SHARED, ...packGroups(vertical)];
   return OS_WORKSPACES[role] ?? [];
 }
 

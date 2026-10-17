@@ -12,7 +12,8 @@
  * "Put a clock on every customer intent" (reports/Short stay venue court booking flows.md): every
  * row has one deadline and one owner; the list is sorted by the clock that runs out first —
  * provider-owned timers (overdue → under 25% left → ok), then items waiting on the customer, then
- * the rest. Filters: source (All / Long-term leads / Short stays / Venues / Courts / Yachts),
+ * the rest. Filters: subcategory TABS at the top (All / Long-term leases / Holiday homes / Venues /
+ * Courts / Yachts — ?type= in the URL),
  * channel (Form / Call / WhatsApp / Email), status and payment model. ?id=<booking id> or
  * ?id=L-<lead id> opens that row (links from the Today queue).
  */
@@ -29,6 +30,7 @@ import { HOUR_MS, MIN_MS, RULES, formatAED, formatDuration, modeOf, ms, respondH
 import { useNow } from '@/lib/os/bookings/store';
 import type { Booking, BookingModel, LeadSource, PaymentMode } from '@/lib/os/bookings/types';
 import { STAGE_LABELS, leadDisplayName, type ApiLead } from '@/lib/leadJourney';
+import { SubcatTabs, useSubcatParam } from '@/components/os/SubcatTabs';
 
 const RP = '/rental-provider/dashboard';
 const LEAD_SLA_MS = RULES.enquiryFirstReplyMin * MIN_MS;
@@ -44,7 +46,7 @@ const STATUS: { v: Status; l: string; test: (b: Booking) => boolean; lead: (x: A
 ];
 type Source = 'all' | 'leads' | BookingModel;
 const SOURCES: { v: Source; l: string }[] = [
-  { v: 'all', l: 'All' }, { v: 'leads', l: 'Long-term leads' }, { v: 'shortstay', l: 'Short stays' }, { v: 'venue', l: 'Venues' }, { v: 'court', l: 'Courts' }, { v: 'charter', l: 'Yachts' },
+  { v: 'all', l: 'All' }, { v: 'leads', l: 'Long-term leases' }, { v: 'shortstay', l: 'Holiday homes' }, { v: 'venue', l: 'Venues' }, { v: 'court', l: 'Courts' }, { v: 'charter', l: 'Yachts' },
 ];
 const CHANNELS: { v: LeadSource | 'all'; l: string }[] = [
   { v: 'all', l: 'All channels' }, { v: 'form', l: 'Form' }, { v: 'call', l: 'Call' }, { v: 'whatsapp', l: 'WhatsApp' }, { v: 'email', l: 'Email' },
@@ -131,7 +133,9 @@ function Inbox() {
   const narrow = useIsNarrow();
   const urlId = params.get('id');
   const [status, setStatus] = useState<Status>('open');
-  const [source, setSource] = useState<Source>('all');
+  // Subcategory tabs at the top of the page — ?type= in the URL (Long-term leases = the real leads).
+  const [sub, setSub] = useSubcatParam(['all', 'leases', 'shortstay', 'venue', 'court', 'charter']);
+  const source: Source = sub === 'leases' ? 'leads' : (sub as Source);
   const [channel, setChannel] = useState<LeadSource | 'all'>('all');
   const [pay, setPay] = useState<PaymentMode | 'all'>('all');
   const [picked, setPicked] = useState<string | null>(null);
@@ -221,12 +225,9 @@ function Inbox() {
         </div>
       )}
 
+      <SubcatTabs value={sub} label="Filter by subcategory" onChange={setSub}
+        counts={Object.fromEntries(SOURCES.map((x) => [x.v === 'leads' ? 'leases' : x.v, sourceCount(x.v)]))} />
       <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
-        <div className="gx-chips" role="group" aria-label="Filter by source">
-          {SOURCES.map((x) => (
-            <button key={x.v} type="button" className="gx-chip" aria-pressed={source === x.v} onClick={() => setSource(x.v)}>{x.l} · {sourceCount(x.v)}</button>
-          ))}
-        </div>
         <div className="gx-btn-row" style={{ justifyContent: 'space-between' }}>
           <div className="gx-chips" role="group" aria-label="Filter by status">
             {STATUS.map((f) => (

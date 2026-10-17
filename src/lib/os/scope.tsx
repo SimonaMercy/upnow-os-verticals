@@ -22,7 +22,9 @@ function verticalFromPath(pathname: string): MsVerticalId | null {
   return m && verticalOf(m[1]) ? (m[1] as MsVerticalId) : null;
 }
 
-interface Scope { vertical: MsVerticalId; setVertical: (v: MsVerticalId) => void }
+/** `go`: open that vertical's pack Overview (the rail's pack selector). Without it the page
+ *  only moves when it is vertical-scoped (to the same workspace of the new vertical). */
+interface Scope { vertical: MsVerticalId; setVertical: (v: MsVerticalId, opts?: { go?: boolean }) => void }
 const Ctx = createContext<Scope>({ vertical: 'spaces', setVertical: () => {} });
 
 export function OsScopeProvider({ children }: { children: ReactNode }) {
@@ -39,9 +41,10 @@ export function OsScopeProvider({ children }: { children: ReactNode }) {
   const fromUrl = verticalFromPath(pathname);
   const vertical = fromUrl ?? picked;
 
-  const setVertical = useCallback((v: MsVerticalId) => {
+  const setVertical = useCallback((v: MsVerticalId, opts?: { go?: boolean }) => {
     setPicked(v);
     try { sessionStorage.setItem(KEY, v); } catch { /* ignore */ }
+    if (opts?.go) { router.push(`${RP_BASE}/v/${v}`); return; }
     // Inside a vertical-scoped page → go to the same workspace of the new vertical.
     const inVerticalPage = !!verticalFromPath(pathname)
       || /\/rental-provider\/dashboard\/(orders|ended-leases|operations|portfolio|units|maintenance|building-inspections|amc|breaches|legal|contracts|listings)/.test(pathname);

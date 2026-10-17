@@ -160,3 +160,85 @@
 }
 .subhead:first-child { padding-top: 4px; }
 .kid + .subhead { margin-top: 5px; border-top: 1px solid var(--ms-surface-3); padding-top: 10px; }
+
+/* ==== Provider rail — two sections (owner sketch, Oct 2026) ====
+   SHARED UPNOW OS: dark-green filled rounded items. <VERTICAL> PACK: light-green outlined
+   rounded items. Sub-items expand inline under an item. */
+.wsLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ms-ink-3);
+  padding: 14px 16px 2px;
+}
+.sec {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px 8px;
+  font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ms-ink-3);
+  background: none; border: 0; font-family: inherit; text-align: left;
+}
+.secDotShared, .secDotPack { width: 8px; height: 8px; border-radius: 2px; flex: none; display: inline-block; }
+.secDotShared { background: #1d4a37; }
+.secDotPack { background: #cfe9da; border: 1px solid #9fcfb5; }
+.packSel { cursor: pointer; border-radius: 6px; margin-top: 4px; }
+.packSel:hover { color: var(--ms-primary-dark); }
+.packChev { margin-left: auto; transition: transform .15s; }
+.packChevOpen { transform: rotate(180deg); }
+.packMenu {
+  margin: 0 10px 8px; padding: 4px; border: 1px solid var(--ms-border-strong); border-radius: 10px;
+  background: var(--ms-surface); box-shadow: var(--ms-shadow-md);
+}
+.packOpt {
+  display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 8px; border-radius: 7px;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ms-ink); background: none; border: 0; cursor: pointer;
+  text-decoration: none; text-align: left;
+}
+.packOpt:hover { background: var(--ms-tint-light); }
+.packOptOn { background: var(--ms-tint-light); color: var(--ms-primary-dark); }
+.packOptLocked { color: var(--ms-ink-3); }
+.packOptName { flex: 1; min-width: 0; }
+.packState { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; color: var(--ms-ink-3); white-space: nowrap; }
+.packStatePending { color: var(--ms-amber); }
+.packStateRefused { color: var(--ms-danger); }
+
+.item { margin: 0 10px 6px; }
+.itemBtn {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px;
+  border-radius: 9px; border: 1.5px solid transparent; cursor: pointer; text-align: left; text-decoration: none;
+  font: inherit; font-size: 13px; font-weight: 600; letter-spacing: -.005em; transition: background .13s, border-color .13s;
+}
+.itemLabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.itemChev { flex: none; opacity: .75; transition: transform .16s; }
+.itemOpen .itemChev { transform: rotate(90deg); }
+.itemBadge {
+  font-size: 10px; font-weight: 800; min-width: 18px; padding: 1px 6px; border-radius: 999px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.itemShared .itemBtn { background: #1d4a37; color: #fff; }
+.itemShared .itemBtn:hover { background: #173d2d; }
+.itemShared.itemOn > .itemBtn { background: #12301f; border-color: #7fcfa5; font-weight: 800; }
+.itemShared .itemBadge { background: rgba(255,255,255,.18); color: #fff; }
+.itemPack .itemBtn { background: #e8f4ee; color: var(--ms-ink); border-color: #cfe5d9; }
+.itemPack .itemBtn:hover { background: #ddefe5; }
+.itemPack.itemOn > .itemBtn { background: #d6ede1; border-color: var(--ms-primary); color: var(--ms-primary-dark); font-weight: 700; }
+.itemPack .itemBadge { background: var(--ms-primary); color: #fff; }
+.subs { padding: 4px 0 2px; }
+.sub { padding: 6px 10px 6px 22px; border-radius: 7px; border-left: 0; margin: 1px 0; }
+.sub.kidOn { border-left: 0; box-shadow: inset 3px 0 0 var(--ms-primary); }
+.subHead {
+  font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ms-ink-3);
+  padding: 8px 10px 3px 22px;
+}
+.subHead:first-child { padding-top: 3px; }
+
+/* collapsed provider rail */
+.iconSec { display: grid; place-items: center; height: 18px; margin-top: 6px; }
+.iconShared { background: #1d4a37; color: #fff; }
+.iconShared:hover { background: #173d2d; color: #fff; }
+.iconPack { background: #e8f4ee; color: var(--ms-primary-dark); border: 1px solid #cfe5d9; }
+.iconPack:hover { background: #ddefe5; color: var(--ms-primary-dark); }
+.iconOn { outline: 2px solid #7fcfa5; outline-offset: 1px; }
+
+/* Section headings + collapsed icons in the previous rail look (owner: keep the old look and colours). */
+.sec { padding: 12px 14px 4px; font-size: 9px; font-weight: 800; letter-spacing: .1em; gap: 6px; border-top: 1px solid var(--ms-surface-3); margin-top: 6px; }
+.secDotPack { background: var(--ms-primary); border: 0; }
+.subHead { padding: 8px 12px 3px 37px; }
+.iconShared, .iconPack { background: transparent; color: var(--ms-ink-2); border: 0; }
+.iconShared:hover, .iconPack:hover { background: var(--ms-surface-2); color: var(--ms-ink); }
+.iconOn { outline: 0; background: var(--ms-tint-light); color: var(--ms-primary-dark); }
