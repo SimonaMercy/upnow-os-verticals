@@ -28,11 +28,11 @@ function EndpointRow({
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        backgroundColor: isSelected ? '#f0faf6' : 'transparent',
+        backgroundColor: isSelected ? '#eef7f2' : 'transparent',
         border: 'none',
         borderLeftStyle: 'solid',
         borderLeftWidth: 2,
-        borderLeftColor: isSelected ? '#2e9f82' : 'transparent',
+        borderLeftColor: isSelected ? '#047246' : 'transparent',
         cursor: 'pointer',
         transition: 'background-color 0.1s',
       }}
@@ -46,7 +46,7 @@ function EndpointRow({
       <MethodBadge method={endpoint.method} size="sm" />
       <span style={{
         fontSize: 12,
-        color: isSelected ? '#1a5a4a' : '#3d3b35',
+        color: isSelected ? '#0f4f36' : '#46534c',
         flex: 1,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -98,7 +98,7 @@ function TagGroup({
         <span style={{
           fontSize: 12,
           fontWeight: hasSelected ? 700 : 500,
-          color: hasSelected ? '#2e9f82' : '#3d3b35',
+          color: hasSelected ? '#047246' : '#46534c',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -106,7 +106,7 @@ function TagGroup({
           {section.label}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: '#9b9890', fontWeight: 600 }}>
+          <span style={{ fontSize: 10, color: '#8a948d', fontWeight: 600 }}>
             {section.endpoints.length}
           </span>
           <span style={{ fontSize: 9, color: '#c4c2bc' }}>{expanded ? '▾' : '▸'}</span>
@@ -160,16 +160,16 @@ function ProductGroup({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          backgroundColor: '#fafaf8',
+          backgroundColor: '#f6f8f6',
           border: 'none',
-          borderBottom: expanded ? '1px solid #f4f3ef' : 'none',
+          borderBottom: expanded ? '1px solid #eef1ef' : 'none',
           cursor: 'pointer',
         }}
       >
         <span style={{
           fontSize: 11,
           fontWeight: 800,
-          color: hasSelected ? '#2e9f82' : '#6b6860',
+          color: hasSelected ? '#047246' : '#5f6b63',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
         }}>
@@ -177,12 +177,12 @@ function ProductGroup({
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{
-            fontSize: 10, backgroundColor: '#f0faf6', color: '#2e9f82',
+            fontSize: 10, backgroundColor: '#eef7f2', color: '#047246',
             padding: '1px 6px', borderRadius: 99, fontWeight: 700,
           }}>
             {group.endpointCount}
           </span>
-          <span style={{ fontSize: 9, color: '#9b9890' }}>{expanded ? '▾' : '▸'}</span>
+          <span style={{ fontSize: 9, color: '#8a948d' }}>{expanded ? '▾' : '▸'}</span>
         </div>
       </button>
 
@@ -219,7 +219,7 @@ export function DocsSidebar({ groups, selectedId, searchQuery, onSelect }: Props
       width: 272,
       flexShrink: 0,
       backgroundColor: '#ffffff',
-      borderRight: '1px solid #e8e6e0',
+      borderRight: '1px solid #e4e9e5',
       overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
@@ -227,7 +227,7 @@ export function DocsSidebar({ groups, selectedId, searchQuery, onSelect }: Props
       {/* Sidebar header */}
       <div style={{
         padding: '10px 14px',
-        borderBottom: '1px solid #e8e6e0',
+        borderBottom: '1px solid #e4e9e5',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -237,12 +237,12 @@ export function DocsSidebar({ groups, selectedId, searchQuery, onSelect }: Props
         backgroundColor: '#ffffff',
         zIndex: 1,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#6b6860', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#5f6b63', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Endpoints
         </span>
         <span style={{
-          fontSize: 10, backgroundColor: isSearching ? '#f0faf6' : '#f4f3ef',
-          color: isSearching ? '#2e9f82' : '#9b9890',
+          fontSize: 10, backgroundColor: isSearching ? '#eef7f2' : '#eef1ef',
+          color: isSearching ? '#047246' : '#8a948d',
           padding: '1px 7px', borderRadius: 99, fontWeight: 600,
         }}>
           {totalFiltered}
@@ -251,7 +251,7 @@ export function DocsSidebar({ groups, selectedId, searchQuery, onSelect }: Props
 
       {/* No results */}
       {totalFiltered === 0 && (
-        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#9b9890', fontSize: 13 }}>
+        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8a948d', fontSize: 13 }}>
           {isSearching ? `No endpoints match “${searchQuery}”` : 'No endpoints'}
         </div>
       )}

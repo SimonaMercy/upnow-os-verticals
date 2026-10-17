@@ -130,13 +130,13 @@ function rangesFor(preset: Preset, customFrom: string, customTo: string): { cur:
 }
 
 /* ── house palette (validated in ReportCharts) — fixed order per person ───── */
-const PALETTE = ['#2e9f82', '#1e5fae', '#b45309', '#8250df'];
-const OTHERS = '#9b9890';
+const PALETTE = ['#047246', '#1e5fae', '#b45309', '#8250df'];
+const OTHERS = '#8a948d';
 
 const SIDE_STYLE: Record<StageRow['side'], string> = {
   manager: 'bg-[#e0f2fe] text-[#0369a1]',
   customer: 'bg-[#fef3c7] text-[#854d0e]',
-  landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  landlord: 'bg-[#d8efe3] text-[#1a7a5a]',
 };
 // Stage chip tint by journey area — leads/setup sky, signatures indigo,
 // wind-down red, the rest green.
@@ -144,7 +144,7 @@ const stageTint = (stage: string): string => {
   if (stage.startsWith('Lead') || stage === 'KYC' || stage.startsWith('Payment')) return 'bg-[#e0f2fe] text-[#0369a1]';
   if (stage.includes('Signature')) return 'bg-[#ede9fe] text-[#5b21b6]';
   if (stage.startsWith('Termination') || stage.startsWith('Move-out') || stage.startsWith('Deposit') || stage === 'Bill Clearance') return 'bg-[#fee2e2] text-[#b91c1c]';
-  return 'bg-[#d8f2e8] text-[#1a7a5a]';
+  return 'bg-[#d8efe3] text-[#1a7a5a]';
 };
 // Activity category chip tint — grouped into the same journey-area colours the
 // stage chips use, so the feed reads consistently across sections.
@@ -153,21 +153,21 @@ const CATEGORY_TINT: Record<string, string> = {
   Signature: 'bg-[#ede9fe] text-[#5b21b6]',
   Termination: 'bg-[#fee2e2] text-[#b91c1c]', Settlement: 'bg-[#fee2e2] text-[#b91c1c]',
   Payments: 'bg-[#fef3c7] text-[#92400e]', Registration: 'bg-[#fef3c7] text-[#92400e]',
-  Properties: 'bg-[#d8f2e8] text-[#1a7a5a]', Units: 'bg-[#d8f2e8] text-[#1a7a5a]', Listings: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  Properties: 'bg-[#d8efe3] text-[#1a7a5a]', Units: 'bg-[#d8efe3] text-[#1a7a5a]', Listings: 'bg-[#d8efe3] text-[#1a7a5a]',
   Contracts: 'bg-[#d1f0ea] text-[#0f766e]', Inspection: 'bg-[#d1f0ea] text-[#0f766e]', Renewal: 'bg-[#d1f0ea] text-[#0f766e]',
   Documents: 'bg-[#eef2f7] text-[#475569]',
   Team: 'bg-[#f3eefe] text-[#6d28d9]', Templates: 'bg-[#f3eefe] text-[#6d28d9]', AMC: 'bg-[#f3eefe] text-[#6d28d9]', Settings: 'bg-[#f3eefe] text-[#6d28d9]',
-  Viewing: 'bg-[#f4f3ef] text-[#9b9890]', Session: 'bg-[#eef2f7] text-[#475569]',
+  Viewing: 'bg-[#eef1ef] text-[#8a948d]', Session: 'bg-[#eef2f7] text-[#475569]',
 };
-const categoryTint = (c: string) => CATEGORY_TINT[c] ?? 'bg-[#f4f3ef] text-[#6b6860]';
+const categoryTint = (c: string) => CATEGORY_TINT[c] ?? 'bg-[#eef1ef] text-[#5f6b63]';
 
 // Step-duration tone — long waits should jump out in the history view.
 const gapTone = (d: number | null) =>
-  d == null ? '' : d >= 14 ? 'bg-[#fee2e2] text-[#991b1b]' : d >= 7 ? 'bg-[#fef3c7] text-[#92400e]' : 'bg-[#f4f3ef] text-[#6b6860]';
+  d == null ? '' : d >= 14 ? 'bg-[#fee2e2] text-[#991b1b]' : d >= 7 ? 'bg-[#fef3c7] text-[#92400e]' : 'bg-[#eef1ef] text-[#5f6b63]';
 const actorChip = (name: string) =>
   name === 'Customer' ? 'bg-[#fef3c7] text-[#854d0e]'
-    : name === 'Landlord' ? 'bg-[#d8f2e8] text-[#1a7a5a]'
-      : name === '—' ? 'bg-[#f4f3ef] text-[#9b9890]'
+    : name === 'Landlord' ? 'bg-[#d8efe3] text-[#1a7a5a]'
+      : name === '—' ? 'bg-[#eef1ef] text-[#8a948d]'
         : 'bg-[#e0f2fe] text-[#0369a1]';
 
 /** Who a stuck record is waiting on — same sides the stage-timing table uses. */
@@ -180,7 +180,7 @@ const blameOf = (stageLabel: string): 'Customer' | 'Landlord' | 'Manager' => {
 };
 const BLAME_STYLE: Record<'Customer' | 'Landlord' | 'Manager', string> = {
   Customer: 'bg-[#fef3c7] text-[#854d0e]',
-  Landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  Landlord: 'bg-[#d8efe3] text-[#1a7a5a]',
   Manager: 'bg-[#e0f2fe] text-[#0369a1]',
 };
 
@@ -217,7 +217,7 @@ function Delta({ cur, prev, vsLabel, goodDown = false, unit = '' }: {
   if (prev == null) return null;
   const diff = round1(cur - prev);
   if (diff === 0) {
-    return <span className="text-[11px] font-medium text-[#9b9890]">same as {vsLabel} ({round1(prev)}{unit})</span>;
+    return <span className="text-[11px] font-medium text-[#8a948d]">same as {vsLabel} ({round1(prev)}{unit})</span>;
   }
   const up = diff > 0;
   const good = goodDown ? !up : up;
@@ -233,19 +233,19 @@ function Tile({ label, value, sub, delta, onClick }: {
 }) {
   const body = (
     <>
-      <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{label}</p>
-      <p className="text-2xl font-bold text-[#1a1916] mt-1 tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-[#6b6860] mt-0.5">{sub}</p>}
+      <p className="text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold">{label}</p>
+      <p className="text-2xl font-bold text-[#14201a] mt-1 tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-[#5f6b63] mt-0.5">{sub}</p>}
       {delta && <p className="mt-1">{delta}</p>}
     </>
   );
-  if (!onClick) return <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">{body}</div>;
+  if (!onClick) return <div className="bg-white rounded-2xl border border-[#e4e9e5] px-5 py-4">{body}</div>;
   return (
     <button
       type="button"
       onClick={onClick}
       title="See the details behind this number"
-      className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4 text-left cursor-pointer transition-colors hover:border-[#2e9f82] focus:outline-none focus:border-[#2e9f82]">
+      className="bg-white rounded-2xl border border-[#e4e9e5] px-5 py-4 text-left cursor-pointer transition-colors hover:border-[#047246] focus:outline-none focus:border-[#047246]">
       {body}
     </button>
   );
@@ -483,21 +483,21 @@ export function ManagerOperationsReport({
       {/* ── header ── */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <Link href={backHref} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm print:hidden">
+          <Link href={backHref} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-sm print:hidden">
             <ArrowLeft size={14} /> All Reports
           </Link>
-          <h1 className="text-2xl font-bold text-[#1a1916] mt-1.5">Manager Operations Report</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5 max-w-[72ch]">
+          <h1 className="text-2xl font-bold text-[#14201a] mt-1.5">Manager Operations Report</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5 max-w-[72ch]">
             What each manager moved through the Lead, New Lease, Renewal and Terminated pipelines —
             compared against {vsLabel}, day by day, with every delay attributed to the manager, the
             customer or the landlord. Signatures marked “on file” are never counted.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <button onClick={downloadCsv} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82]">
+          <button onClick={downloadCsv} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246]">
             <Download size={14} /> CSV
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
             <Printer size={14} /> Print / PDF
           </button>
         </div>
@@ -513,8 +513,8 @@ export function ManagerOperationsReport({
             aria-pressed={preset === p.key}
             className={`px-3.5 py-1.5 rounded-full text-sm font-semibold border transition-colors ${
               preset === p.key
-                ? 'bg-[#1a1916] text-white border-[#1a1916]'
-                : 'bg-white text-[#3d3b35] border-[#e8e6e0] hover:border-[#2e9f82]'
+                ? 'bg-[#14201a] text-white border-[#14201a]'
+                : 'bg-white text-[#46534c] border-[#e4e9e5] hover:border-[#047246]'
             }`}>
             {p.label}
           </button>
@@ -522,28 +522,28 @@ export function ManagerOperationsReport({
         {preset === 'custom' && (
           <DateRangePicker from={customFrom} to={customTo} onChange={(f, t) => { if (f && t) { setCustomFrom(f); setCustomTo(t); } }} />
         )}
-        <span className="text-xs text-[#9b9890]">
+        <span className="text-xs text-[#8a948d]">
           {fmtDate(cur.from)} – {fmtDate(cur.to)} · compared to {fmtDate(prev.from)} – {fmtDate(prev.to)}
         </span>
       </div>
-      <p className="hidden print:block text-xs text-[#6b6860] mt-2">
+      <p className="hidden print:block text-xs text-[#5f6b63] mt-2">
         Period {fmtDate(cur.from)} – {fmtDate(cur.to)}, compared to {fmtDate(prev.from)} – {fmtDate(prev.to)}.
       </p>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 text-[#5f6b63] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
       ) : error ? (
         <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>
       ) : !data ? null : (
         <>
           {/* ── 1. Bottom line ── */}
-          <section className="mt-5 bg-[#1a1916] text-white rounded-2xl px-5 py-4 print:break-inside-avoid">
+          <section className="mt-5 bg-[#14201a] text-white rounded-2xl px-5 py-4 print:break-inside-avoid">
             <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#c8c6c0]">Bottom line</h2>
             <ul className="mt-2 space-y-1.5">
               {bottomLine.map((b, i) => (
                 <li key={i} className="text-sm leading-relaxed flex gap-2">
-                  <span className="text-[#2e9f82] shrink-0">•</span>
-                  <span className="[&>b]:font-bold [&>b]:text-white text-[#e8e6e0]">{b}</span>
+                  <span className="text-[#047246] shrink-0">•</span>
+                  <span className="[&>b]:font-bold [&>b]:text-white text-[#e4e9e5]">{b}</span>
                 </li>
               ))}
             </ul>
@@ -582,10 +582,10 @@ export function ManagerOperationsReport({
           </section>
 
           {/* ── 3. Where the time goes ── */}
-          <section className="mt-3 bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4 print:break-inside-avoid">
+          <section className="mt-3 bg-white rounded-2xl border border-[#e4e9e5] px-5 py-4 print:break-inside-avoid">
             <div className="flex items-baseline justify-between flex-wrap gap-2">
-              <h2 className="text-sm font-bold text-[#1a1916]">Where the waiting time goes</h2>
-              <span className="text-[11px] text-[#9b9890]">sum of average stage waits — lower is better</span>
+              <h2 className="text-sm font-bold text-[#14201a]">Where the waiting time goes</h2>
+              <span className="text-[11px] text-[#8a948d]">sum of average stage waits — lower is better</span>
             </div>
             <div className="grid grid-cols-3 gap-3 mt-3">
               {([
@@ -595,7 +595,7 @@ export function ManagerOperationsReport({
               ] as Array<[string, number, number | null, string]>).map(([who, v, pv, chip]) => (
                 <div key={who} className="rounded-xl border border-[#f0ede8] px-4 py-3">
                   <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${chip}`}>{who}</span>
-                  <p className="text-xl font-bold text-[#1a1916] mt-1.5 tabular-nums">{round1(v)}d</p>
+                  <p className="text-xl font-bold text-[#14201a] mt-1.5 tabular-nums">{round1(v)}d</p>
                   <p className="mt-0.5"><Delta cur={v} prev={pv} vsLabel={vsLabel} goodDown unit="d" /></p>
                 </div>
               ))}
@@ -607,10 +607,10 @@ export function ManagerOperationsReport({
                  the long axis (14 stages) runs vertically, the short axis (a
                  few people) horizontally — same reading direction as the
                  stage-timing table below. ── */}
-          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+          <section className="mt-5 bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8]">
-              <h2 className="text-sm font-bold text-[#1a1916]">Operations by stage — records each manager progressed</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">
+              <h2 className="text-sm font-bold text-[#14201a]">Operations by stage — records each manager progressed</h2>
+              <p className="text-xs text-[#5f6b63] mt-0.5">
                 Stages down the side grouped by pipeline (KYC → Payment Confirmation serve both the Lead intake
                 and lease setup); customer and landlord signatures kept separate. Click any number to see
                 the records behind it with their history.
@@ -618,7 +618,7 @@ export function ManagerOperationsReport({
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr>
                     <th className="px-5 py-2.5 text-left font-semibold min-w-[210px]">Stage</th>
                     {people.map((p, i) => (
@@ -627,10 +627,10 @@ export function ManagerOperationsReport({
                         {p.name}
                       </th>
                     ))}
-                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e8e6e0]">Team</th>
+                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e4e9e5]">Team</th>
                   </tr>
                 </thead>
-                <tbody className="text-[#1a1916]">
+                <tbody className="text-[#14201a]">
                   {data.stageMatrix.stages.map((stage, i) => {
                     const band = grouped14
                       ? (i === 0 ? { label: 'Lead intake', cls: 'text-[#0369a1] bg-[#f0f9ff]' }
@@ -645,7 +645,7 @@ export function ManagerOperationsReport({
                             <td colSpan={people.length + 2} className={`px-5 py-1.5 text-[10px] font-bold uppercase tracking-wide ${band.cls}`}>{band.label}</td>
                           </tr>
                         )}
-                        <tr className="border-t border-[#f7f5f1] hover:bg-[#fafaf8]">
+                        <tr className="border-t border-[#f7f5f1] hover:bg-[#f6f8f6]">
                           <td className="px-5 py-2 font-medium">{stage}</td>
                           {people.map(p => {
                             const v = p.cells[i];
@@ -654,7 +654,7 @@ export function ManagerOperationsReport({
                                 {v == null ? '—' : v === 0 ? 0 : (
                                   <button
                                     onClick={() => setDrill({ userId: p.userId, who: p.name, stage, count: v })}
-                                    className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
+                                    className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#047246] cursor-pointer"
                                     title="See the records behind this number">
                                     {v}
                                   </button>
@@ -666,7 +666,7 @@ export function ManagerOperationsReport({
                             {total == null ? '—' : total === 0 ? 0 : (
                               <button
                                 onClick={() => setDrill({ userId: null, who: 'Team', stage, count: total })}
-                                className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer"
+                                className="underline decoration-dotted underline-offset-2 hover:text-[#047246] cursor-pointer"
                                 title="See the records behind this number">
                                 {total}
                               </button>
@@ -677,7 +677,7 @@ export function ManagerOperationsReport({
                     );
                   })}
                 </tbody>
-                <tfoot className="bg-[#f0faf6] border-t-2 border-[#e8e6e0] font-bold text-[#1a7a5a]">
+                <tfoot className="bg-[#eef7f2] border-t-2 border-[#e4e9e5] font-bold text-[#1a7a5a]">
                   <tr>
                     <td className="px-5 py-2.5">Leases Activated (delivered)</td>
                     {people.map(p => (
@@ -685,7 +685,7 @@ export function ManagerOperationsReport({
                         {deliveredBy.get(p.userId) ?? 0}
                       </td>
                     ))}
-                    <td className="px-4 py-2.5 text-right tabular-nums border-l border-[#e8e6e0]">
+                    <td className="px-4 py-2.5 text-right tabular-nums border-l border-[#e4e9e5]">
                       {completions.totals.newLeases + completions.totals.renewals}
                     </td>
                   </tr>
@@ -696,16 +696,16 @@ export function ManagerOperationsReport({
 
           {/* ── 6. Waiting too long right now (live, not period-scoped) ── */}
           {stuck && stuck.length > 0 && (
-            <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+            <section className="mt-5 bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
               <div className="px-5 py-3.5 border-b border-[#f0ede8]">
-                <h2 className="text-sm font-bold text-[#1a1916]">Waiting too long right now — 7+ days without movement</h2>
-                <p className="text-xs text-[#6b6860] mt-0.5">
+                <h2 className="text-sm font-bold text-[#14201a]">Waiting too long right now — 7+ days without movement</h2>
+                <p className="text-xs text-[#5f6b63] mt-0.5">
                   Live snapshot of the pipelines (not limited to the period above). “Waiting on” follows the
                   same rules as stage timing — a customer or landlord wait is not the manager&apos;s clock.
                 </p>
               </div>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr>
                     <th className="px-5 py-2.5 text-left font-semibold">Record</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Pipeline · stage</th>
@@ -714,12 +714,12 @@ export function ManagerOperationsReport({
                     <th className="px-3 py-2.5 print:hidden" />
                   </tr>
                 </thead>
-                <tbody className="text-[#1a1916]">
+                <tbody className="text-[#14201a]">
                   {stuck.slice(0, 12).map((s, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <td className="px-5 py-2.5 font-semibold">
                         {s.tenantName ?? '—'}
-                        <span className="text-[#9b9890] font-normal"> {s.unitLabel ? `· ${s.unitLabel}` : ''}{s.buildingName ? ` · ${s.buildingName}` : ''}</span>
+                        <span className="text-[#8a948d] font-normal"> {s.unitLabel ? `· ${s.unitLabel}` : ''}{s.buildingName ? ` · ${s.buildingName}` : ''}</span>
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{s.stageLabel}</td>
                       <td className="px-3 py-2.5">
@@ -730,7 +730,7 @@ export function ManagerOperationsReport({
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
                         {s.contractId != null && (
-                          <Link href={`${contractsBase}/${s.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                          <Link href={`${contractsBase}/${s.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">
                             Open <ExternalLink size={11} />
                           </Link>
                         )}
@@ -740,7 +740,7 @@ export function ManagerOperationsReport({
                 </tbody>
               </table>
               {stuck.length > 12 && (
-                <p className="px-5 py-2.5 text-xs text-[#9b9890] border-t border-[#f0ede8]">
+                <p className="px-5 py-2.5 text-xs text-[#8a948d] border-t border-[#f0ede8]">
                   +{stuck.length - 12} more — see the Operations page for the full pipeline.
                 </p>
               )}
@@ -748,36 +748,36 @@ export function ManagerOperationsReport({
           )}
 
           {/* ── 7. Stage timing — managers side by side ── */}
-          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+          <section className="mt-5 bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8] flex items-baseline justify-between flex-wrap gap-2">
               <div>
-                <h2 className="text-sm font-bold text-[#1a1916]">Stage timing — managers side by side</h2>
-                <p className="text-xs text-[#6b6860] mt-0.5">
+                <h2 className="text-sm font-bold text-[#14201a]">Stage timing — managers side by side</h2>
+                <p className="text-xs text-[#5f6b63] mt-0.5">
                   Average time to close each stage; the bracket is how many records that average comes
                   from — “2.5d (4)” = 4 records closed, 2.5 days each on average. Hover for median and
                   slowest. A manager is only measured on stages whose clock is theirs.
                 </p>
               </div>
-              <span className="text-xs text-[#6b6860]">
+              <span className="text-xs text-[#5f6b63]">
                 Σ stage avgs — Manager <b>{data.totals.managerAvgDays}d</b> · Customer <b>{data.totals.customerAvgDays}d</b> · Landlord <b>{data.totals.landlordAvgDays}d</b>
               </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr>
                     <th className="px-5 py-2.5 text-left font-semibold min-w-[230px]">Stage</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Side</th>
                     {actorCols.map(a => <th key={a} className="px-4 py-2.5 text-right font-semibold whitespace-nowrap">{a}</th>)}
                     <th className="px-4 py-2.5 text-right font-semibold">Customer</th>
-                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e8e6e0]">Overall</th>
+                    <th className="px-4 py-2.5 text-right font-semibold border-l border-[#e4e9e5]">Overall</th>
                   </tr>
                 </thead>
-                <tbody className="text-[#1a1916]">
+                <tbody className="text-[#14201a]">
                   {data.rows.map(r => {
                     const cust = cellOf(r, 'Customer');
                     return (
-                      <tr key={r.stageLabel} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                      <tr key={r.stageLabel} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                         <td className="px-5 py-2.5 font-medium">{r.stageLabel}</td>
                         <td className="px-3 py-2.5">
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${SIDE_STYLE[r.side]}`}>{r.side}</span>
@@ -787,16 +787,16 @@ export function ManagerOperationsReport({
                           return (
                             <td key={a} className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap"
                               title={c ? `average of ${c.completed} record${c.completed === 1 ? '' : 's'} · median ${fmtDays(c.medianDays)} · slowest ${fmtDays(c.slowestDays)}` : undefined}>
-                              {c ? <><b>{fmtDays(c.avgDays)}</b> <span className="text-[#9b9890] text-xs">({c.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
+                              {c ? <><b>{fmtDays(c.avgDays)}</b> <span className="text-[#8a948d] text-xs">({c.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
                             </td>
                           );
                         })}
                         <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap"
                           title={cust ? `average of ${cust.completed} record${cust.completed === 1 ? '' : 's'} · median ${fmtDays(cust.medianDays)} · slowest ${fmtDays(cust.slowestDays)}` : undefined}>
-                          {cust ? <><b>{fmtDays(cust.avgDays)}</b> <span className="text-[#9b9890] text-xs">({cust.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
+                          {cust ? <><b>{fmtDays(cust.avgDays)}</b> <span className="text-[#8a948d] text-xs">({cust.completed})</span></> : <span className="text-[#d4d2cc]">·</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8]">
-                          {r.completed ? <><b>{fmtDays(r.avgDays)}</b> <span className="text-[#9b9890] text-xs">({r.completed})</span></> : <span className="text-[#d4d2cc]">—</span>}
+                          {r.completed ? <><b>{fmtDays(r.avgDays)}</b> <span className="text-[#8a948d] text-xs">({r.completed})</span></> : <span className="text-[#d4d2cc]">—</span>}
                         </td>
                       </tr>
                     );
@@ -807,20 +807,20 @@ export function ManagerOperationsReport({
           </section>
 
           {/* ── 8. Average working day ── */}
-          <section className="mt-5 bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+          <section className="mt-5 bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
             <div className="px-5 py-3.5 border-b border-[#f0ede8]">
-              <h2 className="text-sm font-bold text-[#1a1916]">Average working day</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">Everything each manager does in the system per day — output, breadth, presence.</p>
+              <h2 className="text-sm font-bold text-[#14201a]">Average working day</h2>
+              <p className="text-xs text-[#5f6b63] mt-0.5">Everything each manager does in the system per day — output, breadth, presence.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr>
                     <th className="px-5 py-2.5 text-left font-semibold w-56">Metric</th>
                     {data.daily.map(d => <th key={d.userId} className="px-4 py-2.5 text-right font-semibold">{d.name}</th>)}
                   </tr>
                 </thead>
-                <tbody className="text-[#1a1916]">
+                <tbody className="text-[#14201a]">
                   {([
                     ['Days active', (d: DailyRow) => `${d.activeDays} of ${d.daysInPeriod}`],
                     ['Idle days (no activity)', (d: DailyRow) => String(d.idleDays)],
@@ -831,7 +831,7 @@ export function ManagerOperationsReport({
                       `${d.mix.leads} leads · ${d.mix.leases} leases · ${d.mix.documents} docs · ${d.mix.reports} report checks`],
                   ] as Array<[string, (d: DailyRow) => string]>).map(([label, pick]) => (
                     <tr key={label} className="border-t border-[#f0ede8]">
-                      <td className="px-5 py-2.5 text-[#6b6860] font-medium">{label}</td>
+                      <td className="px-5 py-2.5 text-[#5f6b63] font-medium">{label}</td>
                       {data.daily.map(d => (
                         <td key={d.userId} className="px-4 py-2.5 text-right tabular-nums font-semibold">{pick(d)}</td>
                       ))}
@@ -844,9 +844,9 @@ export function ManagerOperationsReport({
 
           {/* ── 9. Manager activity ── */}
           <section className="mt-5">
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-3.5">
-              <h2 className="text-sm font-bold text-[#1a1916]">Manager activity</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">
+            <div className="bg-white rounded-2xl border border-[#e4e9e5] px-5 py-3.5">
+              <h2 className="text-sm font-bold text-[#14201a]">Manager activity</h2>
+              <p className="text-xs text-[#5f6b63] mt-0.5">
                 The full day for each person, newest first — signing in, pages opened, and every create/edit/delete
                 across leads, contracts, payments, listings, documents, templates and settings. Repeated saves of the
                 same thing roll up into one “×5” line; <b>click any row to see exactly what changed</b>. Only
@@ -869,53 +869,53 @@ export function ManagerOperationsReport({
                 return out;
               }, []);
               return (
-                <div key={m.userId} className="bg-white rounded-2xl border border-[#e8e6e0] mt-3 overflow-hidden print:break-inside-avoid">
-                  <div className="px-5 py-3 border-b border-[#f0ede8] bg-[#fafaf8] flex items-baseline justify-between">
-                    <h3 className="text-sm font-bold text-[#1a1916]">{m.name}</h3>
-                    <span className="text-xs text-[#9b9890]">{m.total} action{m.total === 1 ? '' : 's'} in this period</span>
+                <div key={m.userId} className="bg-white rounded-2xl border border-[#e4e9e5] mt-3 overflow-hidden print:break-inside-avoid">
+                  <div className="px-5 py-3 border-b border-[#f0ede8] bg-[#f6f8f6] flex items-baseline justify-between">
+                    <h3 className="text-sm font-bold text-[#14201a]">{m.name}</h3>
+                    <span className="text-xs text-[#8a948d]">{m.total} action{m.total === 1 ? '' : 's'} in this period</span>
                   </div>
                   {m.days.length === 0 ? (
-                    <p className="px-5 py-6 text-sm text-[#9b9890]">No recorded activity in this period.</p>
+                    <p className="px-5 py-6 text-sm text-[#8a948d]">No recorded activity in this period.</p>
                   ) : (
                     <>
                       {visibleDays.map(({ day, actions, views }) => (
                         <div key={day}>
-                          <div className="px-5 py-1.5 bg-[#fafaf8] border-t border-[#f0ede8] flex items-baseline justify-between gap-3 flex-wrap">
-                            <span className="text-xs font-bold text-[#3d3b35]">{day}</span>
-                            <span className="text-[11px] text-[#9b9890] flex items-center gap-2">
+                          <div className="px-5 py-1.5 bg-[#f6f8f6] border-t border-[#f0ede8] flex items-baseline justify-between gap-3 flex-wrap">
+                            <span className="text-xs font-bold text-[#46534c]">{day}</span>
+                            <span className="text-[11px] text-[#8a948d] flex items-center gap-2">
                               {(() => {
                                 const acts = actions.filter(a => a.category !== 'Viewing').reduce((s, a) => s + a.count, 0);
                                 return <span>{acts} action{acts === 1 ? '' : 's'}</span>;
                               })()}
                               {views && views.pages > 0 && (
-                                <span className="inline-flex items-center gap-1 text-[#9b9890]">
+                                <span className="inline-flex items-center gap-1 text-[#8a948d]">
                                   <Eye size={11} /> {views.pages} page{views.pages === 1 ? '' : 's'}{views.reports ? ` · ${views.reports} report${views.reports === 1 ? '' : 's'}` : ''}
                                 </span>
                               )}
                             </span>
                           </div>
                           {actions.map((a, i) => (
-                            <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm hover:bg-[#fafaf8]">
+                            <div key={i} className="px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm hover:bg-[#f6f8f6]">
                               <button
                                 type="button"
                                 onClick={() => setActivityDrill({ action: a, who: m.name })}
                                 title="See what changed"
                                 className="flex-1 min-w-0 flex items-center gap-3 text-left cursor-pointer">
-                                <span className="text-[11px] text-[#9b9890] tabular-nums w-24 shrink-0">
+                                <span className="text-[11px] text-[#8a948d] tabular-nums w-24 shrink-0">
                                   {a.count > 1 ? `${fmtTime(a.firstAt)}–${fmtTime(a.at)}` : fmtTime(a.at)}
                                 </span>
                                 <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${categoryTint(a.category)}`}>{a.category}</span>
-                                <span className="text-[#1a1916] shrink-0 font-medium">{a.label}</span>
+                                <span className="text-[#14201a] shrink-0 font-medium">{a.label}</span>
                                 {a.detail && <span className="text-[#b45309] shrink-0 tabular-nums truncate" title={a.detail}>— {a.detail}</span>}
                                 {a.count > 1 && (
-                                  <span className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums bg-[#f4f3ef] text-[#6b6860] shrink-0" title={`${a.count} times`}>×{a.count}</span>
+                                  <span className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums bg-[#eef1ef] text-[#5f6b63] shrink-0" title={`${a.count} times`}>×{a.count}</span>
                                 )}
-                                {a.record && <span className="text-[#6b6860] truncate">· {a.record}</span>}
+                                {a.record && <span className="text-[#5f6b63] truncate">· {a.record}</span>}
                               </button>
                               {(a.contractId ?? a.leadId) != null && (
                                 <Link
                                   href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
-                                  className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline print:hidden shrink-0">
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline print:hidden shrink-0">
                                   Open <ExternalLink size={11} />
                                 </Link>
                               )}
@@ -931,7 +931,7 @@ export function ManagerOperationsReport({
                             if (next.has(m.userId)) next.delete(m.userId); else next.add(m.userId);
                             return next;
                           })}
-                          className="w-full px-5 py-2.5 border-t border-[#f0ede8] text-xs font-semibold text-[#2e9f82] hover:bg-[#fafaf8] print:hidden">
+                          className="w-full px-5 py-2.5 border-t border-[#f0ede8] text-xs font-semibold text-[#047246] hover:bg-[#f6f8f6] print:hidden">
                           {expanded ? 'Show less' : `View all ${totalEntries} entries`}
                         </button>
                       )}
@@ -942,7 +942,7 @@ export function ManagerOperationsReport({
             })}
           </section>
 
-          <p className="text-[11px] text-[#9b9890] mt-3">
+          <p className="text-[11px] text-[#8a948d] mt-3">
             Generated {new Date(data.generatedAt).toLocaleString('en-AE', { timeZone: APP_TIME_ZONE })}. Detailed stage
             tracking since {fmtDate(data.attributionSince)} — periods before that under-count. Only in-system work is
             measurable — calls and site visits leave no trace. Landlord-only report.
@@ -956,30 +956,30 @@ export function ManagerOperationsReport({
                 onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-bold text-[#1a1916]">{drill.who} — {drill.stage}</h3>
-                    <p className="text-xs text-[#6b6860] mt-0.5">
+                    <h3 className="text-sm font-bold text-[#14201a]">{drill.who} — {drill.stage}</h3>
+                    <p className="text-xs text-[#5f6b63] mt-0.5">
                       {drillData.length} record{drillData.length === 1 ? '' : 's'}
                       {drillData.length < drill.count ? ` shown of ${drill.count} — narrow the period for the rest` : ''}
                       {drill.userId == null ? ' · full history with step durations' : ` · ${drill.who}’s own steps — click Team for full history`}
                     </p>
                   </div>
-                  <button onClick={() => setDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+                  <button onClick={() => setDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#8a948d] hover:bg-[#eef1ef] hover:text-[#14201a]">
                     <X size={15} />
                   </button>
                 </div>
                 {drillData.length === 0 ? (
-                  <p className="px-5 py-10 text-sm text-[#9b9890] text-center">
+                  <p className="px-5 py-10 text-sm text-[#8a948d] text-center">
                     The detail behind this number is older than the loaded window — narrow the period to see it.
                   </p>
                 ) : drillData.map((r, ri) => (
                   <div key={ri} className="border-t border-[#f0ede8] first:border-t-0">
-                    <div className="px-5 py-2.5 bg-[#fafaf8] flex items-center gap-3 flex-wrap">
-                      <span className="text-sm font-bold text-[#1a1916]">{r.label}</span>
-                      {r.journey && <span className="text-xs text-[#9b9890]">{r.journey.kind} · {r.journey.spanDays}d start to latest</span>}
+                    <div className="px-5 py-2.5 bg-[#f6f8f6] flex items-center gap-3 flex-wrap">
+                      <span className="text-sm font-bold text-[#14201a]">{r.label}</span>
+                      {r.journey && <span className="text-xs text-[#8a948d]">{r.journey.kind} · {r.journey.spanDays}d start to latest</span>}
                       {(r.contractId ?? r.leadId) != null && (
                         <Link
                           href={r.contractId != null ? `${contractsBase}/${r.contractId}/v2` : `${leadsBase}/${r.leadId}`}
-                          className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                          className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">
                           Open <ExternalLink size={11} />
                         </Link>
                       )}
@@ -988,17 +988,17 @@ export function ManagerOperationsReport({
                         stage — visible even when the journey milestones are other
                         people's (in-progress work has no milestone yet). */}
                     {drill.userId != null && r.times.length > 0 && (
-                      <div className="px-5 py-1.5 text-[11px] bg-[#f0faf6] text-[#1a7a5a] border-t border-[#f7f5f1]">
+                      <div className="px-5 py-1.5 text-[11px] bg-[#eef7f2] text-[#1a7a5a] border-t border-[#f7f5f1]">
                         Counted for {drill.who} — worked this stage {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                       </div>
                     )}
                     {r.visibleEvents.length > 0 ? r.visibleEvents.map((e, i) => {
                       const mine = r.times.some(t2 => Math.abs(new Date(t2).getTime() - new Date(e.at).getTime()) < 60_000);
                       return (
-                        <div key={i} className={`px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm ${mine ? 'bg-[#f0faf6]' : ''}`}>
-                          <span className="text-[11px] text-[#9b9890] tabular-nums w-28 shrink-0">{fmtStamp(e.at)}</span>
+                        <div key={i} className={`px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm ${mine ? 'bg-[#eef7f2]' : ''}`}>
+                          <span className="text-[11px] text-[#8a948d] tabular-nums w-28 shrink-0">{fmtStamp(e.at)}</span>
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${actorChip(e.actor)}`}>{e.actor}</span>
-                          <span className="text-[#1a1916] font-medium">{e.label}</span>
+                          <span className="text-[#14201a] font-medium">{e.label}</span>
                           {e.gapDays != null && (
                             <span className={`ml-auto inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums shrink-0 ${gapTone(e.gapDays)}`}
                               title="Days since the previous step shown">
@@ -1008,7 +1008,7 @@ export function ManagerOperationsReport({
                         </div>
                       );
                     }) : (
-                      <div className="px-5 py-2.5 text-sm text-[#6b6860]">
+                      <div className="px-5 py-2.5 text-sm text-[#5f6b63]">
                         Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                         {(r.contractId ?? r.leadId) != null ? ' — open the record for its full history.' : '.'}
                       </div>
@@ -1027,27 +1027,27 @@ export function ManagerOperationsReport({
                 onClick={e => e.stopPropagation()}>
                 <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-bold text-[#1a1916]">
+                    <h3 className="text-sm font-bold text-[#14201a]">
                       {tileDrill === 'steps' ? `Pipeline steps moved — ${progressed}`
                         : tileDrill === 'delivered' ? `Leases delivered — ${delivered}`
                           : tileDrill === 'settlements' ? `Settlements paid — ${completions.totals.settlements}`
                             : `Idle manager-days — ${idleDays}`}
                     </h3>
-                    <p className="text-xs text-[#6b6860] mt-0.5">
+                    <p className="text-xs text-[#5f6b63] mt-0.5">
                       {tileDrill === 'steps' ? 'Where the steps happened — click a stage for the records behind it.'
                         : tileDrill === 'delivered' ? 'The leases activated in this period, and who activated them.'
                           : tileDrill === 'settlements' ? 'The deposit settlements paid out in this period.'
                             : 'Days with no in-system activity, per manager. Fridays are the day off and never count.'}
                     </p>
                   </div>
-                  <button onClick={() => setTileDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+                  <button onClick={() => setTileDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#8a948d] hover:bg-[#eef1ef] hover:text-[#14201a]">
                     <X size={15} />
                   </button>
                 </div>
 
                 {tileDrill === 'steps' && (
                   data.stageMatrix.stages.every((_, i) => !(data.stageMatrix.totals[i])) ? (
-                    <p className="px-5 py-8 text-sm text-[#9b9890] text-center">No stage activity in this period.</p>
+                    <p className="px-5 py-8 text-sm text-[#8a948d] text-center">No stage activity in this period.</p>
                   ) : data.stageMatrix.stages.map((stage, i) => {
                     const total = data.stageMatrix.totals[i];
                     if (!total) return null;
@@ -1056,7 +1056,7 @@ export function ManagerOperationsReport({
                         key={stage}
                         type="button"
                         onClick={() => { setTileDrill(null); setDrill({ userId: null, who: 'Team', stage, count: total }); }}
-                        className="w-full px-5 py-2.5 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm hover:bg-[#fafaf8] cursor-pointer text-left">
+                        className="w-full px-5 py-2.5 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm hover:bg-[#f6f8f6] cursor-pointer text-left">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${stageTint(stage)}`}>{stage}</span>
                         <span className="ml-auto font-bold tabular-nums text-[#1a7a5a]">{total}</span>
                       </button>
@@ -1068,17 +1068,17 @@ export function ManagerOperationsReport({
                   const items = (completions.items ?? []).filter(i =>
                     tileDrill === 'delivered' ? i.kind !== 'settlement' : i.kind === 'settlement');
                   if (!items.length) {
-                    return <p className="px-5 py-8 text-sm text-[#9b9890] text-center">None in this period.</p>;
+                    return <p className="px-5 py-8 text-sm text-[#8a948d] text-center">None in this period.</p>;
                   }
                   return items.map((it, i) => (
                     <div key={i} className="px-5 py-2.5 flex items-center gap-3 border-t border-[#f7f5f1] first:border-t-0 text-sm">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
-                        it.kind === 'new' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : it.kind === 'renewal' ? 'bg-[#e0f2fe] text-[#0369a1]' : 'bg-[#fee2e2] text-[#b91c1c]'}`}>
+                        it.kind === 'new' ? 'bg-[#d8efe3] text-[#1a7a5a]' : it.kind === 'renewal' ? 'bg-[#e0f2fe] text-[#0369a1]' : 'bg-[#fee2e2] text-[#b91c1c]'}`}>
                         {it.kind === 'new' ? 'New lease' : it.kind === 'renewal' ? 'Renewal' : it.refund ? 'Settled · refund issued' : 'Settled'}
                       </span>
-                      <span className="text-[#1a1916] truncate">{it.label}</span>
-                      <span className="text-[11px] text-[#9b9890] whitespace-nowrap ml-auto">{it.actor} · {fmtStamp(it.at)}</span>
-                      <Link href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline shrink-0">
+                      <span className="text-[#14201a] truncate">{it.label}</span>
+                      <span className="text-[11px] text-[#8a948d] whitespace-nowrap ml-auto">{it.actor} · {fmtStamp(it.at)}</span>
+                      <Link href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline shrink-0">
                         Open <ExternalLink size={11} />
                       </Link>
                     </div>
@@ -1087,7 +1087,7 @@ export function ManagerOperationsReport({
 
                 {tileDrill === 'idle' && (
                   data.daily.length === 0 ? (
-                    <p className="px-5 py-8 text-sm text-[#9b9890] text-center">No managers on this account.</p>
+                    <p className="px-5 py-8 text-sm text-[#8a948d] text-center">No managers on this account.</p>
                   ) : data.daily.map(d => {
                     const idle: string[] | null = d.activeDayList && data.window
                       ? (() => {
@@ -1105,8 +1105,8 @@ export function ManagerOperationsReport({
                     return (
                       <div key={d.userId} className="px-5 py-3 border-t border-[#f7f5f1] first:border-t-0">
                         <div className="flex items-baseline justify-between gap-3">
-                          <span className="text-sm font-bold text-[#1a1916]">{d.name}</span>
-                          <span className="text-xs text-[#6b6860]">{d.idleDays} idle of {d.daysInPeriod} tracked day{d.daysInPeriod === 1 ? '' : 's'}</span>
+                          <span className="text-sm font-bold text-[#14201a]">{d.name}</span>
+                          <span className="text-xs text-[#5f6b63]">{d.idleDays} idle of {d.daysInPeriod} tracked day{d.daysInPeriod === 1 ? '' : 's'}</span>
                         </div>
                         {idle && idle.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mt-2">
@@ -1136,24 +1136,24 @@ export function ManagerOperationsReport({
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${categoryTint(a.category)}`}>{a.category}</span>
-                        <h3 className="text-sm font-bold text-[#1a1916] truncate">{a.label}</h3>
+                        <h3 className="text-sm font-bold text-[#14201a] truncate">{a.label}</h3>
                       </div>
-                      <p className="text-xs text-[#6b6860] mt-1">
+                      <p className="text-xs text-[#5f6b63] mt-1">
                         {activityDrill.who} · {a.count > 1 ? `${a.count}× between ${fmtStamp(a.firstAt)} – ${fmtStamp(a.at)}` : fmtStamp(a.at)}
                         {a.record ? <> · {a.record}</> : null}
                       </p>
                     </div>
-                    <button onClick={() => setActivityDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916] shrink-0">
+                    <button onClick={() => setActivityDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#8a948d] hover:bg-[#eef1ef] hover:text-[#14201a] shrink-0">
                       <X size={15} />
                     </button>
                   </div>
                   <div className="px-5 py-4">
                     {a.changes && a.changes.length > 0 ? (
                       <>
-                        <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">What changed</p>
+                        <p className="text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold mb-2">What changed</p>
                         <div className="rounded-xl border border-[#f0ede8] overflow-hidden">
                           <table className="w-full text-sm">
-                            <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                            <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                               <tr>
                                 <th className="px-3 py-2 text-left font-semibold">Field</th>
                                 <th className="px-3 py-2 text-left font-semibold">Before</th>
@@ -1163,9 +1163,9 @@ export function ManagerOperationsReport({
                             <tbody>
                               {a.changes.map((c, i) => (
                                 <tr key={i} className="border-t border-[#f0ede8]">
-                                  <td className="px-3 py-2 font-medium text-[#3d3b35] capitalize whitespace-nowrap">{c.field}</td>
-                                  <td className="px-3 py-2 text-[#9b9890] tabular-nums">{c.from ?? <span className="text-[#c8c6c0]">—</span>}</td>
-                                  <td className="px-3 py-2 text-[#1a1916] font-semibold tabular-nums">{c.to ?? <span className="text-[#b91c1c]">removed</span>}</td>
+                                  <td className="px-3 py-2 font-medium text-[#46534c] capitalize whitespace-nowrap">{c.field}</td>
+                                  <td className="px-3 py-2 text-[#8a948d] tabular-nums">{c.from ?? <span className="text-[#c8c6c0]">—</span>}</td>
+                                  <td className="px-3 py-2 text-[#14201a] font-semibold tabular-nums">{c.to ?? <span className="text-[#b91c1c]">removed</span>}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1173,14 +1173,14 @@ export function ManagerOperationsReport({
                         </div>
                       </>
                     ) : a.detail ? (
-                      <p className="text-sm text-[#1a1916]">{a.detail}</p>
+                      <p className="text-sm text-[#14201a]">{a.detail}</p>
                     ) : a.category === 'Viewing' ? (
-                      <p className="text-sm text-[#6b6860]">Opened this page{a.count > 1 ? ` ${a.count} times` : ''}.</p>
+                      <p className="text-sm text-[#5f6b63]">Opened this page{a.count > 1 ? ` ${a.count} times` : ''}.</p>
                     ) : null}
                     {(a.contractId ?? a.leadId) != null && (
                       <Link
                         href={a.contractId != null ? `${contractsBase}/${a.contractId}/v2` : `${leadsBase}/${a.leadId}`}
-                        className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[#2e9f82] hover:underline">
+                        className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-[#047246] hover:underline">
                         Open the record <ExternalLink size={12} />
                       </Link>
                     )}

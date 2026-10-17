@@ -1,18 +1,61 @@
 'use client';
 
 /**
- * RP move-in / move-out inspection workspace — the editable surface of the shared
- * InspectionReportView (design spec §6). Save draft / Submit to tenant (locks) /
- * Reopen to edit. The category-report layout itself lives in InspectionReportView,
- * shared read-only with the tenant page.
+ * Operations › Long-term leases › Move-in / move-out inspection — Genspark OS
+ * rebuild of the RP inspection workspace (the editable surface of the shared
+ * InspectionReportView, design spec §6). Save draft / Submit to the customer
+ * (locks) / Reopen to edit / counter-sign. The category-report layout itself lives
+ * in InspectionReportView (REUSED unchanged), shared read-only with the customer page.
+ *
+ * Served by THREE routes, all kept working (paths derived from the URL):
+ *  - /rental-provider/dashboard/contracts/:id/inspection/v2 (RP owner)
+ *  - /dashboard/manager/contracts/:id/inspection/v2 (re-export; canManageInspections gate)
+ *  - /portal/:token/contract/:id/inspection (no-login inspector magic link — no Back
+ *    link, token-scoped endpoints, inspector counter-sign pad, money hidden)
+ *  (+ /prototype/os/rp/… bridge re-export.)
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - GET {apiBase}/inspection/v2?type= (portal: {apiBase}/inspection/full?type=) + GET {apiBase}
+ *    (contract: landlord id, status, building + community, unit no/type/floor, customer
+ *    name/phone/email, move-in = startDate, move-out = doc.moveOutDate ?? termination
+ *    effective date ?? endDate). apiBase = /api/contracts/:id or /api/portal/:token/contracts/:id.
+ *  - Price book: /api/inspection-price-book (RP) · /api/manager/inspection-price-book?rp=
+ *    (manager, waits for landlord id) · {apiBase}/inspection-price-book?type= (portal).
+ *  - PATCH {apiBase}/inspection {type, data, finalize:false} — Save draft, and the
+ *    auto-persist after every photo add/remove; {finalize:true} — Submit (behind the
+ *    confirmation dialog).
+ *  - POST /api/contracts/:id/inspection/reopen?type= — Reopen to edit (RP/manager, not portal).
+ *  - PATCH {apiBase}/inspection/move-out-date {moveOutDate} — debounced 700 ms, only once
+ *    submitted; editable on move-out until counter-signed.
+ *  - POST {apiBase}/inspection/counter-sign {type, signatureImage, signatoryName, consent,
+ *    clientMeta, geo} — SignatureBlock (REUSED) once the customer has signed.
+ *  - Per-item photo upload / remove (uploadInspectionItemPhoto, sequential) and bulk
+ *    report photos with progress; general photo remove.
+ *  - Restoration list: Add category (catalog minus existing + custom), Add component
+ *    (RP price book rows for that exact category, catalog seed fallback, resolved price
+ *    shown, custom component with optional frozen price + validation), remove
+ *    component / category; row totals via computeRowTotal unless manual.
+ *  - General notes, Inspected-by override, move-out date editing.
+ *  - Preview overlay (InspectionInline — exactly what the customer sees; Esc / browser
+ *    Back close it via useBackClose) with Download; Download PDF (InspectionReportV2Pdf,
+ *    money only on RP/manager move-out); hidden Preview once the customer has signed.
+ *  - Once the customer has signed: the finished InspectionInline document in place of the
+ *    editable workspace, then the counter-signature block.
+ *  - Back: ?from=… else Operations record (live lease, keeps ?rp=) or the lease record
+ *    (expired / terminated); "Back to operations" / "Back to contract" label.
+ *  - Locked notice (portal vs dashboard wording), error banner, loading state.
+ *  - Manager permission canManageInspections hides Save / Submit / Reopen / counter-sign
+ *    and makes the report read-only (portal token is its own authorisation).
+ *  - New (read-only, same data): sign-off Flow, report KPIs (categories, components,
+ *    flagged, photos, estimated restoration on the RP move-out copy), a "view only"
+ *    note for managers without the inspection permission.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useParams, useSearchParams, usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
-import Link from 'next/link';
-import { ArrowLeft, Save, Loader2, CheckCircle, Send, RotateCcw, Lock, Plus, X, Printer, Download } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, CheckCircle, Send, RotateCcw, Plus, Printer, Download } from 'lucide-react';
 import {
   InspectionDoc, InspectionItem, InspectionCategory, InspectionPriceBookEntry,
   CategoryKey, CanonicalCategoryKey, PriceBookSeedRow,
@@ -22,6 +65,9 @@ import { uploadInspectionItemPhoto, type InspectionPhotoRef } from '@/lib/inspec
 import { InspectionReportView, type ReportMeta } from '@/components/contract/InspectionReportView';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
 import { useBackClose } from '@/lib/useSlideOver';
+import {
+  OsPage, PageHead, ScopeStrip, Card, Kpis, Kpi, Pill, Btn, Callout, Flow, Modal, fmtAed, type Tone,
+} from '@/components/os/kit';
 
 // Preview renders the EXACT document the customer reads — the same canvas-
 // rasterised report their portal page shows — instead of dumping a blob into a
@@ -30,16 +76,9 @@ import { useBackClose } from '@/lib/useSlideOver';
 const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
   ssr: false,
   loading: () => (
-    <div className="h-[360px] grid place-items-center text-sm text-[#9b9890]">Preparing inspection report…</div>
+    <div style={{ height: 360, display: 'grid', placeItems: 'center', fontSize: 13, color: 'var(--ms-ink-3)' }}>Preparing inspection report…</div>
   ),
 });
-
-/** Top-bar action buttons: icon-only and compact on a phone (the labels would
- *  otherwise eat the whole width next to the Back link), full size from `sm`. */
-const TOPBAR_BTN =
-  'inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] '
-  + 'text-[12.5px] sm:text-sm font-semibold px-2.5 py-2 sm:px-4 sm:py-2.5 '
-  + 'disabled:opacity-60 hover:border-[#c8c6be]';
 
 type Phase = 'move_in' | 'move_out';
 const AED = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -47,6 +86,8 @@ const AED = (n: number) => n.toLocaleString('en-AE', { minimumFractionDigits: 2,
 interface ContractMeta {
   property: string; unitNo: string; propertyType: string; floor: string;
   tenantName: string; tenantPhone: string; tenantEmail: string;
+  /** Contract reference (e.g. CID-…) for the page title. */
+  ref: string;
 }
 interface Dates { inspectionDate?: string | null; moveInDate?: string | null; moveOutDate?: string | null; }
 
@@ -146,6 +187,7 @@ export default function CategoryInspectionPage() {
             tenantName: c.tenant?.companyName || c.tenant?.name || '',
             tenantPhone: c.tenant?.phone ?? '',
             tenantEmail: c.tenant?.email ?? '',
+            ref: c.ref ?? '',
           });
           // The move-out date the report shows: the inspection's own recorded date
           // (editable, wins when set), else the contract's termination / end date.
@@ -502,8 +544,27 @@ export default function CategoryInspectionPage() {
     finally { setDownloading(false); }
   }
 
+  // Stable close handlers — the kit Modal re-runs its focus effect whenever
+  // onClose changes identity, so inline arrows would steal focus on every render.
+  const closeCatPicker = useCallback(() => setCatPickerOpen(false), []);
+  const closeCompPicker = useCallback(() => setCompPickerSection(null), []);
+  const cancelSubmit = useCallback(() => setConfirmSubmit(false), []);
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
+
+  const phaseLabel = phase === 'move_out' ? 'Move-out' : 'Move-in';
+  const refLabel = meta?.ref || `CID-${contractId}`;
+  const titleNode = <>{phaseLabel} inspection · {refLabel}</>;
+  const eyebrow = portalToken ? 'Inspection report' : 'Operations › Long-term leases';
+
   if (loading) {
-    return <div className="flex items-center justify-center h-[60vh] text-[#9b9890]"><Loader2 className="animate-spin mr-2" /> Loading inspection…</div>;
+    return (
+      <OsPage>
+        <PageHead eyebrow={eyebrow} title={titleNode} lede="Loading the inspection report…" />
+        <Card pad><div aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+          {[70, 45, 60, 35].map((w, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${w}%` }} />)}
+        </div></Card>
+      </OsPage>
+    );
   }
 
   const reportMeta: ReportMeta = {
@@ -531,192 +592,229 @@ export default function CategoryInspectionPage() {
   // The move-out date stays editable until the inspection is approved (counter-signed).
   const canEditMoveOutDate = phase === 'move_out' && canEditInsp && !counterSigned;
 
+  // Read-only overview figures (same maths the PDF uses).
+  const totals = computeInspectionTotals(doc, phase);
+  const itemPhotoCount = (doc?.categories ?? []).reduce((n, c) => n + c.items.reduce((m, it) => m + (it.itemAttachments?.length ?? 0), 0), 0);
+  const photoCount = (doc?.photos?.length ?? 0) + itemPhotoCount;
+  const showMoney = phase === 'move_out' && !portalToken;
+  const status: { label: string; tone: Tone } = counterSigned
+    ? { label: 'Counter-signed', tone: 'primary' }
+    : tenantSigned ? { label: 'Customer signed — counter-sign', tone: 'amber' }
+    : locked ? { label: 'Submitted — awaiting customer', tone: 'info' }
+    : { label: 'Draft', tone: 'neutral' };
+  const flowCurrent = counterSigned ? 4 : tenantSigned ? 3 : locked ? 2 : 0;
+  const placeLine = [meta?.property, meta?.unitNo ? `Unit ${meta.unitNo}` : '', meta?.tenantName].filter(Boolean).join(' · ');
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 pb-24">
-      {/* Top bar — navigation + the always-available Preview / Download (and Reopen
-          once submitted). The primary Save draft / Submit actions live at the
-          bottom of the page, after the report. */}
-      <div className="flex items-start justify-between gap-4 mb-5">
-        {/* The magic link is a standalone page — there is no app behind it to go
-            "back" to, so it gets the document's name instead of a Back link. */}
-        {portalToken ? (
-          <p className="min-w-0 truncate text-[13.5px] sm:text-base font-bold text-[#1a1916] pt-1.5 sm:pt-2">
-            Inspection Report
-          </p>
-        ) : (
-          <Link href={backHref}
-            className="inline-flex items-center gap-1 min-w-0 text-[12.5px] sm:text-sm text-[#9b9890] hover:text-[#1a1916] pt-1.5 sm:pt-2">
-            <ArrowLeft size={14} className="shrink-0" /> <span className="truncate">{backLabel}</span>
-          </Link>
-        )}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Once the customer has signed, the page IS the preview — offering a
-              Preview button that opens the identical document is noise. */}
+    <OsPage>
+      <PageHead
+        eyebrow={eyebrow}
+        title={titleNode}
+        lede={<>{placeLine ? <>{placeLine}. </> : null}{phase === 'move_out'
+          ? 'Condition of every room and component at handover back, with photos and restoration costs — the evidence behind any deposit deduction.'
+          : 'Condition of every room and component at handover, with photos — the baseline the move-out inspection is compared against.'}</>}
+        actions={<>
+          {/* The magic link is a standalone page — there is no app behind it to go back to. */}
+          {!portalToken && <Btn href={backHref}><ArrowLeft size={13} aria-hidden /> {backLabel}</Btn>}
+          {/* Once the customer has signed, the page IS the preview. */}
           {!tenantSigned && (
-            <button type="button" onClick={() => setPreviewOpen(true)} disabled={!doc}
-              aria-label="Preview" title="Preview"
-              className={TOPBAR_BTN}>
-              <Printer size={15} /> <span className="hidden sm:inline">Preview</span>
-            </button>
+            <Btn onClick={() => setPreviewOpen(true)} disabled={!doc}><Printer size={13} aria-hidden /> Preview</Btn>
           )}
-          <button type="button" onClick={() => handleDownloadPdf(false)} disabled={downloading || !doc}
-            aria-label="Download" title="Download"
-            className={TOPBAR_BTN}>
-            {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} <span className="hidden sm:inline">Download</span>
-          </button>
+          <Btn onClick={() => void handleDownloadPdf(false)} disabled={downloading || !doc}>
+            {downloading ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Download size={13} aria-hidden />} Download PDF
+          </Btn>
           {canEditInsp && locked && !portalToken && (
             // On the portal the inspector cannot reopen — the submitted report is
             // handed to the customer to sign, then the inspector counter-signs below.
-            <button type="button" onClick={handleReopen} disabled={reopening}
-              aria-label="Reopen to edit" title="Reopen to edit"
-              className={TOPBAR_BTN}>
-              {reopening ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
-              <span className="hidden sm:inline">{reopening ? 'Reopening…' : 'Reopen to edit'}</span>
-            </button>
+            <Btn variant="amber" onClick={() => void handleReopen()} disabled={reopening}>
+              {reopening ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <RotateCcw size={13} aria-hidden />} {reopening ? 'Reopening…' : 'Reopen to edit'}
+            </Btn>
           )}
-        </div>
+        </>}
+      />
+
+      <ScopeStrip items={[
+        ...(portalToken ? [{ label: 'Access', value: 'Inspector link' }] : [
+          { label: 'Workspace', value: 'Operations' },
+          { label: 'Vertical', value: 'Long-term leases' },
+        ]),
+        { label: 'Contract', value: refLabel },
+        { label: 'Inspection', value: phaseLabel },
+        { label: 'Status', value: <Pill tone={status.tone}>{status.label}</Pill> },
+        ...(!canEditInsp ? [{ label: 'Access', value: <Pill tone="neutral">View only</Pill> }] : []),
+      ]} />
+
+      {/* Only while the report is waiting on the customer — once they have signed
+          this notice is stale (Reopen is no longer possible). */}
+      {locked && !counterSigned && !tenantSigned && (
+        <Callout tone="warn" title="Locked for editing.">
+          {portalToken
+            ? <>Inspection submitted — the customer signs it from their link, then you counter-sign below. The move-out date can still be adjusted until it is approved.</>
+            : <>Submitted to the customer — the report is locked for editing. Choose <strong>Reopen to edit</strong> to make changes (only possible until the customer signs). The move-out date can still be adjusted until the inspection is approved.</>}
+        </Callout>
+      )}
+      {!canEditInsp && !portalToken && (
+        <Callout tone="info" title="View only.">Filling, submitting and counter-signing inspections needs the “Manage inspections” permission for this landlord.</Callout>
+      )}
+      {error && <Callout tone="bad">{error}</Callout>}
+
+      <div style={{ marginTop: 14 }}>
+        <Kpis>
+          <Kpi k="Categories" v={totals.categories} d="rooms / systems with components" />
+          <Kpi k="Components" v={totals.items} d={`${totals.defective} flagged`} />
+          <Kpi k="Photos" v={photoCount} d={`${doc?.photos?.length ?? 0} report · ${itemPhotoCount} on components`} />
+          {showMoney
+            ? <Kpi k="Est. restoration" v={fmtAed(totals.estCostAed, true)} d="from the restoration list" dark />
+            : <Kpi k="Sign-off" v={status.label.split(' — ')[0]} d={doc?.rpCounterSignedAt ? `counter-signed ${new Date(doc.rpCounterSignedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'both parties sign'} dark />}
+        </Kpis>
       </div>
 
-      {/* Only while the report is waiting on the customer. Once they have signed
-          this notice is stale — it tells you to wait for a signature that has
-          already arrived, and Reopen is no longer possible — so the signed view
-          is just the document plus the counter-signature. */}
-      {locked && !counterSigned && !tenantSigned && (
-        <div className="mb-4 rounded-lg bg-[#fef9ec] border border-[#f3e2b8] text-[#8a6d1a] text-sm px-3 py-2 flex items-center gap-2">
-          <Lock size={14} className="shrink-0" />
-          <span>
-            {portalToken
-              ? <>Inspection submitted — the customer signs it from their link, then you counter-sign below. The move-out date can still be adjusted until it is approved.</>
-              : <>Submitted to the tenant — the report is locked for editing. Choose <strong>Reopen to edit</strong> to make changes (only possible until the tenant signs). The move-out date can still be adjusted until the inspection is approved.</>}
-          </span>
+      <Card title="Sign-off" sub={phase === 'move_in' ? 'The move-in counter-signature activates the tenancy and locks the report.' : 'The signed move-out report is the evidence for the final settlement.'}>
+        <div className="gx-pad">
+          <Flow current={flowCurrent} steps={[
+            { t: 'Fill the report', s: 'conditions, photos, notes' },
+            { t: 'Submit to Tenant', s: locked ? 'submitted' : 'locks the report' },
+            { t: 'Customer signs', s: doc?.tenantSignedAt ? new Date(doc.tenantSignedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'from their link' },
+            { t: 'Counter-sign', s: portalToken ? 'inspection manager' : 'landlord / manager' },
+          ]} />
         </div>
-      )}
-      {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
+      </Card>
 
-      {/* Once the CUSTOMER has signed, the report is final — nothing here is
-          editable and Reopen is gone. Show the finished document exactly as the
-          customer reads it (the same canvas), not the editable workspace chrome;
-          the counter-signature block sits below it. */}
+      {/* Once the CUSTOMER has signed, the report is final — show the finished
+          document exactly as the customer reads it (the same canvas, same
+          max-w-3xl width so it rasterises identically). */}
       {doc && tenantSigned && (
-        // Same container the customer's page uses (`max-w-3xl`), so the document
-        // rasterises to exactly the width — and therefore the look — they see.
-        <div className="max-w-3xl mx-auto">
-          <InspectionInline
-            doc={doc}
-            meta={reportMeta}
-            phase={phase}
-            contractRef={`CID-${contractId}`}
-            inspectionDate={doc.reportGeneratedDate ?? doc.inspectionDate ?? null}
-            moveInDate={doc.moveInDate ?? dates.moveInDate ?? null}
-            moveOutDate={(doc.moveOutDate as string | undefined) ?? dates.moveOutDate ?? null}
-          />
+        <div style={{ marginTop: 14 }}>
+          <div style={{ maxWidth: 768, marginInline: 'auto' }}>
+            <InspectionInline
+              doc={doc}
+              meta={reportMeta}
+              phase={phase}
+              contractRef={`CID-${contractId}`}
+              inspectionDate={doc.reportGeneratedDate ?? doc.inspectionDate ?? null}
+              moveInDate={doc.moveInDate ?? dates.moveInDate ?? null}
+              moveOutDate={(doc.moveOutDate as string | undefined) ?? dates.moveOutDate ?? null}
+            />
+          </div>
         </div>
       )}
 
       {doc && !tenantSigned && (
-        <InspectionReportView
-          doc={doc}
-          meta={reportMeta}
-          phase={phase}
-          audience="rp"
-          dates={{ inspectionDate: doc.reportGeneratedDate ?? doc.inspectionDate ?? null, moveInDate: doc.moveInDate ?? dates.moveInDate ?? null, moveOutDate: dates.moveOutDate ?? null }}
-          editable={!locked && canEditInsp}
-          onPatch={patchItem}
-          onAddCategory={() => setCatPickerOpen(true)}
-          onAddComponent={(sid) => setCompPickerSection(sid)}
-          onRemoveComponent={removeComponent}
-          onRemoveCategory={removeCategory}
-          onAddItemPhotos={handleAddItemPhotos}
-          onRemoveItemPhoto={handleRemoveItemPhoto}
-          uploadingItemId={uploadingItemId}
-          photos={doc.photos ?? []}
-          onAddPhotos={!locked && canEditInsp ? handleAddGeneralPhotos : undefined}
-          onRemovePhoto={!locked && canEditInsp ? handleRemoveGeneralPhoto : undefined}
-          photosUploading={uploadingPhotos}
-          photosProgress={photoProgress}
-          generalNotes={doc.generalNotes ?? ''}
-          onGeneralNotes={setGeneralNotes}
-          onInspectorName={!locked && canEditInsp ? setInspectorName : undefined}
-          onMoveOutDate={canEditMoveOutDate ? handleMoveOutDate : undefined}
-          signatures={{ tenantSig: doc.tenantSig ?? null, tenantSignedAt: doc.tenantSignedAt ?? null, rpSig: doc.rpCounterSig ?? null, rpSignedAt: doc.rpCounterSignedAt ?? null }}
-          hideSignatures={!!portalToken}
-        />
+        <div style={{ marginTop: 14 }}>
+          <InspectionReportView
+            doc={doc}
+            meta={reportMeta}
+            phase={phase}
+            audience="rp"
+            dates={{ inspectionDate: doc.reportGeneratedDate ?? doc.inspectionDate ?? null, moveInDate: doc.moveInDate ?? dates.moveInDate ?? null, moveOutDate: dates.moveOutDate ?? null }}
+            editable={!locked && canEditInsp}
+            onPatch={patchItem}
+            onAddCategory={() => setCatPickerOpen(true)}
+            onAddComponent={(sid) => setCompPickerSection(sid)}
+            onRemoveComponent={removeComponent}
+            onRemoveCategory={removeCategory}
+            onAddItemPhotos={handleAddItemPhotos}
+            onRemoveItemPhoto={handleRemoveItemPhoto}
+            uploadingItemId={uploadingItemId}
+            photos={doc.photos ?? []}
+            onAddPhotos={!locked && canEditInsp ? handleAddGeneralPhotos : undefined}
+            onRemovePhoto={!locked && canEditInsp ? handleRemoveGeneralPhoto : undefined}
+            photosUploading={uploadingPhotos}
+            photosProgress={photoProgress}
+            generalNotes={doc.generalNotes ?? ''}
+            onGeneralNotes={setGeneralNotes}
+            onInspectorName={!locked && canEditInsp ? setInspectorName : undefined}
+            onMoveOutDate={canEditMoveOutDate ? handleMoveOutDate : undefined}
+            signatures={{ tenantSig: doc.tenantSig ?? null, tenantSignedAt: doc.tenantSignedAt ?? null, rpSig: doc.rpCounterSig ?? null, rpSignedAt: doc.rpCounterSignedAt ?? null }}
+            hideSignatures={!!portalToken}
+          />
+        </div>
       )}
 
-      {/* Bottom action bar — the primary Save draft (left) + Submit to Tenant (right),
-          shown after the report so the RP/inspector acts once they've reviewed it. */}
+      {/* Primary Save draft + Submit, after the report so the RP/inspector acts
+          once they've reviewed it. */}
       {canEditInsp && !locked && doc && (
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <button type="button" onClick={handleSave} disabled={saving || submitting}
-            className="inline-flex items-center gap-2 rounded-xl border border-[#2e9f82] text-[#2e9f82] text-sm font-semibold px-5 py-2.5 disabled:opacity-60 hover:bg-[#f0faf6]">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : saved ? <CheckCircle size={16} /> : <Save size={16} />}
-            {saving ? 'Saving…' : saved ? 'Saved' : 'Save draft'}
-          </button>
-          <button type="button" onClick={() => setConfirmSubmit(true)} disabled={submitting}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-5 py-2.5 disabled:opacity-60 hover:bg-[#27896f]">
-            {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-            {submitting ? 'Submitting…' : 'Submit to Tenant'}
-          </button>
+        <div style={{ marginTop: 14 }}>
+          <Card title="Save & submit" sub="Photos save as you add them. Submitting hands the report to the customer to sign and locks it (you can reopen it until they sign).">
+            <div className="gx-pad gx-btn-row" style={{ justifyContent: 'space-between' }}>
+              <Btn onClick={() => void handleSave()} disabled={saving || submitting}>
+                {saving ? <Loader2 size={13} className="animate-spin" aria-hidden /> : saved ? <CheckCircle size={13} aria-hidden /> : <Save size={13} aria-hidden />}
+                {saving ? 'Saving…' : saved ? 'Saved' : 'Save draft'}
+              </Btn>
+              <Btn variant="primary" onClick={() => setConfirmSubmit(true)} disabled={submitting}>
+                {submitting ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Send size={13} aria-hidden />}
+                {submitting ? 'Submitting…' : 'Submit to Tenant'}
+              </Btn>
+            </div>
+          </Card>
         </div>
       )}
 
       {/* Counter-sign the RP side once the customer has signed. Open to the
-          on-site inspector (magic link) AND to the landlord / delegated manager
-          in the dashboard — the contract page sends them here to "counter-sign
-          in the inspection workspace", so the control has to exist in both.
-          Move-in counter-signature activates the tenancy and locks the report. */}
+          on-site inspector (magic link) AND to the landlord / delegated manager in
+          the dashboard — the contract page sends them here to "counter-sign in the
+          inspection workspace". Move-in counter-signature activates the tenancy
+          and locks the report. */}
       {doc && (portalToken || canEditInsp) && (
-        <div className={`mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5${tenantSigned ? ' max-w-3xl mx-auto' : ''}`}>
-          <h3 className="text-sm font-bold text-[#1a1916] mb-3">
-            {portalToken ? 'Inspection Manager Counter-Signature' : 'Your Counter-Signature'}
-          </h3>
-          {counterSigned ? (
-            <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle size={16} /> This inspection has been counter-signed{doc.rpCounterSignedAt ? ` on ${new Date(doc.rpCounterSignedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}.</p>
-          ) : !locked ? (
-            <p className="text-sm text-[#9b9890]">Fill and submit the inspection first, then the customer signs and you counter-sign here.</p>
-          ) : !tenantSigned ? (
-            <p className="text-sm text-[#9b9890]">Submitted — waiting for the customer to sign from their link. You counter-sign once they do.</p>
-          ) : (
-            <SignatureBlock
-              // The RP-side signatory is the person inspecting — never the
-              // customer, so `tenantName` is not a fallback here.
-              signerRole={portalToken ? 'Inspector' : (doc.inspectorRole?.trim() || 'Property Representative')}
-              signerName={doc?.inspectorName?.trim() || 'Inspection Manager'}
-              onBehalfOf="the rental provider"
-              defaultName={doc?.inspectorName?.trim() || ''}
-              termsText={`I confirm the condition recorded in this ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
-              submitLabel="Sign inspection"
-              alreadySigned={false}
-              onSign={handleCounterSign}
-            />
-          )}
+        <div style={{ marginTop: 14, ...(tenantSigned ? { maxWidth: 768, marginInline: 'auto' } : {}) }}>
+          <Card title={portalToken ? 'Inspection Manager Counter-Signature' : 'Your Counter-Signature'}>
+            <div className="gx-pad">
+              {counterSigned ? (
+                <Callout title="Counter-signed.">
+                  This inspection has been counter-signed{doc.rpCounterSignedAt ? ` on ${new Date(doc.rpCounterSignedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}.
+                </Callout>
+              ) : !locked ? (
+                <p style={{ color: 'var(--ms-ink-3)', fontSize: 12.5 }}>Fill and submit the inspection first, then the customer signs and you counter-sign here.</p>
+              ) : !tenantSigned ? (
+                <p style={{ color: 'var(--ms-ink-3)', fontSize: 12.5 }}>Submitted — waiting for the customer to sign from their link. You counter-sign once they do.</p>
+              ) : (
+                <SignatureBlock
+                  // The RP-side signatory is the person inspecting — never the
+                  // customer, so `tenantName` is not a fallback here.
+                  signerRole={portalToken ? 'Inspector' : (doc.inspectorRole?.trim() || 'Property Representative')}
+                  signerName={doc?.inspectorName?.trim() || 'Inspection Manager'}
+                  onBehalfOf="the rental provider"
+                  defaultName={doc?.inspectorName?.trim() || ''}
+                  termsText={`I confirm the condition recorded in this ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
+                  submitLabel="Sign inspection"
+                  alreadySigned={false}
+                  onSign={handleCounterSign}
+                />
+              )}
+            </div>
+          </Card>
         </div>
       )}
 
-      {catPickerOpen && (
-        <AddCategoryPicker
-          existingKeys={new Set((doc?.categories ?? []).map((c) => c.key))}
-          onAdd={addCategory}
-          onClose={() => setCatPickerOpen(false)}
-        />
-      )}
+      {catPickerOpen && <AddCategoryPicker
+        open
+        existingKeys={new Set((doc?.categories ?? []).map((c) => c.key))}
+        onAdd={addCategory}
+        onClose={closeCatPicker}
+      />}
       {compPickerCat && (
         <AddComponentPicker
           cat={compPickerCat}
           priceBook={priceBook}
           onAdd={(name, seedRow, customPriceAed) => addComponent(compPickerCat.sectionId, name, seedRow, customPriceAed)}
-          onClose={() => setCompPickerSection(null)}
+          onClose={closeCompPicker}
         />
       )}
-      {confirmSubmit && (
-        <ConfirmDialog
-          title={`Submit ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection?`}
-          body="The customer will be able to review and sign it, and the report is locked from further editing (you can reopen it until they sign)."
-          confirmLabel="Submit to Tenant"
-          onConfirm={handleSubmit}
-          onCancel={() => setConfirmSubmit(false)}
-        />
-      )}
+      <Modal
+        open={confirmSubmit}
+        onClose={cancelSubmit}
+        width={440}
+        title={`Submit ${phase === 'move_out' ? 'move-out' : 'move-in'} inspection?`}
+        footer={<>
+          <span className="sp" />
+          <Btn onClick={cancelSubmit}>Cancel</Btn>
+          <Btn variant="primary" onClick={() => void handleSubmit()}><Send size={13} aria-hidden /> Submit to Tenant</Btn>
+        </>}
+      >
+        <p style={{ fontSize: 13, color: 'var(--ms-ink-2)', lineHeight: 1.55 }}>
+          The customer will be able to review and sign it, and the report is locked from further editing (you can reopen it until they sign).
+        </p>
+      </Modal>
       {previewOpen && doc && (
         <InspectionPreviewOverlay
           doc={doc}
@@ -728,19 +826,20 @@ export default function CategoryInspectionPage() {
           moveOutDate={(doc.moveOutDate as string | undefined) ?? dates.moveOutDate ?? null}
           onDownload={() => void handleDownloadPdf(false)}
           downloading={downloading}
-          onClose={() => setPreviewOpen(false)}
+          onClose={closePreview}
         />
       )}
-    </div>
+    </OsPage>
   );
 }
 
 /** Preview = the finished report exactly as the CUSTOMER reads it — the same
- *  canvas-rasterised document their portal page renders, in an overlay, rather
- *  than a blob in a new tab behind the browser print dialog. Shown to the
- *  landlord, a delegated manager and the magic-link inspector alike (all three
- *  routes render this one page). Money stays off: this is the customer's copy —
- *  the RP's own copy, with restoration costs, is what Download produces. */
+ *  canvas-rasterised document their portal page renders, in a full-page sheet
+ *  (the customer reads it as a page of its own, `max-w-3xl px-4`, so the canvas
+ *  scales to exactly the width theirs does). Shown to the landlord, a delegated
+ *  manager and the magic-link inspector alike. Money stays off: this is the
+ *  customer's copy — the RP's own copy, with restoration costs, is what Download
+ *  produces. */
 function InspectionPreviewOverlay({
   doc, meta, phase, contractRef, inspectionDate, moveInDate, moveOutDate, onDownload, downloading, onClose,
 }: {
@@ -756,35 +855,24 @@ function InspectionPreviewOverlay({
     return () => window.removeEventListener('keydown', onKey);
   }, [dismiss]);
   return (
-    // Full-page sheet, NOT a modal card: the customer reads the report as a page
-    // of its own (`max-w-3xl px-4`, the page itself scrolling), so the preview
-    // uses the same container — the canvas then scales to exactly the width the
-    // customer's does, at every viewport.
-    <div className="fixed inset-0 z-[70] bg-[#f7f6f3] overflow-y-auto overscroll-contain">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-[#eceae4]">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button type="button" onClick={dismiss} title="Close preview"
-            className="shrink-0 w-9 h-9 rounded-lg border border-[#e8e6e0] text-[#6b6860] flex items-center justify-center hover:border-[#c8c6be]">
-            <ArrowLeft size={17} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-[#1a1916] truncate">
+    <div role="dialog" aria-modal="true" aria-label="Inspection preview"
+      style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'var(--ms-surface-2)', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ms-surface)', borderBottom: '1px solid var(--ms-border)' }}>
+        <div style={{ maxWidth: 768, margin: '0 auto', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="gx-eyebrow">Preview</div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {phase === 'move_out' ? 'Move-out' : 'Move-in'} inspection — {contractRef}
-            </p>
-            <p className="text-[11.5px] text-[#9b9890]">Exactly what the customer sees</p>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Exactly what the customer sees</div>
           </div>
-          <button type="button" onClick={onDownload} disabled={downloading}
-            className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-3.5 py-2 disabled:opacity-60 hover:border-[#c8c6be]">
-            {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-            <span className="hidden sm:inline">Download</span>
-          </button>
-          <button type="button" onClick={dismiss} title="Close"
-            className="shrink-0 w-9 h-9 rounded-lg text-[#6b6860] flex items-center justify-center hover:bg-[#f4f3ef]">
-            <X size={18} />
-          </button>
+          <Btn onClick={dismiss}><ArrowLeft size={13} aria-hidden /> Back to workspace</Btn>
+          <Btn onClick={onDownload} disabled={downloading}>
+            {downloading ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Download size={13} aria-hidden />} Download PDF
+          </Btn>
         </div>
       </div>
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div style={{ maxWidth: 768, margin: '0 auto', padding: '32px 16px' }}>
         <InspectionInline
           doc={doc}
           meta={meta}
@@ -799,70 +887,39 @@ function InspectionPreviewOverlay({
   );
 }
 
-/** App-styled confirmation dialog (replaces the native window.confirm) — a centred
- *  card with a jade primary action, dismissable by backdrop / Cancel. */
-function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel }: {
-  title: string; body: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
-      <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 pt-5 pb-4">
-          <div className="flex items-start gap-3">
-            <span className="shrink-0 w-10 h-10 rounded-full bg-[#f0faf6] text-[#2e9f82] flex items-center justify-center"><Send size={18} /></span>
-            <div>
-              <h2 className="text-base font-bold text-[#1a1916]">{title}</h2>
-              <p className="text-sm text-[#6b6860] mt-1 leading-relaxed">{body}</p>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-3 bg-[#fafaf8] border-t border-[#eceae4]">
-          <button type="button" onClick={onCancel}
-            className="rounded-xl border border-[#e8e6e0] text-[#6b6860] text-sm font-semibold px-4 py-2 hover:border-[#c8c6be]">Cancel</button>
-          <button type="button" onClick={onConfirm}
-            className="rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-4 py-2 hover:bg-[#27896f]">{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Draw-to-sign pad (portal inspector counter-signature). Emits a PNG data-URL on
- *  each stroke so the parent can enable the Counter-sign button; sizes its backing
- *  store to the rendered box (× DPR) so strokes stay crisp and un-stretched. */
 /* ─── Restoration-list pickers ─────────────────────────────────────────────
  * The move-out inspection starts from the move-in report (or blank). These two
  * modals let the RP/manager add categories & sub-category/components one by one
- * from the standard restoration catalog (or a custom one). */
+ * from the standard restoration catalog (or a custom one). Both stay open so
+ * several can be added; "Done" closes. */
 
-function ModalShell({ title, subtitle, onClose, children }: {
-  title: string; subtitle?: string; onClose: () => void; children: ReactNode;
+function PickerModal({ open = true, title, subtitle, onClose, children }: {
+  open?: boolean; title: string; subtitle?: string; onClose: () => void; children: ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto p-4 sm:p-8" onClick={onClose}>
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl my-2" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-[#eceae4] sticky top-0 bg-white rounded-t-2xl z-10">
-          <div className="min-w-0">
-            <h2 className="text-base font-bold text-[#1a1916]">{title}</h2>
-            {subtitle && <p className="text-xs text-[#9b9890] mt-0.5">{subtitle}</p>}
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
-        </div>
-        <div className="px-5 py-4">{children}</div>
-        <div className="flex items-center justify-end px-5 py-3 border-t border-[#eceae4] sticky bottom-0 bg-white rounded-b-2xl">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]">Done</button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      open={open}
+      onClose={onClose}
+      width={560}
+      title={<>{title}{subtitle && <span style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: 'var(--ms-ink-3)', marginTop: 2 }}>{subtitle}</span>}</>}
+      footer={<><span className="sp" /><Btn variant="primary" onClick={onClose}>Done</Btn></>}
+    >
+      {children}
+    </Modal>
   );
 }
 
-const CUSTOM_INPUT = 'flex-1 min-w-0 px-3 py-2 rounded-lg border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#2e9f82]';
-const CUSTOM_ADD = 'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-[#cfe8df] text-sm font-medium text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-50';
+const pickBtn = (done: boolean): CSSProperties => ({
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left',
+  padding: '8px 11px', borderRadius: 8, fontSize: 12.5, cursor: done ? 'default' : 'pointer',
+  border: `1px solid ${done ? 'var(--ms-primary-lighter)' : 'var(--ms-border-strong)'}`,
+  background: done ? 'var(--ms-tint-pale)' : 'var(--ms-surface)',
+});
 
 /** Pick a category to add. Standard categories already in the report are hidden;
  *  a custom category is always available. Stays open so several can be added. */
-function AddCategoryPicker({ existingKeys, onAdd, onClose }: {
+function AddCategoryPicker({ open, existingKeys, onAdd, onClose }: {
+  open: boolean;
   existingKeys: Set<string>;
   onAdd: (def: { key: CategoryKey; label: string; unitLabel: string; subCategories?: string[] }) => void;
   onClose: () => void;
@@ -879,27 +936,27 @@ function AddCategoryPicker({ existingKeys, onAdd, onClose }: {
   };
 
   return (
-    <ModalShell title="Add category" subtitle="From the restoration list, or a custom one" onClose={onClose}>
-      <div className="grid grid-cols-2 gap-2 mb-4">
+    <PickerModal open={open} title="Add category" subtitle="From the restoration list, or a custom one" onClose={onClose}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 7, marginBottom: 14 }}>
         {available.map((c) => {
           const done = added.has(c.key);
           return (
-            <button key={c.key} disabled={done}
-              onClick={() => { onAdd({ key: c.key, label: c.label, unitLabel: c.unitLabel, subCategories: c.subCategories }); setAdded((s) => new Set(s).add(c.key)); }}
-              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-sm text-left ${done ? 'border-[#cfe8df] bg-[#f0faf6] text-[#2e9f82]' : 'border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] hover:bg-[#fafaf8]'}`}>
-              <span className="truncate">{c.label}</span>
-              {done ? <CheckCircle size={15} className="shrink-0" /> : <Plus size={15} className="shrink-0 text-[#9b9890]" />}
+            <button key={c.key} type="button" disabled={done} style={pickBtn(done)}
+              onClick={() => { onAdd({ key: c.key, label: c.label, unitLabel: c.unitLabel, subCategories: c.subCategories }); setAdded((s) => new Set(s).add(c.key)); }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.label}</span>
+              {done ? <Pill tone="primary">Added</Pill> : <span className="gx-btn xs" aria-hidden>Add</span>}
             </button>
           );
         })}
-        {available.length === 0 && <p className="col-span-2 text-xs text-[#9b9890] px-1 py-2">All standard categories are already in the report — add a custom one below.</p>}
+        {available.length === 0 && <p style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--ms-ink-3)' }}>All standard categories are already in the report — add a custom one below.</p>}
       </div>
-      <div className="flex items-center gap-2 border-t border-[#f0efe9] pt-3">
-        <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
-          placeholder="Custom category name…" className={CUSTOM_INPUT} />
-        <button onClick={addCustom} disabled={!custom.trim()} className={CUSTOM_ADD}><Plus size={14} /> Add</button>
+      <div className="gx-lb">Custom category</div>
+      <div className="gx-btn-row" style={{ flexWrap: 'nowrap' }}>
+        <input className="gx-inp" style={{ flex: 1, minWidth: 0 }} value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+          placeholder="Custom category name…" aria-label="Custom category name" />
+        <Btn onClick={addCustom} disabled={!custom.trim()}><Plus size={13} aria-hidden /> Add category</Btn>
       </div>
-    </ModalShell>
+    </PickerModal>
   );
 }
 
@@ -953,8 +1010,8 @@ function AddComponentPicker({ cat, priceBook, onAdd, onClose }: {
   };
 
   return (
-    <ModalShell title={`Add to ${cat.label || 'category'}`} subtitle="From the restoration list, or a custom component" onClose={onClose}>
-      <div className="space-y-1.5 mb-4 max-h-[46vh] overflow-y-auto">
+    <PickerModal title={`Add to ${cat.label || 'category'}`} subtitle="From the restoration list, or a custom component" onClose={onClose}>
+      <div style={{ display: 'grid', gap: 6, marginBottom: 14, maxHeight: '46vh', overflowY: 'auto' }}>
         {rows.map((row) => {
           const rowKey = `${row.name}|${row.subCategory ?? ''}`;
           // React key includes the variant so two variants of one component
@@ -963,40 +1020,35 @@ function AddComponentPicker({ cat, priceBook, onAdd, onClose }: {
           const done = added.has(rowKey) || usedNames.has(rowKey);
           const p = price(row);
           return (
-            <button key={reactKey} disabled={done}
-              onClick={() => { onAdd(row.name, row); setAdded((s) => new Set(s).add(rowKey)); }}
-              className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-sm text-left ${done ? 'border-[#cfe8df] bg-[#f0faf6]' : 'border-[#e8e6e0] hover:border-[#2e9f82] hover:bg-[#fafaf8]'}`}>
-              <span className="min-w-0">
-                <span className="text-[#1a1916]">{row.name}</span>
-                {row.subCategory && <span className="text-xs text-[#9b9890]"> · {row.subCategory}</span>}
+            <button key={reactKey} type="button" disabled={done} style={pickBtn(done)}
+              onClick={() => { onAdd(row.name, row); setAdded((s) => new Set(s).add(rowKey)); }}>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ color: 'var(--ms-ink)' }}>{row.name}</span>
+                {row.subCategory && <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}> · {row.subCategory}</span>}
               </span>
-              <span className="flex items-center gap-2 shrink-0">
-                {p != null && <span className="text-xs text-[#6b6860] tabular-nums">AED {AED(p)}/{row.unitOfMeasure}</span>}
-                {done ? <CheckCircle size={15} className="text-[#2e9f82]" /> : <Plus size={15} className="text-[#9b9890]" />}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                {p != null && <span style={{ fontSize: 11.5, color: 'var(--ms-ink-2)', fontVariantNumeric: 'tabular-nums' }}>AED {AED(p)}/{row.unitOfMeasure}</span>}
+                {done ? <Pill tone="primary">Added</Pill> : <span className="gx-btn xs" aria-hidden>Add</span>}
               </span>
             </button>
           );
         })}
-        {rows.length === 0 && <p className="text-xs text-[#9b9890] px-1 py-2">No standard components for this category — add a custom one below.</p>}
+        {rows.length === 0 && <p style={{ fontSize: 12, color: 'var(--ms-ink-3)' }}>No standard components for this category — add a custom one below.</p>}
       </div>
-      <div className="border-t border-[#f0efe9] pt-3">
-        <div className="flex items-center gap-2">
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
-            placeholder="Custom component name…" className={CUSTOM_INPUT} />
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[11px] text-[#9b9890]">AED</span>
-            <input type="number" min={0} step={0.01} value={customPrice}
-              onChange={(e) => setCustomPrice(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
-              placeholder="Price"
-              className="w-20 px-2 py-2 rounded-lg border border-[#e8e6e0] text-sm text-right tabular-nums focus:outline-none focus:border-[#2e9f82]" />
-          </div>
-          <button onClick={addCustom} disabled={!custom.trim() || priceInvalid} className={CUSTOM_ADD}><Plus size={14} /> Add</button>
-        </div>
-        <p className="text-[11px] text-[#9b9890] mt-1.5">
-          {priceInvalid ? <span className="text-red-600">Enter a valid price (0 or more).</span>
-            : 'Set a price so the rate is saved with the report. Leave blank to add without a rate.'}
-        </p>
+      <div className="gx-lb">Custom component</div>
+      <div className="gx-btn-row" style={{ flexWrap: 'nowrap' }}>
+        <input className="gx-inp" style={{ flex: 1, minWidth: 0 }} value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+          placeholder="Custom component name…" aria-label="Custom component name" />
+        <span style={{ fontSize: 11, color: 'var(--ms-ink-3)' }}>AED</span>
+        <input className="gx-inp" type="number" min={0} step={0.01} value={customPrice} aria-label="Custom component price (AED)"
+          onChange={(e) => setCustomPrice(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addCustom(); }}
+          placeholder="Price" style={{ width: 90, textAlign: 'right' }} />
+        <Btn onClick={addCustom} disabled={!custom.trim() || priceInvalid}><Plus size={13} aria-hidden /> Add component</Btn>
       </div>
-    </ModalShell>
+      <div className="gx-hint" style={{ marginTop: 6 }}>
+        {priceInvalid ? <span style={{ color: 'var(--ms-danger)' }}>Enter a valid price (0 or more).</span>
+          : 'Set a price so the rate is saved with the report. Leave blank to add without a rate.'}
+      </div>
+    </PickerModal>
   );
 }

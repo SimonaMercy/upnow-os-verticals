@@ -18,8 +18,8 @@ import {
   type ContactRelationship, type CustomerContact, type Rp,
 } from '@/lib/customerContactsApi';
 
-const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-1.5 text-sm text-[#1a1916] focus:outline-none focus:border-[#2e9f82]';
-const LABEL = 'block text-xs font-medium text-[#6b6860] mb-1';
+const INPUT = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-1.5 text-sm text-[#14201a] focus:outline-none focus:border-[#047246]';
+const LABEL = 'block text-xs font-medium text-[#5f6b63] mb-1';
 type Draft = { id: number | null; name: string; relationship: ContactRelationship | ''; email: string; phone: string };
 const EMPTY: Draft = { id: null, name: '', relationship: '', email: '', phone: '' };
 
@@ -71,24 +71,24 @@ export function CustomerContactsCard({ rp, tenantId }: {
   // same label style as that strip, each contact one small chip.
   return (
     <div className="mt-4 pt-4 border-t border-[#eeece6]">
-      <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold" title="Emails and WhatsApp messages from these are filed under this customer. The contract shows the primary email and phone only.">
+      <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold" title="Emails and WhatsApp messages from these are filed under this customer. The contract shows the primary email and phone only.">
         Other contacts <span className="normal-case tracking-normal font-normal">· link conversations only, not on the contract</span>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {items.map((c) => {
           const text = [c.name, c.email, c.phone].filter(Boolean).join(' · ');
           return (
-            <span key={c.id} title={trail(c)} className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-[#e8e6e0] bg-[#fbfaf8] pl-1 pr-1 py-0.5 text-xs text-[#1a1916]">
+            <span key={c.id} title={trail(c)} className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-[#e4e9e5] bg-[#fbfaf8] pl-1 pr-1 py-0.5 text-xs text-[#14201a]">
               <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full px-2 py-0.5 text-[#1a7a5a] bg-[#eef9f4] shrink-0">{relationshipLabel(c.relationship)}</span>
               {canEdit ? (
                 <button type="button" disabled={busy} onClick={() => { setDraft({ id: c.id, name: c.name ?? '', relationship: (c.relationship as ContactRelationship | null) ?? '', email: c.email ?? '', phone: c.phone ?? '' }); setError(null); }} className="truncate hover:underline cursor-pointer" aria-label={`Edit ${text}`}>{text}</button>
               ) : <span className="truncate">{text}</span>}
-              {canEdit && <button type="button" disabled={busy} aria-label="Remove contact" onClick={() => void remove(c)} className="p-1 rounded-full text-[#9b9890] hover:bg-red-50 hover:text-[#b42318] cursor-pointer disabled:opacity-50 shrink-0"><Trash2 size={11} /></button>}
+              {canEdit && <button type="button" disabled={busy} aria-label="Remove contact" onClick={() => void remove(c)} className="p-1 rounded-full text-[#8a948d] hover:bg-red-50 hover:text-[#b42318] cursor-pointer disabled:opacity-50 shrink-0"><Trash2 size={11} /></button>}
               {!canEdit && <span className="w-1" />}
             </span>
           );
         })}
-        {items.length === 0 && !canEdit && <span className="text-sm text-[#9b9890]">None</span>}
+        {items.length === 0 && !canEdit && <span className="text-sm text-[#8a948d]">None</span>}
         {canEdit && !draft && (
           <button type="button" onClick={() => { setDraft(EMPTY); setError(null); }} className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#cfe9df] px-2.5 py-1 text-xs font-medium text-[#1a7a5a] hover:bg-[#eef9f4] cursor-pointer">
             <Plus size={12} /> Add email or phone
@@ -111,9 +111,9 @@ export function CustomerContactsCard({ rp, tenantId }: {
             <div><label className={LABEL} htmlFor="cc-phone">Phone / WhatsApp</label><input id="cc-phone" type="tel" className={`${INPUT} tabular-nums`} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="+971 5x xxx xxxx" /></div>
           </div>
           <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">{busy && <Loader2 size={13} className="animate-spin" />} Save</button>
-            <button type="button" disabled={busy} onClick={() => { setDraft(null); setError(null); }} className="px-4 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#2b2a27] hover:bg-[#f4f3ef] cursor-pointer">Cancel</button>
-            <span className="text-[11px] text-[#9b9890]">Email, phone, or both — existing conversations on them move to this customer.</span>
+            <button type="button" disabled={busy} onClick={() => void save()} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">{busy && <Loader2 size={13} className="animate-spin" />} Save</button>
+            <button type="button" disabled={busy} onClick={() => { setDraft(null); setError(null); }} className="px-4 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#2b2a27] hover:bg-[#eef1ef] cursor-pointer">Cancel</button>
+            <span className="text-[11px] text-[#8a948d]">Email, phone, or both — existing conversations on them move to this customer.</span>
           </div>
         </div>
       )}

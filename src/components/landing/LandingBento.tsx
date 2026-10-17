@@ -5,10 +5,10 @@ const FEATURES = [
     Icon: Zap,
     title: 'Instant booking',
     desc: 'Book a verified professional in minutes. Real-time availability, no waiting for callbacks.',
-    accent: '#2e9f82',
-    bg: '#f0faf6',
-    border: '#d8f2e8',
-    iconBg: '#d8f2e8',
+    accent: '#047246',
+    bg: '#eef7f2',
+    border: '#d8efe3',
+    iconBg: '#d8efe3',
     span: 7,
     tags: ['AC Service', 'Cleaning', 'Plumbing'],
   },
@@ -36,10 +36,10 @@ const FEATURES = [
     Icon: Star,
     title: '4.9★ Average Rating',
     desc: 'Verified reviews from 10,000+ completed jobs.',
-    accent: '#2e9f82',
-    bg: '#f0faf6',
-    border: '#d8f2e8',
-    iconBg: '#d8f2e8',
+    accent: '#047246',
+    bg: '#eef7f2',
+    border: '#d8efe3',
+    iconBg: '#d8efe3',
     span: 4,
   },
   {
@@ -59,8 +59,8 @@ export function LandingBento() {
     <section style={{ background: '#ffffff', paddingBlock: 80 }}>
       <div className="container">
         <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#2e9f82', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>Why UpNow</p>
-          <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#1a1916', letterSpacing: '-0.025em', margin: 0, lineHeight: 1.1 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: '#047246', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>Why UpNow</p>
+          <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#14201a', letterSpacing: '-0.025em', margin: 0, lineHeight: 1.1 }}>
             Built differently.
           </h2>
         </div>
@@ -77,8 +77,8 @@ export function LandingBento() {
                 <Icon size={22} color={accent} strokeWidth={1.8} aria-hidden />
               </div>
               <div>
-                <h3 style={{ fontSize: 17, fontWeight: 800, color: '#1a1916', margin: '0 0 6px', letterSpacing: '-0.015em' }}>{title}</h3>
-                <p style={{ fontSize: 13, color: '#6b6860', lineHeight: 1.6, margin: 0 }}>{desc}</p>
+                <h3 style={{ fontSize: 17, fontWeight: 800, color: '#14201a', margin: '0 0 6px', letterSpacing: '-0.015em' }}>{title}</h3>
+                <p style={{ fontSize: 13, color: '#5f6b63', lineHeight: 1.6, margin: 0 }}>{desc}</p>
               </div>
               {tags && (
                 <div style={{ marginTop: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>

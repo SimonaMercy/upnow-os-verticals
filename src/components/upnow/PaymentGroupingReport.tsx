@@ -523,14 +523,14 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
 
   const header = (
     <div className="mb-5">
-      <Link href={backHref} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
-      <h1 className="text-2xl font-bold text-[#1a1916]">Payment Grouping</h1>
-      <p className="text-sm text-[#6b6860] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Every payment counts once, in the period its cheque falls due — the same basis as Cash Management — so a quarter can be used as a filing period. Session-only; use Print to export.</p>
+      <Link href={backHref} className="text-sm text-[#047246] font-medium flex items-center gap-1 mb-3 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
+      <h1 className="text-2xl font-bold text-[#14201a]">Payment Grouping</h1>
+      <p className="text-sm text-[#5f6b63] mt-1">Build your own statement — drag payment types between categories you rename, add or remove. Grouped like the contract page: Rental Income, Security Deposit, Management Fee and Third Party. Every payment counts once, in the period its cheque falls due — the same basis as Cash Management — so a quarter can be used as a filing period. Session-only; use Print to export.</p>
       <BasisNote slug="payment-grouping" className="mt-1.5 max-w-3xl" />
     </div>
   );
 
-  if (loading) return <div className="p-6">{header}<div className="text-sm text-[#9b9890] flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading payments…</div></div>;
+  if (loading) return <div className="p-6">{header}<div className="text-sm text-[#8a948d] flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading payments…</div></div>;
   if (error) return <div className="p-6">{header}<div className="text-sm text-[#b91c1c]">{error}</div></div>;
 
   return (
@@ -539,24 +539,24 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-5 print:hidden">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#6b6860]">Year</span>
+          <span className="text-xs font-semibold text-[#5f6b63]">Year</span>
           {/* Choosing a year clears any custom date window (they're exclusive). */}
           <select value={dateActive ? 'all' : year} onChange={e => { setYear(e.target.value); setFrom(''); setTo(''); }}
-            className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
+            className="text-sm border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#047246]">
             <option value="all">All years</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#6b6860]">Date</span>
+          <span className="text-xs font-semibold text-[#5f6b63]">Date</span>
           {/* Setting a range overrides the Year filter. */}
           <DateRangePicker from={from} to={to}
             onChange={(f, t) => { setFrom(f); setTo(t); if (f || t) setYear('all'); }} />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#6b6860]">Lease Type</span>
+          <span className="text-xs font-semibold text-[#5f6b63]">Lease Type</span>
           <select value={ownership} onChange={e => setOwnership(e.target.value as typeof ownership)}
-            className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82]">
+            className="text-sm border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#047246]">
             <option value="all">All lease types</option>
             <option value="direct">Own Property</option>
             <option value="sub">Sub-lease</option>
@@ -564,25 +564,25 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#6b6860]">Property</span>
+          <span className="text-xs font-semibold text-[#5f6b63]">Property</span>
           <select value={building} onChange={e => setBuilding(e.target.value)}
-            className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#2e9f82] max-w-[220px]">
+            className="text-sm border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:border-[#047246] max-w-[220px]">
             <option value="all">All properties</option>
             {buildings.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-[#9b9890]">Drag a card between categories to regroup.</span>
+          <span className="text-xs text-[#8a948d]">Drag a card between categories to regroup.</span>
           <button type="button" onClick={reset}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] cursor-pointer">
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#f7f6f2] cursor-pointer">
             <RotateCcw size={13} /> Reset
           </button>
           <button type="button" onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] cursor-pointer">
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#f7f6f2] cursor-pointer">
             <Printer size={13} /> Print
           </button>
           <button type="button" onClick={exportExcel} disabled={exporting}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">
             {exporting ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />} Excel (detailed)
           </button>
         </div>
@@ -614,17 +614,17 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           and on the print-out: this report used to total these rows, so anyone
           comparing against an earlier statement needs to see what moved. */}
       {excludedRows.length > 0 && (
-        <div className="mb-4 rounded-xl border border-[#e8e6e0] bg-[#f7f6f3] px-4 py-3">
-          <p className="text-sm font-semibold text-[#6b6860]">
+        <div className="mb-4 rounded-xl border border-[#e4e9e5] bg-[#f7f6f3] px-4 py-3">
+          <p className="text-sm font-semibold text-[#5f6b63]">
             {excludedRows.length} payment{excludedRows.length !== 1 ? 's' : ''} in this period ({fmtAed(excludedTotal)}) {excludedRows.length !== 1 ? 'are' : 'is'} not counted below
           </p>
-          <p className="text-xs text-[#6b6860] mt-1">
+          <p className="text-xs text-[#5f6b63] mt-1">
             A cancelled cheque was voided and never collected. A bounced cheque
             that was made good, and a cheque the customer swapped, are already
             represented by their replacement, which IS counted — including both
             would state the same money twice.
           </p>
-          <ul className="mt-2 text-xs text-[#6b6860] space-y-0.5">
+          <ul className="mt-2 text-xs text-[#5f6b63] space-y-0.5">
             {excludedRows.map(d => (
               <li key={d.id}>
                 {d.contractRef ?? '—'} · {d.building ?? '—'} {d.unit ?? ''} · {itemLabel(itemKeyOf(d))} · {fmtAed(Number(d.amount) || 0)}
@@ -640,10 +640,10 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
       {/* Grand total banner */}
       <div className="mb-5 rounded-2xl bg-white border border-[#eeece6] px-5 py-4 flex items-baseline justify-between shadow-sm">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Total · {periodLabel}</p>
-          <p className="text-2xl font-bold text-[#1a1916] mt-0.5">{fmtAed(grandTotal)}</p>
+          <p className="text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold">Total · {periodLabel}</p>
+          <p className="text-2xl font-bold text-[#14201a] mt-0.5">{fmtAed(grandTotal)}</p>
         </div>
-        <p className="text-xs text-[#9b9890]">{items.length} payment type{items.length !== 1 ? 's' : ''} across {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}</p>
+        <p className="text-xs text-[#8a948d]">{items.length} payment type{items.length !== 1 ? 's' : ''} across {categories.length} categor{categories.length !== 1 ? 'ies' : 'y'}</p>
       </div>
 
       {/* Category grid */}
@@ -656,23 +656,23 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
               onDragOver={e => { e.preventDefault(); setDropCat(cat.id); }}
               onDragLeave={() => setDropCat(c => (c === cat.id ? null : c))}
               onDrop={() => onDrop(cat.id)}
-              className={`rounded-2xl border bg-white shadow-sm overflow-hidden transition-colors ${active ? 'border-[#2e9f82] ring-2 ring-[#2e9f82]/30' : 'border-[#eeece6]'}`}>
+              className={`rounded-2xl border bg-white shadow-sm overflow-hidden transition-colors ${active ? 'border-[#047246] ring-2 ring-[#047246]/30' : 'border-[#eeece6]'}`}>
               {/* Category header */}
-              <div className="px-4 py-3 border-b border-[#f1efe9] bg-[#fafaf8] flex items-center gap-2">
+              <div className="px-4 py-3 border-b border-[#f1efe9] bg-[#f6f8f6] flex items-center gap-2">
                 {renaming === cat.id ? (
                   <>
                     <input autoFocus value={renameVal} onChange={e => setRenameVal(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') renameCategory(cat.id); if (e.key === 'Escape') setRenaming(null); }}
-                      className="flex-1 text-sm font-bold border border-[#e8e6e0] rounded-md px-2 py-1 focus:outline-none focus:border-[#2e9f82]" />
-                    <button type="button" onClick={() => renameCategory(cat.id)} className="text-[#2e9f82] cursor-pointer"><Check size={15} /></button>
-                    <button type="button" onClick={() => setRenaming(null)} className="text-[#9b9890] cursor-pointer"><X size={15} /></button>
+                      className="flex-1 text-sm font-bold border border-[#e4e9e5] rounded-md px-2 py-1 focus:outline-none focus:border-[#047246]" />
+                    <button type="button" onClick={() => renameCategory(cat.id)} className="text-[#047246] cursor-pointer"><Check size={15} /></button>
+                    <button type="button" onClick={() => setRenaming(null)} className="text-[#8a948d] cursor-pointer"><X size={15} /></button>
                   </>
                 ) : (
                   <>
-                    <span className="text-sm font-bold text-[#1a1916] flex-1 truncate">{cat.name}</span>
+                    <span className="text-sm font-bold text-[#14201a] flex-1 truncate">{cat.name}</span>
                     <span className="text-sm font-bold text-[#1a7a5a] tabular-nums">{fmtAed(catTotal(cat.id))}</span>
                     <button type="button" title="Rename" onClick={() => { setRenaming(cat.id); setRenameVal(cat.name); }}
-                      className="text-[#c5c3bc] hover:text-[#2e9f82] cursor-pointer print:hidden"><Pencil size={13} /></button>
+                      className="text-[#c5c3bc] hover:text-[#047246] cursor-pointer print:hidden"><Pencil size={13} /></button>
                     {categories.length > 1 && (
                       <button type="button" title="Delete category" onClick={() => deleteCategory(cat.id)}
                         className="text-[#c5c3bc] hover:text-[#b91c1c] cursor-pointer print:hidden"><X size={14} /></button>
@@ -690,10 +690,10 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
                     onDragEnd={() => { setDragItem(null); setDropCat(null); }}
                     onClick={() => setDetail(it)}
                     title="See the transactions behind this total"
-                    className={`flex items-center gap-2 rounded-xl border border-[#eeece6] bg-[#fcfbf8] px-3 py-2 cursor-pointer hover:border-[#2e9f82]/50 hover:bg-[#f7fdfb] ${dragItem === it ? 'opacity-40' : ''}`}>
+                    className={`flex items-center gap-2 rounded-xl border border-[#eeece6] bg-[#fcfbf8] px-3 py-2 cursor-pointer hover:border-[#047246]/50 hover:bg-[#f7fdfb] ${dragItem === it ? 'opacity-40' : ''}`}>
                     <GripVertical size={14} className="text-[#c5c3bc] shrink-0 cursor-grab active:cursor-grabbing print:hidden" onClick={e => e.stopPropagation()} />
-                    <span className="text-[13px] font-medium text-[#1a1916] flex-1 truncate">{itemLabel(it)}</span>
-                    <span className="text-[13px] font-semibold text-[#3d3b35] tabular-nums">{fmtAed(itemTotals[it] ?? 0)}</span>
+                    <span className="text-[13px] font-medium text-[#14201a] flex-1 truncate">{itemLabel(it)}</span>
+                    <span className="text-[13px] font-semibold text-[#46534c] tabular-nums">{fmtAed(itemTotals[it] ?? 0)}</span>
                   </div>
                 ))}
               </div>
@@ -707,15 +707,15 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
             <div className="p-4 w-full">
               <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addCategory(); if (e.key === 'Escape') setNewCatOpen(false); }}
-                placeholder="Category name" className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+                placeholder="Category name" className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
               <div className="flex gap-2 mt-2">
-                <button type="button" onClick={addCategory} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white cursor-pointer">Add</button>
-                <button type="button" onClick={() => { setNewCatOpen(false); setNewCatName(''); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg text-[#6b6860] cursor-pointer">Cancel</button>
+                <button type="button" onClick={addCategory} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#047246] text-white cursor-pointer">Add</button>
+                <button type="button" onClick={() => { setNewCatOpen(false); setNewCatName(''); }} className="text-xs font-semibold px-3 py-1.5 rounded-lg text-[#5f6b63] cursor-pointer">Cancel</button>
               </div>
             </div>
           ) : (
             <button type="button" onClick={() => setNewCatOpen(true)}
-              className="inline-flex items-center gap-2 text-sm font-semibold text-[#6b6860] hover:text-[#2e9f82] cursor-pointer">
+              className="inline-flex items-center gap-2 text-sm font-semibold text-[#5f6b63] hover:text-[#047246] cursor-pointer">
               <FolderPlus size={16} /> Add category
             </button>
           )}
@@ -728,20 +728,20 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-[#1a1916]">{itemLabel(detail)} <span className="text-[#9b9890] font-medium">· {periodLabel}</span></h3>
-                <p className="text-xs text-[#6b6860] mt-0.5">
+                <h3 className="text-sm font-bold text-[#14201a]">{itemLabel(detail)} <span className="text-[#8a948d] font-medium">· {periodLabel}</span></h3>
+                <p className="text-xs text-[#5f6b63] mt-0.5">
                   {detailRows.length} transaction{detailRows.length === 1 ? '' : 's'} · {fmtAed(detailRows.reduce((s, e) => s + e.amount, 0))}
                 </p>
               </div>
-              <button onClick={() => setDetail(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+              <button onClick={() => setDetail(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#8a948d] hover:bg-[#eef1ef] hover:text-[#14201a]">
                 <X size={15} />
               </button>
             </div>
             {detailRows.length === 0 ? (
-              <p className="px-5 py-10 text-sm text-[#9b9890] text-center">No transactions in this period.</p>
+              <p className="px-5 py-10 text-sm text-[#8a948d] text-center">No transactions in this period.</p>
             ) : (
               <table className="w-full text-xs">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-[57px]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-[57px]">
                   <tr>
                     <th className="px-4 py-2 text-left font-semibold">Contract</th>
                     <th className="px-3 py-2 text-left font-semibold">Unit</th>
@@ -756,22 +756,22 @@ export function PaymentGroupingReport({ backHref = '/rental-provider/dashboard/r
                   {detailRows.map(({ row: d, amount, note }, idx) => {
                     const cid = d.contractRef ? /CID-(\d+)/.exec(d.contractRef)?.[1] : null;
                     return (
-                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                      <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                         <td className="px-4 py-2 text-left">
                           {cid ? (
-                            <Link href={`/rental-provider/dashboard/contracts/${cid}/v2`} className="font-medium text-[#2e9f82] hover:underline">
+                            <Link href={`/rental-provider/dashboard/contracts/${cid}/v2`} className="font-medium text-[#047246] hover:underline">
                               {d.contractRef}
                             </Link>
                           ) : (d.contractRef ?? d.depositRef ?? '—')}
                         </td>
-                        <td className="px-3 py-2 text-left text-[#1a1916]">{d.unit ?? '—'}</td>
-                        <td className="px-3 py-2 text-left text-[#1a1916]">{d.tenant ?? '—'}</td>
-                        <td className="px-3 py-2 text-left text-[#6b6860]">{d.building ?? '—'}</td>
-                        <td className="px-3 py-2 text-left text-[#6b6860] tabular-nums">{(d.transactionDate ?? d.recordedDate ?? '—').slice(0, 10)}</td>
-                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">
+                        <td className="px-3 py-2 text-left text-[#14201a]">{d.unit ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#14201a]">{d.tenant ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#5f6b63]">{d.building ?? '—'}</td>
+                        <td className="px-3 py-2 text-left text-[#5f6b63] tabular-nums">{(d.transactionDate ?? d.recordedDate ?? '—').slice(0, 10)}</td>
+                        <td className="px-3 py-2 text-left text-[#5f6b63] capitalize">
                           {note ?? d.status ?? '—'}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-[#1a1916]">{fmtAed(amount)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums font-semibold text-[#14201a]">{fmtAed(amount)}</td>
                       </tr>
                     );
                   })}

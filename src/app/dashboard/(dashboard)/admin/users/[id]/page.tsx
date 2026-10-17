@@ -289,8 +289,8 @@ const ROW = 'rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-3';
 const ROW_STYLE = { border: '1px solid var(--color-base-200)', backgroundColor: '#fff' };
 
 // ── Charts (recharts) — palette/conventions shared with the admin dashboard ──
-const CHART = { teal: '#2e9f82', amber: '#d97706', red: '#dc2626', blue: '#2563eb', purple: '#7c3aed', gray: '#d4d2cc' };
-const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
+const CHART = { teal: '#047246', amber: '#d97706', red: '#dc2626', blue: '#2563eb', purple: '#7c3aed', gray: '#d4d2cc' };
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e4e9e5', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
 // Millions collapse to "19M" rather than "19000K": a portfolio's cleared-rent
 // axis runs to eight figures, and the K form overflows the 38px axis gutter and
 // renders clipped ("0000K").
@@ -307,7 +307,7 @@ const leaseStatusColor: Record<string, string> = {
  * rather than a drop shadow. Fifteen cards each carrying their own shadow is
  * what made this page read as noise instead of as a set of sections.
  */
-const CARD = 'bg-white rounded-2xl border border-[#e8e6e0] p-4';
+const CARD = 'bg-white rounded-2xl border border-[#e4e9e5] p-4';
 
 /**
  * Section divider, lifted from the Pulse dashboard: a numbered category label
@@ -319,7 +319,7 @@ function SectionHead({ no, q, id }: { no: string; q: string; id: string }) {
   return (
     <div id={id} className="flex items-baseline gap-3 mt-8 mb-3 pt-4 border-t border-[#e0ded8] scroll-mt-20">
       <span className="text-[10px] font-bold uppercase tracking-wider text-[#1e5fae]">{no}</span>
-      <h2 className="text-[15px] font-bold text-[#1a1916]">{q}</h2>
+      <h2 className="text-[15px] font-bold text-[#14201a]">{q}</h2>
     </div>
   );
 }
@@ -327,8 +327,8 @@ function SectionHead({ no, q, id }: { no: string; q: string; id: string }) {
 function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
     <div className={CARD}>
-      <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5">{sub}</p>}
+      <h3 className="text-sm font-bold text-[#14201a]">{title}</h3>
+      {sub && <p className="text-[11px] text-[#8a948d] mt-0.5">{sub}</p>}
       <div className="mt-2">{children}</div>
     </div>
   );
@@ -349,18 +349,18 @@ function CountBars({ data, aedMode, labelKey }: { data: BarDatum[]; aedMode?: bo
     <ResponsiveContainer width="100%" height={180}>
       <BarChart data={data} margin={{ top: 14, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} />
-        <YAxis allowDecimals={false} tickFormatter={aedMode ? aedAxis : undefined} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={aedMode ? 38 : 28} />
+        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} interval={0} />
+        <YAxis allowDecimals={false} tickFormatter={aedMode ? aedAxis : undefined} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={aedMode ? 38 : 28} />
         <Tooltip
           formatter={(v: unknown) => [aedMode ? aed(Number(v)) : String(v), aedMode ? 'Amount' : 'Count'] as [string, string]}
           contentStyle={tooltipStyle}
-          cursor={{ fill: '#fafaf8' }}
+          cursor={{ fill: '#f6f8f6' }}
         />
         {/* LabelList must precede the Cells and carry its text attributes via
             `style` — as direct props, or placed after the Cells, recharts drops
             the labels silently and the exact figures are lost. */}
         <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-          {labelKey && <LabelList dataKey={labelKey} position="top" style={{ fontSize: 10, fill: '#6b6860' }} />}
+          {labelKey && <LabelList dataKey={labelKey} position="top" style={{ fontSize: 10, fill: '#5f6b63' }} />}
           {data.map((d, i) => <Cell key={i} fill={d.fill ?? CHART.teal} />)}
         </Bar>
       </BarChart>
@@ -405,10 +405,10 @@ function Legend({ items }: { items: { name: string; value: number; fill: string 
 
 function KpiCard({ label, value, sub, accent }: { label: string; value: React.ReactNode; sub?: string; accent?: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5 h-full">
-      <p className="text-[10px] uppercase tracking-wide font-semibold text-[#9b9890]">{label}</p>
-      <p className="text-xl font-bold mt-1.5 leading-none tabular-nums truncate" style={{ color: accent ?? '#1a1916' }}>{value}</p>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3.5 h-full">
+      <p className="text-[10px] uppercase tracking-wide font-semibold text-[#8a948d]">{label}</p>
+      <p className="text-xl font-bold mt-1.5 leading-none tabular-nums truncate" style={{ color: accent ?? '#14201a' }}>{value}</p>
+      {sub && <p className="text-[11px] text-[#8a948d] mt-1.5">{sub}</p>}
     </div>
   );
 }
@@ -416,7 +416,7 @@ function KpiCard({ label, value, sub, accent }: { label: string; value: React.Re
 function MiniPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className={CARD}>
-      <h3 className="text-sm font-bold text-[#1a1916] mb-3">{title}</h3>
+      <h3 className="text-sm font-bold text-[#14201a] mb-3">{title}</h3>
       <div className="space-y-1.5">{children}</div>
     </div>
   );
@@ -701,9 +701,9 @@ function PipelinePanel({ ins }: { ins: LandlordInsights }) {
 /** A breakdown card: header (title + count) and an internally-scrolling body. */
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] flex flex-col overflow-hidden" style={{ maxHeight: 440 }}>
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] flex flex-col overflow-hidden" style={{ maxHeight: 440 }}>
       <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-base-200)' }}>
-        <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+        <h3 className="text-sm font-bold text-[#14201a]">{title}</h3>
         <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-500)' }}>{count}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -1516,9 +1516,9 @@ function StaffView({ s, role }: { s: NonNullable<UserDetail['staff']>; role: str
             <ResponsiveContainer width="100%" height={Math.max(140, actionData.length * 34)}>
               <BarChart layout="vertical" data={actionData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 10, fill: '#6b6860' }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v: unknown) => [String(v), 'Actions'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 10, fill: '#5f6b63' }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(v: unknown) => [String(v), 'Actions'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]} fill={CHART.purple} />
               </BarChart>
             </ResponsiveContainer>
@@ -2013,7 +2013,7 @@ export default function AdminUserDetailPage() {
                   <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}><ShieldCheck size={11} /> KYC Pending</span>
                 )}
                 {u.kycStatus === 'verified' && (
-                  <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}><BadgeCheck size={11} /> KYC Verified</span>
+                  <span title="Badge names the check; the user record returns no KYC decision date (see the KYC queue for document verification dates)" className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}><BadgeCheck size={11} /> KYC docs verified · date not recorded</span>
                 )}
               </div>
               <div className="flex items-center gap-4 mt-1.5 text-sm flex-wrap" style={{ color: 'var(--color-neutral-500)' }}>
@@ -2075,7 +2075,7 @@ export default function AdminUserDetailPage() {
                   ['#sec-governance', '6 · Governance'],
                   ['#sec-activity', '7 · Activity'],
                 ] as [string, string][]).map(([href, label]) => (
-                  <a key={href} href={href} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] bg-white rounded-full px-3 py-1 hover:border-[#1e5fae] hover:text-[#1a1916]">{label}</a>
+                  <a key={href} href={href} className="text-[11px] text-[#5f6b63] border border-[#e4e9e5] bg-white rounded-full px-3 py-1 hover:border-[#1e5fae] hover:text-[#14201a]">{label}</a>
                 ))}
               </nav>
 

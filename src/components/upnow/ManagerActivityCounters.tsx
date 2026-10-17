@@ -82,7 +82,7 @@ interface Payload {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SIDE_ACCENT: Record<string, string> = {
-  manager: '#2e9f82', customer: '#1f6f9c', landlord: '#8a6a1e',
+  manager: '#047246', customer: '#1f6f9c', landlord: '#8a6a1e',
 };
 // No `landlord` entry: the landlord is not a sheet of their own any more. Their
 // acts as a party to the lease sit on their personal sheet, because the account
@@ -534,7 +534,7 @@ function Sheet({ title, blurb, accent, rows, person, year, cutMonth, cell, onPic
                             ? 'Outstanding work, not work done — this manager is who it falls to, not who did it.'
                             : undefined}
                         style={{ width: '100%', border: 0, borderRadius: 0,
-                          background: isOn(r, i + 1) ? '#f0faf6' : 'transparent',
+                          background: isOn(r, i + 1) ? '#eef7f2' : 'transparent',
                           cursor: v ? 'pointer' : 'default', padding: '7px 12px', textAlign: 'right',
                           font: `${v ? 600 : 500} 12px ${MONO}`,
                           // Amber, never the ink the performed steps use: a

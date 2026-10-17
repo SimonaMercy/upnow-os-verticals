@@ -1,14 +1,28 @@
 'use client';
 
+/**
+ * Admin › Trust & safety › Review moderation — Genspark OS rebuild.
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - GET /reviews/admin — every review, visible and hidden.
+ *  - PATCH /reviews/:id/moderate { hidden: true, reason?: string } — "Hide" behind a
+ *    confirm modal with an optional audit reason (trimmed; empty → undefined).
+ *  - PATCH /reviews/:id/moderate { hidden: false, reason: undefined } — "Unhide" (direct).
+ *    Both reload the list; failures show an inline error.
+ *  - Filter tabs with counts: All · Visible · Hidden · Low (≤2★).
+ *  - Each review shows stars, reviewer, provider (or "Provider #id"), service, BK-<booking>,
+ *    date, title, body, Hidden badge + hidden reason.
+ *  - Loading / error / empty ("No reviews here") states.
+ *  New: search (reviewer, provider, service, text), KPIs from the same list, and an "Open"
+ *  drawer with the full review and the Hide / Unhide action. No manager route re-exports it.
+ */
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPatch } from '@/lib/api';
-
-const PRIMARY = '#2e9f82';
-const INK = '#1a1916';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
-const BORDER = '1px solid #ececea';
-const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: '#fff', border: BORDER, borderRadius: 16, ...extra });
+import {
+  Btn, Callout, Drawer, EmptyRow, ErrorRow, Field, KV, Kpi, Kpis, Modal, OsPage, PageHead, Pill, ScopeStrip,
+  SearchField, Seg, SkeletonRows, TableWrap, fmtDate,
+} from '@/components/os/kit';
 
 interface AdminReview {
   id: number; rating: number; title: string | null; body: string | null;
@@ -18,14 +32,18 @@ interface AdminReview {
 }
 
 type Filter = 'all' | 'visible' | 'hidden' | 'low';
-const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
-const fmtWhen = (iso: string) => new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' });
+const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(Math.max(0, 5 - n));
+const Stars = ({ n }: { n: number }) => <span aria-label={`${n} of 5 stars`} style={{ color: 'var(--ms-amber)', letterSpacing: 1 }}>{stars(n)}</span>;
+const providerOf = (r: AdminReview) => r.providerName ?? `Provider #${r.serviceProviderId ?? '—'}`;
 
 export default function AdminReviewsPage() {
   const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [q, setQ] = useState('');
+  const [openId, setOpenId] = useState<number | null>(null);
   const [hideFor, setHideFor] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,12 +51,13 @@ export default function AdminReviewsPage() {
   const load = useCallback(async () => {
     try {
       setReviews(await apiGet<AdminReview[]>('/reviews/admin'));
-      setError(null);
+      setError(null); setLoadFailed(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load reviews');
+      setLoadFailed(true);
     } finally { setLoading(false); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
 
   const moderate = async (id: number, hidden: boolean, why?: string) => {
     setBusy(true);
@@ -57,89 +76,145 @@ export default function AdminReviewsPage() {
     hidden: reviews.filter((r) => r.hidden).length,
     low: reviews.filter((r) => r.rating <= 2).length,
   }), [reviews]);
-  const filtered = reviews.filter((r) =>
-    filter === 'visible' ? !r.hidden : filter === 'hidden' ? r.hidden : filter === 'low' ? r.rating <= 2 : true);
-
-  if (loading) return <div style={{ padding: 24, color: FAINT }}>Loading reviews…</div>;
-
-  const TABS: { key: Filter; label: string }[] = [
-    { key: 'all', label: 'All' }, { key: 'visible', label: 'Visible' },
-    { key: 'hidden', label: 'Hidden' }, { key: 'low', label: 'Low (≤2★)' },
-  ];
+  const avgVisible = useMemo(() => {
+    const v = reviews.filter((r) => !r.hidden);
+    return v.length ? (v.reduce((s, r) => s + r.rating, 0) / v.length).toFixed(1) : '—';
+  }, [reviews]);
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return reviews.filter((r) =>
+      (filter === 'visible' ? !r.hidden : filter === 'hidden' ? r.hidden : filter === 'low' ? r.rating <= 2 : true)
+      && (!s || [r.reviewerName, r.providerName, r.serviceName, r.title, r.body].some((x) => x?.toLowerCase().includes(s))));
+  }, [reviews, filter, q]);
+  const open = reviews.find((r) => r.id === openId) ?? null;
+  const askHide = (id: number) => { setReason(''); setHideFor(id); };
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '8px 4px 48px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: PRIMARY }}>Trust &amp; Safety</div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Review moderation</h1>
-      <p style={{ color: MUTE, fontSize: 14, marginTop: 4 }}>Hide abusive or fake reviews. Hiding a review drops it from the provider&apos;s rating and their list; it stays here for audit.</p>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Trust & safety"
+        title="Review moderation"
+        lede="Hide abusive or fake reviews. Hiding a review drops it from the provider's rating and their list; it stays here for audit."
+        actions={<Btn size="sm" onClick={() => { setLoading(true); void load(); }}>Refresh</Btn>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Trust & safety' },
+        { label: 'Reviews', value: loading ? '…' : counts.all },
+        { label: 'Hidden', value: loading ? '…' : counts.hidden },
+      ]} />
 
-      {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
+      {error && !loadFailed && <div style={{ marginBottom: 14 }}><Callout tone="bad" title="Something went wrong.">{error}</Callout></div>}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setFilter(t.key)}
-            style={{ fontSize: 13, fontWeight: 600, padding: '6px 13px', borderRadius: 999, cursor: 'pointer',
-              border: filter === t.key ? `1px solid ${PRIMARY}` : BORDER,
-              background: filter === t.key ? '#e7f3ec' : '#fff', color: filter === t.key ? PRIMARY : MUTE }}>
-            {t.label} <span style={{ color: FAINT }}>({counts[t.key]})</span>
-          </button>
-        ))}
+      <Kpis>
+        <Kpi k="Reviews" v={loading ? '…' : counts.all} d={`${counts.visible} visible`} />
+        <Kpi k="Average rating" v={loading ? '…' : avgVisible} d="visible reviews only" />
+        <Kpi k="Low (≤2★)" v={loading ? '…' : counts.low} d="worth a look" />
+        <Kpi k="Hidden" v={loading ? '…' : counts.hidden} d="excluded from ratings" />
+      </Kpis>
+
+      <div style={{ marginBottom: 14 }}>
+        <Callout tone="info" title="Hide, never delete.">
+          A hidden review leaves the provider&apos;s rating and public list but remains on this page with its reason for the audit trail. Unhide restores it.
+        </Callout>
       </div>
 
-      <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {filtered.length === 0 ? (
-          <div style={card({ padding: '22px 18px', color: FAINT, fontSize: 14 })}>No reviews here.</div>
-        ) : filtered.map((r) => (
-          <div key={r.id} style={card({ padding: '15px 18px', opacity: r.hidden ? 0.72 : 1, borderColor: r.hidden ? '#f0d9d9' : '#ececea' })}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ color: '#f59e0b', letterSpacing: '1px', fontSize: 15 }}>{stars(r.rating)}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: INK }}>{r.reviewerName}</span>
-                  <span style={{ fontSize: 12.5, color: FAINT }}>→ {r.providerName ?? `Provider #${r.serviceProviderId ?? '—'}`}</span>
-                  {r.hidden && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#991b1b', background: '#fee2e2', borderRadius: 999, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '.04em' }}>Hidden</span>}
-                </div>
-                <div style={{ fontSize: 12, color: FAINT, marginTop: 3 }}>
-                  {r.serviceName ?? 'Service'}{r.bookingId ? ` · BK-${r.bookingId}` : ''} · {fmtWhen(r.createdAt)}
-                </div>
-                {r.title && <div style={{ fontSize: 13.5, fontWeight: 600, color: INK, marginTop: 8 }}>{r.title}</div>}
-                {r.body && <p style={{ fontSize: 13.5, color: MUTE, marginTop: 4 }}>{r.body}</p>}
-                {r.hidden && r.hiddenReason && <p style={{ fontSize: 12, color: '#b42318', marginTop: 6 }}>Hidden reason: {r.hiddenReason}</p>}
-              </div>
-              {r.hidden ? (
-                <button disabled={busy} onClick={() => moderate(r.id, false)}
-                  style={{ background: 'none', border: BORDER, borderRadius: 8, padding: '7px 13px', fontSize: 12.5, fontWeight: 600, color: PRIMARY, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                  Unhide
-                </button>
-              ) : (
-                <button disabled={busy} onClick={() => { setReason(''); setHideFor(r.id); }}
-                  style={{ background: 'none', border: '1px solid #f3c6c6', borderRadius: 8, padding: '7px 13px', fontSize: 12.5, fontWeight: 600, color: '#b42318', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                  Hide
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+      <TableWrap toolbar={<>
+        <SearchField value={q} onChange={setQ} placeholder="Search reviewer, provider, service or text" />
+        <Seg label="Review filter" value={filter} onChange={setFilter} options={[
+          { v: 'all', l: 'All', n: counts.all }, { v: 'visible', l: 'Visible', n: counts.visible },
+          { v: 'hidden', l: 'Hidden', n: counts.hidden }, { v: 'low', l: 'Low (≤2★)', n: counts.low },
+        ]} />
+      </>}>
+        <table className="gx-tbl">
+          <thead><tr>
+            <th>Rating</th><th>Review</th><th>Customer</th><th>Provider</th><th>Service</th><th>Date</th><th>Status</th><th className="act">Actions</th>
+          </tr></thead>
+          {loading ? <SkeletonRows cols={8} /> : loadFailed ? <ErrorRow cols={8} onRetry={() => { setLoading(true); void load(); }} /> : filtered.length === 0 ? (
+            <EmptyRow cols={8} title="No reviews here." text={reviews.length ? 'Clear the search or pick another filter.' : 'Reviews appear after customers rate completed bookings.'} />
+          ) : (
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id} className="click" onClick={() => setOpenId(r.id)} style={r.hidden ? { opacity: 0.75 } : undefined}>
+                  <td className="nowrap"><Stars n={r.rating} /></td>
+                  <td style={{ maxWidth: 320 }}>
+                    {r.title && <span className="strong">{r.title}</span>}
+                    {r.body && <span className="sub" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{r.body}</span>}
+                    {!r.title && !r.body && <span className="sub">No text</span>}
+                  </td>
+                  <td>{r.reviewerName}</td>
+                  <td>{providerOf(r)}</td>
+                  <td>{r.serviceName ?? 'Service'}{r.bookingId && <span className="sub mono">BK-{r.bookingId}</span>}</td>
+                  <td className="nowrap">{fmtDate(r.createdAt)}</td>
+                  <td>{r.hidden ? <Pill tone="danger" title={r.hiddenReason ?? undefined}>Hidden</Pill> : <Pill tone="primary">Visible</Pill>}</td>
+                  <td className="act" onClick={(e) => e.stopPropagation()}>
+                    <div className="gx-btn-row" style={{ justifyContent: 'flex-end' }}>
+                      <Btn size="xs" onClick={() => setOpenId(r.id)}>Open</Btn>
+                      {r.hidden
+                        ? <Btn size="xs" disabled={busy} onClick={() => moderate(r.id, false)}>Unhide</Btn>
+                        : <Btn size="xs" variant="danger" disabled={busy} onClick={() => askHide(r.id)}>Hide</Btn>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
+        </table>
+      </TableWrap>
 
-      {hideFor != null && (
-        <div onClick={() => setHideFor(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,20,18,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={card({ width: 440, maxWidth: '100%', padding: 22 })}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: INK }}>Hide this review?</div>
-            <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>It will be removed from the provider&apos;s rating and their reviews list. Note why for the audit trail.</p>
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
-              placeholder="Reason (e.g. abusive language, fake / not a real customer)"
-              style={{ width: '100%', marginTop: 12, border: BORDER, borderRadius: 10, padding: '9px 11px', fontSize: 13, color: INK, resize: 'vertical', fontFamily: 'inherit' }} />
-            <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-              <button onClick={() => setHideFor(null)} style={{ background: 'none', border: BORDER, borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 600, color: MUTE, cursor: 'pointer' }}>Cancel</button>
-              <button disabled={busy} onClick={() => moderate(hideFor, true, reason.trim() || undefined)}
-                style={{ background: '#b42318', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 17px', fontSize: 13, fontWeight: 600, opacity: busy ? 0.5 : 1, cursor: 'pointer' }}>
-                {busy ? 'Hiding…' : 'Hide review'}
-              </button>
+      <Drawer
+        open={!!open && hideFor == null}
+        onClose={() => setOpenId(null)}
+        title={open ? <Stars n={open.rating} /> : ''}
+        sub={open ? `${open.reviewerName} → ${providerOf(open)}` : null}
+        footer={open && (
+          <>
+            <Btn onClick={() => setOpenId(null)}>Close</Btn>
+            {open.hidden
+              ? <Btn variant="primary" disabled={busy} onClick={() => moderate(open.id, false)}>{busy ? 'Saving…' : 'Unhide review'}</Btn>
+              : <Btn variant="danger" disabled={busy} onClick={() => askHide(open.id)}>Hide review</Btn>}
+          </>
+        )}
+      >
+        {open && (
+          <div style={{ display: 'grid', gap: 16 }}>
+            {open.hidden && (
+              <Callout tone="bad" title="Hidden.">{open.hiddenReason ? `Reason: ${open.hiddenReason}` : 'No reason recorded.'}</Callout>
+            )}
+            <KV items={[
+              { k: 'Rating', v: `${open.rating} / 5` },
+              { k: 'Customer', v: open.reviewerName },
+              { k: 'Provider', v: providerOf(open) },
+              { k: 'Service', v: open.serviceName ?? 'Service' },
+              { k: 'Booking', v: open.bookingId ? <span className="mono">BK-{open.bookingId}</span> : '—' },
+              { k: 'Posted', v: fmtDate(open.createdAt) },
+            ]} />
+            <div>
+              <div className="gx-lb" style={{ marginBottom: 4 }}>Review</div>
+              {open.title && <div style={{ fontWeight: 600, fontSize: 13 }}>{open.title}</div>}
+              <p style={{ fontSize: 12.5, lineHeight: 1.55, marginTop: 4, whiteSpace: 'pre-wrap' }}>{open.body || 'No written review.'}</p>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </Drawer>
+
+      <Modal
+        open={hideFor != null}
+        onClose={() => setHideFor(null)}
+        title="Hide this review?"
+        width={460}
+        footer={hideFor != null && (
+          <>
+            <Btn onClick={() => setHideFor(null)}>Cancel</Btn>
+            <Btn variant="danger" disabled={busy} onClick={() => moderate(hideFor, true, reason.trim() || undefined)}>{busy ? 'Hiding…' : 'Hide review'}</Btn>
+          </>
+        )}
+      >
+        <p style={{ fontSize: 12.5, marginBottom: 10 }}>It will be removed from the provider&apos;s rating and their reviews list. Note why for the audit trail.</p>
+        <Field label="Reason" htmlFor="hide-reason">
+          <textarea id="hide-reason" className="gx-ta" rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason (e.g. abusive language, fake / not a real customer)" />
+        </Field>
+      </Modal>
+    </OsPage>
   );
 }

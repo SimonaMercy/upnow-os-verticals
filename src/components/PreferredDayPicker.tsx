@@ -54,7 +54,7 @@ export function PreferredDayPicker({
         value={value}
         min={min}
         onChange={e => onChange(e.target.value)}
-        className={`w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#1a1916] ${inputClassName} ${className}`}
+        className={`w-full text-xs border border-[#bae6fd] rounded-lg px-3 py-2 focus:outline-none focus:border-[#0ea5e9] bg-white text-[#14201a] ${inputClassName} ${className}`}
       />
     );
   }
@@ -87,26 +87,26 @@ export function PreferredDayPicker({
         onClick={() => setOpen(o => !o)}
         className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors
           ${value
-            ? 'bg-white border-[#2e9f82] text-[#1a1916]'
-            : 'bg-white border-[#bae6fd] text-[#9b9890] hover:border-[#0ea5e9]'}
+            ? 'bg-white border-[#047246] text-[#14201a]'
+            : 'bg-white border-[#bae6fd] text-[#8a948d] hover:border-[#0ea5e9]'}
           ${inputClassName}`}
       >
         <span className="flex items-center gap-1.5">
-          <Calendar size={12} className={value ? 'text-[#2e9f82]' : 'text-[#9b9890]'} />
+          <Calendar size={12} className={value ? 'text-[#047246]' : 'text-[#8a948d]'} />
           {displayValue || placeholder}
         </span>
-        <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''} text-[#9b9890] shrink-0`} />
+        <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''} text-[#8a948d] shrink-0`} />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1 bg-white rounded-xl border border-[#e8e6e0] shadow-lg z-30 p-3 min-w-[220px]">
+        <div className="absolute top-full left-0 mt-1 bg-white rounded-xl border border-[#e4e9e5] shadow-lg z-30 p-3 min-w-[220px]">
           {/* Month nav */}
           <div className="flex items-center justify-between mb-2">
-            <button type="button" onClick={prev} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-[#f4f3ef] text-[#3d3b35] cursor-pointer">
+            <button type="button" onClick={prev} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-[#eef1ef] text-[#46534c] cursor-pointer">
               <ChevronLeft size={12} />
             </button>
-            <span className="text-[11px] font-semibold text-[#1a1916]">{monthLabel}</span>
-            <button type="button" onClick={next} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-[#f4f3ef] text-[#3d3b35] cursor-pointer">
+            <span className="text-[11px] font-semibold text-[#14201a]">{monthLabel}</span>
+            <button type="button" onClick={next} className="w-6 h-6 flex items-center justify-center rounded-lg hover:bg-[#eef1ef] text-[#46534c] cursor-pointer">
               <ChevronRight size={12} />
             </button>
           </div>
@@ -114,7 +114,7 @@ export function PreferredDayPicker({
           {/* Day-of-week headers */}
           <div className="grid grid-cols-7 mb-1">
             {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
-              <div key={d} className="text-center text-[8px] font-semibold text-[#9b9890] py-0.5">{d}</div>
+              <div key={d} className="text-center text-[8px] font-semibold text-[#8a948d] py-0.5">{d}</div>
             ))}
           </div>
 
@@ -139,10 +139,10 @@ export function PreferredDayPicker({
                   onClick={() => !isPast && select(day)}
                   className={`flex items-center justify-center h-7 rounded-lg text-[10px] font-bold transition-colors
                     ${isSelected
-                      ? 'bg-[#2e9f82] text-white cursor-pointer'
+                      ? 'bg-[#047246] text-white cursor-pointer'
                       : isPast
                         ? 'text-[#c8c6c0] cursor-not-allowed'
-                        : 'bg-[#e8f5f1] text-[#2e9f82] hover:bg-[#2e9f82] hover:text-white cursor-pointer'}`}
+                        : 'bg-[#e8f5f1] text-[#047246] hover:bg-[#047246] hover:text-white cursor-pointer'}`}
                 >
                   {day}
                 </button>
@@ -150,7 +150,7 @@ export function PreferredDayPicker({
             })}
           </div>
 
-          <p className="text-[8px] text-[#9b9890] text-center mt-2 leading-tight">
+          <p className="text-[8px] text-[#8a948d] text-center mt-2 leading-tight">
             Only preferred start dates available
           </p>
         </div>

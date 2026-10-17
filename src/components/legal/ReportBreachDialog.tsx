@@ -14,8 +14,8 @@ import { uploadOwnedDocument } from '@/lib/uploadOwnedDocument';
 import { legalApi, BREACH_CATEGORY_LABELS, BREACH_REPORTED_BY_LABELS, type BreachCategory, type BreachReportedBy, type BreachDetail } from '@/lib/legal';
 import { leaseListPath, leaseLine, type LeaseOpt } from '@/components/legal/StartNoticeModal';
 
-const field = 'w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
-const lbl = 'text-xs font-medium text-[#6b6860] mb-1 block';
+const field = 'w-full text-sm px-3 py-2 border border-[#e4e9e5] rounded-lg bg-white focus:outline-none focus:border-[#047246]';
+const lbl = 'text-xs font-medium text-[#5f6b63] mb-1 block';
 const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: process.env.NEXT_PUBLIC_APP_TIME_ZONE || 'Asia/Dubai' });
 const errText = (e: unknown, fb: string) => (e as Error)?.message || fb;
 
@@ -65,12 +65,12 @@ export function ReportBreachDialog({ base, rp, onClose, onDone }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef] sticky top-0 bg-white z-10">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#eef1ef] sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-sm font-bold text-[#1a1916]">Report breach</h2>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">Opens at “Reported”. Warnings and escalation happen on the lease’s Breaches section.</p>
+            <h2 className="text-sm font-bold text-[#14201a]">Report breach</h2>
+            <p className="text-[11px] text-[#8a948d] mt-0.5">Opens at “Reported”. Warnings and escalation happen on the lease’s Breaches section.</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
         </div>
 
         <div className="px-5 py-4 space-y-4">
@@ -89,7 +89,7 @@ export function ReportBreachDialog({ base, rp, onClose, onDone }: {
                 <div className="mt-1.5 rounded-lg border border-[#e6e8e6] overflow-hidden max-h-56 overflow-y-auto">
                   {options.length === 0 ? <div className="px-3 py-2 text-[12px] text-[#8a8f8c]">No lease matches.</div>
                     : options.slice(0, 8).map(l => (
-                      <button key={l.id} type="button" onClick={() => setLease(l)} className="w-full text-left px-3 py-2 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#f0faf6] cursor-pointer">
+                      <button key={l.id} type="button" onClick={() => setLease(l)} className="w-full text-left px-3 py-2 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#eef7f2] cursor-pointer">
                         <div className="font-medium truncate">{leaseLine(l)}</div>
                       </button>
                     ))}
@@ -118,7 +118,7 @@ export function ReportBreachDialog({ base, rp, onClose, onDone }: {
             </div>
             <div className="mt-3"><span className={lbl}>Description</span><textarea rows={3} className={field} value={description} onChange={e => setDescription(e.target.value)} placeholder="What was reported, by whom, when — enough for a warning letter." /></div>
             <div className="mt-3 flex items-center gap-3 flex-wrap">
-              <label className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer inline-flex items-center gap-1.5 ${file ? 'border-[#1a7a5a] text-[#1a7a5a] bg-[#e6f4ef]' : 'border-dashed border-[#d8d6d0] text-[#6b6860] hover:bg-[#f9f8f6]'}`}>
+              <label className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer inline-flex items-center gap-1.5 ${file ? 'border-[#1a7a5a] text-[#1a7a5a] bg-[#e6f4ef]' : 'border-dashed border-[#d8d6d0] text-[#5f6b63] hover:bg-[#f9f8f6]'}`}>
                 <Paperclip size={12} /> {file ? file.name : 'Attach photo / complaint'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { setFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
               </label>
@@ -127,7 +127,7 @@ export function ReportBreachDialog({ base, rp, onClose, onDone }: {
           </section>
         </div>
 
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#f4f3ef] sticky bottom-0 bg-white">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#eef1ef] sticky bottom-0 bg-white">
           <span className="text-[11px] text-red-600">{err ?? ''}</span>
           <div className="flex items-center gap-2">
             <button type="button" onClick={onClose} className="text-[12px] font-semibold px-3.5 py-[9px] rounded-lg border border-[#e6e8e6] bg-white cursor-pointer">Cancel</button>

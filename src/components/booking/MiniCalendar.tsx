@@ -78,23 +78,23 @@ export function MiniCalendar({ value, onChange, allowedDays, compact }: {
   while (cells.length % 7 !== 0) cells.push(null);
 
   return (
-    <div data-testid="mini-calendar" className="rounded-2xl border border-[#e8e6e0] overflow-hidden" style={compact ? { maxWidth: 300 } : undefined}>
+    <div data-testid="mini-calendar" className="rounded-2xl border border-[#e4e9e5] overflow-hidden" style={compact ? { maxWidth: 300 } : undefined}>
       {/* Header */}
       <div className={`flex items-center justify-between ${compact ? 'px-3 py-1.5' : 'px-4 py-3'}`} style={{ backgroundColor: '#f9f8f6' }}>
-        <button type="button" onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronLeft size={compact ? 14 : 16} style={{ color: '#6b6860' }} />
+        <button type="button" onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-[#e4e9e5] transition-colors cursor-pointer">
+          <ChevronLeft size={compact ? 14 : 16} style={{ color: '#5f6b63' }} />
         </button>
-        <span className={`${compact ? 'text-[13px]' : 'text-sm'} font-semibold`} style={{ color: '#1a1916' }}>
+        <span className={`${compact ? 'text-[13px]' : 'text-sm'} font-semibold`} style={{ color: '#14201a' }}>
           {MONTHS[cursor.month]} {cursor.year}
         </span>
-        <button type="button" onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronRight size={compact ? 14 : 16} style={{ color: '#6b6860' }} />
+        <button type="button" onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-[#e4e9e5] transition-colors cursor-pointer">
+          <ChevronRight size={compact ? 14 : 16} style={{ color: '#5f6b63' }} />
         </button>
       </div>
       {/* Day labels */}
-      <div className="grid grid-cols-7 border-b border-[#e8e6e0]">
+      <div className="grid grid-cols-7 border-b border-[#e4e9e5]">
         {DAYS.map(d => (
-          <div key={d} className={`text-center font-medium ${compact ? 'text-[10px] py-1' : 'text-xs py-2'}`} style={{ color: '#9b9890' }}>{d}</div>
+          <div key={d} className={`text-center font-medium ${compact ? 'text-[10px] py-1' : 'text-xs py-2'}`} style={{ color: '#8a948d' }}>{d}</div>
         ))}
       </div>
       {/* Cells */}
@@ -119,8 +119,8 @@ export function MiniCalendar({ value, onChange, allowedDays, compact }: {
               onClick={() => !isDisabled && onChange(iso)}
               className={`rounded-lg w-full text-center transition-all cursor-pointer ${compact ? 'text-[11px] py-1' : 'text-xs py-1.5'}`}
               style={{
-                backgroundColor: isSelected ? '#2e9f82' : isToday && !isSelected && !isDisabled ? '#edf7f3' : 'transparent',
-                color: isSelected ? '#fff' : isDisabled ? '#c8c6c0' : '#1a1916',
+                backgroundColor: isSelected ? '#047246' : isToday && !isSelected && !isDisabled ? '#edf7f3' : 'transparent',
+                color: isSelected ? '#fff' : isDisabled ? '#c8c6c0' : '#14201a',
                 fontWeight: isSelected ? 600 : isToday && !isDisabled ? 600 : 400,
                 cursor: isDisabled ? 'not-allowed' : 'pointer',
               }}

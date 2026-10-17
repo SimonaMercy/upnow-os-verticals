@@ -86,12 +86,12 @@ export default function ManagerReportsPage() {
   if (!permsLoading && !allowed) {
     return (
       <div className="p-6">
-        <div className="mx-auto max-w-[460px] text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-10">
+        <div className="mx-auto max-w-[460px] text-center bg-white border border-[#e4e9e5] rounded-2xl px-7 py-10 mt-10">
           <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]">
             <Lock size={20} />
           </div>
-          <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-          <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">
+          <p className="text-base font-bold text-[#14201a]">Permission required</p>
+          <p className="text-sm text-[#5f6b63] mt-1.5 leading-relaxed">
             This landlord hasn&rsquo;t granted you the <strong>View Reports</strong> permission, so their reports aren&rsquo;t available.
           </p>
         </div>
@@ -274,23 +274,23 @@ export default function ManagerReportsPage() {
     <div className="p-6">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Reports</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">
+          <h1 className="text-2xl font-bold text-[#14201a]">Reports</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5">
             Open any report to view, filter and export it.{' '}
-            <Link href={`/dashboard/manager/analytics?rp=${effectiveRp}`} className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+            <Link href={`/dashboard/manager/analytics?rp=${effectiveRp}`} className="text-[#047246] font-medium hover:underline inline-flex items-center gap-1">
               <LineChart size={12} /> View analytics
             </Link>
           </p>
         </div>
         {/* Hub-wide year — scopes the overview and the default period each
             time-based report opens with (snapshots ignore it). */}
-        <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
-          <CalendarRange size={15} className="text-[#2e9f82]" />
-          <span className="text-xs font-medium text-[#6b6860]">Year</span>
+        <label className="inline-flex items-center gap-2 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+          <CalendarRange size={15} className="text-[#047246]" />
+          <span className="text-xs font-medium text-[#5f6b63]">Year</span>
           <select
             value={year === 'all' ? 'all' : String(year)}
             onChange={e => setReportsYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-            className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+            className="text-sm font-semibold text-[#14201a] bg-transparent focus:outline-none cursor-pointer pr-1"
             aria-label="Reports year">
             {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
             <option value="all">All years</option>
@@ -300,18 +300,18 @@ export default function ManagerReportsPage() {
 
       <DataExports manager={{ rp: effectiveRp }} />
 
-      <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#9b9890] mb-3">All reports</h2>
+      <h2 className="text-[11px] uppercase tracking-wide font-semibold text-[#8a948d] mb-3">All reports</h2>
       <div className="relative max-w-sm mb-6">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
         <input
           type="text"
           placeholder="Search reports…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]"
+          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm focus:outline-none focus:border-[#047246]"
         />
         {search && (
-          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] hover:text-[#1a1916]">
+          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8a948d] hover:text-[#14201a]">
             <X size={12} />
           </button>
         )}
@@ -320,17 +320,17 @@ export default function ManagerReportsPage() {
       {sections.length === 0 ? (
         <div className="text-center py-16">
           <BarChart2 size={32} className="mx-auto text-[#c8c6c0] mb-3" />
-          <p className="text-sm text-[#6b6860]">No reports match your search.</p>
+          <p className="text-sm text-[#5f6b63]">No reports match your search.</p>
         </div>
       ) : (
         sections.map(g => (
           <section key={g.key} className="mb-9">
             <div className="flex items-baseline gap-2.5 mb-1">
-              <span className="w-6 h-6 rounded-lg bg-[#f0faf6] flex items-center justify-center self-center">
-                <g.Icon size={13} className="text-[#2e9f82]" />
+              <span className="w-6 h-6 rounded-lg bg-[#eef7f2] flex items-center justify-center self-center">
+                <g.Icon size={13} className="text-[#047246]" />
               </span>
-              <h2 className="text-sm font-bold text-[#1a1916]">{g.title}</h2>
-              <span className="text-xs text-[#9b9890]">{g.blurb}</span>
+              <h2 className="text-sm font-bold text-[#14201a]">{g.title}</h2>
+              <span className="text-xs text-[#8a948d]">{g.blurb}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-3">
               {g.tiles.map(r => r.available ? (
@@ -338,29 +338,29 @@ export default function ManagerReportsPage() {
                   key={r.slug}
                   type="button"
                   onClick={() => navigate(r.slug)}
-                  className="group bg-white rounded-2xl border border-[#e8e6e0] p-5 shadow-sm hover:border-[#2e9f82] hover:shadow-md transition-all text-left">
+                  className="group bg-white rounded-2xl border border-[#e4e9e5] p-5 shadow-sm hover:border-[#047246] hover:shadow-md transition-all text-left">
                   <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#f0faf6] flex items-center justify-center shrink-0 group-hover:bg-[#2e9f82] transition-colors">
-                      <r.Icon size={18} className="text-[#2e9f82] group-hover:text-white transition-colors" />
+                    <div className="w-10 h-10 rounded-xl bg-[#eef7f2] flex items-center justify-center shrink-0 group-hover:bg-[#047246] transition-colors">
+                      <r.Icon size={18} className="text-[#047246] group-hover:text-white transition-colors" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-bold text-[#1a1916] leading-tight">{r.title}</h3>
-                      <p className="text-xs text-[#6b6860] mt-1 line-clamp-2">{r.description}</p>
+                      <h3 className="text-sm font-bold text-[#14201a] leading-tight">{r.title}</h3>
+                      <p className="text-xs text-[#5f6b63] mt-1 line-clamp-2">{r.description}</p>
                     </div>
                   </div>
                 </button>
               ) : (
-                <div key={r.slug} className="bg-white rounded-2xl border border-dashed border-[#e8e6e0] p-5 opacity-70">
+                <div key={r.slug} className="bg-white rounded-2xl border border-dashed border-[#e4e9e5] p-5 opacity-70">
                   <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#f4f3ef] flex items-center justify-center shrink-0">
-                      <r.Icon size={18} className="text-[#9b9890]" />
+                    <div className="w-10 h-10 rounded-xl bg-[#eef1ef] flex items-center justify-center shrink-0">
+                      <r.Icon size={18} className="text-[#8a948d]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-bold text-[#6b6860] leading-tight flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-[#5f6b63] leading-tight flex items-center gap-2">
                         {r.title}
-                        <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890] border border-[#e8e6e0]">Soon</span>
+                        <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full bg-[#eef1ef] text-[#8a948d] border border-[#e4e9e5]">Soon</span>
                       </h3>
-                      <p className="text-xs text-[#9b9890] mt-1 line-clamp-2">{r.description}</p>
+                      <p className="text-xs text-[#8a948d] mt-1 line-clamp-2">{r.description}</p>
                     </div>
                   </div>
                 </div>

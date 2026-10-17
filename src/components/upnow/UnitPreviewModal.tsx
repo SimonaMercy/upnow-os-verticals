@@ -22,8 +22,10 @@ import { APP_TIME_ZONE } from '@/lib/datetime';
  *   GET /api/documents?ownerType=unit&ownerId=:uid       (unit documents)
  * Documents are view-only here (the header "Edit" opens the unit form for
  * changes), matching the no-download document-viewer principle.
+ * Optional `topSlot` renders caller content above the gallery (Units & listings uses it
+ * for the listing-quality checklist with its "Fix" button).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   X, ArrowLeft, ExternalLink, FileText, Eye, AlignLeft, Banknote, Users, History,
@@ -241,6 +243,7 @@ export function UnitPreviewModal({
   contracts,
   onEdit,
   onClose,
+  topSlot,
 }: {
   propertyId: number;
   /** Manager portal passes '/manager/properties' + 'rp=N'. */
@@ -258,6 +261,8 @@ export function UnitPreviewModal({
   /** Opens the edit form (header "Edit" button). Hidden when omitted. */
   onEdit?: () => void;
   onClose: () => void;
+  /** Caller content shown at the top of the body, above the gallery. */
+  topSlot?: ReactNode;
 }) {
   const [media, setMedia] = useState<UnitMedia[]>([]);
   const [history, setHistory] = useState<PriceHistory | null>(null);
@@ -575,6 +580,7 @@ export function UnitPreviewModal({
           {/* BODY */}
           <main style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <div style={{ maxWidth: 920, margin: '0 auto', padding: isTight ? 16 : '20px 24px 28px' }}>
+              {topSlot && <div className="gx" style={{ marginBottom: 18 }}>{topSlot}</div>}
 
               {/* GALLERY */}
               {media.length > 0 ? (

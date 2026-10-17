@@ -1,15 +1,29 @@
 'use client';
 
+/**
+ * Admin › People › Create admin account (super_admin only).
+ *
+ * Parity with previous page (every item kept, same validation and payload):
+ *  - Permission check: <CanAccess roles={['super_admin']}> with the "You do not have
+ *    permission to create admin accounts." fallback.
+ *  - react-hook-form + zod: email (valid email), name (2–100), firstName / lastName
+ *    (optional, ≤100), phone (optional, /^\+?[1-9]\d{6,14}$/ or empty).
+ *  - POST /api/admin/accounts { ...data, phone|firstName|lastName: value || undefined }.
+ *  - Success banner "Admin account created. Redirecting…" then router.push to
+ *    /dashboard/admin/accounts after 1.5 s; server error shown inline.
+ *  - Submit disabled + "Creating…" while submitting; "Back" → /dashboard/admin/accounts.
+ *  - Same input ids, autocomplete hints and placeholders. Now kit Field + gx-inp.
+ */
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { ArrowLeft, UserPlus } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { CanAccess } from '@/components/ui/CanAccess';
 import { apiPost } from '@/lib/api';
+import { Btn, Callout, Card, Field, OsPage, PageHead } from '@/components/os/kit';
 
 const schema = z.object({
   email: z.string().email('Enter a valid email address'),
@@ -52,163 +66,65 @@ export default function NewAdminAccountPage() {
     }
   }
 
+  const back = <Btn href="/dashboard/admin/accounts"><ArrowLeft size={13} aria-hidden /> Back</Btn>;
+
   return (
     <CanAccess roles={['super_admin']} fallback={
-      <DashboardPage title="Create Admin Account">
-        <p className="text-sm" style={{ color: 'var(--color-neutral-500)' }}>
-          You do not have permission to create admin accounts.
-        </p>
-      </DashboardPage>
+      <OsPage>
+        <PageHead eyebrow="Admin › People" title="Create admin account" actions={back} />
+        <Callout tone="warn">You do not have permission to create admin accounts.</Callout>
+      </OsPage>
     }>
-      <DashboardPage
-        title="Create Admin Account"
-        subtitle="The new admin will be set to active status and must reset their password on first login."
-        actions={
-          <Link
-            href="/dashboard/admin/accounts"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-            style={{ color: 'var(--color-neutral-600)', backgroundColor: 'var(--color-base-100)' }}
-          >
-            <ArrowLeft size={14} />
-            Back
-          </Link>
-        }
-      >
-        <div className="max-w-lg">
-          {success && (
-            <div
-              className="rounded-xl p-4 mb-6 text-sm font-medium"
-              style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}
-            >
-              Admin account created. Redirecting…
-            </div>
-          )}
+      <OsPage>
+        <PageHead
+          eyebrow="Admin › People"
+          title="Create admin account"
+          lede="The new admin will be set to active status and must reset their password on first login."
+          actions={back}
+        />
 
-          {serverError && (
-            <div
-              className="rounded-xl p-4 mb-6 text-sm font-medium"
-              style={{ backgroundColor: '#fef2f2', color: 'var(--color-error)' }}
-            >
-              {serverError}
-            </div>
-          )}
+        <div style={{ maxWidth: 560 }}>
+          {success && <div style={{ marginBottom: 12 }}><Callout>Admin account created. Redirecting…</Callout></div>}
+          {serverError && <div style={{ marginBottom: 12 }}><Callout tone="bad">{serverError}</Callout></div>}
 
-          <form
-            onSubmit={handleSubmit(onSubmit)}
-            noValidate
-            className="bg-white rounded-2xl p-6 space-y-5"
-            style={{ boxShadow: 'var(--shadow-sm)' }}
-          >
-            {/* Email */}
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-                Email address <span style={{ color: 'var(--color-error)' }}>*</span>
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="off"
-                {...register('email')}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none transition-colors"
-                style={{
-                  borderColor: errors.email ? 'var(--color-error)' : 'var(--color-base-200)',
-                  color: 'var(--color-neutral-900)',
-                }}
-                placeholder="admin@upnow.ae"
-              />
-              {errors.email && (
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>{errors.email.message}</p>
-              )}
-            </div>
+          <Card title="Account details" sub="Fields marked * are required." pad>
+            <form onSubmit={handleSubmit(onSubmit)} noValidate>
+              <Field label="Email address *" htmlFor="email" error={errors.email?.message}>
+                <input id="email" type="email" autoComplete="off" className="gx-inp" placeholder="admin@upnow.ae"
+                  aria-invalid={!!errors.email} {...register('email')} />
+              </Field>
 
-            {/* Display name */}
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-                Display name <span style={{ color: 'var(--color-error)' }}>*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                autoComplete="off"
-                {...register('name')}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none transition-colors"
-                style={{
-                  borderColor: errors.name ? 'var(--color-error)' : 'var(--color-base-200)',
-                  color: 'var(--color-neutral-900)',
-                }}
-                placeholder="Platform Admin"
-              />
-              {errors.name && (
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>{errors.name.message}</p>
-              )}
-            </div>
+              <Field label="Display name *" htmlFor="name" error={errors.name?.message}>
+                <input id="name" type="text" autoComplete="off" className="gx-inp" placeholder="Platform Admin"
+                  aria-invalid={!!errors.name} {...register('name')} />
+              </Field>
 
-            {/* First / Last name (optional) */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="firstName" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-                  First name
-                </label>
-                <input
-                  id="firstName"
-                  type="text"
-                  autoComplete="given-name"
-                  {...register('firstName')}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none"
-                  style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-900)' }}
-                  placeholder="Optional"
-                />
+              <div className="gx-two">
+                <Field label="First name" htmlFor="firstName" error={errors.firstName?.message}>
+                  <input id="firstName" type="text" autoComplete="given-name" className="gx-inp" placeholder="Optional"
+                    {...register('firstName')} />
+                </Field>
+                <Field label="Last name" htmlFor="lastName" error={errors.lastName?.message}>
+                  <input id="lastName" type="text" autoComplete="family-name" className="gx-inp" placeholder="Optional"
+                    {...register('lastName')} />
+                </Field>
               </div>
-              <div>
-                <label htmlFor="lastName" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-                  Last name
-                </label>
-                <input
-                  id="lastName"
-                  type="text"
-                  autoComplete="family-name"
-                  {...register('lastName')}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none"
-                  style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-900)' }}
-                  placeholder="Optional"
-                />
+
+              <Field label="Phone" htmlFor="phone" error={errors.phone?.message}>
+                <input id="phone" type="tel" autoComplete="tel" className="gx-inp" placeholder="+971501234567 (optional)"
+                  aria-invalid={!!errors.phone} {...register('phone')} />
+              </Field>
+
+              <div className="gx-btn-row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
+                <Btn href="/dashboard/admin/accounts">Cancel</Btn>
+                <Btn type="submit" variant="primary" disabled={isSubmitting || success}>
+                  <UserPlus size={13} aria-hidden /> {isSubmitting ? 'Creating…' : 'Create Admin Account'}
+                </Btn>
               </div>
-            </div>
-
-            {/* Phone (optional) */}
-            <div>
-              <label htmlFor="phone" className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-                Phone
-              </label>
-              <input
-                id="phone"
-                type="tel"
-                autoComplete="tel"
-                {...register('phone')}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none"
-                style={{
-                  borderColor: errors.phone ? 'var(--color-error)' : 'var(--color-base-200)',
-                  color: 'var(--color-neutral-900)',
-                }}
-                placeholder="+971501234567 (optional)"
-              />
-              {errors.phone && (
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>{errors.phone.message}</p>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-opacity disabled:opacity-60"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <UserPlus size={16} />
-              {isSubmitting ? 'Creating…' : 'Create Admin Account'}
-            </button>
-          </form>
+            </form>
+          </Card>
         </div>
-      </DashboardPage>
+      </OsPage>
     </CanAccess>
   );
 }

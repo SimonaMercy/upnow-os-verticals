@@ -84,3 +84,17 @@ export function categoryImg(catCode: string, adminUrl?: string | null): string {
   const pool = CATEGORY_IMGS[catCode] ?? CATEGORY_IMGS.home_cleaning;
   return stock(pool[0]);
 }
+
+/**
+ * Same-origin category picture (public/marketspace/images) for when a card's catalogue or stock
+ * image fails to load — so a card never ends up as an empty grey box.
+ */
+const LOCAL_CATEGORY_IMGS: Record<string, string> = {
+  home_cleaning: 'clean1.jpg', ac_services: 'ac1.jpg', plumbing: 'ac2.jpg', electrical: 'ac2.jpg',
+  handyman: 'ac2.jpg', painting: 'apt3.jpg', pest_control: 'clean2.jpg', car_vehicle: 'aerial2.jpg',
+  landscaping_outdoor: 'villa1.jpg', commercial_services: 'office1.jpg',
+};
+
+export function serviceFallbackImg(catCode: string): string {
+  return `/marketspace/images/${LOCAL_CATEGORY_IMGS[catCode] ?? 'clean1.jpg'}`;
+}

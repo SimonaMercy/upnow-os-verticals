@@ -25,7 +25,7 @@ const DAY_FIELDS: { key: DayKey; label: string; help: string }[] = [
   { key: 'appealWindowDays', label: 'Appeal window', help: 'Days after a decision during which the other side may appeal. When it passes with no appeal, the case moves to enforcement on its own.' },
 ];
 
-const field = 'w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]';
+const field = 'w-full text-sm px-3 py-2 border border-[#e4e9e5] rounded-xl bg-white focus:outline-none focus:border-[#047246]';
 
 export function JurisdictionSettingsForm({ scope, load, save, reset }: {
   scope: 'platform' | 'landlord';
@@ -83,13 +83,13 @@ export function JurisdictionSettingsForm({ scope, load, save, reset }: {
   }
 
   if (loading) {
-    return <div className="flex items-center gap-3 py-16 justify-center text-[#6b7a74]"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span></div>;
+    return <div className="flex items-center gap-3 py-16 justify-center text-[#5f6b63]"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span></div>;
   }
 
   return (
     <div className="max-w-3xl space-y-4">
       {scope === 'landlord' && (
-        <div className="px-4 py-3 rounded-[12px] border text-[12px]" style={cfg?.source === 'own' ? { background: '#e6f4ef', borderColor: '#bfe3d3', color: '#125a3c' } : { background: '#fbfbf8', borderColor: '#e8e6e0', color: '#6b6860' }}>
+        <div className="px-4 py-3 rounded-[12px] border text-[12px]" style={cfg?.source === 'own' ? { background: '#e6f4ef', borderColor: '#bfe3d3', color: '#125a3c' } : { background: '#fbfbf8', borderColor: '#e4e9e5', color: '#5f6b63' }}>
           {cfg?.source === 'own'
             ? <>These are <b>your own</b> periods — every warning deadline, notice deadline and appeal window on your cases uses them. Fees live in the fee book below.</>
             : <>You are on the <b>platform defaults</b>. Change anything and save to keep your own set; the platform values stay as the fallback. Fees live in the fee book below.</>}
@@ -97,57 +97,57 @@ export function JurisdictionSettingsForm({ scope, load, save, reset }: {
       )}
 
       {/* authority + rules */}
-      <div className="p-5 rounded-[14px] border border-[#e8e6e0] bg-white">
-        <div className="flex items-center gap-2 mb-3"><Scale size={15} className="text-[#2e9f82]" /><h3 className="text-[13px] font-semibold text-[#1a1916]">Rental authority</h3></div>
+      <div className="p-5 rounded-[14px] border border-[#e4e9e5] bg-white">
+        <div className="flex items-center gap-2 mb-3"><Scale size={15} className="text-[#047246]" /><h3 className="text-[13px] font-semibold text-[#14201a]">Rental authority</h3></div>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-4">
           <div>
-            <label className="text-xs font-medium text-[#6b6860] mb-1 block" htmlFor="authority">Authority display name</label>
+            <label className="text-xs font-medium text-[#5f6b63] mb-1 block" htmlFor="authority">Authority display name</label>
             <input id="authority" className={field} value={authority} onChange={e => { setAuthority(e.target.value); dirty(); }} placeholder="Rental authority" />
-            <p className="text-[11px] text-[#9b9890] mt-1">Free text for tooltips, help lines and the notice template — e.g. the name of the tribunal or committee. The UI otherwise says “rental authority”.</p>
+            <p className="text-[11px] text-[#8a948d] mt-1">Free text for tooltips, help lines and the notice template — e.g. the name of the tribunal or committee. The UI otherwise says “rental authority”.</p>
           </div>
           <div className="space-y-3">
             <label className="flex items-start gap-2.5 cursor-pointer">
-              <input type="checkbox" className="mt-[3px] accent-[#2e9f82]" checked={mediation} onChange={e => { setMediation(e.target.checked); dirty(); }} />
-              <span><span className="text-[13px] font-medium text-[#1a1916]">Mediation required</span><span className="block text-[11px] text-[#9b9890]">A filed case must pass through “Settlement talks” before a decision can be recorded.</span></span>
+              <input type="checkbox" className="mt-[3px] accent-[#047246]" checked={mediation} onChange={e => { setMediation(e.target.checked); dirty(); }} />
+              <span><span className="text-[13px] font-medium text-[#14201a]">Mediation required</span><span className="block text-[11px] text-[#8a948d]">A filed case must pass through “Settlement talks” before a decision can be recorded.</span></span>
             </label>
             <label className="flex items-start gap-2.5 cursor-pointer">
-              <input type="checkbox" className="mt-[3px] accent-[#2e9f82]" checked={registration} onChange={e => { setRegistration(e.target.checked); dirty(); }} />
-              <span><span className="text-[13px] font-medium text-[#1a1916]">Registration required to file</span><span className="block text-[11px] text-[#9b9890]">A lease needs a registration number before its case can move to “Case filed”.</span></span>
+              <input type="checkbox" className="mt-[3px] accent-[#047246]" checked={registration} onChange={e => { setRegistration(e.target.checked); dirty(); }} />
+              <span><span className="text-[13px] font-medium text-[#14201a]">Registration required to file</span><span className="block text-[11px] text-[#8a948d]">A lease needs a registration number before its case can move to “Case filed”.</span></span>
             </label>
           </div>
         </div>
       </div>
 
       {/* periods */}
-      <div className="p-5 rounded-[14px] border border-[#e8e6e0] bg-white">
-        <h3 className="text-[13px] font-semibold text-[#1a1916] mb-1">Periods (days)</h3>
-        <p className="text-[11px] text-[#6b6860] mb-3">Every deadline in both pipelines is the event date plus one of these.</p>
+      <div className="p-5 rounded-[14px] border border-[#e4e9e5] bg-white">
+        <h3 className="text-[13px] font-semibold text-[#14201a] mb-1">Periods (days)</h3>
+        <p className="text-[11px] text-[#5f6b63] mb-3">Every deadline in both pipelines is the event date plus one of these.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
           {DAY_FIELDS.map(f => (
             <div key={f.key} className="p-3.5 rounded-[12px] border border-[#eee] bg-[#fbfbf8]">
               <div className="flex items-center justify-between gap-3">
-                <label htmlFor={f.key} className="text-[13px] font-semibold text-[#1a1916]">{f.label}</label>
+                <label htmlFor={f.key} className="text-[13px] font-semibold text-[#14201a]">{f.label}</label>
                 <div className="relative shrink-0">
                   <input id={f.key} type="number" min={0} step={1} value={days[f.key]} onChange={e => { setDays(dv => ({ ...dv, [f.key]: e.target.value })); dirty(); }}
-                    className="w-24 text-sm pl-3 pr-10 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]" />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#9b9890]">days</span>
+                    className="w-24 text-sm pl-3 pr-10 py-2 border border-[#e4e9e5] rounded-xl bg-white focus:outline-none focus:border-[#047246]" />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#8a948d]">days</span>
                 </div>
               </div>
-              <p className="text-[11px] text-[#6b6860] mt-1 leading-snug">{f.help}</p>
+              <p className="text-[11px] text-[#5f6b63] mt-1 leading-snug">{f.help}</p>
             </div>
           ))}
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="text-[11px] text-[#9b9890]">{cfg?.updatedAt && cfg?.source !== 'platform' ? `Last saved ${new Date(cfg.updatedAt).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
+        <span className="text-[11px] text-[#8a948d]">{cfg?.updatedAt && cfg?.source !== 'platform' ? `Last saved ${new Date(cfg.updatedAt).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
         <div className="flex items-center gap-3">
           {error && <p className="text-[11px] text-red-600">{error}</p>}
-          {saved && !saving && <p className="text-[11px] text-[#2e9f82]">Saved.</p>}
+          {saved && !saving && <p className="text-[11px] text-[#047246]">Saved.</p>}
           {reset && cfg?.source === 'own' && (
-            <button type="button" onClick={() => void onReset()} disabled={saving} className="px-3 py-2 rounded-xl text-xs font-medium border border-[#e8e6e0] bg-white text-[#6b6860] cursor-pointer disabled:opacity-50">Use platform defaults</button>
+            <button type="button" onClick={() => void onReset()} disabled={saving} className="px-3 py-2 rounded-xl text-xs font-medium border border-[#e4e9e5] bg-white text-[#5f6b63] cursor-pointer disabled:opacity-50">Use platform defaults</button>
           )}
-          <button type="button" onClick={() => void onSave()} disabled={saving} className="px-4 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>{saving ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={() => void onSave()} disabled={saving} className="px-4 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 export function LandingStats() {
   return (
-    <section style={{ background: '#2e9f82', paddingBlock: 52 }}>
+    <section style={{ background: '#047246', paddingBlock: 52 }}>
       <div className="container">
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',

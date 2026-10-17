@@ -33,7 +33,7 @@ export function GuideSidebar({ categories, selectedId, searchQuery, onSelect }: 
       width: 272,
       flexShrink: 0,
       backgroundColor: '#ffffff',
-      borderRight: '1px solid #e8e6e0',
+      borderRight: '1px solid #e4e9e5',
       overflowY: 'auto',
       display: 'flex',
       flexDirection: 'column',
@@ -41,18 +41,18 @@ export function GuideSidebar({ categories, selectedId, searchQuery, onSelect }: 
       {/* Header */}
       <div style={{
         padding: '10px 14px',
-        borderBottom: '1px solid #e8e6e0',
+        borderBottom: '1px solid #e4e9e5',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#6b6860', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#5f6b63', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Contents
         </span>
         {isSearching && (
           <span style={{
-            fontSize: 10, backgroundColor: '#f0faf6', color: '#2e9f82',
+            fontSize: 10, backgroundColor: '#eef7f2', color: '#047246',
             padding: '1px 7px', borderRadius: 99, fontWeight: 600,
           }}>
             {flatMatches.length}
@@ -62,7 +62,7 @@ export function GuideSidebar({ categories, selectedId, searchQuery, onSelect }: 
 
       {/* Search results — flat */}
       {isSearching && flatMatches.length === 0 && (
-        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#9b9890', fontSize: 13 }}>
+        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8a948d', fontSize: 13 }}>
           No sections match &quot;{searchQuery}&quot;
         </div>
       )}
@@ -110,7 +110,7 @@ function CategoryGroup({
     <div>
       <div style={{
         padding: '10px 14px 6px',
-        borderBottom: '1px solid #f4f3ef',
+        borderBottom: '1px solid #eef1ef',
         display: 'flex',
         alignItems: 'center',
         gap: 7,
@@ -119,7 +119,7 @@ function CategoryGroup({
         <span style={{
           fontSize: 11,
           fontWeight: 700,
-          color: hasSelected ? '#2e9f82' : '#6b6860',
+          color: hasSelected ? '#047246' : '#5f6b63',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
         }}>
@@ -165,11 +165,11 @@ function SidebarRow({
         alignItems: sub ? 'flex-start' : 'center',
         flexDirection: sub ? 'column' : 'row',
         gap: sub ? 2 : 6,
-        backgroundColor: isSelected ? '#f0faf6' : 'transparent',
+        backgroundColor: isSelected ? '#eef7f2' : 'transparent',
         borderLeft: 'none',
         borderLeftStyle: 'solid',
         borderLeftWidth: 2,
-        borderLeftColor: isSelected ? '#2e9f82' : 'transparent',
+        borderLeftColor: isSelected ? '#047246' : 'transparent',
         border: 'none',
         cursor: 'pointer',
         paddingLeft: sub ? 14 : 20,
@@ -183,7 +183,7 @@ function SidebarRow({
         <span style={{
           fontSize: 12,
           fontWeight: isSelected ? 600 : 400,
-          color: isSelected ? '#1a5a4a' : '#3d3b35',
+          color: isSelected ? '#0f4f36' : '#46534c',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -192,7 +192,7 @@ function SidebarRow({
         </span>
       </div>
       {sub && (
-        <span style={{ fontSize: 10, color: '#9b9890', paddingLeft: icon ? 18 : 0 }}>
+        <span style={{ fontSize: 10, color: '#8a948d', paddingLeft: icon ? 18 : 0 }}>
           {sub}
         </span>
       )}

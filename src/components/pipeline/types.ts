@@ -35,7 +35,7 @@ export const PIPELINE_STAGE_CHIP: Record<PipelineStage, string> = {
   plan:            'bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]',
   cheques:         'bg-[#fef9c3] text-[#854d0e] border-[#fde68a]',
   contract_issued: 'bg-[#d1fae5] text-[#065f46] border-[#a7f3d0]',
-  active:          'bg-[#d8f2e8] text-[#1a7a5a] border-[#a7f3d0]',
+  active:          'bg-[#d8efe3] text-[#1a7a5a] border-[#a7f3d0]',
   closed_lost:     'bg-[#fee2e2] text-[#b91c1c] border-[#fecaca]',
 };
 

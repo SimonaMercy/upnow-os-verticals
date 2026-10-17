@@ -135,7 +135,7 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
   }, [q, kind, page, box, mailboxId, only, loadThreads]);
 
   if (error && !mailbox) return <div className="p-6 text-sm text-[#b42318]">{error}</div>;
-  if (!mailbox) return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  if (!mailbox) return <div className="p-6 text-sm text-[#8a948d]">Loading…</div>;
 
   // A team member with "Emails — read" only sees every trail and writes nothing.
   const canSend = mailbox.connected && mailbox.enabled && mailbox.canSend;
@@ -161,35 +161,35 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex-1 min-w-[200px]">
-          <h1 className="text-2xl font-bold text-[#1a1916]">Emails</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">
+          <h1 className="text-2xl font-bold text-[#14201a]">Emails</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5">
             {mailbox.connected
               ? <>Sent and received with {boxes.map((b, i) => <span key={b.id}>{i > 0 && (i === boxes.length - 1 ? ' and ' : ', ')}<strong>{b.emailAddress}</strong></span>)}</>
               : 'Conversations with your customers, leads and vendors.'}
-            {mailbox.connected && checkNote && !checking && <span className="text-[#9b9890]"> · {checkNote}</span>}
+            {mailbox.connected && checkNote && !checking && <span className="text-[#8a948d]"> · {checkNote}</span>}
           </p>
         </div>
         {mailbox.connected && (
-          <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+          <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer disabled:opacity-60">
             <RefreshCw size={14} className={checking ? 'animate-spin' : ''} /> {checking ? 'Checking…' : 'Check for new'}
           </button>
         )}
         {canSend && (
-          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">
+          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer">
             <Plus size={14} /> New email
           </button>
         )}
       </div>
 
       {!mailbox.connected && (
-        <div className="mb-4 bg-white border border-[#e8e6e0] rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3">
+        <div className="mb-4 bg-white border border-[#e4e9e5] rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3">
           <div className="w-10 h-10 rounded-xl grid place-items-center bg-[#eef9f4] text-[#1a7a5a]"><Mail size={18} /></div>
           <div className="flex-1 min-w-[220px] text-sm text-[#4a4842]">
             {isManager
               ? 'The landlord has not connected an email yet. Once they do, you can write to their customers and leads from here.'
               : 'Connect the email you already use with customers. You write from here with your own address, and replies come back here.'}
           </div>
-          {!isManager && <Link href="/rental-provider/dashboard/settings?tab=email" className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d]">Connect your email</Link>}
+          {!isManager && <Link href="/rental-provider/dashboard/settings?tab=email" className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d]">Connect your email</Link>}
         </div>
       )}
       {backlog > 0 && (
@@ -210,31 +210,31 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
         </div>
       ))}
 
-      <div className="mb-3 border-b border-[#e8e6e0] flex gap-1 overflow-x-auto" role="tablist" aria-label="Who the conversation is with">
+      <div className="mb-3 border-b border-[#e4e9e5] flex gap-1 overflow-x-auto" role="tablist" aria-label="Who the conversation is with">
         {TABS.map((t) => {
           const on = kind === t.key;
           const unread = list?.unreadBy?.[t.key] ?? 0;
           return (
             <button key={t.key} type="button" role="tab" aria-selected={on} onClick={() => chooseTab(t.key)}
-              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2.5 -mb-px border-b-2 text-sm cursor-pointer whitespace-nowrap ${on ? 'border-[#2e9f82] text-[#1a1916] font-semibold' : 'border-transparent text-[#6b6860] hover:text-[#1a1916] hover:border-[#d8d5cd]'}`}>
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2.5 -mb-px border-b-2 text-sm cursor-pointer whitespace-nowrap ${on ? 'border-[#047246] text-[#14201a] font-semibold' : 'border-transparent text-[#5f6b63] hover:text-[#14201a] hover:border-[#d8d5cd]'}`}>
               {/* Eight tabs: the icons give way on a laptop screen so every tab stays in view. */}
-              <t.Icon size={15} className={`hidden 2xl:block ${on ? 'text-[#2e9f82]' : 'text-[#9b9890]'}`} />
+              <t.Icon size={15} className={`hidden 2xl:block ${on ? 'text-[#047246]' : 'text-[#8a948d]'}`} />
               {t.label}
-              <span className={`tabular-nums text-xs font-normal ${on ? 'text-[#6b6860]' : 'text-[#9b9890]'}`}>{(list?.counts[t.key] ?? 0).toLocaleString('en-GB')}</span>
-              {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums" aria-label={`${unread} unread`}>{unread}</span>}
+              <span className={`tabular-nums text-xs font-normal ${on ? 'text-[#5f6b63]' : 'text-[#8a948d]'}`}>{(list?.counts[t.key] ?? 0).toLocaleString('en-GB')}</span>
+              {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#047246] text-white text-[10px] font-bold grid place-items-center tabular-nums" aria-label={`${unread} unread`}>{unread}</span>}
             </button>
           );
         })}
       </div>
 
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden lg:grid lg:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-240px)] min-h-[520px]">
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden lg:grid lg:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-240px)] min-h-[520px]">
         {/* Conversation list — on a phone it gives way to the open conversation. */}
-        <div className={`flex-col min-h-0 h-full border-r border-[#e8e6e0] ${openId != null ? 'hidden lg:flex' : 'flex'}`}>
-          <div className="p-3 border-b border-[#e8e6e0]">
+        <div className={`flex-col min-h-0 h-full border-r border-[#e4e9e5] ${openId != null ? 'hidden lg:flex' : 'flex'}`}>
+          <div className="p-3 border-b border-[#e4e9e5]">
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
               <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search a name, a subject, a file or what was written"
-                className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full border border-[#e4e9e5] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
             </div>
             {only && (
               <div className="mt-2.5 flex items-center gap-2 rounded-lg bg-[#eef9f4] border border-[#d7ede5] px-2.5 py-1.5 text-xs text-[#1a7a5a]">
@@ -244,22 +244,22 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
             )}
             {several && (
               <select aria-label="Mailbox" value={mailboxId ?? ''} onChange={(e) => { setMailboxId(Number(e.target.value) || null); setPage(1); }}
-                className="mt-2.5 w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white text-xs text-[#2b2a27] focus:outline-none focus:border-[#2e9f82]">
+                className="mt-2.5 w-full border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white text-xs text-[#2b2a27] focus:outline-none focus:border-[#047246]">
                 <option value="">All mailboxes ({boxes.length})</option>
                 {boxes.map((b) => <option key={b.id} value={b.id}>{b.label} — {b.emailAddress}</option>)}
               </select>
             )}
-            <div className="flex items-center gap-0.5 mt-2.5 p-0.5 rounded-lg bg-[#f4f3ef] text-xs" role="tablist" aria-label="Mail folder">
+            <div className="flex items-center gap-0.5 mt-2.5 p-0.5 rounded-lg bg-[#eef1ef] text-xs" role="tablist" aria-label="Mail folder">
               {BOXES.map((b) => (
                 <button key={b.key} type="button" role="tab" aria-selected={box === b.key} onClick={() => { setBox(b.key); setPage(1); }}
-                  className={`flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md cursor-pointer whitespace-nowrap ${box === b.key ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'}`}>
+                  className={`flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-md cursor-pointer whitespace-nowrap ${box === b.key ? 'bg-white text-[#14201a] font-semibold shadow-sm' : 'text-[#5f6b63] hover:text-[#14201a]'}`}>
                   <b.Icon size={12} /> {b.label}
                 </button>
               ))}
             </div>
           </div>
           <div className={`flex-1 min-h-0 overflow-y-auto divide-y divide-[#f0eee9] ${loadingList ? 'opacity-60' : ''}`}>
-            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : kind === 'finance' || kind === 'legal' || kind === 'promotions' ? `Nothing in ${TABS.find((t) => t.key === kind)?.label} yet.` : `No emails with ${kind === 'other' ? 'anyone else' : `${TABS.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
+            {list && threads.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#8a948d]">{q || box !== 'all' ? 'Nothing here.' : kind === 'all' ? 'No emails yet.' : kind === 'finance' || kind === 'legal' || kind === 'promotions' ? `Nothing in ${TABS.find((t) => t.key === kind)?.label} yet.` : `No emails with ${kind === 'other' ? 'anyone else' : `${TABS.find((t) => t.key === kind)?.label.toLowerCase()}`} yet.`}</div>}
             {threads.map((t) => <EmailRow key={t.id} t={t} active={openId === t.id} showKind={kind === 'all'} mailboxLabel={mailboxId == null ? labelOf(t.mailboxId) : null} onOpen={() => setOpenId(t.id)} />)}
           </div>
           {list && <EmailPager page={list.page} pageSize={list.pageSize} total={list.total} onPage={setPage} disabled={loadingList} />}
@@ -268,15 +268,15 @@ export function EmailInbox({ rp, isManager = false }: { rp: Rp; isManager?: bool
         <div className={`min-h-0 h-full flex-col ${openId != null ? 'flex' : 'hidden lg:flex'}`}>
           {openId != null ? (
             <>
-              <button type="button" onClick={() => setOpenId(null)} className="lg:hidden flex items-center gap-1.5 px-4 pt-3 text-sm text-[#6b6860] cursor-pointer"><ArrowLeft size={14} /> All emails</button>
+              <button type="button" onClick={() => setOpenId(null)} className="lg:hidden flex items-center gap-1.5 px-4 pt-3 text-sm text-[#5f6b63] cursor-pointer"><ArrowLeft size={14} /> All emails</button>
               <div className="flex-1 min-h-0"><EmailThreadView key={openId} rp={rp} threadId={openId} canSend={canSend} isManager={isManager} onChanged={() => { void loadThreads(); }} onMoved={(id) => { setOpenId(id); void loadThreads(); }} /></div>
             </>
           ) : (
             <div className="flex-1 grid place-items-center bg-[#fbfaf8]">
               <div className="text-center px-6">
                 <div className="w-14 h-14 rounded-2xl grid place-items-center mx-auto mb-3 bg-[#eef9f4] text-[#1a7a5a]"><Mail size={24} /></div>
-                <p className="text-sm font-semibold text-[#1a1916]">{kind === 'all' ? 'Choose a conversation' : `Choose a conversation — ${TABS.find((t) => t.key === kind)?.label}`}</p>
-                <p className="text-sm text-[#6b6860] mt-1 max-w-[360px]">Read the whole trail in order — who wrote, who was copied, every file — and answer everyone from here.</p>
+                <p className="text-sm font-semibold text-[#14201a]">{kind === 'all' ? 'Choose a conversation' : `Choose a conversation — ${TABS.find((t) => t.key === kind)?.label}`}</p>
+                <p className="text-sm text-[#5f6b63] mt-1 max-w-[360px]">Read the whole trail in order — who wrote, who was copied, every file — and answer everyone from here.</p>
               </div>
             </div>
           )}

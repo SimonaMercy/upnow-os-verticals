@@ -68,8 +68,8 @@ function defaultLabel(spaceCategory: string | null, unitType: string | null): st
   return unitType ? `${cat} › ${UNIT_TYPE_LABELS[unitType] ?? unitType}` : `${cat} (all)`;
 }
 
-const GREEN = '#2e9f82';
-const LINE = '#e8e6e0';
+const GREEN = '#047246';
+const LINE = '#e4e9e5';
 const VIEW_KEY = 'moveTemplatesView';
 
 function catCount(t: MoveTemplate): number { return (t.structure?.categories ?? []).length; }
@@ -139,16 +139,16 @@ export default function MoveTemplatesTab({
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-12 justify-center text-[#6b6860]">
+        <div className="flex items-center gap-2 py-12 justify-center text-[#5f6b63]">
           <Loader2 size={18} className="animate-spin" /> <span className="text-sm">Loading…</span>
         </div>
       ) : rows.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 shadow-sm flex flex-col items-center justify-center text-center border border-[#e8e6e0]">
-          <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-            <ClipboardCheck size={24} className="text-[#2e9f82]" />
+        <div className="bg-white rounded-2xl p-12 shadow-sm flex flex-col items-center justify-center text-center border border-[#e4e9e5]">
+          <div className="w-14 h-14 rounded-full bg-[#d8efe3] flex items-center justify-center mb-4">
+            <ClipboardCheck size={24} className="text-[#047246]" />
           </div>
-          <h3 className="font-semibold text-[#1a1916] mb-1">No move templates yet</h3>
-          <p className="text-sm text-[#6b6860] max-w-sm mb-1">
+          <h3 className="font-semibold text-[#14201a] mb-1">No move templates yet</h3>
+          <p className="text-sm text-[#5f6b63] max-w-sm mb-1">
             Build your move-in / move-out inspection once — group by Category → Sub-category and set it
             as the default for a property type. New inspections of that type use it automatically.
           </p>
@@ -157,12 +157,12 @@ export default function MoveTemplatesTab({
         <>
           {/* Toolbar: count + grid/row toggle */}
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-[#9b9890]">{rows.length} template{rows.length === 1 ? '' : 's'}</span>
+            <span className="text-xs text-[#8a948d]">{rows.length} template{rows.length === 1 ? '' : 's'}</span>
             <div className="inline-flex" style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, padding: 4, gap: 3 }}>
               {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
                 <button key={v} onClick={() => selectView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
                   className="flex items-center justify-center"
-                  style={{ width: 34, height: 34, borderRadius: 8, ...(view === v ? { background: GREEN, color: '#fff' } : { color: '#9b9890' }) }}>
+                  style={{ width: 34, height: 34, borderRadius: 8, ...(view === v ? { background: GREEN, color: '#fff' } : { color: '#8a948d' }) }}>
                   <Icon size={17} />
                 </button>
               ))}
@@ -173,19 +173,19 @@ export default function MoveTemplatesTab({
             /* ── Grid view ── */
             <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
               {rows.map(t => (
-                <div key={t.id} className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] p-4 flex flex-col">
+                <div key={t.id} className="bg-white rounded-2xl shadow-sm border border-[#e4e9e5] p-4 flex flex-col">
                   <div className="flex items-start gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-lg bg-[#d8f2e8] flex items-center justify-center shrink-0">
-                      <ClipboardCheck size={16} className="text-[#2e9f82]" />
+                    <div className="w-8 h-8 rounded-lg bg-[#d8efe3] flex items-center justify-center shrink-0">
+                      <ClipboardCheck size={16} className="text-[#047246]" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-[#1a1916] leading-tight">{t.name}</p>
+                      <p className="font-semibold text-[#14201a] leading-tight">{t.name}</p>
                       <div className="mt-1.5"><AppliesTo t={t} /></div>
                     </div>
                   </div>
-                  <div className="mt-auto flex items-center justify-end gap-1 pt-2 border-t border-[#f4f3ef]">
-                    <button onClick={() => setViewRow(t)} title="View" className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]"><Eye size={14} /> View</button>
-                    <button onClick={() => setEditRow(t)} title="Edit" className="p-1.5 rounded-lg text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={14} /></button>
+                  <div className="mt-auto flex items-center justify-end gap-1 pt-2 border-t border-[#eef1ef]">
+                    <button onClick={() => setViewRow(t)} title="View" className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#047246] hover:bg-[#eef7f2]"><Eye size={14} /> View</button>
+                    <button onClick={() => setEditRow(t)} title="Edit" className="p-1.5 rounded-lg text-[#14201a] hover:bg-[#eef1ef]"><Pencil size={14} /></button>
                     <button onClick={() => handleDelete(t.id)} title="Remove" className="p-1.5 rounded-lg text-[#dc2626] hover:bg-red-50"><Trash2 size={14} /></button>
                   </div>
                 </div>
@@ -193,43 +193,43 @@ export default function MoveTemplatesTab({
             </div>
           ) : (
             /* ── Row view ── */
-            <div className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-sm border border-[#e4e9e5] overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-[#f9f8f6] border-b border-[#e8e6e0]">
+                <thead className="bg-[#f9f8f6] border-b border-[#e4e9e5]">
                   <tr>
-                    <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Name</th>
-                    <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Applies to</th>
-                    <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Structure</th>
-                    <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Updated</th>
-                    <th className="text-right px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Actions</th>
+                    <th className="text-left px-4 py-3 font-semibold text-[#5f6b63] text-xs uppercase tracking-wide">Name</th>
+                    <th className="text-left px-4 py-3 font-semibold text-[#5f6b63] text-xs uppercase tracking-wide">Applies to</th>
+                    <th className="text-left px-4 py-3 font-semibold text-[#5f6b63] text-xs uppercase tracking-wide">Structure</th>
+                    <th className="text-left px-4 py-3 font-semibold text-[#5f6b63] text-xs uppercase tracking-wide">Updated</th>
+                    <th className="text-right px-4 py-3 font-semibold text-[#5f6b63] text-xs uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map(t => (
-                    <tr key={t.id} className="border-b border-[#f4f3ef] last:border-b-0 hover:bg-[#fafaf8]">
+                    <tr key={t.id} className="border-b border-[#eef1ef] last:border-b-0 hover:bg-[#f6f8f6]">
                       <td className="px-4 py-3">
                         <div className="flex items-start gap-2">
-                          <ClipboardCheck size={16} className="text-[#2e9f82] mt-0.5 shrink-0" />
+                          <ClipboardCheck size={16} className="text-[#047246] mt-0.5 shrink-0" />
                           <div className="min-w-0">
-                            <p className="font-semibold text-[#1a1916]">{t.name}</p>
+                            <p className="font-semibold text-[#14201a]">{t.name}</p>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3"><AppliesTo t={t} /></td>
-                      <td className="px-4 py-3 text-xs text-[#6b6860]">
-                        <span className="inline-flex items-center gap-1"><Boxes size={13} className="text-[#9b9890]" /> {catCount(t)} categories · {itemCount(t)} items</span>
+                      <td className="px-4 py-3 text-xs text-[#5f6b63]">
+                        <span className="inline-flex items-center gap-1"><Boxes size={13} className="text-[#8a948d]" /> {catCount(t)} categories · {itemCount(t)} items</span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-[#6b6860]">
+                      <td className="px-4 py-3 text-xs text-[#5f6b63]">
                         {new Date(t.updatedAt ?? t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <button onClick={() => setViewRow(t)}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#047246] hover:bg-[#eef7f2]">
                             <Eye size={13} /> View
                           </button>
                           <button onClick={() => setEditRow(t)}
-                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#1a1916] hover:bg-[#f4f3ef]">
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#14201a] hover:bg-[#eef1ef]">
                             <Pencil size={12} /> Edit
                           </button>
                           <button onClick={() => handleDelete(t.id)}
@@ -319,28 +319,28 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[#eceae4] sticky top-0 bg-white rounded-t-2xl z-10">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-[#1a1916]">{template.name}</h2>
+            <h2 className="text-lg font-bold text-[#14201a]">{template.name}</h2>
             <div className="flex items-center gap-2 mt-1">
               <AppliesTo t={template} />
-              <span className="text-xs text-[#9b9890]">· {catCount(template)} categories · {itemCount(template)} components</span>
+              <span className="text-xs text-[#8a948d]">· {catCount(template)} categories · {itemCount(template)} components</span>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Phase toggle — one template serves both */}
-            <div className="inline-flex rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] p-0.5">
+            <div className="inline-flex rounded-lg border border-[#e4e9e5] bg-[#eef1ef] p-0.5">
               {(['move_in', 'move_out'] as const).map(p => (
                 <button key={p} onClick={() => setPhase(p)}
-                  className={`px-3 py-1 rounded-md text-xs font-semibold transition ${phase === p ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'}`}>
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition ${phase === p ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63] hover:text-[#14201a]'}`}>
                   {p === 'move_in' ? 'Move-in' : 'Move-out'}
                 </button>
               ))}
             </div>
             {/* Move-out only: which audience's copy are we previewing */}
             {phase === 'move_out' && (
-              <div className="inline-flex rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] p-0.5">
+              <div className="inline-flex rounded-lg border border-[#e4e9e5] bg-[#eef1ef] p-0.5">
                 {(['rp', 'customer'] as const).map(a => (
                   <button key={a} onClick={() => setAudience(a)}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold transition ${audience === a ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'}`}>
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition ${audience === a ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63] hover:text-[#14201a]'}`}>
                     {a === 'rp' ? 'Rental' : 'Customer'}
                   </button>
                 ))}
@@ -349,15 +349,15 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
             {/* Prices switch — customer copy ONLY (the RP always sees prices) */}
             {isCustomer && (
               <label className="inline-flex items-center gap-2 px-1 select-none cursor-pointer" title="Show prices on the customer's copy">
-                <span className="text-xs font-semibold text-[#6b6860]">Prices to customer</span>
+                <span className="text-xs font-semibold text-[#5f6b63]">Prices to customer</span>
                 <button type="button" role="switch" aria-checked={customerPrices} aria-label="Show prices to customer" onClick={() => setCustomerPrices(v => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${customerPrices ? 'bg-[#2e9f82]' : 'bg-[#d6d3cc]'}`}>
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${customerPrices ? 'bg-[#047246]' : 'bg-[#d6d3cc]'}`}>
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${customerPrices ? 'translate-x-4' : 'translate-x-0.5'}`} />
                 </button>
               </label>
             )}
-            <button onClick={onEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-sm font-medium text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={13} /> Edit</button>
-            <button onClick={dismiss} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
+            <button onClick={onEdit} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-sm font-medium text-[#14201a] hover:bg-[#eef1ef]"><Pencil size={13} /> Edit</button>
+            <button onClick={dismiss} className="p-1.5 rounded-lg text-[#8a948d] hover:bg-[#eef1ef]"><X size={18} /></button>
           </div>
         </div>
 
@@ -377,8 +377,8 @@ function MoveTemplatePreview({ template, onClose, onEdit }: { template: MoveTemp
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[#eceae4] sticky bottom-0 bg-white rounded-b-2xl">
-          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Close</button>
-          <button onClick={onEdit} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"><Pencil size={14} /> Edit template</button>
+          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#5f6b63] hover:bg-[#eef1ef]">Close</button>
+          <button onClick={onEdit} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#27896f]"><Pencil size={14} /> Edit template</button>
         </div>
       </div>
     </div>
@@ -463,8 +463,8 @@ function MoveTemplateEditor({
     }
   }
 
-  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]';
-  const LBL = 'text-[10px] font-semibold text-[#6b6860] block mb-1 uppercase tracking-wide';
+  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] bg-white text-sm focus:outline-none focus:border-[#047246]';
+  const LBL = 'text-[10px] font-semibold text-[#5f6b63] block mb-1 uppercase tracking-wide';
   const totalItems = cats.reduce((n, c) => n + c.items.length, 0);
 
   return (
@@ -473,10 +473,10 @@ function MoveTemplateEditor({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[#eceae4] sticky top-0 bg-white rounded-t-2xl z-10">
           <div>
-            <h2 className="text-lg font-bold text-[#1a1916]">{template ? `Edit — ${template.name}` : 'New move template'}</h2>
-            <p className="text-xs text-[#9b9890] mt-0.5">Build the move-in / move-out inspection structure. It applies to both phases; move-out adds amounts automatically.</p>
+            <h2 className="text-lg font-bold text-[#14201a]">{template ? `Edit — ${template.name}` : 'New move template'}</h2>
+            <p className="text-xs text-[#8a948d] mt-0.5">Build the move-in / move-out inspection structure. It applies to both phases; move-out adds amounts automatically.</p>
           </div>
-          <button onClick={dismiss} className="p-1.5 rounded-lg text-[#9b9890] hover:bg-[#f4f3ef]"><X size={18} /></button>
+          <button onClick={dismiss} className="p-1.5 rounded-lg text-[#8a948d] hover:bg-[#eef1ef]"><X size={18} /></button>
         </div>
 
         {/* Body */}
@@ -513,12 +513,12 @@ function MoveTemplateEditor({
           {/* Categories builder */}
           <div className="border-t border-[#f0efe9] pt-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-[#1a1916]">Inspection structure</h3>
-              <span className="text-[11px] text-[#9b9890]">{cats.length} categories · {totalItems} components</span>
+              <h3 className="text-sm font-semibold text-[#14201a]">Inspection structure</h3>
+              <span className="text-[11px] text-[#8a948d]">{cats.length} categories · {totalItems} components</span>
             </div>
 
             {cats.length === 0 && (
-              <div className="rounded-xl border border-dashed border-[#e0ddd5] bg-[#fbfaf8] px-4 py-8 text-center text-sm text-[#9b9890] mb-3">
+              <div className="rounded-xl border border-dashed border-[#e0ddd5] bg-[#fbfaf8] px-4 py-8 text-center text-sm text-[#8a948d] mb-3">
                 Blank slate — add the categories you inspect, then the components under each.
               </div>
             )}
@@ -529,14 +529,14 @@ function MoveTemplateEditor({
                 const usedNames = new Set(cat.items.map(it => it.componentName));
                 const availableComps = seedNames.filter(s => !usedNames.has(s.name));
                 return (
-                  <div key={cat.key + ci} data-testid="tpl-cat" className="rounded-xl border border-[#e8e6e0] overflow-hidden">
+                  <div key={cat.key + ci} data-testid="tpl-cat" className="rounded-xl border border-[#e4e9e5] overflow-hidden">
                     {/* Category header */}
                     <div className="flex items-center gap-2 px-3 py-2 bg-[#f9f8f6] border-b border-[#eceae4]">
-                      <span className="text-[10px] font-bold text-[#9b9890] w-5 text-center">{ci + 1}</span>
+                      <span className="text-[10px] font-bold text-[#8a948d] w-5 text-center">{ci + 1}</span>
                       <input value={cat.label} onChange={e => patchCategory(ci, { label: e.target.value })} placeholder="Category name"
-                        className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-[#1a1916] focus:outline-none" />
+                        className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-[#14201a] focus:outline-none" />
                       <input value={cat.unitLabel} onChange={e => patchCategory(ci, { unitLabel: e.target.value })} placeholder="Per Item"
-                        className="w-28 px-2 py-1 rounded-md border border-[#e8e6e0] bg-white text-[11px] text-[#6b6860] focus:outline-none focus:border-[#2e9f82]" />
+                        className="w-28 px-2 py-1 rounded-md border border-[#e4e9e5] bg-white text-[11px] text-[#5f6b63] focus:outline-none focus:border-[#047246]" />
                       <button onClick={() => removeCategory(ci)} title="Remove category"
                         className="p-1.5 rounded-md text-[#dc2626] hover:bg-red-50"><Trash2 size={14} /></button>
                     </div>
@@ -550,16 +550,16 @@ function MoveTemplateEditor({
                         <div key={ii} className="flex items-center gap-2">
                           <span className="text-[10px] text-[#c0bdb8] w-8 text-right tabular-nums">{ci + 1}.{ii + 1}</span>
                           <input value={it.componentName} onChange={e => patchItem(ci, ii, { componentName: e.target.value })} placeholder="Component name"
-                            className="flex-1 min-w-0 px-2 py-1 rounded-md border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#2e9f82]" />
+                            className="flex-1 min-w-0 px-2 py-1 rounded-md border border-[#e4e9e5] text-sm focus:outline-none focus:border-[#047246]" />
                           <input value={it.unitOfMeasure ?? ''} onChange={e => patchItem(ci, ii, { unitOfMeasure: e.target.value })} placeholder="item"
-                            className="w-20 px-2 py-1 rounded-md border border-[#e8e6e0] text-[11px] text-[#6b6860] focus:outline-none focus:border-[#2e9f82]" />
+                            className="w-20 px-2 py-1 rounded-md border border-[#e4e9e5] text-[11px] text-[#5f6b63] focus:outline-none focus:border-[#047246]" />
                           <div className="relative w-24">
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#c0bdb8]">AED</span>
                             <input type="number" min={0} value={it.unitCostAed ?? ''} onChange={e => patchItem(ci, ii, { unitCostAed: Number(e.target.value) || 0 })} placeholder="0"
-                              className="w-full pl-8 pr-2 py-1 rounded-md border border-[#e8e6e0] text-sm text-right tabular-nums focus:outline-none focus:border-[#2e9f82]" />
+                              className="w-full pl-8 pr-2 py-1 rounded-md border border-[#e4e9e5] text-sm text-right tabular-nums focus:outline-none focus:border-[#047246]" />
                           </div>
                           <button onClick={() => removeComponent(ci, ii)} title="Remove component"
-                            className="p-1 rounded-md text-[#9b9890] hover:text-[#dc2626] hover:bg-red-50"><X size={14} /></button>
+                            className="p-1 rounded-md text-[#8a948d] hover:text-[#dc2626] hover:bg-red-50"><X size={14} /></button>
                         </div>
                       ))}
 
@@ -568,15 +568,15 @@ function MoveTemplateEditor({
                         {availableComps.length > 0 && (
                           <div className="relative">
                             <select value="" data-testid="tpl-std-comp" onChange={e => { if (e.target.value) addStandardComponent(ci, e.target.value); }}
-                              className="appearance-none pl-2.5 pr-7 py-1 rounded-md border border-[#e8e6e0] bg-white text-[11px] text-[#2e9f82] font-medium focus:outline-none focus:border-[#2e9f82]">
+                              className="appearance-none pl-2.5 pr-7 py-1 rounded-md border border-[#e4e9e5] bg-white text-[11px] text-[#047246] font-medium focus:outline-none focus:border-[#047246]">
                               <option value="">+ Standard component…</option>
                               {availableComps.map(s => <option key={s.name} value={s.name}>{s.name}{s.subCategory ? ` (${s.subCategory})` : ''}</option>)}
                             </select>
-                            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
+                            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8a948d] pointer-events-none" />
                           </div>
                         )}
                         <button onClick={() => addCustomComponent(ci)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-dashed border-[#cfe8df] text-[11px] font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-dashed border-[#cfe8df] text-[11px] font-medium text-[#047246] hover:bg-[#eef7f2]">
                           <Plus size={12} /> Custom component
                         </button>
                       </div>
@@ -591,15 +591,15 @@ function MoveTemplateEditor({
               {availableCats.length > 0 && (
                 <div className="relative">
                   <select value="" data-testid="tpl-std-cat" onChange={e => { if (e.target.value) addStandardCategory(e.target.value); }}
-                    className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-[#e8e6e0] bg-white text-sm text-[#1a1916] font-medium focus:outline-none focus:border-[#2e9f82]">
+                    className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-[#e4e9e5] bg-white text-sm text-[#14201a] font-medium focus:outline-none focus:border-[#047246]">
                     <option value="">+ Add standard category…</option>
                     {availableCats.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                   </select>
-                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8a948d] pointer-events-none" />
                 </div>
               )}
               <button onClick={addCustomCategory}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-[#cfe8df] text-sm font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-[#cfe8df] text-sm font-medium text-[#047246] hover:bg-[#eef7f2]">
                 <Plus size={14} /> Custom category
               </button>
             </div>
@@ -610,9 +610,9 @@ function MoveTemplateEditor({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[#eceae4] sticky bottom-0 bg-white rounded-b-2xl">
-          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
+          <button onClick={dismiss} className="px-4 py-2 rounded-xl text-sm font-medium text-[#5f6b63] hover:bg-[#eef1ef]">Cancel</button>
           <button onClick={submit} disabled={busy || !name.trim()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-60">
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-60">
             {busy ? <Loader2 size={16} className="animate-spin" /> : null}
             {template ? 'Save changes' : 'Save template'}
           </button>

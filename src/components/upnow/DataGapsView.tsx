@@ -67,16 +67,16 @@ function MissingChip({ label, on }: { label: string; on: boolean }) {
 /** Contract status badge. */
 function StatusBadge({ status }: { status: string | null }) {
   const s = status ?? '';
-  const cls = s === 'active' ? 'bg-[#dcfce7] text-[#166534]' : s === 'pending' ? 'bg-[#fef3c7] text-[#854d0e]' : 'bg-[#f1f0ec] text-[#6b6860]';
+  const cls = s === 'active' ? 'bg-[#dcfce7] text-[#166534]' : s === 'pending' ? 'bg-[#fef3c7] text-[#854d0e]' : 'bg-[#f1f0ec] text-[#5f6b63]';
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{s || '—'}</span>;
 }
 
 /** Exception KPI tile — severity tints the number. */
 function StatTile({ icon: Icon, label, value, tone }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; value: number; tone: 'red' | 'amber' | 'neutral' }) {
-  const toneCls = tone === 'red' ? 'text-[#b91c1c]' : tone === 'amber' ? 'text-[#b45309]' : 'text-[#1a1916]';
+  const toneCls = tone === 'red' ? 'text-[#b91c1c]' : tone === 'amber' ? 'text-[#b45309]' : 'text-[#14201a]';
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">
         <Icon size={12} /> {label}
       </div>
       <p className={`text-2xl font-bold mt-1 ${value > 0 ? toneCls : 'text-[#c8c6c0]'}`}>{value}</p>
@@ -88,11 +88,11 @@ function StatTile({ icon: Icon, label, value, tone }: { icon: React.ComponentTyp
 function Section({ icon: Icon, title, count, children }: { icon: React.ComponentType<{ size?: number; className?: string }>; title: string; count: number; children: React.ReactNode }) {
   if (!count) return null;
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[#f0ede8]">
-        <Icon size={15} className="text-[#2e9f82]" />
-        <h2 className="text-sm font-bold text-[#1a1916]">{title}</h2>
-        <span className="text-xs font-semibold text-[#9b9890] bg-[#f4f3ef] rounded-full px-2 py-0.5">{count}</span>
+        <Icon size={15} className="text-[#047246]" />
+        <h2 className="text-sm font-bold text-[#14201a]">{title}</h2>
+        <span className="text-xs font-semibold text-[#8a948d] bg-[#eef1ef] rounded-full px-2 py-0.5">{count}</span>
       </div>
       <div className="overflow-x-auto">{children}</div>
     </div>
@@ -102,7 +102,7 @@ function Section({ icon: Icon, title, count, children }: { icon: React.Component
 const TH = ({ children, right }: { children: React.ReactNode; right?: boolean }) =>
   <th className={`px-4 py-2.5 font-semibold ${right ? 'text-right' : 'text-left'}`}>{children}</th>;
 const TD = ({ children, right }: { children: React.ReactNode; right?: boolean }) =>
-  <td className={`px-4 py-2.5 ${right ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>{children}</td>;
+  <td className={`px-4 py-2.5 ${right ? 'text-right tabular-nums' : 'text-left'} text-[#14201a]`}>{children}</td>;
 
 export function DataGapsView({
   endpoint = '/api/reports/data-gaps',
@@ -137,22 +137,22 @@ export function DataGapsView({
       <div className="flex items-start justify-between flex-wrap gap-3 mb-4 print:hidden">
         <div>
           {onBack ? (
-            <button type="button" onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <button type="button" onClick={onBack} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </button>
           ) : (
-            <Link href={backHref} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <Link href={backHref} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </Link>
           )}
-          <h1 className="text-2xl font-bold text-[#1a1916]">Data Gaps &amp; Exceptions</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">A live worklist of everything that needs filling to keep the portfolio clean and compliant — contracts missing documents, payment plans or a deposit; properties and units missing details; customer KYC; and the landlord&apos;s own profile. Rows drop off automatically as the data is completed. Print to PDF to hand to whoever is filling it.</p>
+          <h1 className="text-2xl font-bold text-[#14201a]">Data Gaps &amp; Exceptions</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5 max-w-2xl">A live worklist of everything that needs filling to keep the portfolio clean and compliant — contracts missing documents, payment plans or a deposit; properties and units missing details; customer KYC; and the landlord&apos;s own profile. Rows drop off automatically as the data is completed. Print to PDF to hand to whoever is filling it.</p>
         </div>
         <button
           onClick={() => window.print()}
           disabled={!data || loading}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-50"
-          style={{ background: '#2e9f82' }}>
+          style={{ background: '#047246' }}>
           <Printer size={14} /> Print / PDF
         </button>
       </div>
@@ -169,8 +169,8 @@ export function DataGapsView({
       )}
 
       {loading ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 flex items-center justify-center">
-          <Loader2 size={20} className="animate-spin text-[#2e9f82]" />
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 flex items-center justify-center">
+          <Loader2 size={20} className="animate-spin text-[#047246]" />
         </div>
       ) : data ? (
         <>
@@ -188,12 +188,12 @@ export function DataGapsView({
           <div className="space-y-4">
             {/* Landlord profile & configuration */}
             {data.landlord && landlordGaps > 0 && (
-              <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+              <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
                 <div className="flex items-center gap-2 px-5 py-3.5 border-b border-[#f0ede8]">
-                  <UserCog size={15} className="text-[#2e9f82]" />
-                  <h2 className="text-sm font-bold text-[#1a1916]">Landlord profile &amp; configuration{data.landlord.name ? ` — ${data.landlord.name}` : ''}</h2>
-                  <span className="text-xs font-semibold text-[#9b9890] bg-[#f4f3ef] rounded-full px-2 py-0.5">{landlordGaps}</span>
-                  <Link href="/rental-provider/dashboard/settings" className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline print:hidden">Open settings <ExternalLink size={12} /></Link>
+                  <UserCog size={15} className="text-[#047246]" />
+                  <h2 className="text-sm font-bold text-[#14201a]">Landlord profile &amp; configuration{data.landlord.name ? ` — ${data.landlord.name}` : ''}</h2>
+                  <span className="text-xs font-semibold text-[#8a948d] bg-[#eef1ef] rounded-full px-2 py-0.5">{landlordGaps}</span>
+                  <Link href="/rental-provider/dashboard/settings" className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline print:hidden">Open settings <ExternalLink size={12} /></Link>
                 </div>
                 <div className="px-5 py-4">
                   <MissingChip label="Company name" on={data.landlord.noCompanyName} />
@@ -219,12 +219,12 @@ export function DataGapsView({
             {/* Contracts missing documents / payment plan / deposit / Ejari */}
             <Section icon={FileText} title="Contracts missing documents, payment plan, deposit or Contract Registration" count={data.contractGaps.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Customer</TH><TH>Property</TH><TH>Unit</TH><TH>Status</TH><TH right>Annual rent</TH><TH>Missing</TH><th className="px-3 print:hidden" /></tr>
                 </thead>
                 <tbody>
                   {data.contractGaps.map((c, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{c.customer ?? '—'}</TD><TD>{c.property ?? '—'}</TD><TD>{c.unit ?? '—'}</TD>
                       <td className="px-4 py-2.5"><StatusBadge status={c.status} /></td>
                       <TD right>{fmtAed(c.annualRent)}</TD>
@@ -235,7 +235,7 @@ export function DataGapsView({
                         <MissingChip label="Contract Registration number" on={c.noEjari} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
-                        <Link href={`/rental-provider/dashboard/contracts/${c.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                        <Link href={`/rental-provider/dashboard/contracts/${c.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">Open <ExternalLink size={12} /></Link>
                       </td>
                     </tr>
                   ))}
@@ -246,12 +246,12 @@ export function DataGapsView({
             {/* Properties missing fields */}
             <Section icon={MapPin} title="Properties missing details" count={data.propertyGaps.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Property</TH><TH>Category</TH><TH>Missing</TH><th className="px-3 print:hidden" /></tr>
                 </thead>
                 <tbody>
                   {data.propertyGaps.map((p, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{p.property ?? '—'}</TD><TD>{p.category ?? '—'}</TD>
                       <td className="px-4 py-2.5">
                         <MissingChip label="Photos" on={p.noPhotos} />
@@ -270,7 +270,7 @@ export function DataGapsView({
                         <MissingChip label="Features" on={p.noFeatures} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
-                        <Link href="/rental-provider/dashboard/portfolio" className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                        <Link href="/rental-provider/dashboard/portfolio" className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">Open <ExternalLink size={12} /></Link>
                       </td>
                     </tr>
                   ))}
@@ -281,12 +281,12 @@ export function DataGapsView({
             {/* Units missing details */}
             <Section icon={Building2} title="Units missing details" count={data.unitsMissing.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Property</TH><TH>Unit</TH><TH>Type</TH><TH>Missing</TH><th className="px-3 print:hidden" /></tr>
                 </thead>
                 <tbody>
                   {data.unitsMissing.map((u, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{u.property ?? '—'}</TD><TD>{u.unit ?? '—'}</TD><TD>{u.type ?? '—'}</TD>
                       <td className="px-4 py-2.5">
                         <MissingChip label="Rental price" on={u.noRentalPrice} />
@@ -300,7 +300,7 @@ export function DataGapsView({
                         <MissingChip label="Floor plan" on={u.noFloorPlan} /><MissingChip label="Images" on={u.noImages} />
                       </td>
                       <td className="px-3 py-2.5 text-right print:hidden">
-                        <Link href={unitHref(u.unitId)} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                        <Link href={unitHref(u.unitId)} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">Open <ExternalLink size={12} /></Link>
                       </td>
                     </tr>
                   ))}
@@ -311,12 +311,12 @@ export function DataGapsView({
             {/* KYC — individuals */}
             <Section icon={ShieldCheck} title="Customer KYC gaps — individuals" count={data.kycIndividuals.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Customer</TH><TH>Units</TH><TH>Missing</TH></tr>
                 </thead>
                 <tbody>
                   {data.kycIndividuals.map((k, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{k.customer ?? '—'}</TD><TD>{k.units ?? '—'}</TD>
                       <td className="px-4 py-2.5">
                         <MissingChip label="Emirates ID no." on={k.noEid} /><MissingChip label="ID document" on={k.noIdentityDoc} />
@@ -332,12 +332,12 @@ export function DataGapsView({
             {/* KYC — companies */}
             <Section icon={ShieldCheck} title="Customer KYC gaps — companies" count={data.kycCompanies.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Customer</TH><TH>Units</TH><TH>Missing</TH></tr>
                 </thead>
                 <tbody>
                   {data.kycCompanies.map((k, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{k.customer ?? '—'}</TD><TD>{k.units ?? '—'}</TD>
                       <td className="px-4 py-2.5">
                         <MissingChip label="Trade licence" on={k.noTradeLicense} /><MissingChip label="Signatory EID" on={k.noEid} />
@@ -352,12 +352,12 @@ export function DataGapsView({
             {/* Document gaps */}
             <Section icon={FileWarning} title="Document gaps (missing bank statement / expired IDs)" count={data.documentGaps.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Customer</TH><TH>Unit</TH><TH>Issues</TH></tr>
                 </thead>
                 <tbody>
                   {data.documentGaps.map((d, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{d.customer ?? '—'}</TD><TD>{d.unit ?? '—'}</TD>
                       <td className="px-4 py-2.5">
                         <MissingChip label="Bank statement" on={!d.hasBank} />
@@ -372,12 +372,12 @@ export function DataGapsView({
             {/* Renewal backlog */}
             <Section icon={RefreshCw} title="Renewal backlog (lapsed or ending this year, not yet renewed)" count={data.renewals.pending.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Customer</TH><TH>Property</TH><TH>Unit</TH><TH>Lease ended</TH><TH right>Days overdue</TH><TH right>Annual rent</TH><TH>Status</TH></tr>
                 </thead>
                 <tbody>
                   {data.renewals.pending.map((r, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{r.customer ?? '—'}</TD><TD>{r.property ?? '—'}</TD><TD>{r.unit ?? '—'}</TD>
                       <TD>{fmtDate(r.expiredOn)}</TD>
                       <TD right>{r.overdue ? (r.daysOverdue ?? 0) : '—'}</TD>
@@ -394,12 +394,12 @@ export function DataGapsView({
             {/* Empty properties */}
             <Section icon={Building2} title="Properties with no units" count={data.emptyProperties.length}>
               <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <tr><TH>Property</TH><TH>Category</TH></tr>
                 </thead>
                 <tbody>
                   {data.emptyProperties.map((p, i) => (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       <TD>{p.property ?? '—'}</TD><TD>{p.category ?? '—'}</TD>
                     </tr>
                   ))}
@@ -409,15 +409,15 @@ export function DataGapsView({
 
             {/* Nothing to fix */}
             {nothingToFix && (
-              <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+              <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
                 <BarChart2 size={32} className="mx-auto text-[#c8c6c0] mb-3" />
-                <p className="text-sm font-semibold text-[#1a1916]">No gaps found</p>
-                <p className="text-xs text-[#9b9890] mt-1">Every contract, property, unit and customer is complete, and the landlord profile is filled in.</p>
+                <p className="text-sm font-semibold text-[#14201a]">No gaps found</p>
+                <p className="text-xs text-[#8a948d] mt-1">Every contract, property, unit and customer is complete, and the landlord profile is filled in.</p>
               </div>
             )}
           </div>
 
-          <p className="text-[11px] text-[#9b9890] mt-4">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>
+          <p className="text-[11px] text-[#8a948d] mt-4">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>
         </>
       ) : null}
     </div>

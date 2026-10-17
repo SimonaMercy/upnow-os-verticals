@@ -64,55 +64,55 @@ export function EmailComposer({ rp, to, fromAddress, mailboxes = [], defaultMail
     } catch (e) { setError(errorText(e, 'The email could not be sent')); setSending(false); }
   };
 
-  const INPUT = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]';
+  const INPUT = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246]';
 
   return (
     <div className="fixed inset-0 z-50">
       <div className={`slideover-scrim${closing ? ' closing' : ''} absolute inset-0 bg-black/40`} onClick={dismiss} />
       <div className={`slideover-panel${closing ? ' closing' : ''} absolute right-0 top-0 h-full w-full max-w-[640px] bg-white shadow-2xl flex flex-col`}>
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#e8e6e0]">
-          <button type="button" onClick={dismiss} aria-label="Back" className="p-1.5 rounded-lg hover:bg-[#f4f3ef] cursor-pointer text-[#6b6860]"><ArrowLeft size={18} /></button>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#e4e9e5]">
+          <button type="button" onClick={dismiss} aria-label="Back" className="p-1.5 rounded-lg hover:bg-[#eef1ef] cursor-pointer text-[#5f6b63]"><ArrowLeft size={18} /></button>
           <div className="flex-1">
-            <div className="text-base font-semibold text-[#1a1916]">New email</div>
-            {mailboxes.length <= 1 && fromAddress && <div className="text-xs text-[#9b9890]">From {fromAddress}</div>}
+            <div className="text-base font-semibold text-[#14201a]">New email</div>
+            {mailboxes.length <= 1 && fromAddress && <div className="text-xs text-[#8a948d]">From {fromAddress}</div>}
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           {mailboxes.length > 1 && (
             <div>
-              <label htmlFor="em-from" className="block text-xs font-medium text-[#6b6860] mb-1.5">From</label>
+              <label htmlFor="em-from" className="block text-xs font-medium text-[#5f6b63] mb-1.5">From</label>
               <select id="em-from" className={INPUT} value={fromId ?? ''} onChange={(e) => setFromId(Number(e.target.value) || null)}>
                 {mailboxes.map((b) => <option key={b.id} value={b.id}>{b.label} — {b.emailAddress}</option>)}
               </select>
             </div>
           )}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1.5">To</label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1.5">To</label>
             {picked ? (
-              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 bg-[#fbfaf8]">
+              <div className="flex items-center gap-2 border border-[#e4e9e5] rounded-lg px-3 py-2 bg-[#fbfaf8]">
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-[#1a1916] truncate">{picked.name}</div>
-                  <div className="text-xs text-[#6b6860] truncate">{picked.email}</div>
+                  <div className="text-sm font-medium text-[#14201a] truncate">{picked.name}</div>
+                  <div className="text-xs text-[#5f6b63] truncate">{picked.email}</div>
                 </div>
-                {!to && <button type="button" aria-label="Choose someone else" onClick={() => setPicked(null)} className="p-1 rounded hover:bg-[#e8e6e0] cursor-pointer text-[#6b6860]"><X size={14} /></button>}
+                {!to && <button type="button" aria-label="Choose someone else" onClick={() => setPicked(null)} className="p-1 rounded hover:bg-[#e4e9e5] cursor-pointer text-[#5f6b63]"><X size={14} /></button>}
               </div>
             ) : (
               <>
                 <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
                   <input autoFocus className={`${INPUT} pl-9`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your customers, leads and vendors" />
                 </div>
-                <div className="mt-1.5 border border-[#e8e6e0] rounded-lg divide-y divide-[#f0eee9] max-h-64 overflow-y-auto">
-                  {hits.length === 0 && <div className="px-3 py-3 text-xs text-[#9b9890]">No customer, lead or vendor with an email address matches.</div>}
+                <div className="mt-1.5 border border-[#e4e9e5] rounded-lg divide-y divide-[#f0eee9] max-h-64 overflow-y-auto">
+                  {hits.length === 0 && <div className="px-3 py-3 text-xs text-[#8a948d]">No customer, lead or vendor with an email address matches.</div>}
                   {hits.map((h) => (
                     <button key={`${h.kind}-${h.tenantId ?? h.leadId ?? h.vendorId}`} type="button" onClick={() => setPicked({ tenantId: h.tenantId, leadId: h.leadId, vendorId: h.vendorId, name: h.name, email: h.email })}
-                      className="w-full text-left px-3 py-2 hover:bg-[#f4f3ef] cursor-pointer flex items-center gap-2">
+                      className="w-full text-left px-3 py-2 hover:bg-[#eef1ef] cursor-pointer flex items-center gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm text-[#1a1916] truncate">{h.name}</div>
-                        <div className="text-xs text-[#6b6860] truncate">{h.email}</div>
+                        <div className="text-sm text-[#14201a] truncate">{h.name}</div>
+                        <div className="text-xs text-[#5f6b63] truncate">{h.email}</div>
                       </div>
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">{h.kind === 'customer' ? 'Customer' : h.kind === 'vendor' ? 'Vendor' : 'Lead'}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#8a948d]">{h.kind === 'customer' ? 'Customer' : h.kind === 'vendor' ? 'Vendor' : 'Lead'}</span>
                     </button>
                   ))}
                 </div>
@@ -120,29 +120,29 @@ export function EmailComposer({ rp, to, fromAddress, mailboxes = [], defaultMail
             )}
           </div>
           <div>
-            <label htmlFor="em-cc" className="block text-xs font-medium text-[#6b6860] mb-1.5">Cc <span className="font-normal text-[#9b9890]">— optional; anyone you want kept in copy, separated by commas</span></label>
+            <label htmlFor="em-cc" className="block text-xs font-medium text-[#5f6b63] mb-1.5">Cc <span className="font-normal text-[#8a948d]">— optional; anyone you want kept in copy, separated by commas</span></label>
             <input id="em-cc" className={INPUT} value={ccText} onChange={(e) => setCcText(e.target.value)} placeholder="broker@example.com, owner@example.com" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Subject</label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1.5">Subject</label>
             <input className={INPUT} value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={300} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Message</label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1.5">Message</label>
             <textarea className={`${INPUT} min-h-[240px] resize-y`} value={body} onChange={(e) => setBody(e.target.value)} />
             <SignedAs text={(mailboxes.find((b) => b.id === fromId) ?? mailboxes[0])?.signaturePreview} />
           </div>
           <AttachmentChips files={staged.files} onRemove={staged.remove} />
         </div>
 
-        <div className="px-5 py-3 border-t border-[#e8e6e0] flex items-center gap-2">
+        <div className="px-5 py-3 border-t border-[#e4e9e5] flex items-center gap-2">
           <input ref={fileRef} type="file" multiple hidden onChange={(e) => { void staged.add(e.target.files); e.target.value = ''; }} />
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={staged.uploading} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={staged.uploading} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer disabled:opacity-60">
             {staged.uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />} Attach
           </button>
           <span className="text-xs text-[#b42318] flex-1">{error ?? staged.error ?? ''}</span>
           <button type="button" onClick={send} disabled={!picked || !subject.trim() || !body.trim() || sending || staged.uploading}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">
             {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {sending ? 'Sending…' : 'Send'}
           </button>
         </div>

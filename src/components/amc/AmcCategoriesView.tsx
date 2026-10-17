@@ -23,7 +23,7 @@ const SCHEDULES: { value: 'fixed' | 'bills' | 'none'; label: string; hint: strin
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} aria-pressed={on}
-      className={`relative inline-flex rounded-full transition-colors align-middle cursor-pointer ${on ? 'bg-[#2e9f82]' : 'bg-[#c9c7c1]'}`} style={{ height: 22, width: 40 }}>
+      className={`relative inline-flex rounded-full transition-colors align-middle cursor-pointer ${on ? 'bg-[#047246]' : 'bg-[#c9c7c1]'}`} style={{ height: 22, width: 40 }}>
       <span className={`inline-block w-4 h-4 rounded-full bg-white shadow transition-transform absolute top-[3px] ${on ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
     </button>
   );
@@ -57,40 +57,40 @@ export function AmcCategoriesView({ base, rp, listHref, embedded = false }: { ba
   const catPatch = (c: ExpenseCategory, body: Record<string, unknown>) => void run(`c${c.id}`, () => apiPatch(scoped(base, rp, `/categories/${c.id}`), body), load);
 
   const nameOf = (key: string, current: string) => draftNames[key] ?? current;
-  const inputCls = 'bg-transparent border-b border-transparent hover:border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none py-0.5';
+  const inputCls = 'bg-transparent border-b border-transparent hover:border-[#e4e9e5] focus:border-[#047246] focus:outline-none py-0.5';
 
   return (
     <div className={embedded ? 'pb-12' : 'max-w-4xl mx-auto px-4 py-6 pb-24'}>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          {!embedded && <button type="button" onClick={() => router.push(listHref)} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer"><ArrowLeft size={15} /> AMC Contracts</button>}
-          {!embedded && <h1 className="text-2xl font-bold text-[#1a1916]">Contract categories</h1>}
-          <p className="text-sm text-[#6b6860] max-w-xl">{embedded ? 'How contracts are grouped on the month-end report. Edit any name in place.' : 'The categories a contract can fall under, each with its sub-categories — the rows the month-end report groups by. Edit any name in place; switch one off to keep its history but stop offering it.'}</p>
+          {!embedded && <button type="button" onClick={() => router.push(listHref)} className="inline-flex items-center gap-1 text-sm text-[#8a948d] hover:text-[#14201a] mb-2 cursor-pointer"><ArrowLeft size={15} /> AMC Contracts</button>}
+          {!embedded && <h1 className="text-2xl font-bold text-[#14201a]">Contract categories</h1>}
+          <p className="text-sm text-[#5f6b63] max-w-xl">{embedded ? 'How contracts are grouped on the month-end report. Edit any name in place.' : 'The categories a contract can fall under, each with its sub-categories — the rows the month-end report groups by. Edit any name in place; switch one off to keep its history but stop offering it.'}</p>
         </div>
-        <button type="button" onClick={() => setAddKind(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-3 py-2 shrink-0 cursor-pointer"><Plus size={15} /> Add category</button>
+        <button type="button" onClick={() => setAddKind(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#047246] text-white text-sm font-semibold px-3 py-2 shrink-0 cursor-pointer"><Plus size={15} /> Add category</button>
       </div>
 
       {error && <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">{error}</div>}
-      {rows == null && <div className="flex items-center gap-2 py-12 justify-center text-sm text-[#9b9890]"><Loader2 size={16} className="animate-spin" /> Loading…</div>}
+      {rows == null && <div className="flex items-center gap-2 py-12 justify-center text-sm text-[#8a948d]"><Loader2 size={16} className="animate-spin" /> Loading…</div>}
 
       <div className="space-y-4">
         {rows != null && kinds.filter(k => k.isActive !== false).map(k => {
           const cats = rows.filter(c => c.defaultKind === k.key);
           const kKey = `k${k.id ?? k.key}`;
           return (
-            <div key={k.key} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden">
-              <div className="flex items-center gap-3 px-4 sm:px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef] flex-wrap">
+            <div key={k.key} className="rounded-2xl border border-[#e4e9e5] bg-white overflow-hidden">
+              <div className="flex items-center gap-3 px-4 sm:px-5 py-3 bg-[#f6f8f6] border-b border-[#eef1ef] flex-wrap">
                 <input value={nameOf(kKey, k.label)} onChange={e => setDraftNames(d => ({ ...d, [kKey]: e.target.value }))}
                   onBlur={() => { const v = (draftNames[kKey] ?? k.label).trim(); if (v && v !== k.label) kindPatch(k, { label: v }); setDraftNames(d => { const n = { ...d }; delete n[kKey]; return n; }); }}
-                  className={inputCls + ' text-sm font-bold text-[#1a1916] min-w-[10rem]'} />
-                {savingKey === kKey ? <Loader2 size={12} className="animate-spin text-[#9b9890]" /> : savedKey === kKey ? <Check size={13} className="text-[#2e9f82]" /> : null}
-                <span className="text-[11px] text-[#9b9890]">· {k.contracts ?? 0} contract{(k.contracts ?? 0) === 1 ? '' : 's'}</span>
+                  className={inputCls + ' text-sm font-bold text-[#14201a] min-w-[10rem]'} />
+                {savingKey === kKey ? <Loader2 size={12} className="animate-spin text-[#8a948d]" /> : savedKey === kKey ? <Check size={13} className="text-[#047246]" /> : null}
+                <span className="text-[11px] text-[#8a948d]">· {k.contracts ?? 0} contract{(k.contracts ?? 0) === 1 ? '' : 's'}</span>
                 <div className="ml-auto flex items-center gap-4 flex-wrap">
                   {/* Built-in categories are always on and fixed in behaviour — nothing to switch. Only a
                       category the landlord added has Settings and can be removed (owner, 12 Sep: keep it simple). */}
-                  {k.isBuiltin === false && <button type="button" onClick={() => setSettingsFor(k)} className="text-xs font-semibold text-[#6b6860] hover:text-[#1a1916] cursor-pointer">Settings</button>}
+                  {k.isBuiltin === false && <button type="button" onClick={() => setSettingsFor(k)} className="text-xs font-semibold text-[#5f6b63] hover:text-[#14201a] cursor-pointer">Settings</button>}
                   {k.isBuiltin === false && (k.contracts ?? 0) === 0 && <button type="button" onClick={() => kindPatch(k, { isActive: false })} className="text-xs font-semibold text-[#b91c1c] hover:opacity-75 cursor-pointer">Remove</button>}
-                  <button type="button" onClick={() => setAddCat(k)} className="inline-flex items-center gap-1 text-xs font-semibold text-[#2e9f82] hover:opacity-75 cursor-pointer"><Plus size={13} /> Add sub-category</button>
+                  <button type="button" onClick={() => setAddCat(k)} className="inline-flex items-center gap-1 text-xs font-semibold text-[#047246] hover:opacity-75 cursor-pointer"><Plus size={13} /> Add sub-category</button>
                 </div>
               </div>
               <table className="w-full text-sm">
@@ -104,15 +104,15 @@ export function AmcCategoriesView({ base, rp, listHref, embedded = false }: { ba
                             <input value={nameOf(cKey, c.name)} onChange={e => setDraftNames(d => ({ ...d, [cKey]: e.target.value }))}
                               onBlur={() => { const v = (draftNames[cKey] ?? c.name).trim(); if (v && v !== c.name) catPatch(c, { name: v }); setDraftNames(d => { const n = { ...d }; delete n[cKey]; return n; }); }}
                               className={inputCls + ' w-full min-w-[14rem] text-[13px]'} />
-                            {savingKey === cKey ? <Loader2 size={12} className="animate-spin text-[#9b9890]" /> : savedKey === cKey ? <Check size={13} className="text-[#2e9f82]" /> : null}
+                            {savingKey === cKey ? <Loader2 size={12} className="animate-spin text-[#8a948d]" /> : savedKey === cKey ? <Check size={13} className="text-[#047246]" /> : null}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-right text-[11px] text-[#9b9890] whitespace-nowrap tabular-nums">{c.contracts} contract{c.contracts === 1 ? '' : 's'}</td>
+                        <td className="px-3 py-2 text-right text-[11px] text-[#8a948d] whitespace-nowrap tabular-nums">{c.contracts} contract{c.contracts === 1 ? '' : 's'}</td>
                         <td className="px-4 py-2 text-center w-20"><Toggle on={c.isActive} onClick={() => catPatch(c, { isActive: !c.isActive })} label="Active" /></td>
                       </tr>
                     );
                   })}
-                  {cats.length === 0 && <tr><td className="px-4 sm:px-5 py-3 text-[12px] text-[#9b9890]" colSpan={3}>No sub-categories yet.</td></tr>}
+                  {cats.length === 0 && <tr><td className="px-4 sm:px-5 py-3 text-[12px] text-[#8a948d]" colSpan={3}>No sub-categories yet.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -150,41 +150,41 @@ function KindSettingsDialog({ kind, onCancel, onSave }: { kind: KindMeta | null;
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={busy ? undefined : onCancel}>
       <div className="w-[min(440px,100%)] bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between bg-[#2e9f82] text-white px-5 py-3.5">
+        <div className="flex items-center justify-between bg-[#047246] text-white px-5 py-3.5">
           <div className="font-bold text-sm">{kind ? `Settings · ${kind.label}` : 'Add category'}</div>
           <button onClick={onCancel} className="p-1 rounded-lg hover:bg-white/20 cursor-pointer" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="p-5 space-y-4">
           {!kind && (
             <div>
-              <label className="block text-xs font-semibold text-[#6b6860] mb-1">Category name</label>
-              <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Licence & permits" className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+              <label className="block text-xs font-semibold text-[#5f6b63] mb-1">Category name</label>
+              <input autoFocus value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Licence & permits" className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
             </div>
           )}
           <div>
-            <span className="block text-sm font-semibold text-[#1a1916] mb-1.5">How the money is scheduled</span>
+            <span className="block text-sm font-semibold text-[#14201a] mb-1.5">How the money is scheduled</span>
             <div className="grid gap-1.5">
               {SCHEDULES.map(o => (
-                <label key={o.value} className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer ${schedule === o.value ? 'border-[#2e9f82] bg-[#eef9f4]' : 'border-[#e8e6e0]'}`}>
+                <label key={o.value} className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer ${schedule === o.value ? 'border-[#047246] bg-[#eef9f4]' : 'border-[#e4e9e5]'}`}>
                   <input type="radio" name="schedule" checked={schedule === o.value} onChange={() => setSchedule(o.value)} />
-                  <span><span className="block text-[13px] font-semibold text-[#1a1916]">{o.label}</span><span className="block text-xs text-[#6b6860]">{o.hint}</span></span>
+                  <span><span className="block text-[13px] font-semibold text-[#14201a]">{o.label}</span><span className="block text-xs text-[#5f6b63]">{o.hint}</span></span>
                 </label>
               ))}
             </div>
           </div>
           {/* Visits are a question only when there is a schedule at all; ad-hoc spend never has a maintenance plan. */}
           {schedule !== 'none' && (
-            <label className="flex items-center gap-2.5 text-sm text-[#1a1916] cursor-pointer">
-              <input type="checkbox" checked={visits} onChange={e => setVisits(e.target.checked)} className="w-4 h-4 accent-[#2e9f82]" />
+            <label className="flex items-center gap-2.5 text-sm text-[#14201a] cursor-pointer">
+              <input type="checkbox" checked={visits} onChange={e => setVisits(e.target.checked)} className="w-4 h-4 accent-[#047246]" />
               Vendor visits on a schedule
             </label>
           )}
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#f0ede8]">
-          <button type="button" onClick={onCancel} disabled={busy} className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60 cursor-pointer">Cancel</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-60 cursor-pointer">Cancel</button>
           <button type="button" disabled={busy || (!kind && !label.trim())} onClick={() => { setBusy(true); setErr(null); onSave({ label: label.trim(), hasVisits: schedule === 'none' ? false : visits, schedule, hint: hint.trim() || null }).catch(e => setErr((e as Error)?.message || 'Could not save.')).finally(() => setBusy(false)); }}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">{busy ? <Loader2 size={14} className="animate-spin" /> : kind ? <Check size={14} /> : <Plus size={14} />} {kind ? 'Save' : 'Add category'}</button>
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">{busy ? <Loader2 size={14} className="animate-spin" /> : kind ? <Check size={14} /> : <Plus size={14} />} {kind ? 'Save' : 'Add category'}</button>
         </div>
       </div>
     </div>
@@ -209,25 +209,25 @@ function SmallDialog({ title, fields, extra, onCancel, onSubmit }: {
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={busy ? undefined : onCancel}>
       <div className="w-[min(420px,100%)] bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between bg-[#2e9f82] text-white px-5 py-3.5">
+        <div className="flex items-center justify-between bg-[#047246] text-white px-5 py-3.5">
           <div className="font-bold text-sm">{title}</div>
           <button onClick={onCancel} className="p-1 rounded-lg hover:bg-white/20 cursor-pointer" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="p-5 space-y-4">
           {fields.map((f, i) => (
             <div key={f.key}>
-              <label className="block text-xs font-semibold text-[#6b6860] mb-1">{f.label}</label>
+              <label className="block text-xs font-semibold text-[#5f6b63] mb-1">{f.label}</label>
               <input autoFocus={i === 0} value={values[f.key] ?? ''} onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}
                 onKeyDown={e => { if (e.key === 'Enter') void submit(); }} placeholder={f.placeholder}
-                className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
             </div>
           ))}
           {extra}
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#f0ede8]">
-          <button type="button" onClick={onCancel} disabled={busy} className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60 cursor-pointer">Cancel</button>
-          <button type="button" onClick={() => void submit()} disabled={busy} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">
+          <button type="button" onClick={onCancel} disabled={busy} className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-60 cursor-pointer">Cancel</button>
+          <button type="button" onClick={() => void submit()} disabled={busy} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-60 cursor-pointer">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
           </button>
         </div>

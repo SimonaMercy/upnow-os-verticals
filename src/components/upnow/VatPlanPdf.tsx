@@ -31,11 +31,11 @@ Font.register({
 });
 Font.registerHyphenationCallback((w) => [w]);
 
-const GREEN = '#1a5a4a';
+const GREEN = '#0f4f36';
 const TINT = '#eef2f0';
 const INK = '#1c1b17';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
+const MUTE = '#5f6b63';
+const FAINT = '#8a948d';
 const HAIR = '#e7e2d9';
 const HAIR_SOFT = '#f0ece4';
 
@@ -142,7 +142,7 @@ const s = StyleSheet.create({
   totTd: { fontSize: 8.5, fontWeight: 700, color: INK },
   grand: { flexDirection: 'row', marginTop: 14, paddingVertical: 8, paddingHorizontal: 7, backgroundColor: GREEN, borderRadius: 4 },
   grandTd: { fontSize: 9.5, fontWeight: 700, color: '#ffffff' },
-  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 7, borderTopWidth: 0.5, borderTopColor: HAIR_SOFT, backgroundColor: '#fafaf8' },
+  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 7, borderTopWidth: 0.5, borderTopColor: HAIR_SOFT, backgroundColor: '#f6f8f6' },
   recTd: { fontSize: 8.5, color: MUTE },
   discTag: { marginLeft: 6, marginTop: 8, fontSize: 6.5, fontWeight: 700, letterSpacing: 0.5, color: '#b91c1c', backgroundColor: '#fdede7', borderWidth: 0.5, borderColor: '#f3cabb', borderRadius: 6, paddingVertical: 1.5, paddingHorizontal: 5 },
   foot: { fontSize: 8, color: FAINT, marginTop: 10 },

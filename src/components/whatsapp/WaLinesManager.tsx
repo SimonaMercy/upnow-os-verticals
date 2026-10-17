@@ -59,31 +59,31 @@ export function WaLinesManager({ lines, onChanged }: { lines: WaLine[]; onChange
               <p className="text-xs text-[#4a4842] mt-1 leading-relaxed">Save it in the bridge’s <code className="font-mono">.ingest.key</code> file and restart the bridge. Without it the bridge cannot hand messages to the platform.</p>
               <div className="mt-2 flex items-center gap-2">
                 <code className="flex-1 min-w-0 font-mono text-xs bg-white border border-[#d7ede5] rounded-md px-2.5 py-2 break-all">{issued.key}</code>
-                <button type="button" onClick={() => { void navigator.clipboard?.writeText(issued.key).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }); }} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">{copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy'}</button>
+                <button type="button" onClick={() => { void navigator.clipboard?.writeText(issued.key).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }); }} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer">{copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy'}</button>
               </div>
             </div>
           )}
           {lines.map((l) => {
             const s = STATE[l.status] ?? STATE.disconnected;
             return (
-              <div key={l.id} className="rounded-xl border border-[#e8e6e0] px-4 py-3">
+              <div key={l.id} className="rounded-xl border border-[#e4e9e5] px-4 py-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-semibold text-[#1a1916]">{l.label}</span>
-                  <span className="text-sm text-[#6b6860] tabular-nums">{prettyPhone(l.phone)}</span>
+                  <span className="text-sm font-semibold text-[#14201a]">{l.label}</span>
+                  <span className="text-sm text-[#5f6b63] tabular-nums">{prettyPhone(l.phone)}</span>
                   <span className={`ml-auto text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${s.tone}`}>{s.label}</span>
                 </div>
-                <div className="text-xs text-[#6b6860] mt-1 break-all">{l.displayName ? `${l.displayName} · ` : ''}{l.bridgeUrl}</div>
+                <div className="text-xs text-[#5f6b63] mt-1 break-all">{l.displayName ? `${l.displayName} · ` : ''}{l.bridgeUrl}</div>
                 {l.lastError && l.status !== 'connected' && <div className="text-xs text-[#b42318] mt-1 break-words">{l.lastError}</div>}
                 <div className="flex flex-wrap items-center gap-2 mt-2.5">
-                  <button type="button" disabled={busy} onClick={() => void rotate(l)} className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">Issue a new delivery key</button>
+                  <button type="button" disabled={busy} onClick={() => void rotate(l)} className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer disabled:opacity-60">Issue a new delivery key</button>
                   {confirmRemove === l.id ? (
                     <>
                       <span className="text-xs text-[#b42318]">Removes this number and all its conversations from the platform. WhatsApp itself is untouched.</span>
                       <button type="button" disabled={busy} onClick={() => void remove(l.id)} className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-[#b42318] text-white cursor-pointer disabled:opacity-60">Remove</button>
-                      <button type="button" onClick={() => setConfirmRemove(null)} className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#4a4842] cursor-pointer">Keep</button>
+                      <button type="button" onClick={() => setConfirmRemove(null)} className="text-xs px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] text-[#4a4842] cursor-pointer">Keep</button>
                     </>
                   ) : (
-                    <button type="button" onClick={() => setConfirmRemove(l.id)} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer"><Trash2 size={12} /> Remove</button>
+                    <button type="button" onClick={() => setConfirmRemove(l.id)} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer"><Trash2 size={12} /> Remove</button>
                   )}
                 </div>
               </div>
@@ -91,27 +91,27 @@ export function WaLinesManager({ lines, onChanged }: { lines: WaLine[]; onChange
           })}
 
           {adding ? (
-            <div className="rounded-xl border border-[#e8e6e0] px-4 py-3.5 space-y-3">
-              <div className="text-sm font-semibold text-[#1a1916]">Link a number</div>
+            <div className="rounded-xl border border-[#e4e9e5] px-4 py-3.5 space-y-3">
+              <div className="text-sm font-semibold text-[#14201a]">Link a number</div>
               <div>
-                <label htmlFor="wa-line-label" className="block text-xs font-medium text-[#6b6860] mb-1">Name of this number</label>
-                <input id="wa-line-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Property Manager" className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                <label htmlFor="wa-line-label" className="block text-xs font-medium text-[#5f6b63] mb-1">Name of this number</label>
+                <input id="wa-line-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Property Manager" className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
               </div>
               <div>
-                <label htmlFor="wa-line-url" className="block text-xs font-medium text-[#6b6860] mb-1">Bridge address</label>
-                <input id="wa-line-url" value={bridgeUrl} onChange={(e) => setBridgeUrl(e.target.value)} placeholder="http://localhost:3100" className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" />
+                <label htmlFor="wa-line-url" className="block text-xs font-medium text-[#5f6b63] mb-1">Bridge address</label>
+                <input id="wa-line-url" value={bridgeUrl} onChange={(e) => setBridgeUrl(e.target.value)} placeholder="http://localhost:3100" className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#047246]" />
               </div>
               <div>
-                <label htmlFor="wa-line-key" className="block text-xs font-medium text-[#6b6860] mb-1">Bridge API key <span className="text-[#9b9890] font-normal">— only if the bridge is protected with one</span></label>
-                <input id="wa-line-key" value={bridgeKey} onChange={(e) => setBridgeKey(e.target.value)} type="password" autoComplete="off" className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                <label htmlFor="wa-line-key" className="block text-xs font-medium text-[#5f6b63] mb-1">Bridge API key <span className="text-[#8a948d] font-normal">— only if the bridge is protected with one</span></label>
+                <input id="wa-line-key" value={bridgeKey} onChange={(e) => setBridgeKey(e.target.value)} type="password" autoComplete="off" className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
               </div>
               <div className="flex justify-end gap-2">
-                {lines.length > 0 && <button type="button" onClick={() => setAdding(false)} className="px-3.5 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] cursor-pointer">Cancel</button>}
-                <button type="button" onClick={() => void save()} disabled={!label.trim() || !bridgeUrl.trim() || busy} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">{busy && <Loader2 size={14} className="animate-spin" />} Link the number</button>
+                {lines.length > 0 && <button type="button" onClick={() => setAdding(false)} className="px-3.5 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#4a4842] cursor-pointer">Cancel</button>}
+                <button type="button" onClick={() => void save()} disabled={!label.trim() || !bridgeUrl.trim() || busy} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">{busy && <Loader2 size={14} className="animate-spin" />} Link the number</button>
               </div>
             </div>
           ) : (
-            <button type="button" onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm border border-dashed border-[#c9c6bd] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer"><Plus size={14} /> Link another number</button>
+            <button type="button" onClick={() => setAdding(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm border border-dashed border-[#c9c6bd] text-[#4a4842] hover:border-[#047246] cursor-pointer"><Plus size={14} /> Link another number</button>
           )}
           {error && <div className="text-sm text-[#b42318]">{error}</div>}
         </div>

@@ -22,9 +22,9 @@ import { StartNoticeModal, fmtD, pillCls } from '@/components/legal/StartNoticeM
 
 function Empty({ msg }: { msg: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
       <Scale size={28} className="mx-auto mb-2 text-[#c5c3bc]" />
-      <p className="text-sm text-[#9b9890]">{msg}</p>
+      <p className="text-sm text-[#8a948d]">{msg}</p>
     </div>
   );
 }

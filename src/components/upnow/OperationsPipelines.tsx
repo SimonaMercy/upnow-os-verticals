@@ -1179,9 +1179,9 @@ export function OpsPipelineStyle() {
   return (
     <style jsx global>{`
       .opsp-page {
-        --green:#2e9f82; --green-d:#1a7a5a; --green-t:#d8f2e8; --green-t2:#ebf8f2;
-        --ink:#1a1916; --ink-2:#3d3b35; --ink-3:#6b6860; --mute:#9b9890;
-        --line:#e8e6e0; --line-2:#f0eeea; --paper:#f4f3ef; --paper-2:#ebe9e3;
+        --green:#047246; --green-d:#1a7a5a; --green-t:#d8efe3; --green-t2:#ebf8f2;
+        --ink:#14201a; --ink-2:#46534c; --ink-3:#5f6b63; --mute:#8a948d;
+        --line:#e4e9e5; --line-2:#f0eeea; --paper:#eef1ef; --paper-2:#ebe9e3;
         --sky-bg:#e0f2fe; --sky-fg:#0369a1; --sh-sm:0 1px 2px rgba(26,25,22,.04);
         background:var(--paper); color:var(--ink); min-height:100vh; font-family:inherit; font-size:12.5px; line-height:1.45; font-weight:450;
       }
@@ -1217,7 +1217,7 @@ export function OpsPipelineStyle() {
       .opsp-page .pcards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:8px; margin:0 0 14px; }
       .opsp-page .pcard{ appearance:none; text-align:left; background:#fff; border:1px solid var(--line); border-radius:11px; padding:9px 12px; box-shadow:var(--sh-sm); cursor:pointer; display:flex; align-items:center; gap:10px; transition:border-color .15s, box-shadow .15s, background .15s; }
       .opsp-page .pcard:hover{ border-color:var(--ink-3); }
-      .opsp-page .pcard.active{ border-color:var(--green); background:var(--green-t2); box-shadow:0 0 0 2px rgba(46,159,130,.1); }
+      .opsp-page .pcard.active{ border-color:var(--green); background:var(--green-t2); box-shadow:0 0 0 2px rgba(4,114,70,.1); }
       .opsp-page .pc-ic{ width:24px; height:24px; border-radius:7px; background:var(--paper-2); color:var(--ink-3); display:grid; place-items:center; flex:0 0 auto; }
       .opsp-page .pcard.active .pc-ic{ background:var(--green-t); color:var(--green-d); }
       .opsp-page .pc-label{ flex:1; min-width:0; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--mute); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1227,7 +1227,7 @@ export function OpsPipelineStyle() {
       .opsp-page .filters{ display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-bottom:12px; }
       .opsp-page .search{ position:relative; flex:1; max-width:340px; min-width:170px; }
       .opsp-page .search input{ width:100%; padding:8px 12px 8px 32px; font-size:12px; border:1px solid var(--line); border-radius:9px; background:#fff; outline:none; }
-      .opsp-page .search input:focus{ border-color:var(--green); box-shadow:0 0 0 3px rgba(46,159,130,.08); }
+      .opsp-page .search input:focus{ border-color:var(--green); box-shadow:0 0 0 3px rgba(4,114,70,.08); }
       .opsp-page .search .ic{ position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--mute); }
       .opsp-page .search .clear{ position:absolute; right:6px; top:50%; transform:translateY(-50%); background:transparent; border:0; color:var(--mute); cursor:pointer; width:22px; height:22px; border-radius:6px; display:grid; place-items:center; }
       .opsp-page .sel{ appearance:none; padding:8px 30px 8px 12px; font-size:12px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink-2); cursor:pointer; font-weight:500; }
@@ -1264,8 +1264,8 @@ export function OpsPipelineStyle() {
 
       .opsp-page .card{ position:relative; background:#fff; border:1px solid #e9ece8; border-radius:9px; padding:8px; box-shadow:0 1px 2px rgba(20,40,30,.04); }
       /* Deep-link highlight (e.g. "Open lease" from a converted lead) */
-      .opsp-page .card.focused, .opsp-page .rrow.focused{ border-color:var(--green); box-shadow:0 0 0 3px rgba(46,159,130,.28); animation:opsp-flash 1.6s ease-out 1; }
-      @keyframes opsp-flash{ 0%{ box-shadow:0 0 0 3px rgba(46,159,130,.55); } 60%{ box-shadow:0 0 0 6px rgba(46,159,130,.12); } 100%{ box-shadow:0 0 0 3px rgba(46,159,130,.28); } }
+      .opsp-page .card.focused, .opsp-page .rrow.focused{ border-color:var(--green); box-shadow:0 0 0 3px rgba(4,114,70,.28); animation:opsp-flash 1.6s ease-out 1; }
+      @keyframes opsp-flash{ 0%{ box-shadow:0 0 0 3px rgba(4,114,70,.55); } 60%{ box-shadow:0 0 0 6px rgba(4,114,70,.12); } 100%{ box-shadow:0 0 0 3px rgba(4,114,70,.28); } }
       .opsp-page .c-top{ display:flex; align-items:center; gap:7px; }
       .opsp-page .card .c-top{ padding-right:30px; }  /* reserve the corner for the pinned age badge */
       .opsp-page .c-top .av{ width:23px; height:23px; flex:0 0 23px; border-radius:6px; background:var(--green-t); color:var(--green-d); display:grid; place-items:center; font-size:9px; font-weight:700; border:1px solid #cfe7dc; }
@@ -1304,9 +1304,9 @@ export function OpsPipelineStyle() {
       /* On a tile it is a corner badge — the tile's own label and number keep their room. */
       .opsp-page .pcard{ position:relative; }
       .opsp-page .pcard .act-wrap{ position:absolute; top:-8px; right:10px; margin:0; }
-      .opsp-page .pcard .act-wrap .act.mail{ box-shadow:0 0 0 2px #fff; background:#2e9f82; color:#fff; }
+      .opsp-page .pcard .act-wrap .act.mail{ box-shadow:0 0 0 2px #fff; background:#047246; color:#fff; }
       .opsp-page .pcard .act-wrap .act.wa{ box-shadow:0 0 0 2px #fff; background:#128c4a; color:#fff; }
-      .opsp-page .card.waiting{ border-color:#2e9f82; box-shadow:0 0 0 1px #2e9f82 inset; }
+      .opsp-page .card.waiting{ border-color:#047246; box-shadow:0 0 0 1px #047246 inset; }
       .opsp-page .c-wait{ margin:6px 0 2px; }
       .opsp-page .c-wait .act-wrap{ margin-left:0; flex-wrap:wrap; }
       .opsp-page .c-wait .act{ font-size:11px; padding:4px 9px; }

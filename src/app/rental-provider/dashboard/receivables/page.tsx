@@ -1,40 +1,56 @@
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useState, useMemo } from 'react';
-import { Search, X, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
-import { DirhamSign } from '@/components/ui/DirhamSign';
+/**
+ * Finance › Receivables — Genspark OS rebuild.
+ *
+ * Parity with previous page (every item kept, same endpoint and payload):
+ *  - GET /api/contracts/receivables (credentials: include). Amounts are AED numbers
+ *    (NOT fils) — shown with fmtAed; totals summed in integer fils.
+ *  - Refresh button.
+ *  - Summary: Total Billed (records count), Collected, Outstanding, Overdue (records
+ *    count, highlighted when > 0), Collection Rate. 'replaced' rows (a bounced cheque made
+ *    good by another) count toward none of the totals.
+ *  - Filters: search (contract ref, customer, unit, description), year (defaults to the
+ *    current year; "All years"; years from due dates + current year), status (all /
+ *    scheduled / due today / overdue / received / replaced — now a Seg with counts),
+ *    type (Rent / Admin Fee / Deposit / Contract Registration Fee / Maintenance / Other),
+ *    building (only when any); Reset (back to current year).
+ *  - "N records" + filtered total.
+ *  - Table: Contract (link → /rental-provider/dashboard/contracts/:id/v2), Building, Unit,
+ *    Customer, Type, Amount, Due Date, Method, Overdue days, Status; row click opens detail.
+ *  - Detail drawer: status + "N days overdue", Contract, Building, Unit, Customer, Amount,
+ *    Due Date, Method, Cheque No., Description, "Open Contract" link.
+ *  - Loading / error-with-retry / empty (filter-aware copy) states.
+ *  - There is no record-payment / reminder / PDF action on this page today, so none is
+ *    added; the drawer's action is "Open contract", where payments are recorded.
+ *  - No manager route re-exports this page; /prototype/os/rp/receivables does, and the
+ *    Finance tabs navigate pathname-relative so it keeps working there.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { RefreshCw } from 'lucide-react';
+import {
+  OsPage, PageHead, Kpis, Kpi, Pill, Btn, TableWrap, SearchField, Seg, SkeletonRows, EmptyRow, ErrorRow,
+  KV, Drawer, fmtAed as kitAed, fmtDate, type Tone,
+} from '@/components/os/kit';
 
-// 'replaced' = a bounced cheque the customer has since made good with another
-// cheque (payments.replaces_payment_id). The row stays visible as history, but it
-// is neither owed nor collected — the replacement row carries the money — so it
-// counts toward none of the totals below.
+// 'replaced' = a bounced cheque the customer has since made good with another cheque
+// (payments.replaces_payment_id). Visible as history, neither owed nor collected.
 type RecvStatus = 'scheduled' | 'due' | 'overdue' | 'received' | 'replaced';
 
+const STATUS_ORDER: RecvStatus[] = ['scheduled', 'due', 'overdue', 'received', 'replaced'];
 const STATUS_LABELS: Record<RecvStatus, string> = {
-  scheduled: 'Scheduled',
-  due:       'Due Today',
-  overdue:   'Overdue',
-  received:  'Received',
-  replaced:  'Replaced',
+  scheduled: 'Scheduled', due: 'Due Today', overdue: 'Overdue', received: 'Received', replaced: 'Replaced',
 };
-
-const STATUS_STYLE: Record<RecvStatus, string> = {
-  scheduled: 'bg-[#dbeafe] text-[#1e40af]',
-  due:       'bg-[#fef3c7] text-[#92400e]',
-  overdue:   'bg-[#fee2e2] text-[#b91c1c]',
-  received:  'bg-[#d8f2e8] text-[#1a7a5a]',
-  replaced:  'bg-[#f4f3ef] text-[#6b6860]',
+const STATUS_TONE: Record<RecvStatus, Tone> = {
+  scheduled: 'info', due: 'amber', overdue: 'danger', received: 'primary', replaced: 'neutral',
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  rental_income:    'Rent',
-  admin_fee:        'Admin Fee',
-  security_deposit: 'Deposit',
-  ejari_fee:        'Contract Registration Fee',
-  maintenance:      'Maintenance',
-  other:            'Other',
+  rental_income: 'Rent', admin_fee: 'Admin Fee', security_deposit: 'Deposit',
+  ejari_fee: 'Contract Registration Fee', maintenance: 'Maintenance', other: 'Other',
 };
 
 interface Receivable {
@@ -54,27 +70,28 @@ interface Receivable {
   overdueDays: number;
 }
 
-function fmtAed(v: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
-}
-
-function fmtDate(iso: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: APP_TIME_ZONE });
-}
+const toFils = (aed: number) => Math.round((Number(aed) || 0) * 100);
+const sumAed = (rows: Receivable[]) => rows.reduce((s, r) => s + toFils(r.amount), 0) / 100;
+const fmtAed = (v: number) => kitAed(v);
+const methodLabel = (m: string | null) => (m ? m.replace('_', ' ').replace(/^\w/, c => c.toUpperCase()) : '—');
+const contractHref = (id: number) => `/rental-provider/dashboard/contracts/${id}/v2`;
+const StatusPill = ({ s }: { s: RecvStatus }) => <Pill tone={STATUS_TONE[s] ?? 'neutral'}>{STATUS_LABELS[s] ?? s}</Pill>;
+const COLS = 11;
 
 export default function ReceivablesPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [items, setItems]       = useState<Receivable[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [search, setSearch]     = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | RecvStatus>('all');
   const [filterType, setFilterType]     = useState('all');
   const [filterBuilding, setFilterBuilding] = useState('all');
   const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
   const [detailId, setDetailId] = useState<number | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const res = await fetch('/api/contracts/receivables', { credentials: 'include' });
@@ -85,19 +102,20 @@ export default function ReceivablesPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount
+  useEffect(() => { void load(); }, [load]);
 
   const buildings = useMemo(() => [...new Set(items.map(r => r.building).filter(b => b !== '—'))], [items]);
-  const years     = useMemo(() => {
+  const years = useMemo(() => {
     const ys = new Set(items.map(r => r.dueDate?.slice(0, 4)).filter(Boolean) as string[]);
     ys.add(String(new Date().getFullYear()));
     return [...ys].sort().reverse();
   }, [items]);
 
-  const filtered = items.filter(r => {
-    if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+  // Everything except the status filter — the status Seg counts come from this.
+  const baseFiltered = useMemo(() => items.filter(r => {
     if (filterType !== 'all' && r.type !== filterType) return false;
     if (filterBuilding !== 'all' && r.building !== filterBuilding) return false;
     if (filterYear !== 'all' && r.dueDate && !r.dueDate.startsWith(filterYear)) return false;
@@ -111,232 +129,176 @@ export default function ReceivablesPage() {
       ) return false;
     }
     return true;
-  });
+  }), [items, filterType, filterBuilding, filterYear, search]);
+  const filtered = useMemo(
+    () => (filterStatus === 'all' ? baseFiltered : baseFiltered.filter(r => r.status === filterStatus)),
+    [baseFiltered, filterStatus],
+  );
 
-  // Summary stats across all items (not filtered)
-  // A replaced bounce is carried by the cheque that replaced it — counting it as
-  // billed would show the same rent twice and depress the collection rate.
-  const billable       = items.filter(r => r.status !== 'replaced');
-  const totalAmount    = billable.reduce((s, r) => s + r.amount, 0);
-  const totalReceived  = items.filter(r => r.status === 'received').reduce((s, r) => s + r.amount, 0);
-  const totalOutstanding = billable.filter(r => r.status !== 'received').reduce((s, r) => s + r.amount, 0);
-  const totalOverdue   = items.filter(r => r.status === 'overdue').reduce((s, r) => s + r.amount, 0);
-  const collectionRate = totalAmount > 0 ? Math.round((totalReceived / totalAmount) * 100) : 0;
+  // Summary across all items (not filtered). A replaced bounce is carried by its replacement.
+  const billable         = items.filter(r => r.status !== 'replaced');
+  const totalAmount      = sumAed(billable);
+  const totalReceived    = sumAed(items.filter(r => r.status === 'received'));
+  const totalOutstanding = sumAed(billable.filter(r => r.status !== 'received'));
+  const overdueItems     = items.filter(r => r.status === 'overdue');
+  const totalOverdue     = sumAed(overdueItems);
+  const collectionRate   = totalAmount > 0 ? Math.round((toFils(totalReceived) / toFils(totalAmount)) * 100) : 0;
 
-  const hasFilters = filterStatus !== 'all' || filterType !== 'all' || filterBuilding !== 'all' ||
-    filterYear !== String(new Date().getFullYear()) || search !== '';
+  const currentYear = String(new Date().getFullYear());
+  const hasFilters = filterStatus !== 'all' || filterType !== 'all' || filterBuilding !== 'all' || filterYear !== currentYear || search !== '';
   const clearFilters = () => {
-    setFilterStatus('all'); setFilterType('all'); setFilterBuilding('all');
-    setFilterYear(String(new Date().getFullYear())); setSearch('');
+    setFilterStatus('all'); setFilterType('all'); setFilterBuilding('all'); setFilterYear(currentYear); setSearch('');
   };
 
   const detail = detailId !== null ? items.find(r => r.id === detailId) ?? null : null;
 
+  const base = pathname.replace(/\/receivables\/?$/, '');
+  const goTab = (t: 'payments' | 'deposits' | 'receivables') => {
+    if (t === 'payments') router.push(`${base}/payments`);
+    else if (t === 'deposits') router.push(`${base}/payments?tab=deposits`);
+  };
+
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Receivables</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Track all rental payments and collection status.</p>
-        </div>
-        <button onClick={load} disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] transition-colors disabled:opacity-50 cursor-pointer">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+    <OsPage>
+      <PageHead
+        eyebrow="Finance › Receivables"
+        title="Receivables"
+        lede="Every scheduled instalment across your leases and where it stands — scheduled, due, overdue or received."
+        actions={<Btn onClick={load} disabled={loading}><RefreshCw size={13} aria-hidden /> Refresh</Btn>}
+      />
+
+      <Kpis>
+        <Kpi k="Total billed" v={loading ? '…' : fmtAed(totalAmount)} d={`${billable.length} records`} />
+        <Kpi k="Collected" v={loading ? '…' : fmtAed(totalReceived)} d="amount received" />
+        <Kpi dark k="Outstanding" v={loading ? '…' : fmtAed(totalOutstanding)} d="pending payment" />
+        <Kpi k="Overdue" v={loading ? '…' : fmtAed(totalOverdue)} d={`${overdueItems.length} records`} />
+        <Kpi k="Collection rate" v={loading ? '…' : `${collectionRate}%`} d="of total billed" />
+      </Kpis>
+
+      <div style={{ margin: '14px 0 10px' }}>
+        <Seg<'payments' | 'deposits' | 'receivables'>
+          label="Finance views"
+          value="receivables"
+          onChange={goTab}
+          options={[
+            { v: 'payments', l: 'Payments' },
+            { v: 'deposits', l: 'Security Deposits' },
+            { v: 'receivables', l: 'Receivables', n: items.length },
+          ]}
+        />
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-        {[
-          { label: 'Total Billed',     value: fmtAed(totalAmount),      sub: `${billable.length} records` },
-          { label: 'Collected',        value: fmtAed(totalReceived),    sub: 'amount received' },
-          { label: 'Outstanding',      value: fmtAed(totalOutstanding), sub: 'pending payment' },
-          { label: 'Overdue',          value: fmtAed(totalOverdue),     sub: `${items.filter(r => r.status === 'overdue').length} records`, highlight: totalOverdue > 0 },
-          { label: 'Collection Rate',  value: `${collectionRate}%`,     sub: 'of total billed' },
-        ].map((s, i) => (
-          <div key={i} className={`bg-white rounded-2xl p-5 shadow-sm border ${(s as any).highlight ? 'border-red-200' : 'border-[#f0ede8]'}`}>
-            <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
-            <div className={`font-bold text-xl mt-1 truncate ${(s as any).highlight ? 'text-red-600' : 'text-[#1a1916]'}`}>{s.value}</div>
-            <div className="text-xs text-[#9b9890] mt-0.5">{s.sub}</div>
-          </div>
-        ))}
+      <div style={{ margin: '0 0 10px' }}>
+        <Seg<'all' | RecvStatus>
+          label="Filter by status"
+          value={filterStatus}
+          onChange={setFilterStatus}
+          options={[
+            { v: 'all', l: 'All', n: baseFiltered.length },
+            ...STATUS_ORDER.map(s => ({ v: s, l: STATUS_LABELS[s], n: baseFiltered.filter(r => r.status === s).length })),
+          ]}
+        />
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm border border-[#f0ede8]">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input type="text" placeholder="Search contract, customer, unit…" value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
-        </div>
-        <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
-          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
-          <option value="all">All Years</option>
+      <TableWrap toolbar={<>
+        <SearchField value={search} onChange={setSearch} placeholder="Search contract, customer, unit…" />
+        <select className="gx-sel" value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year">
+          <option value="all">All years</option>
           {years.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
-          <option value="all">All Statuses</option>
-          {(Object.keys(STATUS_LABELS) as RecvStatus[]).map(s => (
-            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-          ))}
-        </select>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
-          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
-          <option value="all">All Types</option>
+        <select className="gx-sel" value={filterType} onChange={e => setFilterType(e.target.value)} aria-label="Filter by type">
+          <option value="all">All types</option>
           {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         {buildings.length > 0 && (
-          <select value={filterBuilding} onChange={e => setFilterBuilding(e.target.value)}
-            className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
-            <option value="all">All Buildings</option>
+          <select className="gx-sel" value={filterBuilding} onChange={e => setFilterBuilding(e.target.value)} aria-label="Filter by building">
+            <option value="all">All buildings</option>
             {buildings.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         )}
-        {hasFilters && (
-          <button onClick={clearFilters}
-            className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
-            <X size={12} /> Reset
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
-        {filtered.length > 0 && (
-          <span className="text-sm font-semibold text-[#1a1916]">
-            {fmtAed(filtered.reduce((s, r) => s + r.amount, 0))}
-          </span>
-        )}
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-[#f0ede8]">
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 size={22} className="animate-spin text-[#2e9f82]" />
-          </div>
-        ) : error ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
-            <p className="text-sm text-red-600">{error}</p>
-            <button onClick={load} className="text-xs text-[#2e9f82] font-medium hover:underline cursor-pointer">Retry</button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-              <DirhamSign size={24} className="text-[#2e9f82]" />
-            </div>
-            <p className="text-sm text-[#6b6860] mb-1">
-              {hasFilters ? 'No records match your filters.' : 'No receivables yet.'}
-            </p>
-            <p className="text-xs text-[#9b9890]">Payment instalments appear here once contracts are created.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[960px]">
-              <thead>
-                <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
-                  {['Contract', 'Building', 'Unit', 'Customer', 'Type', 'Amount', 'Due Date', 'Method', 'Overdue', 'Status', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
-                  ))}
-                </tr>
-              </thead>
+        {hasFilters && <Btn size="sm" variant="ghost" onClick={clearFilters}>Reset filters</Btn>}
+        <span className="sp" />
+        <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>
+          {filtered.length} record{filtered.length !== 1 ? 's' : ''}{filtered.length > 0 ? ` · ${fmtAed(sumAed(filtered))}` : ''}
+        </span>
+      </>}>
+        <table className="gx-tbl" style={{ minWidth: 980 }}>
+          <thead>
+            <tr>
+              <th>Contract</th><th>Building</th><th>Unit</th><th>Customer</th><th>Type</th>
+              <th className="num">Amount</th><th>Due date</th><th>Method</th><th className="num">Overdue</th><th>Status</th>
+              <th className="act"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          {loading ? <SkeletonRows cols={COLS} />
+            : error ? <ErrorRow cols={COLS} onRetry={load} />
+            : filtered.length === 0 ? (
+              <EmptyRow cols={COLS}
+                title={hasFilters ? 'No records match your filters.' : 'No receivables yet.'}
+                text={hasFilters ? ' Reset the filters to see every instalment.' : ' Payment instalments appear here once contracts are created.'} />
+            ) : (
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id} onClick={() => setDetailId(r.id)}
-                    className="border-b border-[#f0ede8] hover:bg-[#fafaf8] text-sm text-[#1a1916] cursor-pointer transition-colors">
-                    <td className="px-4 py-3.5">
-                      {r.contractId ? (
-                        <Link href={`/rental-provider/dashboard/contracts/${r.contractId}/v2`}
-                          onClick={e => e.stopPropagation()}
-                          className="text-[#2e9f82] font-medium hover:underline">{r.contractRef}</Link>
-                      ) : <span className="text-[#9b9890]">—</span>}
+                  <tr key={r.id} className="click" onClick={() => setDetailId(r.id)}>
+                    <td>
+                      {r.contractId
+                        ? <Link href={contractHref(r.contractId)} onClick={e => e.stopPropagation()} style={{ color: 'var(--ms-primary, #047246)', fontWeight: 600 }}>{r.contractRef}</Link>
+                        : '—'}
                     </td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{r.building}</td>
-                    <td className="px-4 py-3.5">{r.unit}</td>
-                    <td className="px-4 py-3.5">{r.tenant}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{TYPE_LABELS[r.type] ?? r.type}</td>
-                    <td className="px-4 py-3.5 font-semibold">{fmtAed(r.amount)}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{fmtDate(r.dueDate)}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860] capitalize">{r.paymentMethod?.replace('_', ' ') ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-red-600 font-medium text-xs">
+                    <td>{r.building}</td>
+                    <td className="strong">{r.unit}</td>
+                    <td>{r.tenant}</td>
+                    <td>{TYPE_LABELS[r.type] ?? r.type}</td>
+                    <td className="num strong">{fmtAed(r.amount)}</td>
+                    <td className="nowrap">{fmtDate(r.dueDate)}</td>
+                    <td>{methodLabel(r.paymentMethod)}</td>
+                    <td className="num" style={r.overdueDays > 0 ? { color: 'var(--ms-danger, #b91c1c)', fontWeight: 600 } : undefined}>
                       {r.overdueDays > 0 ? `${r.overdueDays}d` : '—'}
                     </td>
-                    <td className="px-4 py-3.5">
-                      <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${STATUS_STYLE[r.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                        {STATUS_LABELS[r.status] ?? r.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <ExternalLink size={13} className="text-[#9b9890]" />
-                    </td>
+                    <td><StatusPill s={r.status} /></td>
+                    <td className="act"><Btn size="xs" onClick={() => setDetailId(r.id)}>Open</Btn></td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+            )}
+        </table>
+      </TableWrap>
 
-      {/* Detail drawer */}
-      {detail && (
-        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setDetailId(null)}>
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
-          <div className="relative w-full max-w-md bg-white h-full shadow-xl overflow-y-auto flex flex-col"
-            onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white z-10 flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0]">
-              <div>
-                <p className="font-bold text-[#1a1916]">{TYPE_LABELS[detail.type] ?? detail.type}</p>
-                <p className="text-xs text-[#9b9890] mt-0.5">{detail.contractRef} · {detail.unit}</p>
-              </div>
-              <button onClick={() => setDetailId(null)} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1">
-                <X size={18} />
-              </button>
+      <Drawer
+        open={!!detail}
+        onClose={() => setDetailId(null)}
+        title={detail ? (TYPE_LABELS[detail.type] ?? detail.type) : ''}
+        sub={detail ? `${detail.contractRef} · ${detail.unit}` : undefined}
+        footer={detail && <>
+          {detail.contractId && <Btn variant="primary" href={contractHref(detail.contractId)}>Open contract</Btn>}
+          <Btn variant="ghost" onClick={() => setDetailId(null)}>Close</Btn>
+        </>}
+      >
+        {detail && (
+          <>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              <StatusPill s={detail.status} />
+              {detail.overdueDays > 0 && <Pill tone="danger" dot={false}>{detail.overdueDays} days overdue</Pill>}
             </div>
-            <div className="p-6 flex-1 space-y-4">
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center rounded-full text-xs font-semibold px-3 py-1 ${STATUS_STYLE[detail.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
-                  {STATUS_LABELS[detail.status] ?? detail.status}
-                </span>
-                {detail.overdueDays > 0 && (
-                  <span className="text-xs text-red-600 font-medium">{detail.overdueDays} days overdue</span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: 'Contract',    value: detail.contractRef },
-                  { label: 'Building',    value: detail.building },
-                  { label: 'Unit',        value: detail.unit },
-                  { label: 'Customer',    value: detail.tenant },
-                  { label: 'Amount',      value: fmtAed(detail.amount) },
-                  { label: 'Due Date',    value: fmtDate(detail.dueDate) },
-                  { label: 'Method',      value: detail.paymentMethod?.replace('_', ' ') ?? '—' },
-                  { label: 'Cheque No.',  value: detail.chequeNumber ?? '—' },
-                ].map(item => (
-                  <div key={item.label} className="bg-[#f4f3ef] rounded-xl p-3">
-                    <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">{item.label}</p>
-                    <p className="text-sm font-semibold text-[#1a1916] capitalize">{item.value}</p>
-                  </div>
-                ))}
-              </div>
-              {detail.description && (
-                <div className="bg-[#f4f3ef] rounded-xl p-3">
-                  <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide mb-1">Description</p>
-                  <p className="text-sm text-[#3d3b35]">{detail.description}</p>
-                </div>
-              )}
-              {detail.contractId && (
-                <Link href={`/rental-provider/dashboard/contracts/${detail.contractId}/v2`}
-                  className="flex items-center gap-2 text-sm font-semibold text-[#2e9f82] hover:underline mt-2">
-                  <ExternalLink size={14} /> Open Contract
-                </Link>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+            <KV items={[
+              { k: 'Contract', v: detail.contractRef },
+              { k: 'Building', v: detail.building },
+              { k: 'Unit', v: detail.unit },
+              { k: 'Customer', v: detail.tenant },
+              { k: 'Amount', v: fmtAed(detail.amount) },
+              { k: 'Due date', v: fmtDate(detail.dueDate) },
+              { k: 'Method', v: methodLabel(detail.paymentMethod) },
+              { k: 'Cheque no.', v: detail.chequeNumber ?? '—' },
+            ]} />
+            {detail.description && (
+              <div style={{ marginTop: 12 }}><KV items={[{ k: 'Description', v: detail.description }]} /></div>
+            )}
+            <p style={{ fontSize: 11.5, color: 'var(--ms-ink-3)', marginTop: 12 }}>
+              Payments are recorded and cheques cleared on the lease record — open the contract to act on this instalment.
+            </p>
+          </>
+        )}
+      </Drawer>
+    </OsPage>
   );
 }

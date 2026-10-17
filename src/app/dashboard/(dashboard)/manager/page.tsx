@@ -574,7 +574,7 @@ function ManagerMultiOverview() {
                       most overdue item here, so it says so instead of reading like any
                       other upcoming expiry. */
         { key: 'renewals', count: action?.renewals?.count ?? 0, el: (
-          <ActionBucket icon={RefreshCw} color="#2e9f82" label={`Renewals to raise (≤${days}d)`} href={`/dashboard/manager/contracts${scopeQ()}`}
+          <ActionBucket icon={RefreshCw} color="#047246" label={`Renewals to raise (≤${days}d)`} href={`/dashboard/manager/contracts${scopeQ()}`}
           loading={actionLoading} bucket={action?.renewals}
           groupBy={buildingOf}
           compact={i => ({
@@ -867,7 +867,7 @@ function ManagerMultiOverview() {
               <div className="bg-white rounded-2xl px-4 py-3 mb-8 flex items-center gap-x-3 gap-y-1.5 flex-wrap" style={{ boxShadow: 'var(--shadow-sm)' }}>
                 <span className="text-[11px] font-semibold uppercase tracking-wide shrink-0" style={{ color: 'var(--color-neutral-400)' }}>All clear</span>
                 {clear.map(b => (
-                  <span key={b.key} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--color-base-100, #f4f3ef)', color: 'var(--color-neutral-500)' }}>{BUCKET_WORDS[b.key] ?? b.key}</span>
+                  <span key={b.key} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--color-base-100, #eef1ef)', color: 'var(--color-neutral-500)' }}>{BUCKET_WORDS[b.key] ?? b.key}</span>
                 ))}
               </div>
             )}

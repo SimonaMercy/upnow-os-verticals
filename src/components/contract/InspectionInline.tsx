@@ -73,7 +73,7 @@ export default function InspectionInline(props: InspectionInlineProps) {
 
   if (error) {
     return (
-      <div style={{ border: '1px solid #e8e6e0', borderRadius: 12, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>
+      <div style={{ border: '1px solid #e4e9e5', borderRadius: 12, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>
         Failed to render the inspection report: {error}
       </div>
     );

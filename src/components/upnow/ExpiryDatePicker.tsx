@@ -93,19 +93,19 @@ export function ExpiryDatePicker({
           display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
           font-family: inherit; font-size: 12px; font-weight: 800;
           padding: 5px 9px; border-radius: 8px;
-          border: 1px solid #cfcbc2; background: #fff; color: #1a1916;
+          border: 1px solid #cfcbc2; background: #fff; color: #14201a;
         }
-        .exp-trigger:hover:not(:disabled) { border-color: #2e9f82; }
+        .exp-trigger:hover:not(:disabled) { border-color: #047246; }
         .exp-trigger:disabled { opacity: .55; cursor: not-allowed; }
         .exp-ph { color: #8a877f; font-weight: 700; }
         .exp-clear {
           display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-          width: 18px; height: 18px; border-radius: 6px; border: 0; background: transparent; color: #9b9890;
+          width: 18px; height: 18px; border-radius: 6px; border: 0; background: transparent; color: #8a948d;
         }
-        .exp-clear:hover { background: #f4f3ef; color: #b91c1c; }
+        .exp-clear:hover { background: #eef1ef; color: #b91c1c; }
         .exp-pop {
           position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
-          background: #fff; border: 1px solid #e8e6e0; border-radius: 12px;
+          background: #fff; border: 1px solid #e4e9e5; border-radius: 12px;
           box-shadow: 0 12px 32px rgba(26,25,22,.16); padding: 6px;
         }
       `}</style>

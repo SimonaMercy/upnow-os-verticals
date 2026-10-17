@@ -21,7 +21,7 @@ import { InspectionPhotosCard } from '@/components/contract/InspectionPhotosCard
 const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
   ssr: false,
   loading: () => (
-    <div className="border border-[#e8e6e0] rounded-xl bg-white h-[360px] grid place-items-center text-sm text-[#9b9890]">
+    <div className="border border-[#e4e9e5] rounded-xl bg-white h-[360px] grid place-items-center text-sm text-[#8a948d]">
       Preparing inspection report…
     </div>
   ),
@@ -33,7 +33,7 @@ function BackLink({ contractId }: { contractId: string | undefined }) {
   const safeFrom = from && from.startsWith('/') && !from.startsWith('//') ? from : null;
   const href = safeFrom ?? (contractId ? `/dashboard/customer/spaces/v2/c-${contractId}` : '/dashboard/customer/spaces');
   return (
-    <Link href={href} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] w-fit">
+    <Link href={href} className="flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#14201a] w-fit">
       <ArrowLeft size={15} /> Back to my space
     </Link>
   );
@@ -135,7 +135,7 @@ export default function TenantInspectionPage() {
   }
 
   if (loading) {
-    return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#2e9f82]" size={28} /></div>;
+    return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#047246]" size={28} /></div>;
   }
   if (loadError || !data) {
     return (
@@ -192,8 +192,8 @@ export default function TenantInspectionPage() {
       </div>
 
       {!signed && (
-        <div className="no-print mt-6 bg-white rounded-2xl border border-[#e8e6e0] p-5">
-          <h3 className="text-sm font-bold text-[#1a1916] mb-3">Your Signature</h3>
+        <div className="no-print mt-6 bg-white rounded-2xl border border-[#e4e9e5] p-5">
+          <h3 className="text-sm font-bold text-[#14201a] mb-3">Your Signature</h3>
           <SignatureBlock
             signerRole="Customer"
             signerName={meta?.tenantName ?? ''}
@@ -207,8 +207,8 @@ export default function TenantInspectionPage() {
       )}
 
       {signed && (
-        <div className="no-print mt-5 flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-          <CheckCircle2 size={16} className="text-[#2e9f82]" />
+        <div className="no-print mt-5 flex items-center gap-2 bg-[#eef7f2] border border-[#c5e8df] rounded-xl px-4 py-3">
+          <CheckCircle2 size={16} className="text-[#047246]" />
           <p className="text-sm font-medium text-[#1a7a5a]">{data.rpCounterSig ? 'Both parties have signed.' : 'You have signed — awaiting the rental provider counter-signature.'}</p>
         </div>
       )}

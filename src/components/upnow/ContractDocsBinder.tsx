@@ -49,11 +49,11 @@ const DOWNLOADABLE_ARTIFACT_KEYS = new Set(['move_in_report', 'move_out_report',
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
-  loading: () => <div style={{ padding: 36, textAlign: 'center', color: '#9b9890', fontSize: 13 }}>Rendering contract…</div>,
+  loading: () => <div style={{ padding: 36, textAlign: 'center', color: '#8a948d', fontSize: 13 }}>Rendering contract…</div>,
 });
 const ReceiptInline = dynamic(() => import('@/components/upnow/PaymentReceiptPdf').then(m => ({ default: m.ReceiptInline })), {
   ssr: false,
-  loading: () => <div style={{ padding: 36, textAlign: 'center', color: '#9b9890', fontSize: 13 }}>Rendering receipts…</div>,
+  loading: () => <div style={{ padding: 36, textAlign: 'center', color: '#8a948d', fontSize: 13 }}>Rendering receipts…</div>,
 });
 const FULL = 100000; // height so the inline canvas never hits its own scroll cap
 
@@ -338,7 +338,7 @@ const idCardsFor = (
 };
 
 const cardCss: React.CSSProperties = { border: '1px solid #e3e0d9', borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: '#fff' };
-const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#1a1916', background: '#faf9f7', borderBottom: '1px solid #efece6' };
+const capCss: React.CSSProperties = { padding: '9px 13px', fontSize: 12.5, fontWeight: 700, color: '#14201a', background: '#faf9f7', borderBottom: '1px solid #efece6' };
 const chip: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: '#4a4742', cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto', lineHeight: 1.3 };
 const JUMP_OFFSET = 88;
 
@@ -387,7 +387,7 @@ function RefileButton({ doc, to, onSetSection }: { doc: BinderDoc; to: 'kyc' | '
           catch (e) { setErr(e instanceof Error ? e.message : 'Could not move the document'); }
           finally { setBusy(false); }
         }}
-        style={{ flex: '0 0 auto', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: busy ? '#9b9890' : '#4a4742', cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
+        style={{ flex: '0 0 auto', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, border: '1px solid #dcd8d0', background: '#fff', color: busy ? '#8a948d' : '#4a4742', cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}
       >
         {busy ? 'Moving…' : to === 'kyc' ? '⇄ Move to Customer KYC' : '⇄ Move to Tenancy'}
       </button>
@@ -401,7 +401,7 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
 
 function Missing({ label }: { label: string }) {
   return (
-    <div style={{ border: '1px dashed #d8d4cc', borderRadius: 12, padding: '14px 16px', marginBottom: 16, color: '#9b9890', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ border: '1px dashed #d8d4cc', borderRadius: 12, padding: '14px 16px', marginBottom: 16, color: '#8a948d', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
       <FileText size={14} /> {label} — not yet available
     </div>
   );
@@ -415,7 +415,7 @@ function Missing({ label }: { label: string }) {
  *  portal (`profileHref` omitted): the lessor has no profile to open. */
 function MissingId({ label, href, optional }: { label: string; href?: string | null; optional?: boolean }) {
   const tone = optional
-    ? { border: '#d8d4cc', bg: '#fcfbf9', icon: '#9b9890', label: '#6b6860', note: '#9b9890' }
+    ? { border: '#d8d4cc', bg: '#fcfbf9', icon: '#8a948d', label: '#5f6b63', note: '#8a948d' }
     : { border: '#e9c48a', bg: '#fdf7ee', icon: '#b07415', label: '#8a5a10', note: '#b07415' };
   return (
     <div style={{ border: `1px dashed ${tone.border}`, borderRadius: 12, padding: '14px 16px', marginBottom: 16, fontSize: 13, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, background: tone.bg }}>
@@ -424,7 +424,7 @@ function MissingId({ label, href, optional }: { label: string; href?: string | n
       <span style={{ color: tone.note, fontWeight: optional ? 400 : 600 }}>— missing{optional ? ' · optional' : ' · required'}</span>
       {href && (
         <a href={href} target="_blank" rel="noreferrer"
-          style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#2e9f82', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+          style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#047246', textDecoration: 'none', whiteSpace: 'nowrap' }}>
           Upload from profile ↗
         </a>
       )}
@@ -434,14 +434,14 @@ function MissingId({ label, href, optional }: { label: string; href?: string | n
 
 function PendingLink({ label }: { label: string }) {
   return (
-    <div style={{ border: '1px dashed #d8d4cc', borderRadius: 12, padding: '14px 16px', marginBottom: 16, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: '#fff', color: '#6b6860' }}>
+    <div style={{ border: '1px dashed #d8d4cc', borderRadius: 12, padding: '14px 16px', marginBottom: 16, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: '#fff', color: '#5f6b63' }}>
       <FileText size={14} /> {label} — not completed yet
     </div>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: '8px 0 12px' }}>{children}</div>;
+  return <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d', margin: '8px 0 12px' }}>{children}</div>;
 }
 
 /** `note` rides beside the title (the KYC pane's missing-document count); a chip
@@ -453,9 +453,9 @@ function QuickNav({ title, note, items }: {
 }) {
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return (
-    <div className={ds.quickNav} style={{ position: 'sticky', top: 0, zIndex: 5, background: '#f4f3ef', padding: '14px 0 10px', borderBottom: '1px solid #e7e3dc', marginBottom: 14 }}>
+    <div className={ds.quickNav} style={{ position: 'sticky', top: 0, zIndex: 5, background: '#eef1ef', padding: '14px 0 10px', borderBottom: '1px solid #e7e3dc', marginBottom: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: items.length ? 8 : 0 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890' }}>{title}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d' }}>{title}</span>
         {note}
       </div>
       {items.length > 0 && (
@@ -487,18 +487,18 @@ function TenantCard({ t, isCompany }: { t: { name?: string | null; email?: strin
   return (
     <div style={{ ...cardCss, borderColor: '#cfe7dd' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'linear-gradient(180deg,#f4faf7,#fff)', borderBottom: '1px solid #eef4f1' }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: '#2e9f82', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{initials(title)}</div>
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: '#047246', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 16, flexShrink: 0 }}>{initials(title)}</div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 800, color: '#1a1916', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-          <div style={{ fontSize: 11.5, color: '#6b6860' }}>{isCompany ? 'Corporate tenant' : 'Individual tenant'} · verify against the documents below</div>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: '#14201a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+          <div style={{ fontSize: 11.5, color: '#5f6b63' }}>{isCompany ? 'Corporate tenant' : 'Individual tenant'} · verify against the documents below</div>
         </div>
       </div>
       {rows.length > 0 && (
         <div style={{ padding: '10px 16px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px' }}>
           {rows.map(([k, v]) => (
             <div key={k} style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#9b9890' }}>{k}</div>
-              <div style={{ fontSize: 13, color: '#1a1916', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={String(v)}>{v}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#8a948d' }}>{k}</div>
+              <div style={{ fontSize: 13, color: '#14201a', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={String(v)}>{v}</div>
             </div>
           ))}
         </div>
@@ -507,7 +507,7 @@ function TenantCard({ t, isCompany }: { t: { name?: string | null; email?: strin
   );
 }
 
-const linkBtn: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, padding: '5px 11px', borderRadius: 8, border: '1px solid #2e9f82', background: '#2e9f82', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' };
+const linkBtn: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, padding: '5px 11px', borderRadius: 8, border: '1px solid #047246', background: '#047246', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' };
 const linkBtnGhost: React.CSSProperties = { ...linkBtn, background: '#fff', color: '#1f6f54' };
 
 /** The UpNow lockup, matching the dashboard sidebar's brand (DashboardShell's
@@ -558,7 +558,7 @@ export function LandlordLinkButton({ tenantId, contractId }: { tenantId: number;
     return (
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
         <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          style={{ width: 230, fontSize: 11, padding: '5px 8px', border: '1px solid #e3e0d9', borderRadius: 8, background: '#fafaf8', color: '#1a1916' }} />
+          style={{ width: 230, fontSize: 11, padding: '5px 8px', border: '1px solid #e3e0d9', borderRadius: 8, background: '#f6f8f6', color: '#14201a' }} />
         <button onClick={copy} style={linkBtnGhost}>{copied ? 'Copied ✓' : 'Copy'}</button>
         <a href={link} target="_blank" rel="noreferrer" style={{ ...linkBtnGhost, textDecoration: 'none' }}>Open ↗</a>
       </span>
@@ -1000,13 +1000,13 @@ export function ContractDocsBinder(props: ContractDocsBinderProps) {
     // jump chips in BOTH panes (the sidebar was already covered, so only that bar
     // showed through). 45 clears it while staying under this binder's own layers:
     // the document reader (70) and the download / sign popups (1000+).
-    <div style={{ position: 'fixed', inset: 0, zIndex: 45, background: '#f4f3ef', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 45, background: '#eef1ef', display: 'flex', flexDirection: 'column' }}>
       <header style={{ flexShrink: 0, padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e3e0d9', display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 6, gap: 10 }}>
         <BrandMark href={homeHref} />
         <span aria-hidden style={{ width: 1, alignSelf: 'stretch', minHeight: 20, background: '#e7e3dc' }} />
-        <span style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>{title ?? 'All documents'}</span>
-        <span style={{ fontSize: 12.5, color: '#9b9890' }}>{refLabel}</span>
-        <span style={{ fontSize: 11, color: '#9b9890' }}>· View only</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: '#14201a' }}>{title ?? 'All documents'}</span>
+        <span style={{ fontSize: 12.5, color: '#8a948d' }}>{refLabel}</span>
+        <span style={{ fontSize: 11, color: '#8a948d' }}>· View only</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {!portalToken && downloadItems.length > 0 && (
             <DownloadDocsButton items={downloadItems} fileName={`Documents-${(refLabel || 'contract').replace(/[^\w.-]+/g, '-')}.pdf`} style={linkBtnGhost} />

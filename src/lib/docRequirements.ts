@@ -1,4 +1,4 @@
-import { COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES } from './unitTaxonomy';
+import { COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES, LAND_UNIT_TYPES } from './unitTaxonomy';
 
 export interface DocReq {
   key: string;
@@ -167,6 +167,25 @@ export const INDUSTRIAL_RENTAL_DOCS: DocReq[] = [
 ];
 
 /**
+ * Land / plot lease docs. Land unit types used to fall through to the
+ * RESIDENTIAL pack, so an individual leasing a plot was asked for a salary
+ * certificate and a marriage certificate. A plot lease needs neither.
+ *
+ *   - Company:    trade licence + authorised-signatory ID (+ MOA) come from
+ *                 COMPANY_KYC_DOCS; this section adds the intended-use statement.
+ *   - Individual: Emirates ID / passport come from KYC_DOCS; this section adds
+ *                 the intended-use statement only.
+ *
+ * Nothing here is `required` — the required set stays the identity pack, so a
+ * land lead already past Documents is not pulled back to "Documents required"
+ * by a slot that did not exist when it submitted (and the backend's own
+ * requirement matrix, which this file mirrors, does not know the key yet).
+ */
+export const LAND_RENTAL_DOCS: DocReq[] = [
+  { key: 'land_use_statement', label: 'Intended-use statement', category: 'legal', required: false, hint: 'A short letter describing what you plan to do on the plot (e.g. logistics yard, G+4 residential) — most master developers ask for it before a land lease is signed' },
+];
+
+/**
  * Universal contract-level slots shown on EVERY lease — new AND renewal.
  * These are the two documents every tenancy carries regardless of unit type:
  *   - Contract Registration — the Ejari / DLD tenancy registration certificate
@@ -190,6 +209,7 @@ export function getRentalSectionDocs(
   const t = unitType ?? '';
   const isCommercial = COMMERCIAL_TYPES.includes(t);
   const isIndustrial = INDUSTRIAL_TYPES.includes(t);
+  const isLand = LAND_UNIT_TYPES.includes(t);
   // Nothing the identity pack already asks for is asked again here. The two
   // lists render as adjacent sections on the customer's Documents step, so a
   // key carried by both showed one physical document as two upload slots under
@@ -202,6 +222,10 @@ export function getRentalSectionDocs(
   const kycKeys = new Set(getKycDocs(entityType).map(d => d.key));
   const notInKyc = (d: DocReq) => !kycKeys.has(d.key);
 
+  // A plot is neither a home nor a shop: its own pack, for both entity types
+  // (see LAND_RENTAL_DOCS). Checked first so land never reaches the residential
+  // default below.
+  if (isLand) return LAND_RENTAL_DOCS.filter(notInKyc);
   // A company renting a RESIDENTIAL unit (staff accommodation, a director's
   // apartment) is still a company: asking it for an employment letter or a
   // marriage certificate is nonsense. It gets the company supporting pack.

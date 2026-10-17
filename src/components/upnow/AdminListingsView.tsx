@@ -1,122 +1,88 @@
 'use client';
+/* eslint-disable react-hooks/set-state-in-effect -- fetch-on-select and reset-on-change effects, the same pattern as the page this replaces */
 
+/**
+ * Admin › Listing approval · Gate 3 (Genspark split panel). Used by /dashboard/admin/listings/rental-providers
+ * (mode 'rp' — Spaces unit listings) and /dashboard/admin/listings/service-providers (mode 'sp' — Services,
+ * grouped one row per provider). Admin verifies and decides; it never edits or creates a provider's listing.
+ *
+ * Parity with previous page (all kept, same endpoints):
+ *  Data
+ *   - GET /admin/unit-listings?limit=25&offset=N[&spaceCategory=a,b][&status=]          (rp queue, total)
+ *   - GET /admin/service-listing-providers?limit=25&offset=N[&category=a,b][&status=]   (sp queue, total; silent refresh after decisions)
+ *   - GET /admin/listings/:propertyId/units/:unitId → { unit, media, documents }  (AbortController guarded)
+ *   - GET /admin/kyc/service-providers/:id  (provider context: profile, checklist, services, operationalProfile)
+ *   - GET /admin/kyc/service-providers/:id/capabilities  ·  …/capabilities/categories  (SP-248 / SP-268 tool checklists)
+ *  Actions
+ *   - PATCH /admin/listings/:propertyId/units/:unitId/approve | reject | expire
+ *   - PATCH /admin/service-listings/:id/approve | reject   (single, and "all pending" bulk loop)
+ *   - POST  /admin/service-listings/:id/capabilities/verify            { requirementIds, verified }  (listing extras)
+ *   - POST  /admin/kyc/service-providers/:id/capabilities/verify       { requirementIds, verified }  (category tools)
+ *   - Ask for changes / Reject now REQUIRE a reason (modal). The reason is sent as { reason } on the existing reject
+ *     endpoint; these endpoints previously took {} — if the API refuses the field (400) the decision is retried with {}
+ *     so the verdict still lands. "Ask for changes" uses the reject endpoint (there is no changes-requested state).
+ *   - Approve / Expire keep their confirm step (modal instead of window.confirm).
+ *  UI
+ *   - Status tabs Pending (default) / Approved / Rejected / Expired (rp only); Types multi-select dropdown (space
+ *     categories or service categories); ?category= deep link; pagination 25/page; refresh; loading / empty / error
+ *   - RERA rental-index filter chip "Exceeds RERA index (n)" + per-item badge (restored from the SCRUM-594 split; same
+ *     caps; ≥ 20% above cap) — filters the current page, pagination suppressed while on
+ *   - Unit detail: photo carousel, location (Makani, map link), specs (beds/baths residential only), pricing, amenities,
+ *     description, documents (view-only, in-portal viewer), "Open full page" → /dashboard/admin/units/:id
+ *   - Provider detail: identity & key facts, Profile → /dashboard/admin/users/:userId, compliance documents, operational
+ *     profile (team, coverage, fleet, hours, rules), services by category with category tools + per-listing extra tools
+ *     (photos, verify / withdraw, verify all declared), "No qualified lead" flag, compliant-gate on approve, bulk actions
+ *   - NEW: Gate 3 checklist per record (derived from the same payloads).
+ *  Decision model (blueprint "three gates, one decision model") — added, nothing removed:
+ *   - Ask for changes / Reject (units, single service, "all pending" bulk) now take Gate 3 reason codes from
+ *     src/lib/os/reasonCodes.ts + an optional note, with a statement-of-reasons preview. The text sent in the
+ *     SAME { reason } field (same 400 → {} fallback, same "Changes requested: " prefix) is
+ *     "[CODE] Explanation To fix: … — note". Approve / Expire keep their confirm step; the expire endpoint
+ *     takes no reason ({}), so Expire carries no reason code (backend gap, said in the modal).
+ *   - Queue SLA: GET /admin/unit-listings and /admin/service-listing-providers rows carry no submitted /
+ *     created / updated timestamp, so the queue lists cannot show waiting time or sort oldest-first (backend
+ *     gap — order stays as the API returns it). The unit detail shows an SLA pill from the detail payload's
+ *     real updatedAt ("since last change") for pending / in-review listings.
+ */
 import Link from 'next/link';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  Building2, RefreshCw, Wrench,
-  CheckCircle2, XCircle, Clock, AlertCircle, EyeOff,
-  ChevronLeft, ChevronRight, ChevronDown, ImageOff, MapPin, Info, Tag,
-  MousePointerClick, FileText, ExternalLink, Inbox,
-  Star, Mail, Phone, ShieldCheck, Layers, Zap, Store, Users,
-} from 'lucide-react';
-import { DirhamSign } from '@/components/ui/DirhamSign';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
-import { BackLink } from '@/components/dashboard/DashboardWidgets';
 import { openDocViewer } from '@/lib/docViewer';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { ReasonPicker, SlaPill, StatementPreview, useReasonCodes } from '@/components/upnow/GateDecision';
+import { composeReasonText } from '@/lib/os/reasonCodes';
+import {
+  Btn, Callout, Card, Checklist, Evid, KV, Modal, OsPage, PageHead, Pill, ScopeStrip, Seg, fmtAed, fmtDate, type Tone,
+} from '@/components/os/kit';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ListingStatus = 'draft' | 'pending' | 'in_review' | 'published' | 'approved' | 'rejected' | 'expired';
 
 interface UnitListing {
-  id: number;
-  unitNumber: string;
-  unitName: string | null;
-  unitType: string;
-  listingStatus: ListingStatus;
-  annualRent: number | null;
-  property: {
-    id: number;
-    buildingName: string;
-    fullAddress: string | null;
-    rentalProviderId: number;
-    spaceCategory: string;
-  } | null;
+  id: number; unitNumber: string; unitName: string | null; unitType: string; listingStatus: ListingStatus; annualRent: number | null;
+  property: { id: number; buildingName: string; fullAddress: string | null; rentalProviderId: number; spaceCategory: string } | null;
 }
-
-interface UnitMedia {
-  id: number;
-  url: string;
-  caption: string | null;
-  mediaType: string;
-  sortOrder: number;
-}
-
-interface ListingDoc {
-  id: number;
-  documentKey: string;
-  fileUrl: string | null;
-  status: string | null;
-  expiryDate: string | null;
-}
-
+interface UnitMedia { id: number; url: string; caption: string | null; mediaType: string; sortOrder: number }
+interface ListingDoc { id: number; documentKey: string; fileUrl: string | null; status: string | null; expiryDate: string | null }
 interface UnitDetail {
-  id: number;
-  unitNumber: string;
-  unitName: string | null;
-  floor: string | null;
-  unitType: string;
-  unitTier: string;
-  unitSizeSqft: number | null;
-  unitSizeSqm: number | null;
-  bedrooms: number | null;
-  bathrooms: number | null;
-  kitchenType: string | null;
-  numBalconies: number;
-  view: string | null;
-  numAcs: number;
-  rentalPrice: number | null;
-  serviceCharges: number | null;
-  securityDeposit: number | null;
-  adminFee: number | null;
-  ejariFeeFils: number | null;
-  commission: number | null;
-  availability: string;
-  description: string | null;
-  listingStatus: ListingStatus;
+  id: number; unitNumber: string; unitName: string | null; floor: string | null; unitType: string; unitTier: string;
+  unitSizeSqft: number | null; unitSizeSqm: number | null; bedrooms: number | null; bathrooms: number | null;
+  kitchenType: string | null; numBalconies: number; view: string | null; numAcs: number; rentalPrice: number | null;
+  serviceCharges: number | null; securityDeposit: number | null; adminFee: number | null; ejariFeeFils: number | null;
+  commission: number | null; availability: string; description: string | null; listingStatus: ListingStatus;
+  createdAt?: string | null; updatedAt?: string | null;
   property: {
-    id: number;
-    buildingName: string;
-    fullAddress: string | null;
-    spaceCategory: string;
-    rentalProviderId: number;
-    numberOfFloors: string | null;
-    hasGym: boolean;
-    hasPool: boolean;
-    hasParking: boolean;
-    propertyDescription: string | null;
-    makaniNumber: string | null;
-    mapLink: string | null;
-    emirate?: { name: string } | null;
-    community?: { name: string } | null;
-    subCommunity?: { name: string } | null;
+    id: number; buildingName: string; fullAddress: string | null; spaceCategory: string; rentalProviderId: number;
+    numberOfFloors: string | null; hasGym: boolean; hasPool: boolean; hasParking: boolean; propertyDescription: string | null;
+    makaniNumber: string | null; mapLink: string | null;
+    emirate?: { name: string } | null; community?: { name: string } | null; subCommunity?: { name: string } | null;
   };
 }
-
-// Full provider context for the review panel — GET /admin/kyc/service-providers/:id
-interface SpChecklistItem {
-  key: string;
-  displayName: string;
-  category: string;
-  required: boolean;
-  uploaded: boolean;
-  status: string | null;
-  fileUrl: string | null;
-  expiryDate: string | null;
-}
-interface SpContextService {
-  id: number;
-  category: string;
-  name: string;
-  basePrice: number | null;
-  priceUnit: string | null;
-  pricingMode: string;
-  isEmergency: boolean;
-  listingStatus: string;
-  isAvailable: boolean;
-}
+interface SpChecklistItem { key: string; displayName: string; category: string; required: boolean; uploaded: boolean; status: string | null; fileUrl: string | null; expiryDate: string | null }
+interface SpContextService { id: number; category: string; name: string; basePrice: number | null; priceUnit: string | null; pricingMode: string; isEmergency: boolean; listingStatus: string; isAvailable: boolean }
 /** SP-248 — one listing's capability checklist as the drawer reads it. */
 interface CapabilityRow {
   requirementId: number; key: string; label: string; description: string | null; requirementType: string;
@@ -129,236 +95,166 @@ interface CapabilityRow {
 }
 interface CapabilitySummary {
   total: number; mandatory: number; declared: number; declaredMandatory: number; verified: number; verifiedMandatory: number;
-  declarationComplete: boolean; verificationComplete: boolean;
-  /** SP-267 — declared lines with / without a photo. */
-  withPhoto: number; photosMissing: number;
+  declarationComplete: boolean; verificationComplete: boolean; withPhoto: number; photosMissing: number;
 }
 interface ListingChecklist { serviceCatalogId: number; templateId: number | null; serviceName: string; summary: CapabilitySummary; rows: CapabilityRow[] }
 /** SP-268 — the provider's tools per CATEGORY (declared once; verified once). */
 interface CategoryChecklist { categoryId: number; categoryCode: string; categoryName: string; listingCount: number; summary: CapabilitySummary; rows: CapabilityRow[] }
-
-interface SpContext {
-  profile: {
-    id: number;
-    userId: number;
-    businessName: string | null;
-    companyName: string | null;
-    ownerName: string | null;
-    entityType: string | null;
-    isGovernment: boolean;
-    tradeLicenseNumber: string | null;
-    vatTrn: string | null;
-    emiratesServed: string | null;
-    serviceCategories: string | null;
-    complianceStatus: string;
-    jobReadyAt: string | null;
-    averageRating: number | null;
-    totalReviews: number;
-    emergencyResponse: boolean;
-    opsContactName: string | null;
-    opsContactPhone: string | null;
-    createdAt: string;
-    user?: { name: string | null; email: string | null; phone: string | null } | null;
-  };
-  checklist: SpChecklistItem[];
-  completionScore: number;
-  services: SpContextService[];
-  /** Evidence behind the Job-ready chip (SP-247) — GET /admin/kyc/service-providers/:id. */
-  operationalProfile?: OperationalProfile | null;
-}
-
 interface OperationalProfile {
-  jobReady: boolean;
-  jobReadyAt: string | null;
+  jobReady: boolean; jobReadyAt: string | null;
   cards: {
     coverage: { complete: boolean; zoneCount: number };
-    team: {
-      complete: boolean;
-      adoptedCategories: string[];
-      coveredCategories: string[];
-      missingCategories: string[];
-      uncoveredServices: { id: number; name: string; category: string }[];
-      activeTechnicians: number;
-      leadCapable: number;
-    };
+    team: { complete: boolean; adoptedCategories: string[]; coveredCategories: string[]; missingCategories: string[]; uncoveredServices: { id: number; name: string; category: string }[]; activeTechnicians: number; leadCapable: number };
     fleet: { complete: boolean; vehicles: number; effectiveMaxConcurrentJobs: number };
     hours: { complete: boolean; daysConfigured: number };
-    rules: {
-      complete: boolean;
-      acceptedAt: string | null;
-      minNoticeHours: number;
-      dispatchLogic: string | null;
-      emergencyResponse: boolean;
-    };
+    rules: { complete: boolean; acceptedAt: string | null; minNoticeHours: number; dispatchLogic: string | null; emergencyResponse: boolean };
   };
   /** SP-254: 'solo' = the individual is the provider AND the one technician. */
   supplyType?: 'solo' | 'company';
-  team: {
-    id: number;
-    name: string;
-    /** SP-254: the solo operator themself. */
-    isSelf?: boolean;
-    status: string;
-    isLeadCapable: boolean;
-    hasPhoto: boolean;
-    complianceStatus: string | null;
-    specialization: string | null;
-    categorySkills: string[];
-    serviceSkills: string[];
-  }[];
+  team: { id: number; name: string; isSelf?: boolean; status: string; isLeadCapable: boolean; hasPhoto: boolean; complianceStatus: string | null; specialization: string | null; categorySkills: string[]; serviceSkills: string[] }[];
   coverageZones: string[];
   fleet: { type: string; label: string | null }[];
   weeklyHours: { weekday: number; opensAt: string; closesAt: string }[];
   timeOff: { startsOn: string; endsOn: string; reason: string | null }[];
 }
-
-// One row per provider in the grouped moderation queue — GET /admin/service-listing-providers
-interface SpProviderRow {
-  id: number;
-  userId: number;
-  name: string | null;
-  entityType: string | null;
-  complianceStatus: string;
-  serviceCategories: string | null;
-  jobReady: boolean;
-  total: number;
-  pending: number;
-  approved: number;
-  rejected: number;
+interface SpContext {
+  profile: {
+    id: number; userId: number; businessName: string | null; companyName: string | null; ownerName: string | null; entityType: string | null;
+    isGovernment: boolean; tradeLicenseNumber: string | null; vatTrn: string | null; emiratesServed: string | null; serviceCategories: string | null;
+    complianceStatus: string; jobReadyAt: string | null; averageRating: number | null; totalReviews: number; emergencyResponse: boolean;
+    opsContactName: string | null; opsContactPhone: string | null; createdAt: string;
+    user?: { name: string | null; email: string | null; phone: string | null } | null;
+  };
+  checklist: SpChecklistItem[]; completionScore: number; services: SpContextService[];
+  /** Evidence behind the Job-ready chip (SP-247). */
+  operationalProfile?: OperationalProfile | null;
 }
+/** One row per provider in the grouped moderation queue — GET /admin/service-listing-providers. */
+interface SpProviderRow {
+  id: number; userId: number; name: string | null; entityType: string | null; complianceStatus: string; serviceCategories: string | null;
+  jobReady: boolean; total: number; pending: number; approved: number; rejected: number;
+}
+
+type Decision = 'approve' | 'changes' | 'reject' | 'expire';
+type ChkItem = { l: string; sub?: string; state: 'pass' | 'fail' | 'wait' };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
 
-// v2 service taxonomy — mirrors service_categories codes owned by the
-// Service Catalog console (dashboard/admin/catalog).
+// v2 service taxonomy — mirrors service_categories codes owned by the Service Catalog console.
 const SERVICE_CATEGORIES: { id: string; label: string }[] = [
-  { id: 'home_cleaning',       label: 'Home Cleaning' },
-  { id: 'ac_services',         label: 'AC Services' },
-  { id: 'plumbing',            label: 'Plumbing' },
-  { id: 'electrical',          label: 'Electrical' },
-  { id: 'handyman',            label: 'Handyman' },
-  { id: 'painting',            label: 'Painting' },
-  { id: 'pest_control',        label: 'Pest Control' },
-  { id: 'car_vehicle',         label: 'Car & Vehicle' },
-  { id: 'landscaping_outdoor', label: 'Landscaping & Outdoor' },
-  { id: 'commercial_services', label: 'Commercial Services' },
+  { id: 'home_cleaning', label: 'Home Cleaning' }, { id: 'ac_services', label: 'AC Services' }, { id: 'plumbing', label: 'Plumbing' },
+  { id: 'electrical', label: 'Electrical' }, { id: 'handyman', label: 'Handyman' }, { id: 'painting', label: 'Painting' },
+  { id: 'pest_control', label: 'Pest Control' }, { id: 'car_vehicle', label: 'Car & Vehicle' },
+  { id: 'landscaping_outdoor', label: 'Landscaping & Outdoor' }, { id: 'commercial_services', label: 'Commercial Services' },
 ];
+const serviceCategoryLabel = (id: string) => SERVICE_CATEGORIES.find((c) => c.id === id)?.label ?? id.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 
-function serviceCategoryLabel(id: string): string {
-  return SERVICE_CATEGORIES.find((c) => c.id === id)?.label
-    ?? id.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-// sp_working_hours.weekday: 0 = Sunday … 6 = Saturday (mirrors SpJobReady).
+// sp_working_hours.weekday: 0 = Sunday … 6 = Saturday.
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// All / Pending / Approved / Rejected — the backend maps these buckets onto each
-// side's underlying status values.
-const STATUS_FILTERS: { id: string; label: string }[] = [
-  { id: '',         label: 'All' },
-  { id: 'pending',  label: 'Pending' },
-  { id: 'approved', label: 'Approved' },
-  { id: 'rejected', label: 'Rejected' },
-  // Without this bucket an expired listing vanishes from every tab but All.
-  { id: 'expired',  label: 'Expired' },
+const STATUS_TABS: { id: string; label: string; rpOnly?: boolean }[] = [
+  { id: 'pending', label: 'Pending' }, { id: 'approved', label: 'Approved' }, { id: 'rejected', label: 'Rejected' },
+  // A service listing never ages out, so Expired is rental-only.
+  { id: 'expired', label: 'Expired', rpOnly: true },
 ];
 
-const categoryColor: Record<string, { bg: string; color: string }> = {
-  residential: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
-  commercial:  { bg: '#eff6ff', color: '#3b82f6' },
-  industrial:  { bg: '#f5f3ff', color: '#8b5cf6' },
-  land:        { bg: '#f0fdf4', color: '#16a34a' },
-  mixed_use:   { bg: '#fffbeb', color: '#d97706' },
-  workspaces:  { bg: '#ecfeff', color: '#0891b2' },
-  venues:      { bg: '#fdf2f8', color: '#db2777' },
+const LISTING: Record<string, { label: string; tone: Tone }> = {
+  draft: { label: 'Draft', tone: 'neutral' }, pending: { label: 'Pending', tone: 'amber' }, in_review: { label: 'In review', tone: 'info' },
+  published: { label: 'Published', tone: 'primary' }, approved: { label: 'Approved', tone: 'primary' }, rejected: { label: 'Rejected', tone: 'danger' },
+  expired: { label: 'Expired', tone: 'danger' },
+  // Auto-set when the provider loses their last qualified lead technician for the service (SP-249); Approve restores.
+  suspended_no_qualified_technician: { label: 'Suspended — no lead', tone: 'amber' },
 };
+const ListingPill = ({ s }: { s: string }) => { const c = LISTING[s] ?? LISTING.draft; return <Pill tone={c.tone}>{c.label}</Pill>; };
 
-const statusCfg: Record<string, { label: string; className: string; Icon: React.ElementType }> = {
-  draft:     { label: 'Draft',      className: 'bg-gray-100 text-gray-600',       Icon: EyeOff },
-  pending:   { label: 'Pending',    className: 'bg-amber-100 text-amber-700',     Icon: Clock },
-  in_review: { label: 'In Review',  className: 'bg-blue-100 text-blue-700',       Icon: AlertCircle },
-  published: { label: 'Published',  className: 'bg-emerald-100 text-emerald-700', Icon: CheckCircle2 },
-  approved:  { label: 'Approved',   className: 'bg-emerald-100 text-emerald-700', Icon: CheckCircle2 },
-  rejected:  { label: 'Rejected',   className: 'bg-red-100 text-red-700',         Icon: XCircle },
-  expired:   { label: 'Expired',    className: 'bg-orange-100 text-orange-700',   Icon: XCircle },
-  // Auto-set when the provider loses their last qualified lead technician for
-  // the service (SP-249); Approve is the admin's restore action.
-  suspended_no_qualified_technician: { label: 'Suspended — no lead', className: 'bg-amber-100 text-amber-700', Icon: AlertCircle },
+const COMPLIANCE: Record<string, { label: string; tone: Tone }> = {
+  compliant: { label: 'Compliant', tone: 'primary' }, pending_review: { label: 'Pending review', tone: 'amber' },
+  action_required: { label: 'Action required', tone: 'danger' }, expired: { label: 'Expired', tone: 'danger' }, paused: { label: 'Paused', tone: 'neutral' },
 };
+const CompliancePill = ({ s }: { s: string }) => { const c = COMPLIANCE[s] ?? COMPLIANCE.pending_review; return <Pill tone={c.tone}>{c.label}</Pill>; };
 
-// ─── Small helpers ──────────────────────────────────────────────────────────
-
-function aed(v: number | null | undefined) {
-  if (v == null) return '—';
-  return `AED ${Number(v).toLocaleString('en-AE')}`;
+// ─── RERA rental index (restored from the pre-SCRUM-594 listings page) ────────
+// Indicative Q1 2026 RERA index caps (AED/yr) by space category. Units priced ≥ 20% above are flagged.
+const RERA_INDEX_CAP: Record<string, number> = { residential: 145000, commercial: 270000, industrial: 160000, land: 220000, mixed_use: 240000 };
+const reraCap = (category: string | null | undefined) => RERA_INDEX_CAP[category ?? ''] ?? 200000;
+function indexDeviation(rentAed: number | null | undefined, category: string | null | undefined): number | null {
+  const rent = rentAed != null ? Number(rentAed) : null;
+  if (!rent) return null;
+  const cap = reraCap(category);
+  const pct = Math.round(((rent - cap) / cap) * 100);
+  return pct >= 20 ? pct : null;
 }
 
-function StatusBadge({ s }: { s: string }) {
-  const cfg = statusCfg[s] ?? statusCfg.draft;
-  const Icon = cfg.Icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.className}`}>
-      <Icon size={10} />{cfg.label}
-    </span>
-  );
+const PRICE_UNIT_SUFFIX: Record<string, string> = { fixed: '', per_hour: '/hr', per_unit: '/unit', per_area: '/m²', per_period: '/period', quote_after_callout: '' };
+function ctxSvcPrice(s: SpContextService): string {
+  if (s.pricingMode === 'quote' || s.priceUnit === 'quote_after_callout') return 'Quote';
+  if (s.basePrice == null) return '—';
+  return `${fmtAed(s.basePrice)}${PRICE_UNIT_SUFFIX[s.priceUnit ?? ''] ?? ''}`;
+}
+const csvToList = (s: string | null | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const titleize = (s: string | null | undefined) => (s ?? '').replace(/_/g, ' ');
+
+/** Contact details that would take the customer off-platform (phone, email, link, messenger). */
+const OFF_PLATFORM: { re: RegExp; l: string }[] = [
+  { re: /\+?\d[\d\s-]{7,}\d/, l: 'phone number' },
+  { re: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i, l: 'email address' },
+  { re: /https?:\/\/|www\./i, l: 'web link' },
+  { re: /\b(whats ?app|wa\.me|telegram|call me|dm me)\b/i, l: 'messenger / call-me' },
+];
+const offPlatformHits = (text: string) => OFF_PLATFORM.filter((o) => o.re.test(text)).map((o) => o.l);
+const PERMIT_KEY = /permit|trakheesi|title_deed|ejari|rera|dtcm|noc|oqood|affection/i;
+
+/**
+ * The existing decision endpoints took {}. A reason is now always collected for reject / changes and sent as
+ * { reason }; if the API refuses the extra field (400) the verdict is retried with {} so it still lands.
+ */
+async function patchDecision(path: string, reason?: string) {
+  if (!reason) return apiPatch(path, {});
+  try {
+    return await apiPatch(path, { reason });
+  } catch (e) {
+    if ((e as { status?: number }).status === 400) return apiPatch(path, {});
+    throw e;
+  }
 }
 
-// Multi-select "Types" dropdown — replaces the category pill row. `selected` is
-// an array of category ids; empty = all types.
+// ─── Small parts ─────────────────────────────────────────────────────────────
+
 function TypesDropdown({ options, selected, onChange, labelFor }: {
-  options: { id: string; label: string }[];
-  selected: string[];
-  onChange: (next: string[]) => void;
-  labelFor: (id: string) => string;
+  options: { id: string; label: string }[]; selected: string[]; onChange: (next: string[]) => void; labelFor: (id: string) => string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    function onDoc(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   const label = selected.length === 0 ? 'All types' : selected.length === 1 ? labelFor(selected[0]) : `${selected.length} types`;
-
   return (
-    <div ref={ref} className="relative">
-      <button onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
-        style={{
-          backgroundColor: selected.length ? 'var(--color-primary-50)' : '#fff',
-          color: selected.length ? 'var(--color-primary)' : 'var(--color-neutral-600)',
-          borderColor: selected.length ? 'var(--color-primary)' : 'var(--color-base-200)',
-        }}>
-        <Tag size={12} /> {label}
-        <ChevronDown size={13} style={{ opacity: 0.6 }} />
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="gx-btn sm" aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        Types: {label} <ChevronDown size={13} aria-hidden />
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 left-0 rounded-xl border bg-white py-1 shadow-lg"
-          style={{ minWidth: 220, borderColor: 'var(--color-base-200)' }}>
-          <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>Types</span>
-            {selected.length > 0 && (
-              <button onClick={() => onChange([])} className="text-xs font-medium" style={{ color: 'var(--color-primary)' }}>Clear</button>
-            )}
+        <div role="group" aria-label="Types" style={{ position: 'absolute', zIndex: 30, top: 30, left: 0, minWidth: 230, background: 'var(--ms-surface)', border: '1px solid var(--ms-border)', borderRadius: 10, boxShadow: 'var(--ms-shadow-md)', padding: 6 }}>
+          <div className="flex items-center" style={{ padding: '4px 6px 6px', borderBottom: '1px solid var(--ms-surface-3)' }}>
+            <span className="gx-lb" style={{ margin: 0, flex: 1 }}>Types</span>
+            {selected.length > 0 && <Btn size="xs" variant="ghost" onClick={() => onChange([])}>Clear</Btn>}
           </div>
-          <div className="max-h-72 overflow-y-auto py-1">
-            {options.map((opt) => {
-              const checked = selected.includes(opt.id);
-              return (
-                <button key={opt.id} onClick={() => toggle(opt.id)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-stone-50"
-                  style={{ color: 'var(--color-neutral-700)' }}>
-                  <span className="w-4 h-4 rounded grid place-items-center shrink-0"
-                    style={{ border: `1.5px solid ${checked ? 'var(--color-primary)' : 'var(--color-base-200)'}`, backgroundColor: checked ? 'var(--color-primary)' : '#fff' }}>
-                    {checked && <CheckCircle2 size={11} style={{ color: '#fff' }} />}
-                  </span>
-                  {opt.label}
-                </button>
-              );
-            })}
+          <div style={{ maxHeight: 280, overflowY: 'auto', paddingTop: 4 }}>
+            {options.map((o) => (
+              <label key={o.id} className="flex items-center gap-2" style={{ padding: '5px 6px', fontSize: 12, cursor: 'pointer', borderRadius: 6 }}>
+                <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)} />
+                {o.label}
+              </label>
+            ))}
           </div>
         </div>
       )}
@@ -366,147 +262,110 @@ function TypesDropdown({ options, selected, onChange, labelFor }: {
   );
 }
 
-// Status as tabs (Pending / Approved / Rejected / Expired) — the primary filter.
-// Expired is rental-only: a service listing is never taken off the market for
-// ageing out, so the bucket would always be empty on the SP side.
-function StatusTabs({ value, onChange, mode }: { value: string; onChange: (s: string) => void; mode: 'rp' | 'sp' }) {
+function Pagination({ page, total, pageSize, onChange }: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
+  const totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--color-base-200)' }}>
-      {STATUS_FILTERS.filter((s) => s.id && (mode === 'rp' || s.id !== 'expired')).map((st) => (
-        <button key={st.id} onClick={() => onChange(st.id)}
-          className="px-3 py-1.5 text-sm font-medium border-b-2 -mb-px transition-colors"
-          style={value === st.id
-            ? { borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }
-            : { borderColor: 'transparent', color: 'var(--color-neutral-500)' }}>
-          {st.label}
-        </button>
-      ))}
+    <div className="flex items-center gap-2" style={{ padding: '9px 12px', borderTop: '1px solid var(--ms-surface-3)', fontSize: 11, color: 'var(--ms-ink-3)', position: 'sticky', bottom: 0, background: 'var(--ms-surface-2)' }}>
+      <span style={{ flex: 1 }}>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}</span>
+      <Btn size="xs" onClick={() => onChange(page - 1)} disabled={page === 0}>Previous</Btn>
+      <span>{page + 1}/{totalPages}</span>
+      <Btn size="xs" onClick={() => onChange(page + 1)} disabled={page >= totalPages - 1}>Next</Btn>
     </div>
   );
 }
 
-// ─── Left-column cards (master list) ──────────────────────────────────────────
-
-function UnitCard({ u, selected, onClick }: { u: UnitListing; selected: boolean; onClick: () => void }) {
-  const cc = categoryColor[u.property?.spaceCategory ?? ''] ?? { bg: 'var(--color-base-100)', color: 'var(--color-neutral-500)' };
+function DetailHead({ title, pills, right, sub }: { title: ReactNode; pills?: ReactNode; right?: ReactNode; sub?: ReactNode }) {
   return (
-    <button onClick={onClick}
-      className="w-full text-left px-4 py-3.5 border-b transition-colors"
-      style={{
-        borderColor: 'var(--color-base-100)',
-        backgroundColor: selected ? 'var(--color-primary-50)' : '#fff',
-        borderLeft: selected ? '3px solid var(--color-primary)' : '3px solid transparent',
-      }}>
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>
-          Unit {u.unitNumber}
-        </span>
-        <StatusBadge s={u.listingStatus} />
+    <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--ms-surface-3)' }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <h2 style={{ fontSize: 16, fontWeight: 800 }}>{title}</h2>
+        {pills}
+        {right && <div className="flex items-center gap-2 flex-wrap" style={{ marginLeft: 'auto' }}>{right}</div>}
       </div>
-      <p className="text-xs truncate mb-1" style={{ color: 'var(--color-neutral-500)' }}>{u.property?.buildingName ?? '—'}</p>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-          style={{ backgroundColor: cc.bg, color: cc.color }}>
-          {u.property ? categoryDisplayLabel(u.property.spaceCategory) : '—'}
-        </span>
-        <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-700)' }}>
-          {u.annualRent != null ? `${aed(u.annualRent)}/yr` : '—'}
-        </span>
-      </div>
-    </button>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--ms-ink-3)', marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+}
+const gap = { marginTop: 12 } as const;
+const muted = { fontSize: 11.5, color: 'var(--ms-ink-3)' } as const;
+
+function PanelSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div aria-busy="true" style={{ display: 'grid', gap: 10, padding: '6px 0' }}>
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${90 - (i % 3) * 18}%` }} />)}
+    </div>
   );
 }
 
-// One provider per row — the grouped moderation queue. Shows who the vendor is
-// and the shape of their queue (pending / approved / rejected) at a glance.
-function ProviderCard({ p, selected, onClick }: { p: SpProviderRow; selected: boolean; onClick: () => void }) {
-  const cc = complianceCfg[p.complianceStatus] ?? complianceCfg.pending_review;
-  const cats = csvToList(p.serviceCategories);
-  const catSummary = cats.length ? cats.slice(0, 2).map(serviceCategoryLabel).join(', ') + (cats.length > 2 ? ` +${cats.length - 2}` : '') : '—';
+/** Sticky decision footer inside the detail column. */
+function DecisionBar({ children, note }: { children: ReactNode; note?: ReactNode }) {
   return (
-    <button onClick={onClick}
-      className="w-full text-left px-4 py-3.5 border-b transition-colors"
-      style={{
-        borderColor: 'var(--color-base-100)',
-        backgroundColor: selected ? 'var(--color-primary-50)' : '#fff',
-        borderLeft: selected ? '3px solid var(--color-primary)' : '3px solid transparent',
-      }}>
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-sm font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{p.name ?? `SP #${p.id}`}</span>
-        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: cc.bg, color: cc.color }}>{cc.label}</span>
-      </div>
-      <p className="text-xs truncate mb-1.5" style={{ color: 'var(--color-neutral-500)' }}>{catSummary}</p>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{p.total} service{p.total === 1 ? '' : 's'}</span>
-        {p.pending > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>{p.pending} pending</span>}
-        {p.approved > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#dcfce7', color: '#15803d' }}>{p.approved} approved</span>}
-        {p.rejected > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#fee2e2', color: '#b91c1c' }}>{p.rejected} rejected</span>}
-      </div>
-    </button>
+    <div style={{ position: 'sticky', bottom: -16, margin: '16px -18px -16px', padding: '12px 18px', background: 'var(--ms-surface)', borderTop: '1px solid var(--ms-border)', zIndex: 2 }}>
+      {note && <div style={{ fontSize: 11, color: 'var(--ms-ink-3)', marginBottom: 8 }}>{note}</div>}
+      <div className="gx-btn-row">{children}</div>
+    </div>
   );
 }
 
-// ─── Right-column detail panels ───────────────────────────────────────────────
-
-function ActionBar({ canApprove, canReject, canExpire, acting, onApprove, onReject, onExpire }: {
-  canApprove: boolean; canReject: boolean; canExpire: boolean; acting: boolean;
-  onApprove: () => void; onReject: () => void; onExpire: () => void;
+/** Confirm (approve / expire) or reason-coded (changes / reject) dialog. */
+function DecisionModal({ open, kind, subject, busy, error, onClose, onConfirm }: {
+  open: boolean; kind: Decision | null; subject: string; busy: boolean; error: string | null;
+  onClose: () => void; onConfirm: (reason: string) => void;
 }) {
-  if (!canApprove && !canReject && !canExpire) return null;
+  const reasons = useReasonCodes();
+  const { reset } = reasons;
+  useEffect(() => { if (open) reset(); }, [open, kind, subject, reset]);
+  if (!kind) return null;
+  const needsReason = kind === 'reject' || kind === 'changes';
+  const verb = kind === 'approve' ? 'Approve' : kind === 'expire' ? 'Expire' : kind === 'reject' ? 'Reject' : 'Ask for changes';
+  const submit = () => {
+    if (needsReason) {
+      reasons.setTouched(true);
+      if (reasons.error) return;
+      onConfirm(composeReasonText(reasons.selected, reasons.text));
+      return;
+    }
+    onConfirm('');
+  };
   return (
-    <div className="shrink-0 border-t px-4 py-3 flex gap-2" style={{ borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
-      {canApprove && (
-        <button onClick={onApprove} disabled={acting}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-          style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-          <CheckCircle2 size={15} /> Approve
-        </button>
+    <Modal open={open} onClose={() => !busy && onClose()} width={needsReason ? 580 : 480} title={`${verb} — ${subject}`}
+      footer={<>
+        <span className="sp" />
+        <Btn onClick={onClose} disabled={busy}>Cancel</Btn>
+        <Btn variant={kind === 'approve' ? 'primary' : kind === 'changes' ? 'amber' : 'danger'} onClick={submit} disabled={busy}>
+          {busy ? 'Saving…' : kind === 'changes' ? 'Send request' : verb}
+        </Btn>
+      </>}>
+      {kind === 'approve' && <div style={{ fontSize: 12.5 }}>The listing goes live and becomes visible to customers.</div>}
+      {kind === 'expire' && (
+        <>
+          <div style={{ fontSize: 12.5 }}>It comes off the market and stops showing to customers. Use this for a listing that was legitimately live and has aged out — not as a rejection.</div>
+          <div style={{ fontSize: 11, color: 'var(--ms-ink-3)', marginTop: 8 }}>The expire endpoint takes no reason, so no reason code or message is sent to the provider.</div>
+        </>
       )}
-      {canReject && (
-        <button onClick={onReject} disabled={acting}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-          style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-          <XCircle size={15} /> Reject
-        </button>
+      {needsReason && (
+        <>
+          <div style={{ fontSize: 12, marginBottom: 10, color: 'var(--ms-ink-2)' }}>
+            {kind === 'changes'
+              ? 'The listing goes back to the provider (recorded as Rejected) with this message, and they resubmit.'
+              : 'The listing cannot go live. The provider sees this message.'}
+          </div>
+          <ReasonPicker gate={3} decision={kind} state={reasons} idPrefix="gate3" />
+          <StatementPreview decisionLabel={kind === 'changes' ? 'Request changes (Gate 3)' : 'Reject listing (Gate 3)'}
+            state={reasons} sentAs="the rejection reason" prefix={kind === 'changes' ? 'Changes requested: ' : ''} />
+        </>
       )}
-      {/* Expire — for a listing that was legitimately live and has simply aged
-          out. Rejecting one of those would be the wrong verdict (SCRUM-663). */}
-      {canExpire && (
-        <button onClick={onExpire} disabled={acting}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-          style={{ backgroundColor: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' }}
-          title="Take this listing off the market as expired">
-          <Clock size={15} /> Expire
-        </button>
-      )}
-    </div>
+      {error && <div className="gx-err" role="alert">{error}</div>}
+    </Modal>
   );
 }
 
-function Section({ icon: Icon, title, children }: { icon: React.ElementType; title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl p-3" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-200)' }}>
-      <div className="flex items-center gap-1.5 mb-2">
-        <Icon size={12} style={{ color: 'var(--color-primary)' }} />
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-neutral-500)' }}>{title}</span>
-      </div>
-      {children}
-    </div>
-  );
-}
+// ─── Right column: unit listing ───────────────────────────────────────────────
 
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
-  return (
-    <div className="flex items-center justify-between py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-      <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>{label}</span>
-      <span className="text-xs font-semibold" style={{ color: value ? 'var(--color-neutral-800)' : 'var(--color-neutral-300)' }}>{value ?? '—'}</span>
-    </div>
-  );
-}
-
-function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
-  row: UnitListing; acting: boolean;
-  onApprove: (u: UnitListing) => void; onReject: (u: UnitListing) => void; onExpire: (u: UnitListing) => void;
+function UnitDetailPanel({ row, acting, lastDecision, onDecide }: {
+  row: UnitListing; acting: boolean; lastDecision: { id: number; kind: Decision; reason: string } | null;
+  onDecide: (u: UnitListing, kind: Decision) => void;
 }) {
   const [detail, setDetail] = useState<UnitDetail | null>(null);
   const [media, setMedia] = useState<UnitMedia[]>([]);
@@ -514,12 +373,11 @@ function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [nonce, setNonce] = useState(0);
   const propertyId = row.property?.id;
 
   useEffect(() => {
     setDetail(null); setMedia([]); setDocs([]); setPhotoIdx(0); setLoading(true); setErr(null);
-    scrollRef.current?.scrollTo({ top: 0 });
     if (propertyId == null) { setLoading(false); return; }
     const controller = new AbortController();
     apiGet<{ unit: UnitDetail; media: UnitMedia[]; documents: ListingDoc[] }>(`/admin/listings/${propertyId}/units/${row.id}`, { signal: controller.signal })
@@ -527,204 +385,232 @@ function UnitDetailPanel({ row, acting, onApprove, onReject, onExpire }: {
       .catch((e) => { if (!controller.signal.aborted) setErr((e as Error).message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [row.id, propertyId]);
+  }, [row.id, propertyId, nonce]);
 
   const photos = media.filter((m) => m.mediaType === 'photo');
   const p = detail?.property;
   const locationParts = [p?.emirate?.name, p?.community?.name, p?.subCommunity?.name].filter(Boolean);
   const canApprove = row.listingStatus !== 'published';
-  const canReject  = row.listingStatus !== 'rejected';
+  const canReject = row.listingStatus !== 'rejected';
   // Only a listing that actually reached the market can expire.
-  const canExpire  = ['published', 'approved'].includes(row.listingStatus);
+  const canExpire = ['published', 'approved'].includes(row.listingStatus);
+  const residential = detail ? isResidentialUnitType(detail.unitType) : false;
+
+  // ── Gate 3 checklist ──
+  const gate: ChkItem[] = [];
+  if (detail) {
+    gate.push(photos.length > 0
+      ? { l: 'Photos', sub: `${photos.length} photo${photos.length === 1 ? '' : 's'} uploaded`, state: 'pass' }
+      : { l: 'Photos', sub: 'No photos uploaded', state: 'fail' });
+    const basics = [!detail.rentalPrice && 'rent', !detail.unitType && 'unit type', !detail.description && 'description'].filter(Boolean) as string[];
+    gate.push(basics.length === 0
+      ? { l: 'Title, details & price', sub: `Unit ${detail.unitNumber}${detail.unitName ? ` — ${detail.unitName}` : ''} · ${fmtAed(detail.rentalPrice)}/yr`, state: 'pass' }
+      : { l: 'Title, details & price', sub: `Missing: ${basics.join(', ')}`, state: 'fail' });
+    const permit = docs.find((d) => PERMIT_KEY.test(d.documentKey) && d.fileUrl);
+    gate.push(permit
+      ? { l: 'Permit / title document', sub: `${titleize(permit.documentKey)} linked${permit.status ? ` · ${titleize(permit.status)}` : ''}`, state: 'pass' }
+      : docs.length > 0
+        ? { l: 'Permit / title document', sub: `${docs.length} document${docs.length === 1 ? '' : 's'} linked — none looks like a permit; open them to confirm`, state: 'wait' }
+        : { l: 'Permit / title document', sub: 'No permit or title document linked to the unit or its property', state: 'fail' });
+    const hits = offPlatformHits(`${detail.description ?? ''} ${p?.propertyDescription ?? ''}`);
+    gate.push(hits.length === 0
+      ? { l: 'No off-platform contact', sub: 'Descriptions carry no phone, email, link or messenger handle', state: 'pass' }
+      : { l: 'No off-platform contact', sub: `Description contains a ${hits.join(', ')}`, state: 'fail' });
+    const dev = indexDeviation(detail.rentalPrice, p?.spaceCategory);
+    gate.push(!detail.rentalPrice
+      ? { l: 'Price within range', sub: 'No rent to compare', state: 'wait' }
+      : dev == null
+        ? { l: 'Price within range', sub: `Within 20% of the RERA index cap (${fmtAed(reraCap(p?.spaceCategory))}/yr ${categoryDisplayLabel(p?.spaceCategory ?? '')})`, state: 'pass' }
+        : { l: 'Price within range', sub: `${dev}% above the RERA index cap (${fmtAed(reraCap(p?.spaceCategory))}/yr) — check the rental index`, state: 'fail' });
+    const fields = [
+      !detail.unitTier && 'tier', !detail.floor && 'floor', !(detail.unitSizeSqft || detail.unitSizeSqm) && 'size',
+      !detail.availability && 'availability',
+      residential && detail.bedrooms == null && 'bedrooms', residential && detail.bathrooms == null && 'bathrooms',
+    ].filter(Boolean) as string[];
+    gate.push(fields.length === 0
+      ? { l: 'Subcategory fields completed', sub: `${categoryDisplayLabel(p?.spaceCategory ?? '')} · ${titleize(detail.unitType)}`, state: 'pass' }
+      : { l: 'Subcategory fields completed', sub: `Missing: ${fields.join(', ')}`, state: 'fail' });
+  }
+  const passing = gate.filter((g) => g.state === 'pass').length;
+  const decided = lastDecision?.id === row.id ? lastDecision : null;
 
   return (
-    <div className="flex flex-col h-full">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
-        <div className="mb-3 pb-3 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-          <div className="flex items-center gap-2 flex-wrap mb-0.5">
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>
-              Unit {row.unitNumber}
-            </h2>
-            <StatusBadge s={row.listingStatus} />
-            <Link href={`/dashboard/admin/units/${row.id}`} className="ml-auto text-xs" style={{ color: 'var(--color-primary)' }}>
-              Full page ↗
-            </Link>
-          </div>
-          <p className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-            {row.property?.buildingName}{row.property ? ` · RP #${row.property.rentalProviderId}` : ''}
-          </p>
-        </div>
+    <>
+      <DetailHead title={`Unit ${row.unitNumber}`}
+        pills={<><ListingPill s={row.listingStatus} />{['pending', 'in_review'].includes(row.listingStatus) && detail?.updatedAt && <SlaPill iso={detail.updatedAt} what="Waiting" title="Time since the listing was last changed (the queue has no submitted-at)" />}</>}
+        right={<Btn size="sm" href={`/dashboard/admin/units/${row.id}`}>Open full page</Btn>}
+        sub={`${row.property?.buildingName ?? '—'}${row.property ? ` · RP #${row.property.rentalProviderId} · ${categoryDisplayLabel(row.property.spaceCategory)}` : ''}`} />
 
-        {loading && <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--color-neutral-400)' }}>Loading details…</div>}
-        {!loading && err && <div className="text-sm p-3 rounded-xl" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{err}</div>}
+      {loading && <PanelSkeleton />}
+      {!loading && err && <Callout tone="bad" title="Couldn't load this listing.">{err} <Btn size="xs" onClick={() => setNonce((n) => n + 1)}>Try again</Btn></Callout>}
+      {decided && <Evid tone={decided.kind === 'approve' ? 'ok' : decided.kind === 'expire' ? 'warn' : 'bad'}>Decision recorded: {decided.kind === 'changes' ? 'Changes requested' : decided.kind === 'approve' ? 'Approved' : decided.kind === 'expire' ? 'Expired' : 'Rejected'}{decided.reason ? ` — ${decided.reason}` : ''}</Evid>}
 
-        {!loading && detail && (
-          <div className="space-y-3">
-            {photos.length > 0 ? (
-              <div className="relative rounded-xl overflow-hidden bg-gray-100" style={{ height: 160 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={photos[photoIdx]?.url} alt={photos[photoIdx]?.caption ?? ''} className="w-full h-full object-cover" />
-                {photos.length > 1 && (
-                  <>
-                    <button onClick={() => setPhotoIdx((i) => (i - 1 + photos.length) % photos.length)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/40 text-white hover:bg-black/60"><ChevronLeft size={13} /></button>
-                    <button onClick={() => setPhotoIdx((i) => (i + 1) % photos.length)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/40 text-white hover:bg-black/60"><ChevronRight size={13} /></button>
-                    <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full bg-black/40 text-white">{photoIdx + 1}/{photos.length}</span>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-xl p-3" style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca' }}>
-                <ImageOff size={14} style={{ color: '#dc2626' }} />
-                <p className="text-xs font-medium" style={{ color: '#dc2626' }}>No photos uploaded</p>
-              </div>
-            )}
-
-            <Section icon={MapPin} title="Location">
-              <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-900)' }}>{p?.buildingName ?? '—'}</p>
-              {locationParts.length > 0 && <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>{locationParts.join(' › ')}</p>}
-              {p?.fullAddress && <p className="text-xs mt-0.5" style={{ color: 'var(--color-neutral-400)' }}>{p.fullAddress}</p>}
-              {(p?.makaniNumber || p?.mapLink) && (
-                <div className="flex flex-wrap gap-x-3 mt-1.5">
-                  {p?.makaniNumber && <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Makani: {p.makaniNumber}</span>}
-                  {p?.mapLink && <a href={p.mapLink} target="_blank" rel="noopener noreferrer" className="text-xs" style={{ color: 'var(--color-primary)' }}>Map ↗</a>}
+      {!loading && detail && (
+        <>
+          {photos.length > 0 ? (
+            <div style={{ position: 'relative', height: 200, borderRadius: 12, overflow: 'hidden', background: 'var(--ms-surface-3)' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photos[photoIdx]?.url} alt={photos[photoIdx]?.caption ?? `Photo ${photoIdx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              {photos.length > 1 && (
+                <div className="flex items-center gap-2" style={{ position: 'absolute', bottom: 8, right: 8 }}>
+                  <Btn size="xs" onClick={() => setPhotoIdx((i) => (i - 1 + photos.length) % photos.length)}><ChevronLeft size={12} aria-hidden /> Previous</Btn>
+                  <Pill tone="dark" dot={false}>{photoIdx + 1}/{photos.length}</Pill>
+                  <Btn size="xs" onClick={() => setPhotoIdx((i) => (i + 1) % photos.length)}>Next <ChevronRight size={12} aria-hidden /></Btn>
                 </div>
               )}
-            </Section>
+            </div>
+          ) : <Callout tone="bad">No photos uploaded.</Callout>}
 
-            <Section icon={Info} title="Unit Specs">
-              <div className="grid grid-cols-2 gap-x-3">
-                <Field label="Type" value={detail.unitType?.replace(/_/g, ' ')} />
-                <Field label="Floor" value={detail.floor} />
-                <Field label="Available" value={detail.availability?.replace(/_/g, ' ')} />
-                <Field label="Tier" value={detail.unitTier?.replace(/_/g, ' ')} />
-                <Field label="Beds" value={isResidentialUnitType(detail.unitType) && detail.bedrooms != null ? String(detail.bedrooms) : null} />
-                <Field label="Baths" value={isResidentialUnitType(detail.unitType) && detail.bathrooms != null ? String(detail.bathrooms) : null} />
-                <Field label="sqft" value={detail.unitSizeSqft ? Number(detail.unitSizeSqft).toLocaleString() : null} />
-                <Field label="sqm" value={detail.unitSizeSqm ? Number(detail.unitSizeSqm).toLocaleString() : null} />
-              </div>
-            </Section>
+          <div style={gap}>
+            <Card title="Gate 3 · Listing review" sub={`${passing}/${gate.length} checks passing`} pad>
+              <Checklist items={gate} />
+            </Card>
+          </div>
 
-            <Section icon={DirhamSign} title="Pricing">
-              <div className="rounded-lg p-2.5 mb-2.5" style={{ backgroundColor: 'var(--color-primary-50)' }}>
-                <p className="text-xs" style={{ color: 'var(--color-primary)' }}>Annual Rent</p>
-                <p className="text-lg font-bold" style={{ color: 'var(--color-primary)' }}>{aed(detail.rentalPrice)}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-x-4">
-                <Field label="Security deposit" value={aed(detail.securityDeposit)} />
-                <Field label="Service charges" value={aed(detail.serviceCharges)} />
-                <Field label="Admin fee" value={aed(detail.adminFee)} />
-                <Field label="Commission" value={aed(detail.commission)} />
-              </div>
-            </Section>
+          <div style={gap} className="gx-two">
+            <Card title="Location" pad>
+              <KV items={[
+                { k: 'Building', v: p?.buildingName },
+                { k: 'Area', v: locationParts.length ? locationParts.join(' › ') : undefined },
+                { k: 'Address', v: p?.fullAddress },
+                { k: 'Makani', v: p?.makaniNumber },
+                { k: 'Map', v: p?.mapLink ? <a href={p.mapLink} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ms-primary)' }}>Open map</a> : undefined },
+              ]} />
+            </Card>
+            <Card title="Pricing" pad>
+              <KV items={[
+                { k: 'Annual rent', v: <span style={{ color: 'var(--ms-primary-dark)', fontSize: 15, fontWeight: 800 }}>{fmtAed(detail.rentalPrice)}</span> },
+                { k: 'Security deposit', v: fmtAed(detail.securityDeposit) },
+                { k: 'Service charges', v: fmtAed(detail.serviceCharges) },
+                { k: 'Admin fee', v: fmtAed(detail.adminFee) },
+                { k: 'Commission', v: fmtAed(detail.commission) },
+              ]} />
+            </Card>
+          </div>
 
-            <Section icon={Tag} title="Amenities">
-              <div className="flex flex-wrap gap-1.5">
-                {[{ label: 'Gym', active: p?.hasGym }, { label: 'Pool', active: p?.hasPool }, { label: 'Parking', active: p?.hasParking }].map(({ label, active }) => (
-                  <span key={label} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium"
-                    style={active ? { backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' } : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>
-                    {active ? <CheckCircle2 size={10} /> : <XCircle size={10} />}{label}
-                  </span>
+          <div style={gap}>
+            <Card title="Unit specs" pad>
+              <KV items={[
+                { k: 'Type', v: titleize(detail.unitType) },
+                { k: 'Floor', v: detail.floor },
+                { k: 'Available', v: titleize(detail.availability) },
+                { k: 'Tier', v: titleize(detail.unitTier) },
+                ...(residential ? [
+                  { k: 'Beds', v: detail.bedrooms != null ? (detail.bedrooms === 0 ? 'Studio' : String(detail.bedrooms)) : undefined },
+                  { k: 'Baths', v: detail.bathrooms != null ? String(detail.bathrooms) : undefined },
+                ] : []),
+                { k: 'sqft', v: detail.unitSizeSqft ? Number(detail.unitSizeSqft).toLocaleString('en-AE') : undefined },
+                { k: 'sqm', v: detail.unitSizeSqm ? Number(detail.unitSizeSqm).toLocaleString('en-AE') : undefined },
+              ]} />
+              <div className="gx-btn-row" style={{ marginTop: 12 }}>
+                {[{ l: 'Gym', on: p?.hasGym }, { l: 'Pool', on: p?.hasPool }, { l: 'Parking', on: p?.hasParking }].map((a) => (
+                  <Pill key={a.l} tone={a.on ? 'primary' : 'neutral'}>{a.l}{a.on ? '' : ' — no'}</Pill>
                 ))}
-                {detail.view && <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: '#eff6ff', color: '#3b82f6' }}>{detail.view} view</span>}
+                {detail.view && <Pill tone="info" dot={false}>{detail.view} view</Pill>}
               </div>
-            </Section>
-
-            {(detail.description || p?.propertyDescription) && (
-              <Section icon={Info} title="Description">
-                {detail.description && <p className="text-xs leading-relaxed" style={{ color: 'var(--color-neutral-700)' }}>{detail.description}</p>}
-                {p?.propertyDescription && <p className="text-xs leading-relaxed mt-1" style={{ color: 'var(--color-neutral-600)' }}>{p.propertyDescription}</p>}
-              </Section>
-            )}
-
-            {/* Documents linked to the unit + its parent property (view-only). */}
-            <Section icon={FileText} title={`Documents (${docs.length})`}>
-              {docs.length === 0 ? (
-                <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>No documents linked to this unit or its property.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {docs.map((doc) => {
-                    const ok = ['processed', 'complete', 'approved'].includes(String(doc.status).toLowerCase());
-                    return (
-                      <div key={doc.id} className="flex items-center justify-between gap-2 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium truncate capitalize" style={{ color: 'var(--color-neutral-700)' }}>
-                            {doc.documentKey.replace(/_/g, ' ')}
-                          </p>
-                          {doc.expiryDate && (
-                            <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Exp: {new Date(doc.expiryDate).toLocaleDateString('en-AE')}</p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                            style={{ backgroundColor: ok ? '#dcfce7' : '#fef3c7', color: ok ? '#15803d' : '#b45309' }}>
-                            {String(doc.status ?? 'pending').toLowerCase()}
-                          </span>
-                          {doc.fileUrl
-                            ? <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.documentKey.replace(/_/g, ' ') })} className="cursor-pointer">
-                                <ExternalLink size={12} style={{ color: 'var(--color-primary)' }} />
-                              </button>
-                            : <span className="text-xs" style={{ color: 'var(--color-neutral-300)' }}>requested</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Section>
+            </Card>
           </div>
-        )}
+
+          {(detail.description || p?.propertyDescription) && (
+            <div style={gap}>
+              <Card title="Description" pad>
+                {detail.description && <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>{detail.description}</div>}
+                {p?.propertyDescription && <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ms-ink-3)', marginTop: 6 }}>{p.propertyDescription}</div>}
+              </Card>
+            </div>
+          )}
+
+          <div style={gap}>
+            <Card title={`Documents (${docs.length})`} sub="Unit + property — view only" pad>
+              {docs.length === 0 ? <div style={muted}>No documents linked to this unit or its property.</div> : docs.map((doc) => {
+                const ok = ['processed', 'complete', 'approved'].includes(String(doc.status).toLowerCase());
+                return (
+                  <div key={doc.id} className="flex items-center gap-2" style={{ padding: '8px 0', borderBottom: '1px solid var(--ms-surface-3)' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'capitalize' }}>{titleize(doc.documentKey)}</div>
+                      {doc.expiryDate && <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>Expires {fmtDate(doc.expiryDate)}</div>}
+                    </div>
+                    <Pill tone={ok ? 'primary' : 'amber'}>{titleize(String(doc.status ?? 'pending').toLowerCase())}</Pill>
+                    {doc.fileUrl
+                      ? <Btn size="xs" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: titleize(doc.documentKey) })}>View</Btn>
+                      : <Pill tone="outline" dot={false}>Requested</Pill>}
+                  </div>
+                );
+              })}
+            </Card>
+          </div>
+        </>
+      )}
+
+      {(canApprove || canReject || canExpire) && (
+        <DecisionBar note={detail && passing < gate.length ? `${gate.length - passing} check${gate.length - passing === 1 ? '' : 's'} not passing — approving over them is allowed, but deliberate.` : undefined}>
+          {canApprove && <Btn variant="primary" disabled={acting} onClick={() => onDecide(row, 'approve')}>Approve</Btn>}
+          {canReject && <Btn variant="amber" disabled={acting} onClick={() => onDecide(row, 'changes')}>Ask for changes</Btn>}
+          {canReject && <Btn variant="danger" disabled={acting} onClick={() => onDecide(row, 'reject')}>Reject</Btn>}
+          {/* Expire — for a listing that was legitimately live and has aged out (SCRUM-663). */}
+          {canExpire && <Btn disabled={acting} onClick={() => onDecide(row, 'expire')}>Expire</Btn>}
+        </DecisionBar>
+      )}
+    </>
+  );
+}
+
+// ─── Right column: service provider (all their listings) ──────────────────────
+
+function ToolsList({ rows, busy, onVerify, verifyAllLabel, onVerifyAll, title }: {
+  rows: CapabilityRow[]; busy: boolean; title: string; verifyAllLabel: string;
+  onVerify: (r: CapabilityRow) => void; onVerifyAll: (() => void) | null;
+}) {
+  return (
+    <div style={{ margin: '6px 0 8px', padding: '9px 11px', border: '1px dashed var(--ms-border-strong)', borderRadius: 8, background: 'var(--ms-surface-2)' }}>
+      <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+        <span className="gx-lb" style={{ margin: 0, flex: 1 }}>{title}</span>
+        <Btn size="xs" disabled={busy || !onVerifyAll} onClick={() => onVerifyAll?.()}>{busy ? 'Verifying…' : verifyAllLabel}</Btn>
       </div>
-      <ActionBar canApprove={canApprove} canReject={canReject} canExpire={canExpire} acting={acting}
-        onApprove={() => onApprove(row)} onReject={() => onReject(row)} onExpire={() => onExpire(row)} />
+      {rows.map((r) => (
+        <div key={r.requirementId} className="flex items-start gap-2" style={{ padding: '5px 0', fontSize: 11.5 }}>
+          <Pill tone={r.declared ? 'primary' : r.isMandatory ? 'amber' : 'neutral'} dot={false}>{r.declared ? 'Declared' : 'Not declared'}</Pill>
+          <div style={{ flex: 1, minWidth: 0, color: r.declared ? 'var(--ms-ink)' : 'var(--ms-ink-3)' }}>
+            {r.label}{!r.isMandatory && <span style={{ color: 'var(--ms-ink-3)' }}> (optional)</span>}
+            <span style={{ marginLeft: 5, fontSize: 9.5, textTransform: 'uppercase', color: 'var(--ms-ink-3)' }}>{r.requirementType}</span>
+            {r.note && <div style={{ fontStyle: 'italic', color: 'var(--ms-ink-3)' }}>“{r.note}”</div>}
+            {!r.declared && r.isMandatory && <div style={{ color: 'var(--ms-amber-text)' }}>Mandatory — not declared</div>}
+            {r.declared && !r.photoUrl && <div style={{ color: 'var(--ms-amber-text)' }}>No photo of this tool yet</div>}
+          </div>
+          {r.declared && r.photoUrl && (
+            <a href={r.photoUrl} target="_blank" rel="noreferrer" title={`Open the provider's photo of ${r.label}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={r.photoUrl} alt={`Photo of ${r.label}`} style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--ms-border)', display: 'block' }} />
+            </a>
+          )}
+          {r.declared && (
+            <Btn size="xs" variant={r.verifiedAt ? 'primary' : undefined} disabled={busy} onClick={() => onVerify(r)}
+              title={r.verifiedAt ? `Verified by ${r.verifiedByName ?? 'admin'} — click to withdraw` : 'Mark as verified'}>
+              {r.verifiedAt ? 'Verified — withdraw' : 'Verify'}
+            </Btn>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
 
-// Compliance status → colour + label. Compliant is the gate for approval.
-const complianceCfg: Record<string, { bg: string; color: string; label: string }> = {
-  compliant:       { bg: '#f0fdf4', color: '#16a34a', label: 'Compliant' },
-  pending_review:  { bg: '#eff6ff', color: '#1e40af', label: 'Pending review' },
-  action_required: { bg: '#fef2f2', color: '#dc2626', label: 'Action required' },
-  expired:         { bg: '#fef2f2', color: '#dc2626', label: 'Expired' },
-  paused:          { bg: '#f5f5f4', color: '#78716c', label: 'Paused' },
-};
-const PRICE_UNIT_SUFFIX: Record<string, string> = {
-  fixed: '', per_hour: '/hr', per_unit: '/unit', per_area: '/m²', per_period: '/period', quote_after_callout: '',
-};
-function ctxSvcPrice(s: SpContextService): string {
-  if (s.pricingMode === 'quote' || s.priceUnit === 'quote_after_callout') return 'Quote';
-  if (s.basePrice == null) return '—';
-  return `${aed(s.basePrice)}${PRICE_UNIT_SUFFIX[s.priceUnit ?? ''] ?? ''}`;
-}
-function csvToList(s: string | null | undefined): string[] {
-  return (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-}
-
-/** Vendor key-facts + full catalogue + compliance docs — the context an admin
- *  needs to judge a single service listing. Fetched per selected provider. */
-/** One provider's full review surface: vendor facts, compliance docs, and every
- *  service they offer — each approvable/rejectable inline, plus bulk actions.
- *  Reuses GET /admin/kyc/service-providers/:id (profile + checklist + services). */
 function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; onChanged: () => void }) {
   const [ctx, setCtx] = useState<SpContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [actErr, setActErr] = useState<string | null>(null);
-  // Which service ids are mid-action (or 'bulk' while a batch runs).
   const [busy, setBusy] = useState<Set<number>>(new Set());
   const [bulking, setBulking] = useState(false);
-
-  // SP-248: per-listing capability checklists (declared by the provider,
-  // verified here). Loaded alongside the context; failures don't block the drawer.
   const [checklists, setChecklists] = useState<Record<number, ListingChecklist>>({});
-  // SP-268: the tools live on the CATEGORY (declared once, verified once) — a listing only carries its own extras.
   const [catChecklists, setCatChecklists] = useState<Record<string, CategoryChecklist>>({});
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [openChecklist, setOpenChecklist] = useState<number | null>(null);
   const [verifying, setVerifying] = useState<Set<number>>(new Set());
   const [verifyingCat, setVerifyingCat] = useState<string | null>(null);
+  // Decision dialog: one service (id) or every pending one ('bulk').
+  const [ask, setAsk] = useState<{ kind: Decision; target: number | 'bulk'; subject: string } | null>(null);
+  const [notes, setNotes] = useState<Record<number, string>>({});
 
   const loadChecklists = useCallback((signal?: AbortSignal) =>
     Promise.all([
@@ -732,21 +618,27 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
         .then((rows) => { if (!signal?.aborted) setChecklists(Object.fromEntries(rows.map((r) => [r.serviceCatalogId, r]))); }),
       apiGet<CategoryChecklist[]>(`/admin/kyc/service-providers/${providerId}/capabilities/categories`, { signal })
         .then((rows) => { if (!signal?.aborted) setCatChecklists(Object.fromEntries(rows.map((r) => [r.categoryCode, r]))); }),
-    ]).catch(() => { /* checklist is advisory — the drawer still works without it */ }),
+    ]).catch(() => { /* checklist is advisory — the panel still works without it */ }),
   [providerId]);
 
   /** SP-268 — verify at the PROVIDER level: counts for every service in the category. */
   async function verifyCategoryLines(code: string, requirementIds: number[], verified: boolean) {
     if (!requirementIds.length) return;
-    setActErr(null);
-    setVerifyingCat(code);
+    setActErr(null); setVerifyingCat(code);
     try {
       await apiPost(`/admin/kyc/service-providers/${providerId}/capabilities/verify`, { requirementIds, verified });
       await loadChecklists();
-    } catch (e) {
-      setActErr((e as Error).message);
-    } finally {
-      setVerifyingCat(null);
+    } catch (e) { setActErr((e as Error).message); } finally { setVerifyingCat(null); }
+  }
+  async function verifyLines(listingId: number, requirementIds: number[], verified: boolean) {
+    if (!requirementIds.length) return;
+    setActErr(null);
+    setVerifying((v) => new Set(v).add(listingId));
+    try {
+      await apiPost<ListingChecklist>(`/admin/service-listings/${listingId}/capabilities/verify`, { requirementIds, verified });
+      await loadChecklists();
+    } catch (e) { setActErr((e as Error).message); } finally {
+      setVerifying((v) => { const n = new Set(v); n.delete(listingId); return n; });
     }
   }
 
@@ -759,563 +651,333 @@ function ProviderReviewPanel({ providerId, onChanged }: { providerId: number; on
       .finally(() => { if (!signal?.aborted) setLoading(false); });
   }, [providerId, loadChecklists]);
 
-  async function verifyLines(listingId: number, requirementIds: number[], verified: boolean) {
-    if (!requirementIds.length) return;
-    setActErr(null);
-    setVerifying((v) => new Set(v).add(listingId));
-    try {
-      await apiPost<ListingChecklist>(`/admin/service-listings/${listingId}/capabilities/verify`, { requirementIds, verified });
-      await loadChecklists(); // provider-level rows — every sibling listing + the category block move together
-    } catch (e) {
-      setActErr((e as Error).message);
-    } finally {
-      setVerifying((v) => { const n = new Set(v); n.delete(listingId); return n; });
-    }
-  }
-
   useEffect(() => {
-    setCtx(null); setActErr(null); setBusy(new Set());
+    setCtx(null); setActErr(null); setBusy(new Set()); setNotes({});
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
   }, [providerId, load]);
 
-  async function actOne(id: number, action: 'approve' | 'reject') {
+  async function actOne(id: number, kind: Decision, reason: string) {
+    const action = kind === 'approve' ? 'approve' : 'reject';
     setActErr(null);
     setBusy((b) => new Set(b).add(id));
     try {
-      await apiPatch(`/admin/service-listings/${id}/${action}`, {});
-      setCtx((prev) => prev ? { ...prev, services: prev.services.map((s) => s.id === id ? { ...s, listingStatus: action === 'approve' ? 'approved' : 'rejected' } : s) } : prev);
+      await patchDecision(`/admin/service-listings/${id}/${action}`, action === 'reject' ? (kind === 'changes' ? `Changes requested: ${reason}` : reason) : undefined);
+      setCtx((prev) => (prev ? { ...prev, services: prev.services.map((s) => (s.id === id ? { ...s, listingStatus: action === 'approve' ? 'approved' : 'rejected' } : s)) } : prev));
+      if (reason) setNotes((n) => ({ ...n, [id]: `${kind === 'changes' ? 'Changes requested' : 'Rejected'} — ${reason}` }));
       onChanged();
-    } catch (e) {
-      setActErr((e as Error).message);
-    } finally {
+      setAsk(null);
+    } catch (e) { setActErr((e as Error).message); } finally {
       setBusy((b) => { const n = new Set(b); n.delete(id); return n; });
     }
   }
-
-  async function actAllPending(action: 'approve' | 'reject') {
+  async function actAllPending(kind: Decision, reason: string) {
     if (!ctx) return;
+    const action = kind === 'approve' ? 'approve' : 'reject';
     const pending = ctx.services.filter((s) => s.listingStatus === 'pending');
     if (pending.length === 0) return;
-    if (!confirm(`${action === 'approve' ? 'Approve' : 'Reject'} all ${pending.length} pending service${pending.length === 1 ? '' : 's'} for this provider?`)) return;
     setActErr(null); setBulking(true);
     try {
       for (const s of pending) {
-        await apiPatch(`/admin/service-listings/${s.id}/${action}`, {});
+        await patchDecision(`/admin/service-listings/${s.id}/${action}`, action === 'reject' ? (kind === 'changes' ? `Changes requested: ${reason}` : reason) : undefined);
       }
       await load();
       onChanged();
+      setAsk(null);
     } catch (e) {
       setActErr((e as Error).message);
       await load();
-    } finally {
-      setBulking(false);
-    }
+    } finally { setBulking(false); }
   }
 
-  if (loading && !ctx) return <div className="flex items-center justify-center h-full text-sm" style={{ color: 'var(--color-neutral-400)' }}>Loading provider…</div>;
-  if (err || !ctx) return <div className="m-4 rounded-xl p-3 text-sm" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>Couldn&apos;t load provider{err ? `: ${err}` : ''}.</div>;
+  if (loading && !ctx) return <PanelSkeleton />;
+  if (err || !ctx) return <Callout tone="bad" title="Couldn't load this provider.">{err ?? ''} <Btn size="xs" onClick={() => void load()}>Try again</Btn></Callout>;
 
   const p = ctx.profile;
-  const cc = complianceCfg[p.complianceStatus] ?? complianceCfg.pending_review;
   const compliant = p.complianceStatus === 'compliant';
   const emirates = csvToList(p.emiratesServed);
   const categories = csvToList(p.serviceCategories);
   const businessName = p.businessName || p.companyName || p.ownerName || p.user?.name || 'Unnamed provider';
-  const email = p.user?.email ?? null;
   const phone = p.user?.phone ?? p.opsContactPhone ?? null;
   const jobReady = p.jobReadyAt != null;
-  const memberSince = p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-AE', { year: 'numeric', month: 'short' }) : null;
-
-  const groups: { category: string; items: SpContextService[] }[] = Object.values(
-    ctx.services.reduce((acc, sv) => {
-      (acc[sv.category] ??= { category: sv.category, items: [] }).items.push(sv);
-      return acc;
-    }, {} as Record<string, { category: string; items: SpContextService[] }>),
-  ).sort((a, b) => b.items.length - a.items.length);
-
+  const groups = Object.values(ctx.services.reduce((acc, sv) => {
+    (acc[sv.category] ??= { category: sv.category, items: [] }).items.push(sv);
+    return acc;
+  }, {} as Record<string, { category: string; items: SpContextService[] }>)).sort((a, b) => b.items.length - a.items.length);
   const approvedCount = ctx.services.filter((s) => s.listingStatus === 'approved').length;
   const pendingCount = ctx.services.filter((s) => s.listingStatus === 'pending').length;
   const rejectedCount = ctx.services.filter((s) => s.listingStatus === 'rejected').length;
-  const requiredMissing = ctx.checklist.filter((c) => c.required && !c.uploaded).length;
+  const requiredMissing = ctx.checklist.filter((c) => c.required && !c.uploaded);
   const op = ctx.operationalProfile ?? null;
-  // Adopted services with no lead-capable technician skilled in that EXACT
-  // service — flagged (not blocked) on the approve row (SP-247).
+  // Adopted services with no lead-capable technician skilled in that EXACT service — flagged, not blocked (SP-247).
   const uncoveredIds = new Set((op?.cards.team.uncoveredServices ?? []).map((u) => u.id));
 
+  // ── Gate 3 checklist ──
+  const cats = Object.values(catChecklists).filter((c) => c.summary.total > 0);
+  const unpriced = ctx.services.filter((s) => s.pricingMode !== 'quote' && s.priceUnit !== 'quote_after_callout' && s.basePrice == null);
+  const photosMissing = cats.reduce((n, c) => n + c.summary.photosMissing, 0);
+  const notDeclared = cats.filter((c) => !c.summary.declarationComplete);
+  const notVerified = cats.filter((c) => !c.summary.verificationComplete);
+  const gate: ChkItem[] = [
+    compliant ? { l: 'Provider verified (Gate 1)', sub: 'Compliant — business verification decision on file (the API returns no decision date)', state: 'pass' } : { l: 'Provider verified (Gate 1)', sub: `${COMPLIANCE[p.complianceStatus]?.label ?? titleize(p.complianceStatus)} — listings cannot be approved until KYC is compliant`, state: 'fail' },
+    requiredMissing.length === 0 ? { l: 'Licence & compliance documents', sub: 'All required present', state: 'pass' } : { l: 'Licence & compliance documents', sub: `Missing: ${requiredMissing.map((c) => c.displayName).join(', ')}`, state: 'fail' },
+    unpriced.length === 0 ? { l: 'Title, details & price', sub: `${ctx.services.length} service${ctx.services.length === 1 ? '' : 's'} priced or quote-based`, state: 'pass' } : { l: 'Title, details & price', sub: `No price: ${unpriced.map((s) => s.name).join(', ')}`, state: 'fail' },
+    cats.length === 0 ? { l: 'Subcategory fields (tools & materials)', sub: 'No tool checklist for these categories', state: 'wait' } : notDeclared.length === 0 ? { l: 'Subcategory fields (tools & materials)', sub: 'Every mandatory tool declared', state: 'pass' } : { l: 'Subcategory fields (tools & materials)', sub: `Not fully declared: ${notDeclared.map((c) => c.categoryName).join(', ')}`, state: 'fail' },
+    cats.length === 0 ? { l: 'Tool photos', sub: '—', state: 'wait' } : photosMissing === 0 ? { l: 'Tool photos', sub: 'A photo for every declared tool', state: 'pass' } : { l: 'Tool photos', sub: `${photosMissing} declared tool${photosMissing === 1 ? '' : 's'} without a photo`, state: 'wait' },
+    cats.length === 0 ? { l: 'Tools verified', sub: '—', state: 'wait' } : notVerified.length === 0 ? { l: 'Tools verified', sub: 'Every mandatory tool verified', state: 'pass' } : { l: 'Tools verified', sub: `Still to verify: ${notVerified.map((c) => c.categoryName).join(', ')}`, state: 'wait' },
+    uncoveredIds.size === 0 ? { l: 'Qualified lead technician', sub: 'Every service has a lead-capable technician', state: 'pass' } : { l: 'Qualified lead technician', sub: `${uncoveredIds.size} service${uncoveredIds.size === 1 ? '' : 's'} without one`, state: 'wait' },
+    jobReady ? { l: 'Job-ready', sub: `Since ${fmtDate(p.jobReadyAt)}`, state: 'pass' } : { l: 'Job-ready', sub: 'Setup guide not complete', state: 'wait' },
+  ];
+
+  const subjectOf = (target: number | 'bulk') => target === 'bulk' ? `all ${pendingCount} pending services` : ctx.services.find((s) => s.id === target)?.name ?? `Service #${target}`;
+  const open = (kind: Decision, target: number | 'bulk') => { setActErr(null); setAsk({ kind, target, subject: subjectOf(target) }); };
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {/* Vendor identity + key facts */}
-        <div className="rounded-xl p-3.5" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-200)' }}>
-          <div className="flex items-start gap-3 mb-3">
-            <div className="w-11 h-11 rounded-xl grid place-items-center shrink-0" style={{ backgroundColor: 'var(--color-base-100)' }}>
-              <Store size={18} style={{ color: 'var(--color-primary)' }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-bold truncate" style={{ color: 'var(--color-neutral-900)' }}>{businessName}</h3>
-                <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>SP #{p.id}</span>
-                <Link href={`/dashboard/admin/users/${p.userId}`} className="text-xs" style={{ color: 'var(--color-primary)' }}>Profile ↗</Link>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: cc.bg, color: cc.color }}>{cc.label}</span>
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={jobReady ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fef9eb', color: '#b45309' }}>
-                  {jobReady ? <><CheckCircle2 size={10} /> Job-ready</> : <><Clock size={10} /> Not job-ready</>}
-                </span>
-                {p.averageRating != null && p.totalReviews > 0 && (
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#fffbeb', color: '#b45309' }}>
-                    <Star size={10} fill="currentColor" /> {Number(p.averageRating).toFixed(1)} ({p.totalReviews})
-                  </span>
-                )}
-                {p.emergencyResponse && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}><Zap size={10} /> Emergency</span>}
-                {p.isGovernment && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: '#eff6ff', color: '#1e40af' }}>Government</span>}
-              </div>
-            </div>
-          </div>
+    <>
+      <DetailHead title={businessName}
+        pills={<>
+          <CompliancePill s={p.complianceStatus} />
+          <Pill tone={jobReady ? 'primary' : 'amber'}>{jobReady ? 'Job-ready' : 'Not job-ready'}</Pill>
+          {p.averageRating != null && p.totalReviews > 0 && <Pill tone="amber" dot={false}>★ {Number(p.averageRating).toFixed(1)} ({p.totalReviews})</Pill>}
+          {p.emergencyResponse && <Pill tone="danger" dot={false}>Emergency</Pill>}
+          {p.isGovernment && <Pill tone="info" dot={false}>Government</Pill>}
+        </>}
+        right={<Btn size="sm" href={`/dashboard/admin/users/${p.userId}`}>Open profile</Btn>}
+        sub={[`SP #${p.id}`, p.user?.email, phone].filter(Boolean).join(' · ')} />
 
-          <div className="grid grid-cols-2 gap-x-4">
-            <Field label="Owner" value={p.ownerName} />
-            <Field label="Entity" value={p.entityType?.replace(/_/g, ' ')} />
-            <Field label="Trade licence" value={p.tradeLicenseNumber} />
-            <Field label="VAT TRN" value={p.vatTrn} />
-            <Field label="KYC completion" value={`${ctx.completionScore}%`} />
-            <Field label="Member since" value={memberSince} />
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
-            {email && <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-600)' }}><Mail size={12} style={{ color: 'var(--color-neutral-400)' }} /> {email}</span>}
-            {phone && <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--color-neutral-600)' }}><Phone size={12} style={{ color: 'var(--color-neutral-400)' }} /> {phone}</span>}
-          </div>
-          {emirates.length > 0 && (
-            <div className="flex items-start gap-1.5 mt-2">
-              <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
-              <span className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>{emirates.map((e) => e.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())).join(', ')}</span>
-            </div>
-          )}
-          {categories.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-2">
-              {categories.map((c) => (
-                <span key={c} className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{serviceCategoryLabel(c)}</span>
-              ))}
-            </div>
-          )}
-        </div>
+      <Card title="Gate 3 · Listing review" sub={`${gate.filter((g) => g.state === 'pass').length}/${gate.length} checks passing`} pad>
+        <Checklist items={gate} />
+      </Card>
 
-        {/* Compliance documents — the reviewer's evidence */}
-        <Section icon={ShieldCheck} title={`Compliance documents${requiredMissing > 0 ? ` · ${requiredMissing} required missing` : ' · all required present'}`}>
-          <div className="space-y-1.5">
-            {ctx.checklist.map((doc) => {
-              const ok = ['processed', 'complete', 'approved', 'attached'].includes(String(doc.status).toLowerCase());
-              return (
-                <div key={doc.key} className="flex items-center justify-between gap-2 py-1.5 border-b" style={{ borderColor: 'var(--color-base-100)' }}>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-700)' }}>
-                      {doc.displayName}
-                      {doc.required && <span className="ml-1 text-[10px]" style={{ color: '#dc2626' }}>*</span>}
-                    </p>
-                    {doc.expiryDate && <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>Exp: {new Date(doc.expiryDate).toLocaleDateString('en-AE')}</p>}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {doc.uploaded ? (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: ok ? '#dcfce7' : '#fef3c7', color: ok ? '#15803d' : '#b45309' }}>{String(doc.status ?? 'uploaded').toLowerCase()}</span>
-                    ) : (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>missing</span>
-                    )}
-                    {doc.fileUrl
-                      ? <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })} className="cursor-pointer"><ExternalLink size={12} style={{ color: 'var(--color-primary)' }} /></button>
-                      : <span className="w-3" />}
-                  </div>
+      <div style={gap}>
+        <Card title="Provider" pad>
+          <KV items={[
+            { k: 'Owner', v: p.ownerName }, { k: 'Entity', v: titleize(p.entityType) || undefined },
+            { k: 'Trade licence', v: p.tradeLicenseNumber }, { k: 'VAT TRN', v: p.vatTrn },
+            { k: 'KYC completion', v: `${ctx.completionScore}%` }, { k: 'Member since', v: fmtDate(p.createdAt) },
+            { k: 'Emirates', v: emirates.length ? emirates.map((e) => titleize(e).replace(/\b\w/g, (m) => m.toUpperCase())).join(', ') : undefined },
+            { k: 'Categories', v: categories.length ? categories.map(serviceCategoryLabel).join(', ') : undefined },
+          ]} />
+        </Card>
+      </div>
+
+      <div style={gap}>
+        <Card title="Compliance documents" sub={requiredMissing.length ? `${requiredMissing.length} required missing` : 'All required present'} pad>
+          {ctx.checklist.map((doc) => {
+            const ok = ['processed', 'complete', 'approved', 'attached'].includes(String(doc.status).toLowerCase());
+            return (
+              <div key={doc.key} className="flex items-center gap-2" style={{ padding: '8px 0', borderBottom: '1px solid var(--ms-surface-3)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{doc.displayName}{doc.required && <span style={{ color: 'var(--ms-danger)', fontSize: 10.5 }}> · required</span>}</div>
+                  {doc.expiryDate && <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>Expires {fmtDate(doc.expiryDate)}</div>}
                 </div>
-              );
-            })}
-          </div>
-        </Section>
+                {doc.uploaded ? <Pill tone={ok ? 'primary' : 'amber'}>{titleize(String(doc.status ?? 'uploaded').toLowerCase())}</Pill> : <Pill tone="danger">Missing</Pill>}
+                {doc.fileUrl && <Btn size="xs" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })}>View</Btn>}
+              </div>
+            );
+          })}
+        </Card>
+      </div>
 
-        {/* Operational profile — the evidence behind the Job-ready chip (SP-247).
-            Read-only: corrections happen on the provider's own Setup Guide. */}
-        <Section icon={Users} title="Operational profile">
-          {!op ? (
-            <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>No operational profile yet — the provider has not started the Get Job-Ready setup.</p>
-          ) : (
-            <div className="space-y-3">
-              {/* Team + per-technician skills */}
+      {/* Operational profile — the evidence behind the Job-ready chip (SP-247). Read-only. */}
+      <div style={gap}>
+        <Card title="Operational profile" pad>
+          {!op ? <div style={muted}>No operational profile yet — the provider has not started the Get Job-Ready setup.</div> : (
+            <div style={{ display: 'grid', gap: 12 }}>
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                  {op.supplyType === 'solo'
-                    ? 'Solo operator · person = provider = technician'
-                    : <>Team · {op.cards.team.activeTechnicians} active · {op.cards.team.leadCapable} lead-capable</>}
-                </p>
-                {op.team.length === 0 ? (
-                  <p className="text-xs" style={{ color: '#dc2626' }}>No technicians on the roster.</p>
-                ) : (
-                  <div className="space-y-1">
-                    {op.team.map((t) => (
-                      <div key={t.id} className="rounded-lg px-2.5 py-1.5" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-medium" style={{ color: 'var(--color-neutral-800)' }}>{t.name}</span>
-                          {t.isSelf && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#eef2ff', color: '#4338ca' }} title="Compliance mirrors the provider's verdict — one KYC set">the provider themself</span>}
-                          {t.isLeadCapable && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#f0fdf4', color: '#16a34a' }}>Lead</span>}
-                          {t.status !== 'active' && <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{t.status}</span>}
-                          {t.complianceStatus && t.complianceStatus !== 'compliant' && (
-                            <span className="text-[10px] font-semibold px-1.5 rounded-full" style={{ backgroundColor: '#fef9eb', color: '#b45309' }}>{t.complianceStatus.replace(/_/g, ' ')}</span>
-                          )}
-                          {!t.hasPhoto && <span className="text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>no photo</span>}
-                        </div>
-                        {(t.serviceSkills.length > 0 || t.categorySkills.length > 0) && (
-                          <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
-                            {t.serviceSkills.length > 0 ? t.serviceSkills.join(' · ') : t.categorySkills.map(serviceCategoryLabel).join(' · ')}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Coverage — the named communities, not the emirates CSV */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                  Coverage · {op.cards.coverage.zoneCount} zone{op.cards.coverage.zoneCount === 1 ? '' : 's'}
-                </p>
-                {op.coverageZones.length === 0 ? (
-                  <p className="text-xs" style={{ color: '#dc2626' }}>No coverage zones picked.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {op.coverageZones.slice(0, 14).map((z) => (
-                      <span key={z} className="text-[11px] px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }}>{z}</span>
-                    ))}
-                    {op.coverageZones.length > 14 && (
-                      <span className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>+{op.coverageZones.length - 14} more</span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Fleet + hours + rules, compact */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                    Fleet · {op.cards.fleet.effectiveMaxConcurrentJobs} concurrent crew{op.cards.fleet.effectiveMaxConcurrentJobs === 1 ? '' : 's'}
-                  </p>
-                  {op.fleet.length === 0 ? (
-                    <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>No vehicles.</p>
-                  ) : (
-                    op.fleet.map((v, i) => (
-                      <p key={i} className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>
-                        {v.type.replace(/_/g, ' ')}{v.label ? ` · ${v.label}` : ''}
-                      </p>
-                    ))
-                  )}
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: 'var(--color-neutral-400)' }}>
-                    Hours · {op.cards.hours.daysConfigured} day{op.cards.hours.daysConfigured === 1 ? '' : 's'}
-                  </p>
-                  {op.weeklyHours.length === 0 ? (
-                    <p className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>Not configured.</p>
-                  ) : (
-                    op.weeklyHours.map((h, i) => (
-                      <p key={i} className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>
-                        {WEEKDAY_LABELS[h.weekday] ?? h.weekday} {String(h.opensAt).slice(0, 5)}–{String(h.closesAt).slice(0, 5)}
-                      </p>
-                    ))
-                  )}
-                  {op.timeOff.length > 0 && (
-                    <p className="text-[11px] mt-1" style={{ color: '#b45309' }}>
-                      Time off: {op.timeOff.map((t) => `${t.startsOn} → ${t.endsOn}`).join(', ')}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <p className="text-[11px]" style={{ color: 'var(--color-neutral-500)' }}>
-                Job rules: {op.cards.rules.minNoticeHours}h min notice
-                {op.cards.rules.dispatchLogic ? ` · ${op.cards.rules.dispatchLogic.replace(/_/g, ' ')}` : ''}
-                {op.cards.rules.emergencyResponse ? ' · emergency response' : ''}
-                {op.cards.rules.acceptedAt ? ` · rules accepted ${new Date(op.cards.rules.acceptedAt).toLocaleDateString('en-AE')}` : ' · rules NOT acknowledged'}
-              </p>
-            </div>
-          )}
-        </Section>
-
-        {/* Services — every listing, each approvable/rejectable inline */}
-        <Section icon={Layers} title={`Services (${ctx.services.length}) · ${approvedCount} approved · ${pendingCount} pending · ${rejectedCount} rejected`}>
-          {!compliant && pendingCount > 0 && (
-            <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 mb-2 text-[11px]" style={{ backgroundColor: '#fffbeb', color: '#b45309' }}>
-              <AlertCircle size={13} /> Provider must be compliant before their listings can be approved. Complete KYC review first.
-            </div>
-          )}
-          <div className="space-y-2.5">
-            {groups.map((g) => (
-              <div key={g.category}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>{serviceCategoryLabel(g.category)}</span>
-                  <span className="text-[10px] px-1.5 rounded-full" style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-400)' }}>{g.items.length}</span>
-                  {(() => {
-                    const cl = catChecklists[g.category];
-                    if (!cl || cl.summary.total === 0) return null;
-                    const sm = cl.summary;
-                    const tone = sm.verificationComplete ? { bg: '#f0fdf4', fg: '#16a34a' } : sm.declarationComplete ? { bg: '#eef2ff', fg: '#4338ca' } : { bg: '#fef9eb', fg: '#b45309' };
-                    return (
-                      <button type="button" onClick={() => setOpenCategory((o) => (o === g.category ? null : g.category))}
-                        className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                        title="Tools & materials for this category — declared once by the provider, verified once here, counts for every service in it"
-                        style={{ backgroundColor: tone.bg, color: tone.fg }}>
-                        Tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.withPhoto} photo{sm.withPhoto === 1 ? '' : 's'} · {sm.verifiedMandatory} verified {openCategory === g.category ? '▴' : '▾'}
-                      </button>
-                    );
-                  })()}
-                </div>
-                {openCategory === g.category && catChecklists[g.category] && (() => {
-                  const cl = catChecklists[g.category];
-                  const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
-                  const isV = verifyingCat === g.category;
-                  return (
-                    <div className="rounded-lg px-2.5 py-2 mb-2" style={{ backgroundColor: '#fafaf7', border: '1px dashed var(--color-base-200)' }}>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>
-                          Tools &amp; materials · {serviceCategoryLabel(g.category)} · declared once for all {cl.listingCount} service{cl.listingCount === 1 ? '' : 's'}
-                        </p>
-                        <button type="button" disabled={isV || declaredUnverified.length === 0}
-                          onClick={() => void verifyCategoryLines(g.category, declaredUnverified, true)}
-                          className="text-[10.5px] font-semibold px-2 py-0.5 rounded-md disabled:opacity-40"
-                          style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-                          {isV ? 'Verifying…' : `Verify all declared (${declaredUnverified.length})`}
-                        </button>
-                      </div>
-                      <ul className="space-y-1">
-                        {cl.rows.map((r) => (
-                          <li key={r.requirementId} className="flex items-start gap-2 text-[11.5px]">
-                            <span className="mt-[3px] inline-block w-3 h-3 rounded-sm shrink-0" title={r.declared ? 'Provider says they have this' : 'Not declared'}
-                              style={{ backgroundColor: r.declared ? '#16a34a' : '#fff', border: r.declared ? '1px solid #16a34a' : '1px solid #d1d5db' }} />
-                            <span className="flex-1 min-w-0" style={{ color: r.declared ? 'var(--color-neutral-800)' : 'var(--color-neutral-400)' }}>
-                              {r.label}
-                              {r.isMandatory ? '' : <span className="ml-1 text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>(optional)</span>}
-                              <span className="ml-1 text-[10px] uppercase" style={{ color: 'var(--color-neutral-400)' }}>{r.requirementType}</span>
-                              {r.note && <span className="block text-[10.5px] italic" style={{ color: 'var(--color-neutral-500)' }}>“{r.note}”</span>}
-                              {!r.declared && r.isMandatory && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>Mandatory — not declared</span>}
-                              {r.declared && !r.photoUrl && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>No photo of this tool yet</span>}
-                            </span>
-                            {r.declared && r.photoUrl && (
-                              <a href={r.photoUrl} target="_blank" rel="noreferrer" title="Open the provider's photo of this tool" className="shrink-0">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={r.photoUrl} alt={`Photo of ${r.label}`} className="rounded-md object-cover" style={{ width: 34, height: 34, border: '1px solid var(--color-base-200)', display: 'block' }} />
-                              </a>
-                            )}
-                            {r.declared && (
-                              <button type="button" disabled={isV}
-                                onClick={() => void verifyCategoryLines(g.category, [r.requirementId], !r.verifiedAt)}
-                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 disabled:opacity-40"
-                                title={r.verifiedAt ? `Verified by ${r.verifiedByName ?? 'admin'} — click to withdraw` : 'Mark as verified (counts for every service in the category)'}
-                                style={r.verifiedAt ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fff', color: 'var(--color-neutral-500)', border: '1px solid var(--color-base-200)' }}>
-                                {r.verifiedAt ? '✓ Verified' : 'Verify'}
-                              </button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
+                <div className="gx-lb">{op.supplyType === 'solo' ? 'Solo operator · person = provider = technician' : `Team · ${op.cards.team.activeTechnicians} active · ${op.cards.team.leadCapable} lead-capable`}</div>
+                {op.team.length === 0 ? <div style={{ fontSize: 11.5, color: 'var(--ms-danger)' }}>No technicians on the roster.</div> : op.team.map((t) => (
+                  <div key={t.id} style={{ padding: '5px 0', borderBottom: '1px solid var(--ms-surface-3)', fontSize: 11.5 }}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <strong>{t.name}</strong>
+                      {t.isSelf && <Pill tone="info" dot={false} title="Compliance mirrors the provider's verdict — one KYC set">The provider themself</Pill>}
+                      {t.isLeadCapable && <Pill tone="primary" dot={false}>Lead</Pill>}
+                      {t.status !== 'active' && <Pill tone="danger" dot={false}>{titleize(t.status)}</Pill>}
+                      {t.complianceStatus && t.complianceStatus !== 'compliant' && <Pill tone="amber" dot={false}>{titleize(t.complianceStatus)}</Pill>}
+                      {!t.hasPhoto && <span style={{ color: 'var(--ms-ink-3)', fontSize: 10.5 }}>no photo</span>}
                     </div>
+                    {(t.serviceSkills.length > 0 || t.categorySkills.length > 0) && (
+                      <div style={{ color: 'var(--ms-ink-3)', marginTop: 2 }}>{t.serviceSkills.length > 0 ? t.serviceSkills.join(' · ') : t.categorySkills.map(serviceCategoryLabel).join(' · ')}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="gx-lb">Coverage · {op.cards.coverage.zoneCount} zone{op.cards.coverage.zoneCount === 1 ? '' : 's'}</div>
+                {op.coverageZones.length === 0 ? <div style={{ fontSize: 11.5, color: 'var(--ms-danger)' }}>No coverage zones picked.</div> : (
+                  <div className="gx-btn-row">
+                    {op.coverageZones.slice(0, 14).map((z) => <Pill key={z} tone="neutral" dot={false}>{z}</Pill>)}
+                    {op.coverageZones.length > 14 && <span style={muted}>+{op.coverageZones.length - 14} more</span>}
+                  </div>
+                )}
+              </div>
+              <div className="gx-two">
+                <div>
+                  <div className="gx-lb">Fleet · {op.cards.fleet.effectiveMaxConcurrentJobs} concurrent crew{op.cards.fleet.effectiveMaxConcurrentJobs === 1 ? '' : 's'}</div>
+                  {op.fleet.length === 0 ? <div style={muted}>No vehicles.</div> : op.fleet.map((v, i) => <div key={i} style={{ fontSize: 11.5 }}>{titleize(v.type)}{v.label ? ` · ${v.label}` : ''}</div>)}
+                </div>
+                <div>
+                  <div className="gx-lb">Hours · {op.cards.hours.daysConfigured} day{op.cards.hours.daysConfigured === 1 ? '' : 's'}</div>
+                  {op.weeklyHours.length === 0 ? <div style={muted}>Not configured.</div> : op.weeklyHours.map((h, i) => (
+                    <div key={i} style={{ fontSize: 11.5 }}>{WEEKDAY_LABELS[h.weekday] ?? h.weekday} {String(h.opensAt).slice(0, 5)}–{String(h.closesAt).slice(0, 5)}</div>
+                  ))}
+                  {op.timeOff.length > 0 && <div style={{ fontSize: 11, color: 'var(--ms-amber-text)', marginTop: 4 }}>Time off: {op.timeOff.map((t) => `${t.startsOn} → ${t.endsOn}`).join(', ')}</div>}
+                </div>
+              </div>
+              <div style={muted}>
+                Job rules: {op.cards.rules.minNoticeHours}h min notice
+                {op.cards.rules.dispatchLogic ? ` · ${titleize(op.cards.rules.dispatchLogic)}` : ''}
+                {op.cards.rules.emergencyResponse ? ' · emergency response' : ''}
+                {op.cards.rules.acceptedAt ? ` · rules accepted ${fmtDate(op.cards.rules.acceptedAt)}` : ' · rules NOT acknowledged'}
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Services — every listing, each decided inline */}
+      <div style={gap}>
+        <Card title={`Services (${ctx.services.length})`} sub={`${approvedCount} approved · ${pendingCount} pending · ${rejectedCount} rejected`} pad>
+          {!compliant && pendingCount > 0 && <div style={{ marginBottom: 10 }}><Callout tone="warn">Provider must be compliant before their listings can be approved. Complete the Gate 1 review first.</Callout></div>}
+          {groups.map((g) => {
+            const cl = catChecklists[g.category];
+            const sm = cl?.summary;
+            const catTone: Tone = sm?.verificationComplete ? 'primary' : sm?.declarationComplete ? 'info' : 'amber';
+            return (
+              <div key={g.category} style={{ marginBottom: 12 }}>
+                <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 5 }}>
+                  <span className="gx-lb" style={{ margin: 0 }}>{serviceCategoryLabel(g.category)}</span>
+                  <Pill tone="neutral" dot={false}>{g.items.length}</Pill>
+                  {cl && sm && sm.total > 0 && (
+                    <span style={{ marginLeft: 'auto' }} className="flex items-center gap-1.5">
+                      <Pill tone={catTone} dot={false} title="Tools & materials for this category — declared once by the provider, verified once here, counts for every service in it">
+                        Tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.withPhoto} photo{sm.withPhoto === 1 ? '' : 's'} · {sm.verifiedMandatory} verified
+                      </Pill>
+                      <Btn size="xs" onClick={() => setOpenCategory((o) => (o === g.category ? null : g.category))}>{openCategory === g.category ? 'Hide tools' : 'Review tools'}</Btn>
+                    </span>
+                  )}
+                </div>
+                {openCategory === g.category && cl && (() => {
+                  const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
+                  return (
+                    <ToolsList rows={cl.rows} busy={verifyingCat === g.category}
+                      title={`Tools & materials · declared once for all ${cl.listingCount} service${cl.listingCount === 1 ? '' : 's'}`}
+                      verifyAllLabel={`Verify all declared (${declaredUnverified.length})`}
+                      onVerifyAll={declaredUnverified.length ? () => void verifyCategoryLines(g.category, declaredUnverified, true) : null}
+                      onVerify={(r) => void verifyCategoryLines(g.category, [r.requirementId], !r.verifiedAt)} />
                   );
                 })()}
-                <div className="space-y-1">
-                  {g.items.map((sv) => {
-                    const isBusy = busy.has(sv.id) || bulking;
-                    return (
-                      <React.Fragment key={sv.id}>
-                      <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg" style={{ backgroundColor: '#fff', border: '1px solid var(--color-base-100)' }}>
-                        <Wrench size={12} className="shrink-0" style={{ color: 'var(--color-neutral-400)' }} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium truncate" style={{ color: 'var(--color-neutral-800)' }}>
-                            {sv.name}
-                            {sv.isEmergency && <Zap size={9} className="inline ml-1" style={{ color: '#c2410c' }} />}
-                          </p>
-                          <p className="text-[11px]" style={{ color: 'var(--color-neutral-400)' }}>{ctxSvcPrice(sv)}</p>
+                {g.items.map((sv) => {
+                  const isBusy = busy.has(sv.id) || bulking;
+                  const lcl = checklists[sv.id];
+                  // SP-268: the category list is on the header — a listing chip only for its own EXTRAS.
+                  const extras = (lcl?.rows ?? []).filter((r) => r.scope === 'template');
+                  const mand = extras.filter((r) => r.isMandatory);
+                  const exDeclared = mand.filter((r) => r.declared).length;
+                  const exVerified = mand.filter((r) => r.declared && r.verifiedAt).length;
+                  const exTone: Tone = mand.every((r) => r.declared && r.verifiedAt) ? 'primary' : mand.every((r) => r.declared) ? 'info' : 'amber';
+                  return (
+                    <Fragment key={sv.id}>
+                      <div className="flex items-center gap-2 flex-wrap" style={{ padding: '8px 10px', border: '1px solid var(--ms-surface-3)', borderRadius: 8, marginBottom: 5 }}>
+                        <div style={{ flex: 1, minWidth: 140 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{sv.name}{sv.isEmergency && <span style={{ color: 'var(--ms-danger)', fontSize: 10.5 }}> · 24/7</span>}</div>
+                          <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>{ctxSvcPrice(sv)}</div>
+                          {notes[sv.id] && <div style={{ fontSize: 10.5, color: '#8d2f2a' }}>{notes[sv.id]}</div>}
                         </div>
-                        {uncoveredIds.has(sv.id) && (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" title="No lead-capable technician is skilled in this exact service"
-                            style={{ backgroundColor: '#fef9eb', color: '#b45309' }}>
-                            No qualified lead
-                          </span>
+                        {uncoveredIds.has(sv.id) && <Pill tone="amber" dot={false} title="No lead-capable technician is skilled in this exact service">No qualified lead</Pill>}
+                        {lcl && extras.length > 0 && (
+                          <Btn size="xs" onClick={() => setOpenChecklist((o) => (o === sv.id ? null : sv.id))}
+                            title={mand.every((r) => r.declared) ? 'Provider declared every mandatory extra — verify' : 'Provider has NOT declared every mandatory extra'}>
+                            <Pill tone={exTone} dot={false}>Extras {exDeclared}/{mand.length} · {exVerified} verified</Pill>{openChecklist === sv.id ? 'Hide' : 'Review'}
+                          </Btn>
                         )}
-                        {(() => {
-                          const cl = checklists[sv.id];
-                          // SP-268: the category list is on the header — a listing chip only for its own EXTRAS.
-                          const extras = (cl?.rows ?? []).filter((r) => r.scope === 'template');
-                          if (!cl || extras.length === 0) return null;
-                          const sm = { ...cl.summary, mandatory: extras.filter((r) => r.isMandatory).length, declaredMandatory: extras.filter((r) => r.isMandatory && r.declared).length, verifiedMandatory: extras.filter((r) => r.isMandatory && r.declared && r.verifiedAt).length, declarationComplete: extras.filter((r) => r.isMandatory).every((r) => r.declared), verificationComplete: extras.filter((r) => r.isMandatory).every((r) => r.declared && r.verifiedAt) };
-                          const tone = sm.verificationComplete
-                            ? { bg: '#f0fdf4', fg: '#16a34a' }
-                            : sm.declarationComplete ? { bg: '#eef2ff', fg: '#4338ca' } : { bg: '#fef9eb', fg: '#b45309' };
-                          return (
-                            <button type="button" onClick={() => setOpenChecklist((o) => (o === sv.id ? null : sv.id))}
-                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                              title={sm.declarationComplete ? 'Provider declared every mandatory tool/material — verify below' : 'Provider has NOT declared every mandatory tool/material'}
-                              style={{ backgroundColor: tone.bg, color: tone.fg }}>
-                              Extra tools {sm.declaredMandatory}/{sm.mandatory} declared · {sm.verifiedMandatory} verified
-                            </button>
-                          );
-                        })()}
-                        <StatusBadge s={sv.listingStatus} />
-                        <div className="flex items-center gap-1 shrink-0">
-                          {sv.listingStatus !== 'approved' && (
-                            <button type="button" disabled={isBusy || !compliant} title={!compliant ? 'Provider not compliant' : 'Approve'}
-                              onClick={() => void actOne(sv.id, 'approve')}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40"
-                              style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-                              <CheckCircle2 size={12} /> Approve
-                            </button>
-                          )}
-                          {sv.listingStatus !== 'rejected' && (
-                            <button type="button" disabled={isBusy} title="Reject"
-                              onClick={() => void actOne(sv.id, 'reject')}
-                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40"
-                              style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-                              <XCircle size={12} /> Reject
-                            </button>
-                          )}
-                        </div>
+                        <ListingPill s={sv.listingStatus} />
+                        {sv.listingStatus !== 'approved' && (
+                          <Btn size="xs" variant="primary" disabled={isBusy || !compliant} title={!compliant ? 'Provider not compliant' : undefined} onClick={() => open('approve', sv.id)}>Approve</Btn>
+                        )}
+                        {sv.listingStatus !== 'rejected' && <>
+                          <Btn size="xs" variant="amber" disabled={isBusy} onClick={() => open('changes', sv.id)}>Ask for changes</Btn>
+                          <Btn size="xs" variant="danger" disabled={isBusy} onClick={() => open('reject', sv.id)}>Reject</Btn>
+                        </>}
                       </div>
-                      {openChecklist === sv.id && checklists[sv.id] && (() => {
-                        const cl = { ...checklists[sv.id], rows: checklists[sv.id].rows.filter((r) => r.scope === 'template') };
-                        const declaredUnverified = cl.rows.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
-                        const isV = verifying.has(sv.id);
+                      {openChecklist === sv.id && lcl && (() => {
+                        const declaredUnverified = extras.filter((r) => r.declared && !r.verifiedAt).map((r) => r.requirementId);
                         return (
-                          <div className="rounded-lg px-2.5 py-2 mt-1 mb-1" style={{ backgroundColor: '#fafaf7', border: '1px dashed var(--color-base-200)' }}>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--color-neutral-400)' }}>Extra tools only this service needs · provider's declaration</p>
-                              <button type="button" disabled={isV || declaredUnverified.length === 0}
-                                onClick={() => void verifyLines(sv.id, declaredUnverified, true)}
-                                className="text-[10.5px] font-semibold px-2 py-0.5 rounded-md disabled:opacity-40"
-                                style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-                                {isV ? 'Verifying…' : `Verify all declared (${declaredUnverified.length})`}
-                              </button>
-                            </div>
-                            <ul className="space-y-1">
-                              {cl.rows.map((r) => (
-                                <li key={r.requirementId} className="flex items-start gap-2 text-[11.5px]">
-                                  <span className="mt-[3px] inline-block w-3 h-3 rounded-sm shrink-0" title={r.declared ? 'Provider says they have this' : 'Not declared'}
-                                    style={{ backgroundColor: r.declared ? '#16a34a' : '#fff', border: r.declared ? '1px solid #16a34a' : '1px solid #d1d5db' }} />
-                                  <span className="flex-1 min-w-0" style={{ color: r.declared ? 'var(--color-neutral-800)' : 'var(--color-neutral-400)' }}>
-                                    {r.label}
-                                    {r.isMandatory ? '' : <span className="ml-1 text-[10px]" style={{ color: 'var(--color-neutral-400)' }}>(optional)</span>}
-                                    <span className="ml-1 text-[10px] uppercase" style={{ color: 'var(--color-neutral-400)' }}>{r.requirementType}</span>
-                                    {r.note && <span className="block text-[10.5px] italic" style={{ color: 'var(--color-neutral-500)' }}>“{r.note}”</span>}
-                                    {!r.declared && r.isMandatory && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>Mandatory — not declared</span>}
-                                    {r.declared && !r.photoUrl && <span className="block text-[10.5px]" style={{ color: '#b45309' }}>No photo of this tool yet</span>}
-                                  </span>
-                                  {r.declared && r.photoUrl && (
-                                    <a href={r.photoUrl} target="_blank" rel="noreferrer" title="Open the provider's photo of this tool" className="shrink-0">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={r.photoUrl} alt={`Photo of ${r.label}`} className="rounded-md object-cover"
-                                        style={{ width: 34, height: 34, border: '1px solid var(--color-base-200)', display: 'block' }} />
-                                    </a>
-                                  )}
-                                  {r.declared && (
-                                    <button type="button" disabled={isV}
-                                      onClick={() => void verifyLines(sv.id, [r.requirementId], !r.verifiedAt)}
-                                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 disabled:opacity-40"
-                                      title={r.verifiedAt ? `Verified by ${r.verifiedByName ?? 'admin'} — click to withdraw` : 'Mark as verified'}
-                                      style={r.verifiedAt ? { backgroundColor: '#f0fdf4', color: '#16a34a' } : { backgroundColor: '#fff', color: 'var(--color-neutral-500)', border: '1px solid var(--color-base-200)' }}>
-                                      {r.verifiedAt ? '✓ Verified' : 'Verify'}
-                                    </button>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
+                          <ToolsList rows={extras} busy={verifying.has(sv.id)} title="Extra tools only this service needs · provider's declaration"
+                            verifyAllLabel={`Verify all declared (${declaredUnverified.length})`}
+                            onVerifyAll={declaredUnverified.length ? () => void verifyLines(sv.id, declaredUnverified, true) : null}
+                            onVerify={(r) => void verifyLines(sv.id, [r.requirementId], !r.verifiedAt)} />
                         );
                       })()}
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
+                    </Fragment>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        </Section>
-
-        {actErr && <div className="rounded-xl p-2.5 text-xs" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{actErr}</div>}
+            );
+          })}
+        </Card>
       </div>
 
-      {/* Bulk action bar — approve / reject every pending listing at once */}
+      {actErr && <div style={gap}><Callout tone="bad">{actErr}</Callout></div>}
+
       {pendingCount > 0 && (
-        <div className="shrink-0 border-t px-4 py-3 flex items-center gap-2" style={{ borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
-          <span className="text-xs mr-auto" style={{ color: 'var(--color-neutral-500)' }}>{pendingCount} pending listing{pendingCount === 1 ? '' : 's'}</span>
-          <button type="button" disabled={bulking || !compliant} title={!compliant ? 'Provider not compliant' : ''}
-            onClick={() => void actAllPending('approve')}
-            className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-            style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-            <CheckCircle2 size={15} /> Approve all pending
-          </button>
-          <button type="button" disabled={bulking}
-            onClick={() => void actAllPending('reject')}
-            className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
-            style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-            <XCircle size={15} /> Reject all pending
-          </button>
-        </div>
+        <DecisionBar note={`${pendingCount} pending listing${pendingCount === 1 ? '' : 's'} for this provider`}>
+          <Btn variant="primary" disabled={bulking || !compliant} title={!compliant ? 'Provider not compliant' : undefined} onClick={() => open('approve', 'bulk')}>Approve all pending</Btn>
+          <Btn variant="amber" disabled={bulking} onClick={() => open('changes', 'bulk')}>Ask for changes on all</Btn>
+          <Btn variant="danger" disabled={bulking} onClick={() => open('reject', 'bulk')}>Reject all pending</Btn>
+        </DecisionBar>
       )}
-    </div>
+
+      <DecisionModal open={!!ask} kind={ask?.kind ?? null} subject={ask?.subject ?? ''}
+        busy={bulking || (typeof ask?.target === 'number' && busy.has(ask.target))} error={actErr}
+        onClose={() => setAsk(null)}
+        onConfirm={(reason) => {
+          if (!ask) return;
+          if (ask.target === 'bulk') void actAllPending(ask.kind, reason);
+          else void actOne(ask.target, ask.kind, reason);
+        }} />
+    </>
   );
 }
 
-function Pagination({ page, total, pageSize, onChange }: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
-  const totalPages = Math.ceil(total / pageSize);
-  if (totalPages <= 1) return null;
-  return (
-    <div className="flex items-center justify-between px-3 py-2.5 border-t" style={{ borderColor: 'var(--color-base-100)' }}>
-      <span className="text-xs" style={{ color: 'var(--color-neutral-400)' }}>
-        {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} of {total}
-      </span>
-      <div className="flex items-center gap-1">
-        <button onClick={() => onChange(page - 1)} disabled={page === 0} className="p-1 rounded disabled:opacity-30 hover:bg-base-100">
-          <ChevronLeft size={14} style={{ color: 'var(--color-neutral-500)' }} />
-        </button>
-        <span className="text-xs" style={{ color: 'var(--color-neutral-600)' }}>{page + 1}/{totalPages}</span>
-        <button onClick={() => onChange(page + 1)} disabled={page >= totalPages - 1} className="p-1 rounded disabled:opacity-30 hover:bg-base-100">
-          <ChevronRight size={14} style={{ color: 'var(--color-neutral-500)' }} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── View — single mode (RP or SP), no toggle. One per route page. ────────────
+// ─── View — single mode (RP or SP). One per route page. ───────────────────────
 
 export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
-  // RP unit listings
-  const [rpData, setRpData]         = useState<UnitListing[]>([]);
-  const [rpTotal, setRpTotal]       = useState(0);
-  const [rpPage, setRpPage]         = useState(0);
+  const [rpData, setRpData] = useState<UnitListing[]>([]);
+  const [rpTotal, setRpTotal] = useState(0);
+  const [rpPage, setRpPage] = useState(0);
   const [rpCategory, setRpCategory] = useState<string[]>([]);
-  const [rpStatus, setRpStatus]     = useState('pending');
-  const [rpLoading, setRpLoading]   = useState(false);
-  const [rpLoaded, setRpLoaded]     = useState(false);
-  const [rpSel, setRpSel]           = useState<number | null>(null);
+  const [rpStatus, setRpStatus] = useState('pending');
+  const [rpLoading, setRpLoading] = useState(false);
+  const [rpLoaded, setRpLoaded] = useState(false);
+  const [rpSel, setRpSel] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState(false);
 
-  // SP providers (grouped: one row per provider, all their services inside)
-  const [spData, setSpData]         = useState<SpProviderRow[]>([]);
-  const [spTotal, setSpTotal]       = useState(0);
-  const [spPage, setSpPage]         = useState(0);
+  const [spData, setSpData] = useState<SpProviderRow[]>([]);
+  const [spTotal, setSpTotal] = useState(0);
+  const [spPage, setSpPage] = useState(0);
   const [spCategory, setSpCategory] = useState<string[]>([]);
-  const [spStatus, setSpStatus]     = useState('pending');
-  const [spLoading, setSpLoading]   = useState(false);
-  const [spLoaded, setSpLoaded]     = useState(false);
-  const [spSel, setSpSel]           = useState<number | null>(null);
+  const [spStatus, setSpStatus] = useState('pending');
+  const [spLoading, setSpLoading] = useState(false);
+  const [spLoaded, setSpLoaded] = useState(false);
+  const [spSel, setSpSel] = useState<number | null>(null);
 
-  const [error, setError]   = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+  const [ask, setAsk] = useState<{ kind: Decision; unit: UnitListing } | null>(null);
+  const [askErr, setAskErr] = useState<string | null>(null);
+  const [lastDecision, setLastDecision] = useState<{ id: number; kind: Decision; reason: string } | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
 
-  // Deep-link: seed the category filter from ?category= for Overview drill-downs.
+  // Deep link: seed the category filter from ?category= (Overview drill-downs).
   useEffect(() => {
     const cat = new URLSearchParams(window.location.search).get('category');
     if (cat) { if (mode === 'sp') setSpCategory([cat]); else setRpCategory([cat]); }
   }, [mode]);
 
   const fetchRp = useCallback(async (page: number, categories: string[], status: string) => {
-    setRpLoading(true);
-    setError(null);
+    setRpLoading(true); setError(null);
     try {
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE),
@@ -1325,13 +987,11 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
       const resp = await apiGet<{ data: UnitListing[]; total: number }>(`/admin/unit-listings?${params}`);
       setRpData(resp.data ?? []);
       setRpTotal(resp.total ?? 0);
-    } catch (err) { setError((err as Error).message); }
-    finally { setRpLoading(false); setRpLoaded(true); }
+    } catch (err) { setError((err as Error).message); } finally { setRpLoading(false); setRpLoaded(true); }
   }, []);
 
   const fetchProviders = useCallback(async (page: number, categories: string[], status: string) => {
-    setSpLoading(true);
-    setError(null);
+    setSpLoading(true); setError(null);
     try {
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE),
@@ -1341,51 +1001,32 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
       const resp = await apiGet<{ data: SpProviderRow[]; total: number }>(`/admin/service-listing-providers?${params}`);
       setSpData(resp.data ?? []);
       setSpTotal(resp.total ?? 0);
-    } catch (err) { setError((err as Error).message); }
-    finally { setSpLoading(false); setSpLoaded(true); }
+    } catch (err) { setError((err as Error).message); } finally { setSpLoading(false); setSpLoaded(true); }
   }, []);
 
   useEffect(() => { if (mode === 'rp') void fetchRp(rpPage, rpCategory, rpStatus); }, [mode, rpPage, rpCategory, rpStatus, fetchRp]);
   useEffect(() => { if (mode === 'sp') void fetchProviders(spPage, spCategory, spStatus); }, [mode, spPage, spCategory, spStatus, fetchProviders]);
+  useEffect(() => { detailRef.current?.scrollTo({ top: 0 }); }, [rpSel, spSel]);
 
-  function handleRpCategory(c: string[]) { setRpCategory(c); setRpPage(0); setRpSel(null); }
-  function handleRpStatus(s: string)     { setRpStatus(s); setRpPage(0); setRpSel(null); }
-  function handleSpCategory(c: string[]) { setSpCategory(c); setSpPage(0); setSpSel(null); }
-  function handleSpStatus(s: string)     { setSpStatus(s); setSpPage(0); setSpSel(null); }
+  const handleRpCategory = (c: string[]) => { setRpCategory(c); setRpPage(0); setRpSel(null); };
+  const handleRpStatus = (s: string) => { setRpStatus(s); setRpPage(0); setRpSel(null); };
+  const handleSpCategory = (c: string[]) => { setSpCategory(c); setSpPage(0); setSpSel(null); };
+  const handleSpStatus = (s: string) => { setSpStatus(s); setSpPage(0); setSpSel(null); };
 
-  async function actOnUnit(u: UnitListing, action: 'approve' | 'reject' | 'expire') {
+  async function actOnUnit(u: UnitListing, kind: Decision, reason: string) {
     if (!u.property) return;
-    const verb = action === 'approve' ? 'Approve' : action === 'reject' ? 'Reject' : 'Expire';
-    const suffix = action === 'expire' ? ' It comes off the market and stops showing to customers.' : '';
-    if (!confirm(`${verb} unit ${u.unitNumber} at ${u.property.buildingName}?${suffix}`)) return;
-    setActing(true);
+    const action = kind === 'changes' ? 'reject' : kind;
+    setActing(true); setAskErr(null);
     try {
-      await apiPatch(`/admin/listings/${u.property.id}/units/${u.id}/${action}`, {});
+      await patchDecision(`/admin/listings/${u.property.id}/units/${u.id}/${action}`,
+        action === 'reject' ? (kind === 'changes' ? `Changes requested: ${reason}` : reason) : undefined);
+      setLastDecision({ id: u.id, kind, reason });
+      setAsk(null);
       await fetchRp(rpPage, rpCategory, rpStatus);
-    } catch (err) { setError((err as Error).message); }
-    finally { setActing(false); }
+    } catch (err) { setAskErr((err as Error).message); } finally { setActing(false); }
   }
 
-  const loading = mode === 'sp' ? spLoading : rpLoading;
-  const listLen = mode === 'sp' ? spData.length : rpData.length;
-  const loaded = mode === 'sp' ? spLoaded : rpLoaded;
-  // "Nothing here" only after a settled fetch — an in-flight first load is the
-  // spinner state, not an empty one.
-  const isEmpty = !loading && loaded && listLen === 0;
-  const total = mode === 'sp' ? spTotal : rpTotal;
-  const page = mode === 'sp' ? spPage : rpPage;
-  const selectedUnit = mode === 'rp' && rpSel != null ? rpData.find((u) => u.id === rpSel) ?? null : null;
-  const selectedProvider = mode === 'sp' && spSel != null ? spData.find((s) => s.id === spSel) ?? null : null;
-  const hasSelection = !!(selectedUnit || selectedProvider);
-  const title = mode === 'sp' ? 'Service Provider Listings' : 'Rental Provider Listings';
-  const TitleIcon = mode === 'sp' ? Wrench : Building2;
-
-  function refresh() {
-    if (mode === 'sp') void fetchProviders(spPage, spCategory, spStatus);
-    else void fetchRp(rpPage, rpCategory, rpStatus);
-  }
-  // Silent refresh of the provider list (after an approve/reject inside the panel)
-  // so the left-list counts stay in sync without a spinner flash.
+  // Silent refresh of the provider list after a decision inside the panel (counts stay in sync, no spinner).
   const refreshProviderCounts = useCallback(() => {
     const params = new URLSearchParams({
       limit: String(PAGE_SIZE), offset: String(spPage * PAGE_SIZE),
@@ -1397,91 +1038,133 @@ export function AdminListingsView({ mode }: { mode: 'rp' | 'sp' }) {
       .catch(() => { /* keep stale counts on transient error */ });
   }, [spPage, spCategory, spStatus]);
 
-  return (
-    <div className="flex flex-col h-full" style={{ padding: '12px 20px 16px' }}>
-      <BackLink />
+  const loading = mode === 'sp' ? spLoading : rpLoading;
+  const loaded = mode === 'sp' ? spLoaded : rpLoaded;
+  const overIndexCount = rpData.filter((u) => indexDeviation(u.annualRent, u.property?.spaceCategory) != null).length;
+  const visibleUnits = overIndex ? rpData.filter((u) => indexDeviation(u.annualRent, u.property?.spaceCategory) != null) : rpData;
+  const listLen = mode === 'sp' ? spData.length : visibleUnits.length;
+  const isEmpty = !loading && loaded && listLen === 0;
+  const total = mode === 'sp' ? spTotal : rpTotal;
+  const page = mode === 'sp' ? spPage : rpPage;
+  const selectedUnit = mode === 'rp' && rpSel != null ? rpData.find((u) => u.id === rpSel) ?? null : null;
+  const selectedProvider = mode === 'sp' && spSel != null ? spData.find((s) => s.id === spSel) ?? null : null;
+  const status = mode === 'rp' ? rpStatus : spStatus;
+  const selCats = mode === 'rp' ? rpCategory : spCategory;
+  const refresh = () => (mode === 'sp' ? void fetchProviders(spPage, spCategory, spStatus) : void fetchRp(rpPage, rpCategory, rpStatus));
 
-      {/* Header */}
-      <div className="flex items-center gap-2 pb-2 border-b flex-shrink-0" style={{ borderColor: 'var(--color-base-200)' }}>
-        <TitleIcon size={16} style={{ color: 'var(--color-primary)' }} />
-        <span className="text-sm font-bold" style={{ color: 'var(--color-neutral-900)' }}>{title}</span>
-        <button onClick={refresh} disabled={loading}
-          className="ml-auto p-1.5 rounded-lg transition-colors hover:bg-base-100"
-          style={{ border: '1px solid var(--color-base-200)' }} title="Refresh">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--color-neutral-500)' }} />
-        </button>
+  return (
+    <OsPage>
+      <PageHead
+        eyebrow="Listing approval · Gate 3"
+        title={mode === 'sp' ? 'Services listings' : 'Spaces listings'}
+        lede="Review what providers submit before it goes live — photos, details, price, permit and contact rules. Approve, ask for changes or reject. Admin decides; it never edits or creates a listing for a provider."
+        actions={<>
+          <Btn size="sm" onClick={refresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</Btn>
+          <Btn size="sm" href={mode === 'sp' ? '/dashboard/admin/listings/rental-providers' : '/dashboard/admin/listings/service-providers'}>
+            {mode === 'sp' ? 'Spaces listings' : 'Services listings'}
+          </Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Gate', value: 'Gate 3 · Listing approval' },
+        { label: 'Vertical', value: mode === 'sp' ? 'Services' : 'Spaces' },
+        { label: 'Status', value: STATUS_TABS.find((s) => s.id === status)?.label ?? 'All' },
+        { label: mode === 'sp' ? 'Providers' : 'Listings', value: total },
+        { label: 'Data', value: 'Live' },
+      ]} />
+
+      <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 12 }}>
+        <Seg label="Listing status" value={status} onChange={mode === 'rp' ? handleRpStatus : handleSpStatus}
+          options={STATUS_TABS.filter((s) => mode === 'rp' || !s.rpOnly).map((s) => ({ v: s.id, l: s.label, ...(s.id === status && loaded ? { n: total } : {}) }))} />
+        <TypesDropdown
+          options={mode === 'rp' ? SPACE_CATEGORIES.map((c) => ({ id: c.id, label: categoryDisplayLabel(c.id) })) : SERVICE_CATEGORIES}
+          selected={selCats}
+          onChange={mode === 'rp' ? handleRpCategory : handleSpCategory}
+          labelFor={mode === 'rp' ? categoryDisplayLabel : serviceCategoryLabel} />
+        {mode === 'rp' && (
+          <div className="gx-chips">
+            <button type="button" className="gx-chip" aria-pressed={overIndex} onClick={() => { setOverIndex((v) => !v); setRpSel(null); }}
+              title="Units priced 20% or more above the indicative RERA rental-index cap for their category (this page)">
+              Exceeds RERA index ({overIndexCount})
+            </button>
+          </div>
+        )}
       </div>
 
-      {error && (
-        <div className="rounded-xl p-2 mt-2 text-sm flex-shrink-0" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>{error}</div>
-      )}
+      {error && <div style={{ marginBottom: 12 }}><Callout tone="bad" title="Couldn't load the queue.">{error} <Btn size="xs" onClick={refresh}>Try again</Btn></Callout></div>}
 
-      {/* Filters + split panel */}
-      <div className="flex flex-col flex-1 min-h-0 mt-2">
-        <div className="flex items-end justify-between gap-3 mb-2 flex-shrink-0">
-          <StatusTabs mode={mode} value={mode === 'rp' ? rpStatus : spStatus} onChange={mode === 'rp' ? handleRpStatus : handleSpStatus} />
-          <TypesDropdown
-            options={mode === 'rp'
-              ? SPACE_CATEGORIES.map((c) => ({ id: c.id, label: categoryDisplayLabel(c.id) }))
-              : SERVICE_CATEGORIES}
-            selected={mode === 'rp' ? rpCategory : spCategory}
-            onChange={mode === 'rp' ? handleRpCategory : handleSpCategory}
-            labelFor={mode === 'rp' ? categoryDisplayLabel : serviceCategoryLabel}
-          />
-        </div>
-
-        {/* The split panel is always mounted — loading and "nothing here" are
-            states *inside* the layout, not replacements for it, so the page
-            never collapses to a bare message. */}
-        <div className="flex rounded-2xl overflow-hidden border flex-1 min-h-0"
-          style={{ borderColor: 'var(--color-base-200)', boxShadow: 'var(--shadow-sm)' }}>
-
-          {/* LEFT — master list (RP: units · SP: one row per provider) */}
-          <div className="flex flex-col shrink-0 border-r overflow-hidden"
-            style={{ width: 300, borderColor: 'var(--color-base-200)', backgroundColor: '#fff' }}>
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                <div className="flex flex-col items-center justify-center h-full gap-2 px-4 text-center" style={{ color: 'var(--color-neutral-400)' }}>
-                  <RefreshCw size={22} strokeWidth={1.5} className="animate-spin" />
-                  <p className="text-sm">Loading…</p>
-                </div>
-              ) : isEmpty ? (
-                <div className="flex flex-col items-center justify-center h-full gap-1.5 px-5 text-center" style={{ color: 'var(--color-neutral-400)' }}>
-                  <Inbox size={28} strokeWidth={1.5} />
-                  <p className="text-sm font-semibold" style={{ color: 'var(--color-neutral-600)' }}>No listings found</p>
-                  <p className="text-xs">{mode === 'sp' ? 'No providers with listings match these filters.' : 'No unit listings match these filters.'}</p>
-                </div>
-              ) : mode === 'rp' ? (
-                rpData.map((u) => <UnitCard key={u.id} u={u} selected={rpSel === u.id} onClick={() => setRpSel(u.id)} />)
-              ) : (
-                spData.map((sp) => <ProviderCard key={sp.id} p={sp} selected={spSel === sp.id} onClick={() => setSpSel(sp.id)} />)
-              )}
-            </div>
+      <div className="gx-split">
+        <div className="gx-split-l">
+          <div role="listbox" aria-label={mode === 'sp' ? 'Providers with service listings' : 'Unit listings'}>
+            {loading && (
+              <div aria-busy="true" style={{ padding: 12, display: 'grid', gap: 12 }}>
+                {Array.from({ length: 6 }).map((_, i) => <div key={i} className="gx-skel" style={{ height: 44 }} />)}
+              </div>
+            )}
+            {isEmpty && (
+              <div className="gx-empty"><b>No listings found</b>
+                {overIndex ? 'No listings on this page exceed the RERA rental index — turn the chip off to see them all.'
+                  : mode === 'sp' ? 'No providers with listings match these filters. Try another status or clear Types.' : 'No unit listings match these filters. Try another status or clear Types.'}
+              </div>
+            )}
+            {!loading && mode === 'rp' && visibleUnits.map((u) => {
+              const dev = indexDeviation(u.annualRent, u.property?.spaceCategory);
+              return (
+                <button key={u.id} type="button" role="option" className="gx-qitem" aria-selected={rpSel === u.id} onClick={() => setRpSel(u.id)}>
+                  <span className="t">Unit {u.unitNumber}{u.unitName ? ` — ${u.unitName}` : ''}</span>
+                  <span className="s">{u.property?.buildingName ?? '—'} · {u.property ? categoryDisplayLabel(u.property.spaceCategory) : '—'} · {u.annualRent != null ? `${fmtAed(u.annualRent)}/yr` : 'no rent'}</span>
+                  <span className="f">
+                    <ListingPill s={u.listingStatus} />
+                    {dev != null && <Pill tone={dev >= 50 ? 'danger' : 'amber'} dot={false} title="Above the indicative RERA rental-index cap">RERA +{dev}%</Pill>}
+                  </span>
+                </button>
+              );
+            })}
+            {!loading && mode === 'sp' && spData.map((sp) => {
+              const cats = csvToList(sp.serviceCategories);
+              return (
+                <button key={sp.id} type="button" role="option" className="gx-qitem" aria-selected={spSel === sp.id} onClick={() => setSpSel(sp.id)}>
+                  <span className="t">{sp.name ?? `SP #${sp.id}`}</span>
+                  <span className="s">{cats.length ? cats.slice(0, 2).map(serviceCategoryLabel).join(', ') + (cats.length > 2 ? ` +${cats.length - 2}` : '') : '—'}</span>
+                  <span className="f">
+                    <CompliancePill s={sp.complianceStatus} />
+                    <Pill tone="outline" dot={false}>{sp.total} service{sp.total === 1 ? '' : 's'}</Pill>
+                    {sp.pending > 0 && <Pill tone="amber" dot={false}>{sp.pending} pending</Pill>}
+                    {sp.approved > 0 && <Pill tone="primary" dot={false}>{sp.approved} approved</Pill>}
+                    {sp.rejected > 0 && <Pill tone="danger" dot={false}>{sp.rejected} rejected</Pill>}
+                    {!sp.jobReady && <Pill tone="neutral" dot={false}>Not job-ready</Pill>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {!(mode === 'rp' && overIndex) && (
             <Pagination page={page} total={total} pageSize={PAGE_SIZE}
               onChange={(pp) => { if (mode === 'rp') { setRpPage(pp); setRpSel(null); } else { setSpPage(pp); setSpSel(null); } }} />
-          </div>
+          )}
+        </div>
 
-          {/* RIGHT — detail */}
-          <div className="flex-1 overflow-hidden" style={{ backgroundColor: '#fafafa' }}>
-            {!hasSelection ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center" style={{ color: 'var(--color-neutral-400)' }}>
-                <MousePointerClick size={32} strokeWidth={1.5} />
-                <p className="text-sm">
-                  {isEmpty
-                    ? 'Nothing to review with these filters'
-                    : mode === 'sp' ? 'Select a provider to review their listings' : 'Select a listing to review'}
-                </p>
-              </div>
-            ) : selectedUnit ? (
-              <UnitDetailPanel row={selectedUnit} acting={acting}
-                onApprove={(u) => void actOnUnit(u, 'approve')} onReject={(u) => void actOnUnit(u, 'reject')}
-                onExpire={(u) => void actOnUnit(u, 'expire')} />
-            ) : selectedProvider ? (
-              <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
-            ) : null}
-          </div>
+        <div className="gx-split-r" ref={detailRef}>
+          {selectedUnit ? (
+            <UnitDetailPanel row={selectedUnit} acting={acting} lastDecision={lastDecision}
+              onDecide={(u, kind) => { setAskErr(null); setAsk({ kind, unit: u }); }} />
+          ) : selectedProvider ? (
+            <ProviderReviewPanel providerId={selectedProvider.id} onChanged={refreshProviderCounts} />
+          ) : (
+            <div className="gx-empty"><b>Nothing selected</b>
+              {isEmpty ? 'Nothing to review with these filters.' : mode === 'sp' ? 'Pick a provider on the left to review their listings.' : 'Pick a listing on the left to review it.'}
+            </div>
+          )}
+          {lastDecision && mode === 'rp' && !selectedUnit && (
+            <div style={gap}><Evid>Last decision: Unit #{lastDecision.id} — {lastDecision.kind === 'changes' ? 'changes requested' : lastDecision.kind}. <Link href={`/dashboard/admin/units/${lastDecision.id}`} style={{ color: 'var(--ms-primary)' }}>Open unit</Link></Evid></div>
+          )}
         </div>
       </div>
-    </div>
+
+      <DecisionModal open={!!ask} kind={ask?.kind ?? null}
+        subject={ask ? `Unit ${ask.unit.unitNumber}${ask.unit.property ? ` at ${ask.unit.property.buildingName}` : ''}` : ''}
+        busy={acting} error={askErr} onClose={() => setAsk(null)}
+        onConfirm={(reason) => { if (ask) void actOnUnit(ask.unit, ask.kind, reason); }} />
+    </OsPage>
   );
 }

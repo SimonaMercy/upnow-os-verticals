@@ -220,7 +220,7 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
         aria-label="About this"
         onClick={() => setOpen(o => !o)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="text-[#9b9890] hover:text-[#2e9f82] transition-colors align-middle">
+        className="text-[#8a948d] hover:text-[#047246] transition-colors align-middle">
         <Info size={15} />
       </button>
       {open && (
@@ -229,7 +229,7 @@ function InfoTip({ text, note, align = 'left' }: { text: string; note?: string; 
           style={{ boxShadow: '0 12px 32px rgba(20,18,15,.16)' }}>
           {text}
           {note && (
-            <span className="block mt-2.5 pt-2.5 border-t border-[#eeece6] text-[#6b6860]">{note}</span>
+            <span className="block mt-2.5 pt-2.5 border-t border-[#eeece6] text-[#5f6b63]">{note}</span>
           )}
         </span>
       )}
@@ -1361,17 +1361,17 @@ function SummaryPanels({ panels, totals, topBorder = true }: {
   topBorder?: boolean;
 }) {
   return (
-    <div className={`${topBorder ? 'border-t border-[#e8e6e0] ' : ''}grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid`}>
+    <div className={`${topBorder ? 'border-t border-[#e4e9e5] ' : ''}grid gap-5 px-5 py-5 md:grid-cols-2 xl:grid-cols-3 bg-[#fdfcfa] print:break-inside-avoid`}>
       {panels.map(panel => (
         <div key={panel.title}>
-          <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
-          <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden">
+          <div className="text-[12px] font-bold text-[#14201a] mb-2">{panel.title}</div>
+          <table className="w-full text-[12px] border border-[#e4e9e5] rounded-lg overflow-hidden">
             <tbody>
               {panel.rows.map(r => (
-                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#eef1ef] font-bold text-[#14201a]' : 'text-[#5f6b63]'}`}>
                   <td className="px-3 py-2 text-left">
                     {r.label}
-                    {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                    {r.note && <span className="block text-[10.5px] text-[#8a948d] font-normal">{r.note}</span>}
                   </td>
                   <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${toneText(r.tone, r.key ? totals?.[r.key] : undefined)}`}>
                     {(() => {
@@ -1384,7 +1384,7 @@ function SummaryPanels({ panels, totals, topBorder = true }: {
               ))}
             </tbody>
           </table>
-          {panel.note && <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>}
+          {panel.note && <p className="text-[11px] text-[#5f6b63] mt-2 leading-relaxed">{panel.note}</p>}
         </div>
       ))}
     </div>
@@ -1463,17 +1463,17 @@ function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contrac
   const signed = (fils: number) => `${fils > 0 ? '+' : fils < 0 ? '−' : ''}${money(Math.abs(fils))}`;
 
   return (
-    <div className="border-t border-[#e8e6e0] px-5 py-5 bg-[#fdfcfa] print:hidden">
+    <div className="border-t border-[#e4e9e5] px-5 py-5 bg-[#fdfcfa] print:hidden">
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={run}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-[#e8e6e0] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#1a1916] hover:border-[#2e9f82] hover:text-[#2e9f82] disabled:opacity-60 transition-colors">
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#e4e9e5] bg-white px-3 py-1.5 text-[12px] font-semibold text-[#14201a] hover:border-[#047246] hover:text-[#047246] disabled:opacity-60 transition-colors">
           <RefreshCw size={12} className={busy ? 'animate-spin' : ''} />
           {busy ? 'Reconciling…' : result ? 'Run again' : 'Reconcile'}
         </button>
-        <span className="text-[11px] text-[#6b6860]">
+        <span className="text-[11px] text-[#5f6b63]">
           Checks every lease three ways — schedule, net of VAT, and collectible cash. Read-only: nothing is changed.
         </span>
       </div>
@@ -1482,13 +1482,13 @@ function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contrac
 
       {result && (
         <div className="mt-4">
-          <div className="text-[12px] text-[#6b6860]">
-            <span className="font-bold text-[#1a1916]">{result.totals.exceptions}</span>
+          <div className="text-[12px] text-[#5f6b63]">
+            <span className="font-bold text-[#14201a]">{result.totals.exceptions}</span>
             {result.totals.exceptions === 1 ? ' lease does not' : ' leases do not'} reconcile, out of{' '}
-            <span className="font-bold text-[#1a1916]">{result.totals.leases}</span>.{' '}
+            <span className="font-bold text-[#14201a]">{result.totals.leases}</span>.{' '}
             {result.totals.exceptions > 0 && (
               <>
-                <span className="font-bold text-[#1a1916]">AED {money(result.totals.grossGapFils)}</span> adrift in total
+                <span className="font-bold text-[#14201a]">AED {money(result.totals.grossGapFils)}</span> adrift in total
                 {result.totals.netGapFils !== result.totals.grossGapFils && (
                   <> — netting to {signed(result.totals.netGapFils)}, which is why an aggregate Difference can read clean</>
                 )}
@@ -1506,8 +1506,8 @@ function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contrac
             </p>
           ) : (
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden min-w-[720px]">
-                <thead className="bg-[#f4f3ef] text-[#6b6860]">
+              <table className="w-full text-[12px] border border-[#e4e9e5] rounded-lg overflow-hidden min-w-[720px]">
+                <thead className="bg-[#eef1ef] text-[#5f6b63]">
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Lease</th>
                     <th className="px-3 py-2 text-left font-semibold">What is wrong</th>
@@ -1529,22 +1529,22 @@ function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contrac
                       : 'bg-[#f3f4f6] text-[#374151]';
                     /** The basis the verdict was reached on, emphasised so the
                      *  reader's eye lands on the column that actually failed. */
-                    const hot = (b: string) => (e.basis === b ? 'font-bold text-[#1a1916]' : 'text-[#6b6860]');
+                    const hot = (b: string) => (e.basis === b ? 'font-bold text-[#14201a]' : 'text-[#5f6b63]');
                     return (
                       <tr key={e.contractId} className="border-t border-[#f0ede8] align-top">
                         <td className="px-3 py-2 text-left">
-                          <Link href={`${contractsBase}/${e.contractId}/v2`} className="font-semibold text-[#2e9f82] inline-flex items-center gap-1 hover:underline">
+                          <Link href={`${contractsBase}/${e.contractId}/v2`} className="font-semibold text-[#047246] inline-flex items-center gap-1 hover:underline">
                             {e.unitLabel ?? e.contractRef}<ExternalLink size={11} />
                           </Link>
-                          <div className="text-[11px] text-[#9b9890] leading-tight">
+                          <div className="text-[11px] text-[#8a948d] leading-tight">
                             {[e.buildingName, e.customer].filter(Boolean).join(' · ')}
                           </div>
                         </td>
                         <td className="px-3 py-2 text-left max-w-[320px]">
                           <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${tone}`}>{k.label}</span>
-                          {k.what && <div className="text-[11px] text-[#6b6860] mt-1 leading-relaxed">{k.what}</div>}
+                          {k.what && <div className="text-[11px] text-[#5f6b63] mt-1 leading-relaxed">{k.what}</div>}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{money(e.annualRentFils)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#14201a]">{money(e.annualRentFils)}</td>
                         <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('sched')}`}>{money(e.schedFils)}</td>
                         <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('net')}`}>{money(e.netFils)}</td>
                         <td className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${hot('live')}`}>{money(e.liveFils)}</td>
@@ -1558,7 +1558,7 @@ function ReconcilePanel({ endpoint, contractsBase }: { endpoint: string; contrac
               </table>
             </div>
           )}
-          <p className="text-[11px] text-[#9b9890] mt-2">
+          <p className="text-[11px] text-[#8a948d] mt-2">
             Ran {new Date(result.generatedAt).toLocaleString('en-AE')} · nothing was changed
           </p>
         </div>
@@ -1572,7 +1572,7 @@ const CELL_STATUS_STYLE: Record<string, string> = {
   cleared:   'text-[#15803d]',          // collected → green
   pending:   'text-[#b45309]',          // outstanding → amber
   bounced:   'text-[#dc2626] font-semibold', // bounced → red
-  cancelled: 'text-[#9b9890] line-through',
+  cancelled: 'text-[#8a948d] line-through',
 };
 /** A column or summary line can carry a tone: its non-zero figures print in that
  *  colour — the same green and red as the cheque cells above. */
@@ -1580,7 +1580,7 @@ const TONE_TEXT: Record<'red' | 'green', string> = {
   red:   'text-[#dc2626] font-semibold',
   green: 'text-[#15803d] font-semibold',
 };
-const toneText = (tone: 'red' | 'green' | undefined, value: unknown, fallback = 'text-[#1a1916]') =>
+const toneText = (tone: 'red' | 'green' | undefined, value: unknown, fallback = 'text-[#14201a]') =>
   tone && Number(value) ? TONE_TEXT[tone] : fallback;
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
@@ -1594,7 +1594,7 @@ const BUCKET_STYLE: Record<string, string> = {
   '31-60':  'bg-[#fdba74] text-[#7c2d12]',
   '61-90':  'bg-[#fca5a5] text-[#7f1d1d]',
   '90+':    'bg-[#dc2626] text-white',
-  undated:  'bg-[#f4f3ef] text-[#6b6860]',  // pending cheque with no due date — age unknown
+  undated:  'bg-[#eef1ef] text-[#5f6b63]',  // pending cheque with no due date — age unknown
 };
 /** Stage names that read badly with the underscores simply swapped for spaces.
  *  Only values no other report produces — Contract Status shows `new_lease` too,
@@ -1610,11 +1610,11 @@ const STAGE_TEXT: Record<string, string> = {
   off_market_let: 'Off market — let',
 };
 const STAGE_STYLE: Record<string, string> = {
-  not_started: 'bg-[#f4f3ef] text-[#6b6860]',
+  not_started: 'bg-[#eef1ef] text-[#5f6b63]',
   proposed:    'bg-[#fef3c7] text-[#854d0e]',
   accepted:    'bg-[#dcfce7] text-[#166534]',
   signed:      'bg-[#dbeafe] text-[#1e40af]',
-  active:      'bg-[#d8f2e8] text-[#1a7a5a]',
+  active:      'bg-[#d8efe3] text-[#1a7a5a]',
   available:   'bg-[#dcfce7] text-[#166534]',
   rejected:    'bg-[#fee2e2] text-[#b91c1c]',
   renewed:     'bg-[#dcfce7] text-[#166534]',  // renewal completed — new term already running
@@ -1647,7 +1647,7 @@ const STAGE_STYLE: Record<string, string> = {
   // new letting vs renewal of the sitting term
   new:                'bg-[#e0f2fe] text-[#0369a1]',
   renewal:            'bg-[#ede9fe] text-[#5b21b6]',
-  amendment:          'bg-[#f4f3ef] text-[#6b6860]',
+  amendment:          'bg-[#eef1ef] text-[#5f6b63]',
   awaiting_customer:  'bg-[#fef3c7] text-[#854d0e]',
   awaiting_landlord:  'bg-[#e0e7ff] text-[#3730a3]',
   awaiting_both:      'bg-[#fee2e2] text-[#b91c1c]',
@@ -1659,13 +1659,13 @@ const STAGE_STYLE: Record<string, string> = {
   move_out_inspection:'bg-[#fee2e2] text-[#b91c1c]',
   bill_clearance:     'bg-[#fee2e2] text-[#b91c1c]',
   settlement:         'bg-[#fee2e2] text-[#b91c1c]',
-  in_progress:        'bg-[#f4f3ef] text-[#6b6860]',
+  in_progress:        'bg-[#eef1ef] text-[#5f6b63]',
   ready_to_activate:  'bg-[#dbeafe] text-[#1e40af]',
   // monthly Contract Status sheet — the cycle's state and its registration
   for_signature:  'bg-[#dbeafe] text-[#1e40af]',  // new agreement out, not signed yet
   move_out:       'bg-[#fee2e2] text-[#b91c1c]',  // customer leaving — nothing carries forward
   completed:      'bg-[#dcfce7] text-[#166534]',  // Contract Registration done (certificate on file)
-  not_applicable: 'bg-[#f4f3ef] text-[#6b6860]',  // registration doesn't apply to this contract
+  not_applicable: 'bg-[#eef1ef] text-[#5f6b63]',  // registration doesn't apply to this contract
   // security-deposit lifecycle
   holding:            'bg-[#dbeafe] text-[#1e40af]',  // held against a live lease
   pending_settlement: 'bg-[#fef3c7] text-[#854d0e]',  // lease ended → refund/deduct it
@@ -1682,18 +1682,18 @@ const STAGE_STYLE: Record<string, string> = {
   available_for_rent: 'bg-[#dcfce7] text-[#166534]',  // green — ready to let
   under_maintenance:  'bg-[#ffedd5] text-[#9a3412]',  // orange — restoration job open
   let_not_started:    'bg-[#e0e7ff] text-[#3730a3]',  // indigo — a confirmed lease that has not begun holds it
-  off_market_let:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — de-listed because it was let (never the raw 'expired')
+  off_market_let:     'bg-[#eef1ef] text-[#5f6b63]',  // grey — de-listed because it was let (never the raw 'expired')
   // listing-status lifecycle (vacancy-analysis)
-  draft:     'bg-[#f4f3ef] text-[#6b6860]',  // grey — not yet live
+  draft:     'bg-[#eef1ef] text-[#5f6b63]',  // grey — not yet live
   pending:   'bg-[#fef3c7] text-[#854d0e]',  // amber — awaiting review
   in_review: 'bg-[#fef3c7] text-[#854d0e]',  // amber — under review
   published: 'bg-[#dcfce7] text-[#166534]',  // green — live/listed
   expired:   'bg-[#fee2e2] text-[#b91c1c]',  // red — lapsed (rejected already above)
   // rent-vs-market position (gap to benchmark)
   below_market: 'bg-[#fee2e2] text-[#b91c1c]',  // rent under market → red
-  at_market:    'bg-[#f4f3ef] text-[#6b6860]',  // within ±5% → neutral
-  above_market: 'bg-[#d8f2e8] text-[#1a7a5a]',  // rent over market → green
-  no_benchmark: 'bg-[#f4f3ef] text-[#6b6860]',  // no market rent set
+  at_market:    'bg-[#eef1ef] text-[#5f6b63]',  // within ±5% → neutral
+  above_market: 'bg-[#d8efe3] text-[#1a7a5a]',  // rent over market → green
+  no_benchmark: 'bg-[#eef1ef] text-[#5f6b63]',  // no market rent set
   vacant:       'bg-[#fef3c7] text-[#854d0e]',  // amber — earning nothing
   not_leased:   'bg-[#fef3c7] text-[#854d0e]',  // occupied flag, no counting lease
   // …and why it earns nothing: the work outstanding on the unit's open lease.
@@ -1707,13 +1707,13 @@ const STAGE_STYLE: Record<string, string> = {
   // manager-operations stage-gap ownership — whose clock the gap runs on
   manager:  'bg-[#e0f2fe] text-[#0369a1]',      // sky — manager work
   customer: 'bg-[#fef3c7] text-[#854d0e]',      // amber — waiting on the customer
-  landlord: 'bg-[#d8f2e8] text-[#1a7a5a]',      // green — landlord counter-sign
+  landlord: 'bg-[#d8efe3] text-[#1a7a5a]',      // green — landlord counter-sign
 };
 
 function drillRowClass(item: Record<string, unknown>): string {
   return item.availability === 'available'
     ? 'border-t border-[#bbf7d0] bg-[#f0fdf4] hover:bg-[#dcfce7]'
-    : 'border-t border-[#f0ede8] hover:bg-[#fafaf8]';
+    : 'border-t border-[#f0ede8] hover:bg-[#f6f8f6]';
 }
 
 function CellValue({ value, type, decimals }: { value: unknown; type?: Column['type']; decimals?: number }) {
@@ -1727,7 +1727,7 @@ function CellValue({ value, type, decimals }: { value: unknown; type?: Column['t
   if (type === 'delta') {
     const v = Number(value);
     // gapFils = market − current: positive = below market (red, down), negative = above market (green, up)
-    if (v === 0) return <span className="text-[#6b6860] inline-flex items-center gap-1"><Minus size={11} /> {fmtAed(0)}</span>;
+    if (v === 0) return <span className="text-[#5f6b63] inline-flex items-center gap-1"><Minus size={11} /> {fmtAed(0)}</span>;
     return v > 0
       ? <span className="text-red-600 inline-flex items-center gap-1"><TrendingDown size={11} /> {fmtAed(Math.abs(v))}</span>
       : <span className="text-[#1a7a5a] inline-flex items-center gap-1"><TrendingUp size={11} /> {fmtAed(Math.abs(v))}</span>;
@@ -1737,19 +1737,19 @@ function CellValue({ value, type, decimals }: { value: unknown; type?: Column['t
     const lines = String(value).split('\n').filter(Boolean);
     return (
       <span className="block leading-snug">
-        <span className="block font-medium text-[#1a1916]">{lines[0]}</span>
+        <span className="block font-medium text-[#14201a]">{lines[0]}</span>
         {lines.slice(1).map((l, i) => (
-          <span key={i} className={`block ${i === 0 ? 'text-[#4a4742]' : 'text-[11px] text-[#9b9890]'}`}>{l}</span>
+          <span key={i} className={`block ${i === 0 ? 'text-[#4a4742]' : 'text-[11px] text-[#8a948d]'}`}>{l}</span>
         ))}
       </span>
     );
   }
   if (type === 'bucket') {
-    const cls = BUCKET_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
+    const cls = BUCKET_STYLE[String(value)] ?? 'bg-[#eef1ef] text-[#5f6b63]';
     return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${cls}`}>{String(value)}</span>;
   }
   if (type === 'stage') {
-    const cls = STAGE_STYLE[String(value)] ?? 'bg-[#f4f3ef] text-[#6b6860]';
+    const cls = STAGE_STYLE[String(value)] ?? 'bg-[#eef1ef] text-[#5f6b63]';
     const text = STAGE_TEXT[String(value)] ?? String(value).replace(/_/g, ' ');
     return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{text}</span>;
   }
@@ -2317,23 +2317,23 @@ export function ReportDetailView({
       ? `${fmtDate(row.contractStartDate as string)} – ${fmtDate(row.contractEndDate as string)}`
       : '';
     return (
-      <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+      <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6] print:break-inside-avoid">
         <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left">
           {row.contractId != null ? (
-            <Link href={`${contractsBase}/${row.contractId}/v2`} className="font-medium text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline" title={bare && term ? `${String(row.unitLabel ?? '')} · ${term}` : 'Open contract'}>
+            <Link href={`${contractsBase}/${row.contractId}/v2`} className="font-medium text-[#047246] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#14201a] print:no-underline" title={bare && term ? `${String(row.unitLabel ?? '')} · ${term}` : 'Open contract'}>
               {bare ? label : String(row.unitLabel ?? '—')}<ExternalLink size={11} className="print:hidden" />
             </Link>
           ) : (
-            <div className="font-medium text-[#1a1916] leading-tight">{bare ? label : String(row.unitLabel ?? '—')}</div>
+            <div className="font-medium text-[#14201a] leading-tight">{bare ? label : String(row.unitLabel ?? '—')}</div>
           )}
-          {!bare && <div className="text-[11px] text-[#9b9890] leading-tight">{String(row.buildingName ?? '')}</div>}
+          {!bare && <div className="text-[11px] text-[#8a948d] leading-tight">{String(row.buildingName ?? '')}</div>}
           {/* Who is on the lease — the accountant reads a cheque against a name,
               not a unit number (owner, 23 Sep 2026: "also customer name"). */}
           {Boolean(row.customer) && (
-            <div className="text-[11px] text-[#1a1916] leading-tight max-w-[240px] truncate" title={String(row.customer)}>{String(row.customer)}</div>
+            <div className="text-[11px] text-[#14201a] leading-tight max-w-[240px] truncate" title={String(row.customer)}>{String(row.customer)}</div>
           )}
           {Boolean(row.contractStartDate || row.contractEndDate) && (
-            <div className="text-[11px] text-[#9b9890] leading-tight whitespace-nowrap">
+            <div className="text-[11px] text-[#8a948d] leading-tight whitespace-nowrap">
               {fmtDate(row.contractStartDate as string)} – {fmtDate(row.contractEndDate as string)}
             </div>
           )}
@@ -2342,13 +2342,13 @@ export function ReportDetailView({
             superseded during the year still lists its cash, but a
             figure here would double-count the unit — so it reads as
             a dash with the reason on hover. */}
-        <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">
+        <td className="px-3 py-2 text-right tabular-nums text-[#14201a] whitespace-nowrap border-l border-[#f0ede8]">
           {row.isCurrentLease === false
-            ? <span className="text-[#9b9890]" title="Superseded during the year — annual rent sits on this unit's current lease">—</span>
+            ? <span className="text-[#8a948d]" title="Superseded during the year — annual rent sits on this unit's current lease">—</span>
             : fmtAmt(Number(row.annualRentFils))}
         </td>
         {cells.map((c, ci) => (
-          <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+          <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${c.amountFils ? (CELL_STATUS_STYLE[c.status ?? ''] ?? 'text-[#14201a]') : 'text-[#d4d2cc]'}`}>
             {c.amountFils ? (
               <button
                 type="button"
@@ -2378,13 +2378,13 @@ export function ReportDetailView({
           </td>
         ))}
         {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-          <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916]' : c.tone === 'red' && Number(row[c.key]) > 0 ? 'font-medium text-[#dc2626]' : 'text-[#1a1916]'} ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#f0ede8]' : ''}`}
+          <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#14201a]' : c.tone === 'red' && Number(row[c.key]) > 0 ? 'font-medium text-[#dc2626]' : 'text-[#14201a]'} ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#f0ede8]' : ''}`}
             title={c.tone === 'red' && Number(row[c.key]) > 0 ? 'Recorded without a date — enter the cheque date on the lease' : undefined}>
             {c.type === 'number' ? fmtNumber(Number(row[c.key])) : fmtAmt(Number(row[c.key]))}
           </td>
         )) : (<>
-        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
+        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#14201a] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.totalFils))}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-[#14201a] whitespace-nowrap border-l border-[#f0ede8]">{fmtAmt(Number(row.ytdExpectedFils))}</td>
         <td className="px-3 py-2 text-right tabular-nums font-medium text-[#15803d] whitespace-nowrap">{fmtAmt(Number(row.ytdReceivedFils))}</td>
         </>)}
       </tr>
@@ -2398,27 +2398,27 @@ export function ReportDetailView({
                   const counts = (row.monthCounts as number[]) ?? [];
                   const cheques = (row.cheques as { chequeNumber: string | null; dueDate: string | null; amountFils: number; status: string | null; monthIndex: number }[] | undefined) ?? [];
                   return (
-                    <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
+                    <tr key={rowKey} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6] print:break-inside-avoid">
                       <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left whitespace-nowrap">
                         {/* Property is in the group bar and the term is not what the
                             row is about — the cell carries the unit alone, with the
                             full label and term on hover. */}
                         {Number(row.contractId) > 0 ? (
-                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="text-[13px] font-semibold text-[#2e9f82] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#1a1916] print:no-underline"
+                          <Link href={`${contractsBase}/${row.contractId}/v2`} className="text-[13px] font-semibold text-[#047246] leading-tight inline-flex items-center gap-1 hover:underline print:text-[#14201a] print:no-underline"
                             title={`${String(row.unitLabel ?? '')}${row.contractStartDate ? ` · ${fmtDate(row.contractStartDate as string)} – ${fmtDate(row.contractEndDate as string)}` : ''}`}>
                             {String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '')}<ExternalLink size={11} className="print:hidden" />
                           </Link>
                         ) : (
-                          <div className="text-[13px] font-semibold text-[#1a1916] leading-tight">{String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '')}</div>
+                          <div className="text-[13px] font-semibold text-[#14201a] leading-tight">{String(row.unitLabel ?? '—').replace(/^Unit\s+/i, '')}</div>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-left text-[#6b6860] whitespace-nowrap">{String(row.customer ?? '—')}</td>
+                      <td className="px-3 py-2.5 text-left text-[#5f6b63] whitespace-nowrap">{String(row.customer ?? '—')}</td>
                       {Array.from({ length: data?.maxCheques ?? 0 }, (_, ci) => {
                         // Each cheque opens its own detail: number, due date, amount,
                         // status, and — if it bounced — what settled it and when.
                         const chq = cheques[ci];
                         return (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'border-l border-[#f0ede8]' : ''} ${dates[ci] ? (CELL_STATUS_STYLE[chq?.status ?? ''] ?? 'text-[#1a1916]') : 'text-[#d4d2cc]'}`}>
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'border-l border-[#f0ede8]' : ''} ${dates[ci] ? (CELL_STATUS_STYLE[chq?.status ?? ''] ?? 'text-[#14201a]') : 'text-[#d4d2cc]'}`}>
                           {dates[ci] && chq ? (
                             <button
                               type="button"
@@ -2445,7 +2445,7 @@ export function ReportDetailView({
                       {counts.map((n, ci) => {
                         const monthCheques = cheques.filter(c => c.monthIndex === ci);
                         return (
-                        <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#1a1916] font-medium' : 'text-[#d4d2cc]'}`}>
+                        <td key={ci} className={`px-3 py-2.5 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8] ${n ? 'text-[#14201a] font-medium' : 'text-[#d4d2cc]'}`}>
                           {n && monthCheques.length ? (
                             <button
                               type="button"
@@ -2468,7 +2468,7 @@ export function ReportDetailView({
                         </td>
                         );
                       })}
-                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-bold text-[#14201a] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.totalCheques))}</td>
                     </tr>
                   );
   };
@@ -2606,13 +2606,13 @@ export function ReportDetailView({
   const ctrlRowCls = simpleFilterBar
     ? 'flex items-center gap-2 flex-wrap print:hidden'
     : 'flex items-center gap-2 mb-4 flex-wrap print:hidden';
-  const ctrlLabelCls = 'text-xs text-[#6b6860] font-medium';
+  const ctrlLabelCls = 'text-xs text-[#5f6b63] font-medium';
   // Simple-filter-bar group: a small label stacked directly above its field, so
   // every filter (Year · Property · Lease type · Customers) lines up as one row
   // of matching label-over-dropdown columns.
   const fGroup = 'flex flex-col gap-1';
-  const fLabel = 'text-[10px] uppercase tracking-wide font-semibold text-[#9b9890] px-0.5';
-  const fSelect = 'text-xs font-semibold text-[#1a1916] bg-white border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] cursor-pointer disabled:opacity-50';
+  const fLabel = 'text-[10px] uppercase tracking-wide font-semibold text-[#8a948d] px-0.5';
+  const fSelect = 'text-xs font-semibold text-[#14201a] bg-white border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#047246] cursor-pointer disabled:opacity-50';
 
   function handleCsv() {
     if (!data) return;
@@ -2899,15 +2899,15 @@ export function ReportDetailView({
     return (
       <div className="p-6">
         {onBack ? (
-          <button type="button" onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm">
+          <button type="button" onClick={onBack} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-sm">
             <ArrowLeft size={14} /> Back to Reports
           </button>
         ) : (
-          <Link href={backHref} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm">
+          <Link href={backHref} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-sm">
             <ArrowLeft size={14} /> Back to Reports
           </Link>
         )}
-        <div className="mt-8 text-center text-[#6b6860]">Unknown report: {slug}</div>
+        <div className="mt-8 text-center text-[#5f6b63]">Unknown report: {slug}</div>
       </div>
     );
   }
@@ -2936,19 +2936,19 @@ export function ReportDetailView({
       <div className="flex items-start justify-between flex-wrap gap-3 mb-4 print:hidden">
         <div>
           {onBack ? (
-            <button type="button" onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <button type="button" onClick={onBack} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </button>
           ) : (
-            <Link href={backHref} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <Link href={backHref} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </Link>
           )}
-          <h1 className="text-xl font-bold text-[#1a1916] flex items-center gap-2">
+          <h1 className="text-xl font-bold text-[#14201a] flex items-center gap-2">
             {def.title}
             <InfoTip text={def.description} note={def.dataNote} />
           </h1>
-          {def.tagline && <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{def.tagline}</p>}
+          {def.tagline && <p className="text-sm text-[#5f6b63] mt-0.5 max-w-2xl">{def.tagline}</p>}
           {/* Scope · period · status, for the money reports. Renders nothing for
               a slug with no entry. */}
           <BasisNote slug={slug} className="mt-1 max-w-2xl" />
@@ -2957,14 +2957,14 @@ export function ReportDetailView({
           <button
             onClick={handleCsv}
             disabled={!data || loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] disabled:opacity-50 transition-colors bg-white">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e4e9e5] text-[#5f6b63] hover:text-[#14201a] hover:border-[#c5c2bc] disabled:opacity-50 transition-colors bg-white">
             <FileSpreadsheet size={14} /> CSV
           </button>
           <button
             onClick={() => window.print()}
             disabled={!data || loading}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-50 transition-colors"
-            style={{ background: '#2e9f82' }}>
+            style={{ background: '#047246' }}>
             <Printer size={14} /> Print / PDF
           </button>
         </div>
@@ -2988,7 +2988,7 @@ export function ReportDetailView({
           no such filters, so their single controls are unchanged. */}
       <div className={
         simpleFilterBar
-          ? 'rounded-2xl border border-[#e8e6e0] bg-white flex flex-wrap items-end gap-x-4 gap-y-3 px-4 py-3 mb-6 print:hidden'
+          ? 'rounded-2xl border border-[#e4e9e5] bg-white flex flex-wrap items-end gap-x-4 gap-y-3 px-4 py-3 mb-6 print:hidden'
           : 'contents'
       }>
 
@@ -3268,7 +3268,7 @@ export function ReportDetailView({
             <button
               key={w}
               onClick={() => { setLeaseWindow(w); if (urlBase) router.replace(`${urlBase}/lease-expiry?window=${w}`); }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${leaseWindow === w ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${leaseWindow === w ? 'bg-[#047246] text-white' : 'bg-white border border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]'}`}>
               {w} days
             </button>
           ))}
@@ -3283,7 +3283,7 @@ export function ReportDetailView({
             <button
               key={m}
               onClick={() => { setForecastMonths(m); if (urlBase) router.replace(`${urlBase}/${slug}?months=${m}`); }}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${forecastMonths === m ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${forecastMonths === m ? 'bg-[#047246] text-white' : 'bg-white border border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]'}`}>
               {m} months
             </button>
           ))}
@@ -3314,7 +3314,7 @@ export function ReportDetailView({
               if (v === 'all') { setFrom(''); setTo(''); }
               else { setFrom(`${v}-01-01`); setTo(`${v}-12-31`); }
             }}
-            className="text-xs font-semibold border border-[#e8e6e0] rounded-lg px-3 py-1.5 bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+            className="text-xs font-semibold border border-[#e4e9e5] rounded-lg px-3 py-1.5 bg-white text-[#14201a] focus:outline-none focus:border-[#047246] cursor-pointer">
             <option value="all">All years</option>
             {REPORT_YEARS.map(y => (
               <option key={y} value={y}>{y}</option>
@@ -3328,11 +3328,11 @@ export function ReportDetailView({
           buildingLeaseFilter is on, so it's only shown when that isn't. */}
       {!def.buildingLeaseFilter && (def.layout === 'matrix' || def.layout === 'chequeMatrix') && propertyOptions.length > 0 && (
         <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Property:</span>
+          <span className="text-xs text-[#5f6b63] font-medium">Property:</span>
           <select
             value={propertyFilter}
             onChange={e => setPropertyFilter(e.target.value)}
-            className="text-xs font-semibold border border-[#e8e6e0] rounded-lg px-3 py-1.5 bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer max-w-[280px]">
+            className="text-xs font-semibold border border-[#e4e9e5] rounded-lg px-3 py-1.5 bg-white text-[#14201a] focus:outline-none focus:border-[#047246] cursor-pointer max-w-[280px]">
             <option value="">All properties</option>
             {propertyOptions.map(p => (
               <option key={p} value={p}>{p}</option>
@@ -3340,7 +3340,7 @@ export function ReportDetailView({
           </select>
           {propertyFilter && (
             <button onClick={() => setPropertyFilter('')}
-              className="text-[11px] text-[#9b9890] hover:text-[#6b6860] underline">Clear</button>
+              className="text-[11px] text-[#8a948d] hover:text-[#5f6b63] underline">Clear</button>
           )}
         </div>
       )}
@@ -3351,7 +3351,7 @@ export function ReportDetailView({
           <span className={ctrlLabelCls}>Year:</span>
           {(dataYears ?? [...REPORT_YEARS].reverse()).map(y => (
             <button key={y} onClick={() => setYear(y)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${year === y ? 'bg-[#047246] text-white' : 'bg-white border border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]'}`}>
               {y}
             </button>
           ))}
@@ -3365,11 +3365,11 @@ export function ReportDetailView({
           <span className={ctrlLabelCls}>Customers:</span>
           {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
             <button key={v} onClick={() => setScope(v)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#047246] text-white' : 'bg-white border border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]'}`}>
               {label}
             </button>
           ))}
-          <span className="text-[11px] text-[#9b9890] ml-1">
+          <span className="text-[11px] text-[#8a948d] ml-1">
             {scope === 'active' ? 'Showing current tenants — ended tenancies are hidden.' : 'Showing all tenants, including ended tenancies.'}
           </span>
         </div>
@@ -3386,9 +3386,9 @@ export function ReportDetailView({
               : def.layout === 'countMatrix' && countMatrixView ? countMatrixView.totals
               : data.totals)[t.key];
             return (
-              <div key={t.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-2.5">
-                <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
-                <p className="text-sm font-bold text-[#1a1916] mt-0.5">
+              <div key={t.key} className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-2.5">
+                <p className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{t.label}</p>
+                <p className="text-sm font-bold text-[#14201a] mt-0.5">
                   {t.type === 'aed' ? fmtAed(raw) : t.type === 'rate' ? `${Number(raw).toFixed(t.decimals ?? 1)}%` : fmtNumber(raw)}
                 </p>
               </div>
@@ -3415,13 +3415,13 @@ export function ReportDetailView({
 
       {/* Search */}
       <div className="relative max-w-sm mb-4 print:hidden">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search rows…"
-          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]"
+          className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm focus:outline-none focus:border-[#047246]"
         />
       </div>
 
@@ -3433,14 +3433,14 @@ export function ReportDetailView({
       )}
 
       {loading ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 flex items-center justify-center">
-          <Loader2 size={20} className="animate-spin text-[#2e9f82]" />
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 flex items-center justify-center">
+          <Loader2 size={20} className="animate-spin text-[#047246]" />
         </div>
       ) : (def.layout === 'grouped' ? groups.length === 0 : sorted.length === 0) ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
           <BarChart2 size={32} className="mx-auto text-[#c8c6c0] mb-3" />
-          <p className="text-sm font-semibold text-[#1a1916]">No data</p>
-          <p className="text-xs text-[#9b9890] mt-1">{search ? 'Nothing matches your search.' : 'No matching records found.'}</p>
+          <p className="text-sm font-semibold text-[#14201a]">No data</p>
+          <p className="text-xs text-[#8a948d] mt-1">{search ? 'Nothing matches your search.' : 'No matching records found.'}</p>
         </div>
       ) : def.layout === 'grouped' && def.drilldown ? (
         <div className="space-y-3">
@@ -3450,14 +3450,14 @@ export function ReportDetailView({
             const isCollapsed = collapsed.has(key);
             const isOverdue = g.row['month'] === 'overdue';
             return (
-              <div key={key} className={`bg-white rounded-2xl border overflow-hidden ${isOverdue ? 'border-[#fca5a5]' : 'border-[#e8e6e0]'} print:break-inside-avoid`}>
+              <div key={key} className={`bg-white rounded-2xl border overflow-hidden ${isOverdue ? 'border-[#fca5a5]' : 'border-[#e4e9e5]'} print:break-inside-avoid`}>
                 {/* Month header */}
                 <button
                   onClick={() => toggleGroup(key)}
-                  className="w-full flex items-center gap-4 px-5 py-3 text-left hover:bg-[#fafaf8] print:hover:bg-transparent">
+                  className="w-full flex items-center gap-4 px-5 py-3 text-left hover:bg-[#f6f8f6] print:hover:bg-transparent">
                   <div className="flex items-center gap-2.5 min-w-0 w-[13rem] shrink-0">
-                    <ChevronRight size={16} className={`text-[#9b9890] shrink-0 transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
-                    <span className={`text-sm font-bold truncate ${isOverdue ? 'text-[#b91c1c]' : 'text-[#1a1916]'}`} title={String(g.row[dd.titleKey] ?? '')}>{String(g.row[dd.titleKey] ?? '')}</span>
+                    <ChevronRight size={16} className={`text-[#8a948d] shrink-0 transition-transform print:hidden ${isCollapsed ? '' : 'rotate-90'}`} />
+                    <span className={`text-sm font-bold truncate ${isOverdue ? 'text-[#b91c1c]' : 'text-[#14201a]'}`} title={String(g.row[dd.titleKey] ?? '')}>{String(g.row[dd.titleKey] ?? '')}</span>
                   </div>
                   {/* One equal-width track per summary column, label stacked over
                       figure. Every section header shares the grid, so the figures
@@ -3469,8 +3469,8 @@ export function ReportDetailView({
                     style={{ gridTemplateColumns: `repeat(${summaryTracks}, minmax(0, 1fr))` }}>
                     {summaryCols.map(c => (
                       <span key={c.key} className="min-w-0 text-right">
-                        <span className="block text-[10px] uppercase tracking-wide text-[#9b9890] truncate" title={c.label}>{c.label}</span>
-                        <span className="block text-xs font-semibold text-[#1a1916] tabular-nums truncate">
+                        <span className="block text-[10px] uppercase tracking-wide text-[#8a948d] truncate" title={c.label}>{c.label}</span>
+                        <span className="block text-xs font-semibold text-[#14201a] tabular-nums truncate">
                           <CellValue value={g.row[c.key]} type={c.type} decimals={c.decimals} />
                         </span>
                       </span>
@@ -3494,7 +3494,7 @@ export function ReportDetailView({
                           {dd.contractIdKey && <col style={{ width: '5.5rem' }} />}
                         </colgroup>
                       )}
-                      <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                      <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                         <tr>
                           {dd.columns.map(c => (
                             <th key={c.key} className={`px-3 py-2 font-semibold truncate ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
@@ -3520,14 +3520,14 @@ export function ReportDetailView({
                           <Fragment key={`b${idx}`}>
                           {subHead && (
                             <tr className="border-t border-[#e3e0d9] bg-[#faf9f6]">
-                              <td colSpan={span} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#6b6860]">
+                              <td colSpan={span} className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#5f6b63]">
                                 {subHead}
                               </td>
                             </tr>
                           )}
-                          <tr className={`hover:bg-[#fafaf8] ${sameBlock ? 'border-t border-[#f7f5f1]' : 'border-t border-[#e3e0d9]'}`}>
+                          <tr className={`hover:bg-[#f6f8f6] ${sameBlock ? 'border-t border-[#f7f5f1]' : 'border-t border-[#e3e0d9]'}`}>
                             {dd.columns.map(c => (
-                              <td key={c.key} className={`px-3 ${sameBlock ? 'py-1.5' : 'py-2'} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${fixedItemCols && c.type !== 'stack' ? 'truncate' : ''} text-[#1a1916]`}>
+                              <td key={c.key} className={`px-3 ${sameBlock ? 'py-1.5' : 'py-2'} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${fixedItemCols && c.type !== 'stack' ? 'truncate' : ''} text-[#14201a]`}>
                                 {sameBlock && merged.has(c.key) ? null : <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />}
                               </td>
                             ))}
@@ -3543,7 +3543,7 @@ export function ReportDetailView({
                                       href={inOps
                                         ? `${contractsBase.replace(/\/contracts$/, '/operations')}/${opsId ?? it[dd.contractIdKey]}`
                                         : `${contractsBase}/${it[dd.contractIdKey]}/v2`}
-                                      className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                                      className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline"
                                       title={inOps ? 'Open in Operations' : 'Open contract'}>
                                       {inOps ? 'Operations' : 'Open'} <ExternalLink size={12} />
                                     </Link>
@@ -3567,13 +3567,13 @@ export function ReportDetailView({
               stated. Leases - Monthly uses it to show the year's share against
               the portfolio anchor Cash Management reports. */}
           {def.summaryPanels && (
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+            <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
               <SummaryPanels panels={def.summaryPanels} totals={data?.totals} topBorder={false} />
             </div>
           )}
         </div>
       ) : def.layout === 'matrix' ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:border-none print:rounded-none">
           {/* The table scrolls inside its own box, BOTH ways. A wrapper with only
               overflow-x is its own scroll container, so a sticky header pins to
               something that never moves vertically — the labels scrolled away and
@@ -3583,20 +3583,20 @@ export function ReportDetailView({
             <table className="text-xs border-collapse min-w-full">
               {/* Header stays put while the sheet scrolls — 29 columns of months and
                   totals are unreadable once the labels have gone off the top. */}
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-20 print:static">
+              <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0 z-20 print:static">
                 <tr>
-                  <th className="sticky left-0 z-30 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
-                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0] bg-[#fafaf8]">Annual rent</th>
+                  <th className="sticky left-0 z-30 bg-[#f6f8f6] px-4 py-3 text-left font-semibold min-w-[190px]">By Unit</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5] bg-[#f6f8f6]">Annual rent</th>
                   {(data?.months ?? []).map(m => (
-                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0] bg-[#fafaf8]">{m}</th>
+                    <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5] bg-[#f6f8f6]">{m}</th>
                   ))}
                   {/* Trailing columns: a report may declare its own set (Rent Receivable
                       needs Total / Cleared / Pending / Bounced, not the YTD pair). */}
                   {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-                    <th key={c.key} className={`px-4 py-3 text-right font-semibold whitespace-nowrap bg-[#fafaf8] ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e8e6e0]' : ''}`}>{c.label}</th>
+                    <th key={c.key} className={`px-4 py-3 text-right font-semibold whitespace-nowrap bg-[#f6f8f6] ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e4e9e5]' : ''}`}>{c.label}</th>
                   )) : (<>
-                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total</th>
-                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">YTD Expected</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5]">Total</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5]">YTD Expected</th>
                   <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">YTD Received</th>
                   </>)}
                 </tr>
@@ -3624,21 +3624,21 @@ export function ReportDetailView({
                     const rent = rows.reduce((a, r) => a + (Number(r.annualRentFils) || 0), 0);
                     return (
                       <Fragment key={g}>
-                        <tr className="bg-[#f0ede8] border-t border-[#e8e6e0]">
-                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#1a1916] whitespace-nowrap">
-                            {g} <span className="font-normal text-[#9b9890]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
+                        <tr className="bg-[#f0ede8] border-t border-[#e4e9e5]">
+                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#14201a] whitespace-nowrap">
+                            {g} <span className="font-normal text-[#8a948d]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
                           </td>
                           <td colSpan={1 + monthCount + Math.max(trailing.length, 3)} className="bg-[#f0ede8]" />
                         </tr>
                         {rows.map((row, i) => renderMatrixRow(row, `${g}-${i}`))}
-                        <tr className="bg-[#fafaf8] border-t border-[#e8e6e0] font-semibold text-[#1a1916]">
-                          <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
-                          <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(rent)}</td>
+                        <tr className="bg-[#f6f8f6] border-t border-[#e4e9e5] font-semibold text-[#14201a]">
+                          <td className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
+                          <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(rent)}</td>
                           {cols.map((t, ti) => (
-                            <td key={ti} className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
+                            <td key={ti} className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(t)}</td>
                           ))}
                           {trailing.map((c, ci) => (
-                            <td key={c.key} className={`px-4 py-2 text-right tabular-nums whitespace-nowrap ${ci < trailing.length - 1 ? 'border-l border-[#e8e6e0]' : ''}`}>
+                            <td key={c.key} className={`px-4 py-2 text-right tabular-nums whitespace-nowrap ${ci < trailing.length - 1 ? 'border-l border-[#e4e9e5]' : ''}`}>
                               {fmtAmt(rows.reduce((a, r) => a + (Number(r[c.key]) || 0), 0))}
                             </td>
                           ))}
@@ -3649,22 +3649,22 @@ export function ReportDetailView({
                 })()}
                 {!def.matrixGroupKey && sorted.map((row, i) => renderMatrixRow(row, String(i)))}
               </tbody>
-              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+              <tfoot className="bg-[#f6f8f6] border-t-2 border-[#e4e9e5] font-bold text-[#14201a]">
                 <tr>
-                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
-                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.annualRentFils ?? data?.totals?.annualRentFils)}</td>
+                  <td className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-3 text-left">Total</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(matrixView?.totals?.annualRentFils ?? data?.totals?.annualRentFils)}</td>
                   {(matrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
-                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
+                    <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(t)}</td>
                   ))}
                   {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-                    <td key={c.key} className={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e8e6e0]' : ''}`}>
+                    <td key={c.key} className={`px-4 py-3 text-right tabular-nums whitespace-nowrap ${ci < (def.matrixTrailing!.length - 1) ? 'border-l border-[#e4e9e5]' : ''}`}>
                       {c.type === 'number'
                         ? fmtNumber(Number(matrixView?.totals?.[c.key] ?? data?.totals?.[c.key]))
                         : fmtAmt(matrixView?.totals?.[c.key] ?? data?.totals?.[c.key])}
                     </td>
                   )) : (<>
-                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.scheduledFils ?? data?.totals?.scheduledFils)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(matrixView?.totals?.ytdExpectedFils ?? data?.totals?.ytdExpectedFils)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e4e9e5]">{fmtAmt(matrixView?.totals?.scheduledFils ?? data?.totals?.scheduledFils)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(matrixView?.totals?.ytdExpectedFils ?? data?.totals?.ytdExpectedFils)}</td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap text-[#15803d]">{fmtAmt(matrixView?.totals?.ytdReceivedFils ?? data?.totals?.ytdReceivedFils)}</td>
                   </>)}
                 </tr>
@@ -3674,15 +3674,15 @@ export function ReportDetailView({
                   let run = 0;
                   const cum = colTot.map(t => (run += Number(t) || 0));
                   return (
-                    <tr className="border-t border-[#e8e6e0] font-medium text-[#6b6860]">
-                      <td className="sticky left-0 z-10 bg-[#fafaf8] px-3 py-2 text-left font-semibold">Cumulative</td>
-                      <td className="px-3 py-2 border-l border-[#e8e6e0]" />
+                    <tr className="border-t border-[#e4e9e5] font-medium text-[#5f6b63]">
+                      <td className="sticky left-0 z-10 bg-[#f6f8f6] px-3 py-2 text-left font-semibold">Cumulative</td>
+                      <td className="px-3 py-2 border-l border-[#e4e9e5]" />
                       {cum.map((t, ti) => (
-                        <td key={ti} className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#e8e6e0]">{fmtAmt(t)}</td>
+                        <td key={ti} className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-[#e4e9e5]">{fmtAmt(t)}</td>
                       ))}
-                      <td className="px-3 py-2 text-right tabular-nums border-l border-[#e8e6e0] font-semibold text-[#1a1916]">{fmtAmt(run)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums border-l border-[#e4e9e5] font-semibold text-[#14201a]">{fmtAmt(run)}</td>
                       {(def.matrixTrailing ? def.matrixTrailing.slice(1) : [{ key: 'a' }, { key: 'b' }]).map((c, ci) => (
-                        <td key={ci} className={`px-3 py-2 ${ci === 0 ? 'border-l border-[#e8e6e0]' : ''}`} />
+                        <td key={ci} className={`px-3 py-2 ${ci === 0 ? 'border-l border-[#e4e9e5]' : ''}`} />
                       ))}
                     </tr>
                   );
@@ -3695,11 +3695,11 @@ export function ReportDetailView({
               is the first thing read after the sheet and the thing the panels
               then explain. */}
           {yearSummary && yearSummary.length > 0 && (
-            <div className="border-t border-[#e8e6e0] px-5 py-5 bg-[#fdfcfa] print:break-inside-avoid">
-              <div className="text-[12px] font-bold text-[#1a1916] mb-2">By year</div>
+            <div className="border-t border-[#e4e9e5] px-5 py-5 bg-[#fdfcfa] print:break-inside-avoid">
+              <div className="text-[12px] font-bold text-[#14201a] mb-2">By year</div>
               <div className="overflow-x-auto">
-                <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden min-w-[420px]">
-                  <thead className="bg-[#f4f3ef] text-[#6b6860]">
+                <table className="w-full text-[12px] border border-[#e4e9e5] rounded-lg overflow-hidden min-w-[420px]">
+                  <thead className="bg-[#eef1ef] text-[#5f6b63]">
                     <tr>
                       <th className="px-3 py-2 text-left font-semibold">Year</th>
                       <th className="px-3 py-2 text-right font-semibold">Collected</th>
@@ -3710,11 +3710,11 @@ export function ReportDetailView({
                   </thead>
                   <tbody>
                     {yearSummary.map(y => (
-                      <tr key={y.year} className="border-t border-[#f0ede8] text-[#6b6860]">
-                        <td className="px-3 py-2 text-left font-medium text-[#1a1916]">{y.year}</td>
+                      <tr key={y.year} className="border-t border-[#f0ede8] text-[#5f6b63]">
+                        <td className="px-3 py-2 text-left font-medium text-[#14201a]">{y.year}</td>
                         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#15803d]">{fmtAmt(y.clearedFils)}</td>
                         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#b45309]">{fmtAmt(y.pendingFils)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAmt(y.totalFils)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#14201a]">{fmtAmt(y.totalFils)}</td>
                         {/* Blank rather than 0% on a year that is entirely
                             post-dated — nothing has been missed there yet. */}
                         <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
@@ -3726,10 +3726,10 @@ export function ReportDetailView({
                         so the years plus this line give Total, not 10,050 less
                         (owner, 23 Sep 2026: "making confusion"). */}
                     {Number(matrixView?.totals?.undatedFils ?? data?.totals?.undatedFils ?? 0) > 0 && (
-                      <tr className="border-t border-[#f0ede8] text-[#6b6860]">
+                      <tr className="border-t border-[#f0ede8] text-[#5f6b63]">
                         <td className="px-3 py-2 text-left font-medium text-[#dc2626]">
                           No date
-                          <span className="block text-[10.5px] font-normal text-[#9b9890]">cheques recorded without a date — enter it on the lease</span>
+                          <span className="block text-[10.5px] font-normal text-[#8a948d]">cheques recorded without a date — enter it on the lease</span>
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">·</td>
                         <td className="px-3 py-2 text-right tabular-nums">·</td>
@@ -3738,7 +3738,7 @@ export function ReportDetailView({
                       </tr>
                     )}
                   </tbody>
-                  <tfoot className="bg-[#f4f3ef] font-bold text-[#1a1916]">
+                  <tfoot className="bg-[#eef1ef] font-bold text-[#14201a]">
                     {(() => {
                       const undated = Number(matrixView?.totals?.undatedFils ?? data?.totals?.undatedFils ?? 0);
                       const t = yearSummary.reduce((s, y) => ({
@@ -3747,7 +3747,7 @@ export function ReportDetailView({
                         totalFils: s.totalFils + y.totalFils,
                       }), { clearedFils: 0, pendingFils: 0, totalFils: undated });
                       return (
-                        <tr className="border-t border-[#e8e6e0]">
+                        <tr className="border-t border-[#e4e9e5]">
                           <td className="px-3 py-2 text-left">Total</td>
                           <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmtAmt(t.clearedFils)}</td>
                           <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{fmtAmt(t.pendingFils)}</td>
@@ -3761,7 +3761,7 @@ export function ReportDetailView({
                   </tfoot>
                 </table>
               </div>
-              <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">
+              <p className="text-[11px] text-[#5f6b63] mt-2 leading-relaxed">
                 Each year is the rent DATED in it — a lease running across 31 December is split between two years, which is why no year equals the annual rent of any lease. Collected + Pending is the year’s total; a bounced cheque is in neither, on the same rule as the sheet above. A cheque recorded without a date sits in no year and is shown on its own line. The Total line is every column on the sheet plus that line, and matches Total — collected + pending below.
               </p>
             </div>
@@ -3775,7 +3775,7 @@ export function ReportDetailView({
               panels that state the arithmetic, because it is the answer to the
               question those panels raise. */}
           <ReconcilePanel endpoint={reconcileEndpoint} contractsBase={contractsBase} />
-          <div className="flex items-center gap-4 px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+          <div className="flex items-center gap-4 px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#5f6b63]">
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#15803d]" /> Collected</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#b45309]" /> Pending</span>
             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#dc2626]" /> Bounced</span>
@@ -3783,25 +3783,25 @@ export function ReportDetailView({
           </div>
         </div>
       ) : def.layout === 'chequeMatrix' ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:border-none print:rounded-none">
           {/* Scrolls both ways with a pinned header — same reason as the matrix:
               22 month columns are unreadable once the labels leave the top. */}
           <div className="overflow-auto max-h-[72vh] print:max-h-none print:overflow-visible">
             <table className="text-xs border-collapse min-w-full">
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-20 print:static">
+              <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0 z-20 print:static">
                 <tr>
-                  <th className="sticky left-0 z-30 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[130px]">Unit</th>
-                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap bg-[#fafaf8]">Customer</th>
+                  <th className="sticky left-0 z-30 bg-[#f6f8f6] px-4 py-3 text-left font-semibold min-w-[130px]">Unit</th>
+                  <th className="px-3 py-3 text-left font-semibold whitespace-nowrap bg-[#f6f8f6]">Customer</th>
                   {Array.from({ length: data?.maxCheques ?? 0 }, (_, i) => (
-                    <th key={i} className={`px-3 py-3 text-right font-semibold whitespace-nowrap ${i === 0 ? 'border-l border-[#e8e6e0]' : ''}`}>Cheque {i + 1}</th>
+                    <th key={i} className={`px-3 py-3 text-right font-semibold whitespace-nowrap ${i === 0 ? 'border-l border-[#e4e9e5]' : ''}`}>Cheque {i + 1}</th>
                   ))}
                   {/* The label is the month itself. A "Month N" counter made sense
                       when the grid was a fixed twelve; the columns now run the length
                       of the book, so it read "Month 22" and meant nothing. */}
                   {(data?.months ?? []).map(m => (
-                    <th key={m} className="px-3 py-3 text-center font-semibold whitespace-nowrap border-l border-[#f0ede8] bg-[#fafaf8]">{m}</th>
+                    <th key={m} className="px-3 py-3 text-center font-semibold whitespace-nowrap border-l border-[#f0ede8] bg-[#f6f8f6]">{m}</th>
                   ))}
-                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Total cheques</th>
+                  <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5]">Total cheques</th>
                 </tr>
               </thead>
               <tbody>
@@ -3825,15 +3825,15 @@ export function ReportDetailView({
                     const tot = rows.reduce((a, r) => a + (Number(r.totalCheques) || 0), 0);
                     return (
                       <Fragment key={g}>
-                        <tr className="bg-[#f0ede8] border-t border-[#e8e6e0]">
-                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#1a1916] whitespace-nowrap">
-                            {g} <span className="font-normal text-[#9b9890]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
+                        <tr className="bg-[#f0ede8] border-t border-[#e4e9e5]">
+                          <td className="sticky left-0 z-10 bg-[#f0ede8] px-4 py-2 text-left text-[12px] font-bold text-[#14201a] whitespace-nowrap">
+                            {g} <span className="font-normal text-[#8a948d]">{rows.length} unit{rows.length === 1 ? '' : 's'}</span>
                           </td>
                           <td colSpan={1 + nChq + nMonths + 1} className="bg-[#f0ede8]" />
                         </tr>
                         {rows.map((row, i) => renderChequeRow(row, `${g}-${i}`))}
-                        <tr className="bg-[#fafaf8] border-t border-[#e8e6e0] font-semibold text-[#1a1916]">
-                          <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
+                        <tr className="bg-[#f6f8f6] border-t border-[#e4e9e5] font-semibold text-[#14201a]">
+                          <td className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-2 text-left text-[11px] whitespace-nowrap">{g} subtotal</td>
                           <td className="px-3 py-2" colSpan={1 + nChq} />
                           {cols.map((n, ci) => (
                             <td key={ci} className="px-3 py-2 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{n ? fmtNumber(n) : '·'}</td>
@@ -3846,17 +3846,17 @@ export function ReportDetailView({
                 })()}
                 {!def.matrixGroupKey && sorted.map((row, i) => renderChequeRow(row, String(i)))}
               </tbody>
-              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+              <tfoot className="bg-[#f6f8f6] border-t-2 border-[#e4e9e5] font-bold text-[#14201a]">
                 <tr>
                   {/* Only the Unit column is pinned — a sticky cell spanning the
                       cheque columns too stays that wide and covers the month totals
                       once the grid scrolls. Same split as the subtotal line. */}
-                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  <td className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-3 text-left">Total</td>
                   <td className="px-3 py-3" colSpan={1 + (data?.maxCheques ?? 0)} />
                   {(chequeView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
                     <td key={ti} className="px-3 py-3 text-center tabular-nums whitespace-nowrap border-l border-[#f0ede8]">{Number(t) ? fmtNumber(Number(t)) : '·'}</td>
                   ))}
-                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtNumber(chequeView?.totals?.totalCheques ?? data?.totals?.totalCheques)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums border-l border-[#e4e9e5]">{fmtNumber(chequeView?.totals?.totalCheques ?? data?.totals?.totalCheques)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -3872,19 +3872,19 @@ export function ReportDetailView({
           <ReconcilePanel endpoint={reconcileEndpoint} contractsBase={contractsBase} />
         </div>
       ) : def.layout === 'countMatrix' ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
             <table className="text-xs border-collapse min-w-full">
-              <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+              <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left font-semibold min-w-[190px]">Property</th>
+                  <th className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-3 text-left font-semibold min-w-[190px]">Property</th>
                   {(data?.months ?? []).map(m => (
                     <th key={m} className="px-3 py-3 text-right font-semibold whitespace-nowrap">{m}</th>
                   ))}
                   {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-                    <th key={c.key} className={`px-4 py-3 text-right font-semibold whitespace-nowrap ${ci === 0 ? 'border-l border-[#e8e6e0]' : ''}`}>{c.label}</th>
+                    <th key={c.key} className={`px-4 py-3 text-right font-semibold whitespace-nowrap ${ci === 0 ? 'border-l border-[#e4e9e5]' : ''}`}>{c.label}</th>
                   )) : (<>
-                    <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e8e6e0]">Renewals</th>
+                    <th className="px-4 py-3 text-right font-semibold whitespace-nowrap border-l border-[#e4e9e5]">Renewals</th>
                     <th className="px-3 py-3 text-right font-semibold whitespace-nowrap">Vacant</th>
                     <th className="px-4 py-3 text-right font-semibold whitespace-nowrap">Total units</th>
                   </>)}
@@ -3897,19 +3897,19 @@ export function ReportDetailView({
                     ? (row[def.cellDrill.itemsKey ?? 'cellItems'] as Record<string, unknown>[][] | undefined)
                     : undefined;
                   return (
-                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] print:break-inside-avoid">
-                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium text-[#1a1916] whitespace-nowrap">{String(row.label ?? '—')}</td>
+                    <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6] print:break-inside-avoid">
+                      <td className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-medium text-[#14201a] whitespace-nowrap">{String(row.label ?? '—')}</td>
                       {cells.map((n, ci) => {
                         const num = Number(n);
                         const its = cellItems?.[ci];
                         const drillable = def.cellDrill && num > 0 && Array.isArray(its) && its.length > 0;
                         return (
-                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${num ? 'text-[#1a1916]' : 'text-[#d4d2cc]'}`}>
+                        <td key={ci} className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${num ? 'text-[#14201a]' : 'text-[#d4d2cc]'}`}>
                           {drillable ? (
                             <button
                               type="button"
                               onClick={() => setCellModal({ title: `${String(row.label ?? '')} · ${(data?.months ?? [])[ci] ?? ''}`, countLabel: def.cellDrill!.countLabel, columns: def.cellDrill!.columns, contractIdKey: def.cellDrill!.contractIdKey, items: its! })}
-                              className="font-medium text-[#2e9f82] hover:underline cursor-pointer print:no-underline print:text-[#1a1916]"
+                              className="font-medium text-[#047246] hover:underline cursor-pointer print:no-underline print:text-[#14201a]"
                               title={`See the ${def.cellDrill!.countLabel} behind this number`}>
                               {fmtNumber(num)}
                             </button>
@@ -3918,11 +3918,11 @@ export function ReportDetailView({
                         );
                       })}
                       {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => (
-                        <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#1a1916] border-l border-[#f0ede8]' : 'text-[#6b6860]'}`}>
+                        <td key={c.key} className={`px-3 py-2 text-right tabular-nums whitespace-nowrap ${ci === 0 ? 'font-bold text-[#14201a] border-l border-[#f0ede8]' : 'text-[#5f6b63]'}`}>
                           {c.type === 'aed' ? fmtAed(Number(row[c.key] ?? 0)) : fmtNumber(Number(row[c.key] ?? 0))}
                         </td>
                       )) : (<>
-                        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#1a1916] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.total))}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold text-[#14201a] whitespace-nowrap border-l border-[#f0ede8]">{fmtNumber(Number(row.total))}</td>
                         <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
                           {Number(row.vacant) ? (
                             <button
@@ -3934,32 +3934,32 @@ export function ReportDetailView({
                             </button>
                           ) : <span className="text-[#d4d2cc]">·</span>}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-[#6b6860] whitespace-nowrap">{fmtNumber(Number(row.totalUnits))}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-[#5f6b63] whitespace-nowrap">{fmtNumber(Number(row.totalUnits))}</td>
                       </>)}
                     </tr>
                   );
                 })}
                 {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={(data?.months?.length ?? 12) + 1 + (def.matrixTrailing?.length ?? 3)} className="px-4 py-8 text-center text-[#9b9890]">No leases in this year.</td>
+                    <td colSpan={(data?.months?.length ?? 12) + 1 + (def.matrixTrailing?.length ?? 3)} className="px-4 py-8 text-center text-[#8a948d]">No leases in this year.</td>
                   </tr>
                 )}
               </tbody>
-              <tfoot className="bg-[#fafaf8] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+              <tfoot className="bg-[#f6f8f6] border-t-2 border-[#e4e9e5] font-bold text-[#14201a]">
                 <tr>
-                  <td className="sticky left-0 z-10 bg-[#fafaf8] px-4 py-3 text-left">Total</td>
+                  <td className="sticky left-0 z-10 bg-[#f6f8f6] px-4 py-3 text-left">Total</td>
                   {(countMatrixView?.columnTotals ?? data?.columnTotals ?? []).map((t, ti) => (
                     <td key={ti} className="px-3 py-3 text-right tabular-nums whitespace-nowrap">{Number(t) ? fmtNumber(Number(t)) : '·'}</td>
                   ))}
                   {def.matrixTrailing ? def.matrixTrailing.map((c, ci) => {
                     const v = Number((countMatrixView?.totals ?? data?.totals ?? {})[c.key] ?? 0);
                     return (
-                      <td key={c.key} className={`px-4 py-3 text-right tabular-nums ${ci === 0 ? 'border-l border-[#e8e6e0]' : ''}`}>
+                      <td key={c.key} className={`px-4 py-3 text-right tabular-nums ${ci === 0 ? 'border-l border-[#e4e9e5]' : ''}`}>
                         {c.type === 'aed' ? fmtAed(v) : fmtNumber(v)}
                       </td>
                     );
                   }) : (<>
-                    <td className="px-4 py-3 text-right tabular-nums border-l border-[#e8e6e0]">{fmtNumber(Number(countMatrixView?.totals?.leased ?? data?.totals?.leased ?? 0))}</td>
+                    <td className="px-4 py-3 text-right tabular-nums border-l border-[#e4e9e5]">{fmtNumber(Number(countMatrixView?.totals?.leased ?? data?.totals?.leased ?? 0))}</td>
                     <td className="px-3 py-3 text-right tabular-nums">
                       {(() => {
                         const all = sorted.flatMap(r => (r.vacantUnits as VacantUnit[]) ?? []);
@@ -3978,13 +3978,13 @@ export function ReportDetailView({
             </table>
           </div>
           {!def.matrixTrailing && (
-            <div className="px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#6b6860]">
+            <div className="px-3 py-2 border-t border-[#f0ede8] text-[11px] text-[#5f6b63]">
               Months add up to Renewals — the units coming up for renewal in the selected year (each counted once, in its renewal month). Vacant and Total units are current inventory (each unit&rsquo;s live status), independent of the year, so Renewals + Vacant is normally less than Total units: the difference is the occupied units whose renewal falls outside this year — already overdue, or not due until next year. Click a Vacant count to list those units.
             </div>
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:border-none print:rounded-none">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:border-none print:rounded-none">
           <div className="overflow-x-auto">
             {(() => {
               // With tableGroupKey the rows read in sections: a bar per group (the
@@ -4011,13 +4011,13 @@ export function ReportDetailView({
               const nameSpan = firstFigure < 1 ? cols.length : firstFigure;
               return (
                 <table className="w-full text-xs">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                     <tr>
                       {cols.map(c => (
                         <th
                           key={c.key}
                           onClick={() => toggleSort(c.key)}
-                          className={`px-4 py-3 font-semibold cursor-pointer hover:text-[#1a1916] transition-colors select-none ${c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'}`}>
+                          className={`px-4 py-3 font-semibold cursor-pointer hover:text-[#14201a] transition-colors select-none ${c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'}`}>
                           {c.label}
                           {sortKey === c.key && <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>}
                         </th>
@@ -4029,7 +4029,7 @@ export function ReportDetailView({
                     {sections.map(section => (
                       <Fragment key={section.name ?? 'rows'}>
                         {section.name != null && (
-                          <tr className="bg-[#f0ede8] border-t border-[#e8e6e0] text-[12px] font-bold text-[#1a1916]">
+                          <tr className="bg-[#f0ede8] border-t border-[#e4e9e5] text-[12px] font-bold text-[#14201a]">
                             <td colSpan={nameSpan} className="px-4 py-2 text-left">{section.name}</td>
                             {cols.slice(nameSpan).map(c => {
                               // A figure no row in the section fills stays "—", not 0.
@@ -4065,7 +4065,7 @@ export function ReportDetailView({
                             <tr
                               key={i}
                               onClick={canDrill ? () => setDrill(drillTarget) : undefined}
-                              className={`border-t border-[#f0ede8] hover:bg-[#fafaf8] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
+                              className={`border-t border-[#f0ede8] hover:bg-[#f6f8f6] ${canDrill ? 'cursor-pointer print:cursor-auto' : ''}`}>
                               {cols.map(c => {
                                 // Generic row deep-link: this column links to the contract
                                 // (or unit) the row represents. Unit links need a unitsBase.
@@ -4081,7 +4081,7 @@ export function ReportDetailView({
                                     <Link
                                       href={rlHref}
                                       onClick={e => e.stopPropagation()}
-                                      className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                                      className="inline-flex items-center gap-1 font-medium text-[#047246] hover:underline print:text-[#14201a] print:no-underline"
                                       title={rl!.target === 'unit' ? 'Open in Units' : 'Open contract'}>
                                       <CellValue value={row[c.key]} type={c.type} decimals={c.decimals} />
                                       <ExternalLink size={12} className="print:hidden" />
@@ -4090,7 +4090,7 @@ export function ReportDetailView({
                                     <Link
                                       href={`${contractsBase}/${row.contractId}/v2`}
                                       onClick={e => e.stopPropagation()}
-                                      className="inline-flex items-center gap-1 font-medium text-[#2e9f82] hover:underline print:text-[#1a1916] print:no-underline"
+                                      className="inline-flex items-center gap-1 font-medium text-[#047246] hover:underline print:text-[#14201a] print:no-underline"
                                       title="Open contract to cross-verify">
                                       {String(row.contractRef ?? `CID-${row.contractId}`)}
                                       <ExternalLink size={12} className="print:hidden" />
@@ -4124,7 +4124,7 @@ export function ReportDetailView({
       )}
 
       {data && (
-        <p className="text-[11px] text-[#9b9890] mt-3 print:mt-4">
+        <p className="text-[11px] text-[#8a948d] mt-3 print:mt-4">
           {def.layout === 'grouped'
             ? (() => {
                 const noun = def.drilldown?.groupNoun ?? 'month';
@@ -4149,8 +4149,8 @@ export function ReportDetailView({
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
                 <div>
-                  <h3 className="text-base font-bold text-[#1a1916]">{String(drill[dd.titleKey] ?? '')}</h3>
-                  <p className="text-xs text-[#6b6860] mt-0.5">
+                  <h3 className="text-base font-bold text-[#14201a]">{String(drill[dd.titleKey] ?? '')}</h3>
+                  <p className="text-xs text-[#5f6b63] mt-0.5">
                     {items.length}{drillFilter ? ` of ${allItems.length}` : ''} {dd.countLabel}{drillFilter ? ` — ${drillFilter}` : ''}
                   </p>
                 </div>
@@ -4159,27 +4159,27 @@ export function ReportDetailView({
                     <div className="flex items-center gap-1.5 mr-1">
                       <button
                         onClick={() => setDrillFilter(null)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${!drillFilter ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${!drillFilter ? 'bg-[#047246] text-white border-[#047246]' : 'bg-white text-[#5f6b63] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
                         All
                       </button>
                       {filterValues.map(v => (
                         <button
                           key={v}
                           onClick={() => setDrillFilter(drillFilter === v ? null : v)}
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border capitalize transition-colors ${drillFilter === v ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border capitalize transition-colors ${drillFilter === v ? 'bg-[#047246] text-white border-[#047246]' : 'bg-white text-[#5f6b63] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
                           {v} · {allItems.filter(it => String(it[dd.filterKey!]) === v).length}
                         </button>
                       ))}
                     </div>
                   )}
-                  <button onClick={close} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+                  <button onClick={close} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef]">
                     <X size={16} />
                   </button>
                 </div>
               </div>
               <div className="overflow-auto">
                 <table className="w-full text-xs">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                  <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0">
                     <tr>
                       {dd.columns.map(c => (
                         <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
@@ -4200,7 +4200,7 @@ export function ReportDetailView({
                             {it[dd.contractIdKey] != null && (
                               <Link
                                 href={`${contractsBase}/${it[dd.contractIdKey]}/v2`}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline"
                                 title="Open contract">
                                 Open <ExternalLink size={12} />
                               </Link>
@@ -4223,19 +4223,19 @@ export function ReportDetailView({
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
               <div>
-                <h3 className="text-base font-bold text-[#1a1916]">Vacant units — {vacantList.title}</h3>
-                <p className="text-xs text-[#6b6860] mt-0.5">{vacantList.units.length} vacant unit{vacantList.units.length === 1 ? '' : 's'}</p>
+                <h3 className="text-base font-bold text-[#14201a]">Vacant units — {vacantList.title}</h3>
+                <p className="text-xs text-[#5f6b63] mt-0.5">{vacantList.units.length} vacant unit{vacantList.units.length === 1 ? '' : 's'}</p>
               </div>
-              <button onClick={() => setVacantList(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+              <button onClick={() => setVacantList(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef]">
                 <X size={16} />
               </button>
             </div>
             <div className="overflow-auto">
               {vacantList.units.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-[#9b9890]">No vacant units.</div>
+                <div className="px-5 py-8 text-center text-sm text-[#8a948d]">No vacant units.</div>
               ) : (
                 <table className="w-full text-xs">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                  <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0">
                     <tr>
                       <th className="px-5 py-2.5 text-left font-semibold">Unit</th>
                       <th className="px-3 py-2 text-left font-semibold">Type</th>
@@ -4245,9 +4245,9 @@ export function ReportDetailView({
                   </thead>
                   <tbody>
                     {vacantList.units.map(u => (
-                      <tr key={u.unitId} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
-                        <td className="px-5 py-2.5 text-left font-medium text-[#1a1916]">{u.label}</td>
-                        <td className="px-3 py-2 text-left text-[#6b6860] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
+                      <tr key={u.unitId} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
+                        <td className="px-5 py-2.5 text-left font-medium text-[#14201a]">{u.label}</td>
+                        <td className="px-3 py-2 text-left text-[#5f6b63] capitalize">{(u.unitType ?? '—').replace(/_/g, ' ')}</td>
                         {/* Terminating = still physically occupied, tenancy accepted for
                             termination. It counts as vacant because there is no renewal
                             to plan, but the reader must not be told the unit is empty. */}
@@ -4255,10 +4255,10 @@ export function ReportDetailView({
                           {u.status === 'terminating' ? (
                             <span className="inline-flex items-center rounded-md bg-[#fdf1e3] px-2 py-0.5 text-[10px] font-semibold text-[#9a5b12]">Terminating</span>
                           ) : (
-                            <span className="inline-flex items-center rounded-md bg-[#f4f3ef] px-2 py-0.5 text-[10px] font-semibold text-[#6b6860]">Available</span>
+                            <span className="inline-flex items-center rounded-md bg-[#eef1ef] px-2 py-0.5 text-[10px] font-semibold text-[#5f6b63]">Available</span>
                           )}
                         </td>
-                        <td className="px-5 py-2.5 text-right tabular-nums text-[#1a1916]">{u.rentFils ? fmtAed(u.rentFils) : '—'}</td>
+                        <td className="px-5 py-2.5 text-right tabular-nums text-[#14201a]">{u.rentFils ? fmtAed(u.rentFils) : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4275,16 +4275,16 @@ export function ReportDetailView({
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
               <div>
-                <h3 className="text-base font-bold text-[#1a1916]">{cellModal.title}</h3>
-                <p className="text-xs text-[#6b6860] mt-0.5">{cellModal.items.length} {cellModal.countLabel}{cellModal.items.length === 1 ? '' : 's'}</p>
+                <h3 className="text-base font-bold text-[#14201a]">{cellModal.title}</h3>
+                <p className="text-xs text-[#5f6b63] mt-0.5">{cellModal.items.length} {cellModal.countLabel}{cellModal.items.length === 1 ? '' : 's'}</p>
               </div>
-              <button onClick={() => setCellModal(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">
+              <button onClick={() => setCellModal(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef]">
                 <X size={16} />
               </button>
             </div>
             <div className="overflow-auto">
               <table className="w-full text-xs">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0">
+                <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0">
                   <tr>
                     {cellModal.columns.map(c => (
                       <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'}`}>{c.label}</th>
@@ -4302,7 +4302,7 @@ export function ReportDetailView({
                     const span = cellModal.columns.length + (cellModal.contractIdKey ? 1 : 0);
                     return (
                     <Fragment key={idx}>
-                    <tr className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                    <tr className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                       {cellModal.columns.map(c => (
                         <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${toneText(c.tone, it[c.key])}`}>
                           <CellValue value={it[c.key]} type={c.type} decimals={c.decimals} />
@@ -4313,7 +4313,7 @@ export function ReportDetailView({
                           {it[cellModal.contractIdKey] != null && (
                             <Link
                               href={`${contractsBase}/${it[cellModal.contractIdKey]}/v2`}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline"
                               title="Open contract">
                               Open <ExternalLink size={12} />
                             </Link>
@@ -4324,10 +4324,10 @@ export function ReportDetailView({
                     {history && history.length > 0 && (
                       <tr className="border-t border-[#f0ede8]">
                         <td colSpan={span} className="px-3 pb-3 pt-1 bg-[#fdfcfa]">
-                          <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold mb-1.5">
+                          <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold mb-1.5">
                             What happened to this cheque
                           </div>
-                          <ol className="border-l-2 border-[#e8e6e0] ml-1">
+                          <ol className="border-l-2 border-[#e4e9e5] ml-1">
                             {history.map((h, hi) => (
                               <li key={hi} className="relative pl-4 pb-2 last:pb-0">
                                 <span className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${
@@ -4336,12 +4336,12 @@ export function ReportDetailView({
                                   : h.status === 'pending' ? 'bg-[#b45309]' : 'bg-[#c8c6c0]'}`} />
                                 <div className="flex items-baseline justify-between gap-3">
                                   <div className="min-w-0">
-                                    <span className="text-[12px] font-semibold text-[#1a1916]">{h.event}</span>
-                                    {h.detail && <span className="text-[11px] text-[#6b6860] ml-2">{h.detail}</span>}
+                                    <span className="text-[12px] font-semibold text-[#14201a]">{h.event}</span>
+                                    {h.detail && <span className="text-[11px] text-[#5f6b63] ml-2">{h.detail}</span>}
                                   </div>
                                   <div className="flex items-baseline gap-3 whitespace-nowrap">
-                                    <span className="text-[11px] text-[#9b9890]">{h.date ? fmtDate(h.date) : ''}</span>
-                                    <span className="text-[12px] tabular-nums font-medium text-[#1a1916]">{fmtAmt(h.amountFils)}</span>
+                                    <span className="text-[11px] text-[#8a948d]">{h.date ? fmtDate(h.date) : ''}</span>
+                                    <span className="text-[12px] tabular-nums font-medium text-[#14201a]">{fmtAmt(h.amountFils)}</span>
                                   </div>
                                 </div>
                               </li>

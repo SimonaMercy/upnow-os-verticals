@@ -5,6 +5,9 @@
  *   1. Go-live journey strip — profile → KYC docs → compliance (GATE 1) →
  *      services; each step is server-state-driven and links where the work
  *      happens. Hidden once the account is fully live.
+ *   1b. Job flow — fixed-price and quote flows as stage strips counted from the same
+ *      /bookings response (SpJobFlowCard; zeros + stage meanings when empty). Also
+ *      shown above the live dashboard once the account is job-ready.
  *   2. KPI row — new requests / active jobs / earnings (month) / team size.
  *   3. Pipeline snapshot — per-pipeline counts deep-linking into
  *      /operations?tab=… (same partition logic as the Operations page via
@@ -30,6 +33,7 @@ import { SpReliabilityCard } from '@/components/upnow/SpReliabilityCard';
 import { ProfileCompletionBanner } from '@/components/dashboard/ProfileCompletionBanner';
 import { bookingPipeline, type SpBooking, type SpPipelineTab } from '@/components/upnow/SpOperationsPipelines';
 import { SpLiveOverview } from '@/components/upnow/SpLiveOverview';
+import { SpJobFlowCard } from '@/components/upnow/SpJobFlowCard';
 import { apiGet } from '@/lib/api';
 import {
   Briefcase, CalendarCheck, Star, Wallet, Plus, CheckCircle2, Lock,
@@ -191,6 +195,7 @@ export default function ServiceProviderOverview() {
   const [techCount, setTechCount] = useState(0);
   const [pendingInvites, setPendingInvites] = useState(0);
   const [bookings, setBookings] = useState<SpBooking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
   const [services, setServices] = useState<SpService[]>([]);
   // v2: a landlord-invited light vendor's home IS the job board — the
   // marketplace checklist (KYC, services, job-ready) is the other tier. Its
@@ -215,7 +220,7 @@ export default function ServiceProviderOverview() {
     apiGet<unknown>('/team/technicians').then(d => setTechCount(asArray(d).length)).catch(() => {});
     apiGet<unknown>('/invitations?status=pending').then(d => setPendingInvites(asArray(d).length)).catch(() => {});
     apiGet<unknown>('/service-provider/services').then(d => setServices(asArray<SpService>(d))).catch(() => {});
-    apiGet<unknown>('/bookings').then(d => setBookings(asArray<SpBooking>(d))).catch(() => {});
+    apiGet<unknown>('/bookings').then(d => setBookings(asArray<SpBooking>(d))).catch(() => {}).finally(() => setBookingsLoading(false));
     apiGet<{ jobReady: boolean; cards: Record<string, { complete: boolean }> }>('/service-provider/job-ready').then(setJobReady).catch(() => {});
   }, []);
 
@@ -272,6 +277,7 @@ export default function ServiceProviderOverview() {
     return (
       <div className={grotesk.className} style={{ background: '#F5F7F4', minHeight: '100%', color: '#182420' }}>
         <div className="max-w-7xl mx-auto px-5 py-6">
+          <SpJobFlowCard bookings={bookings} loading={bookingsLoading} />
           <SpLiveOverview businessName={profile?.businessName ?? name} />
         </div>
       </div>
@@ -297,6 +303,9 @@ export default function ServiceProviderOverview() {
 
       {/* Go-live journey */}
       <JourneyStrip steps={steps} />
+
+      {/* The services flow at a glance — real bookings, zeros when there are none */}
+      <SpJobFlowCard bookings={bookings} loading={bookingsLoading} />
 
       {/* Post-approval nudge — approved but not yet job-ready */}
       {Boolean(kyc?.isCompliant) && jobReady && !jobReady.jobReady && (

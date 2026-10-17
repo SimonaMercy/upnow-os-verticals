@@ -44,17 +44,17 @@ const KIND_HINT: Record<VendorKind, string> = {
   landlord: 'e.g. Land Renewal, Main Lease, Sub Lease Tax', internal: 'e.g. Employee Salary',
 };
 
-const field = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2.5 text-sm bg-white text-[#1a1916] placeholder:text-[#b8b5ad] focus:outline-none focus:border-[#2e9f82] focus:ring-2 focus:ring-[#2e9f82]/15 disabled:bg-[#f9f8f6] disabled:text-[#9b9890]';
+const field = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2.5 text-sm bg-white text-[#14201a] placeholder:text-[#b8b5ad] focus:outline-none focus:border-[#047246] focus:ring-2 focus:ring-[#047246]/15 disabled:bg-[#f9f8f6] disabled:text-[#8a948d]';
 const label = 'block text-[12px] font-semibold text-[#4a4842] mb-1';
-const hint = 'text-[11.5px] text-[#9b9890] mt-1';
-const chipCls = (on: boolean, disabled = false) => `px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border transition-colors ${on ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e8e6e0] hover:border-[#c9c6be]'} ${disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`;
+const hint = 'text-[11.5px] text-[#8a948d] mt-1';
+const chipCls = (on: boolean, disabled = false) => `px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border transition-colors ${on ? 'bg-[#047246] text-white border-[#047246]' : 'bg-white text-[#5f6b63] border-[#e4e9e5] hover:border-[#c9c6be]'} ${disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`;
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
     <section className="grid gap-3">
       <div className="flex items-baseline gap-2 border-b border-[#f0eee8] pb-1.5">
         <h3 className="text-[11px] font-bold tracking-[.08em] uppercase text-[#8a8f8c]">{title}</h3>
-        {sub && <span className="text-[11.5px] text-[#9b9890]">{sub}</span>}
+        {sub && <span className="text-[11.5px] text-[#8a948d]">{sub}</span>}
       </div>
       {children}
     </section>
@@ -147,10 +147,10 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
         onSubmit={e => { e.preventDefault(); if (!busy) void submit(); }}>
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-[#f0eee8] sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-lg font-bold text-[#1a1916]">{mode === 'add' ? 'Add a vendor' : 'Edit vendor'}</h2>
-            <p className="text-[12.5px] text-[#9b9890] mt-0.5">{mode === 'add' ? 'Your roster — service companies, your own crew, and the records behind your expenses.' : `Your record of ${v?.name ?? 'this vendor'}.`}</p>
+            <h2 className="text-lg font-bold text-[#14201a]">{mode === 'add' ? 'Add a vendor' : 'Edit vendor'}</h2>
+            <p className="text-[12.5px] text-[#8a948d] mt-0.5">{mode === 'add' ? 'Your roster — service companies, your own crew, and the records behind your expenses.' : `Your record of ${v?.name ?? 'this vendor'}.`}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer mt-1" aria-label="Close"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer mt-1" aria-label="Close"><X size={18} /></button>
         </div>
 
         <div className="px-6 py-5 grid gap-6">
@@ -176,7 +176,7 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                 {newCat ? (
                   <div className="flex items-center gap-2">
                     <input id="vf-category" autoFocus className={field} placeholder={KIND_HINT[kind]} value={category} onChange={e => setCategory(e.target.value)} />
-                    <button type="button" onClick={() => { setNewCat(false); setCategory(''); }} className="text-[11px] text-[#9b9890] hover:text-[#1a1916] cursor-pointer whitespace-nowrap">Pick existing</button>
+                    <button type="button" onClick={() => { setNewCat(false); setCategory(''); }} className="text-[11px] text-[#8a948d] hover:text-[#14201a] cursor-pointer whitespace-nowrap">Pick existing</button>
                   </div>
                 ) : (
                   <select id="vf-category" className={field} value={categoryId ?? ''} onChange={e => {
@@ -230,11 +230,11 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                 <input id="vf-address" className={field} placeholder="Office / yard address" value={address} onChange={e => setAddress(e.target.value)} />
               </div>
               <div>
-                <label className={label} htmlFor="vf-trn">TRN <span className="font-normal text-[#9b9890]">— VAT registration, from their tax invoice</span></label>
+                <label className={label} htmlFor="vf-trn">TRN <span className="font-normal text-[#8a948d]">— VAT registration, from their tax invoice</span></label>
                 <input id="vf-trn" className={field} inputMode="numeric" maxLength={15} placeholder="15 digits, e.g. 100314979400003" value={trn} onChange={e => setTrn(e.target.value.replace(/\D/g, ''))} />
               </div>
             </div>
-            <div className="rounded-xl border border-[#f0eee8] bg-[#fafaf8] p-3 grid gap-3">
+            <div className="rounded-xl border border-[#f0eee8] bg-[#f6f8f6] p-3 grid gap-3">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-[12px] font-semibold text-[#4a4842]">Trade licence</span>
                 {existingDoc && !licFile && (
@@ -253,10 +253,10 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
                   {licExpiry && licExpiry < today && <p className="text-[11.5px] text-[#b91c1c] mt-1 font-semibold">Expired</p>}
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs text-[#6b6860] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-white">
-                <UploadCloud size={14} className="text-[#2e9f82]" />
+              <label className="flex items-center gap-2 text-xs text-[#5f6b63] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-white">
+                <UploadCloud size={14} className="text-[#047246]" />
                 <span className="flex-1 truncate">{licFile ? licFile.name : existingDoc ? 'Replace the copy on file' : 'Attach a copy — PDF or photo'}</span>
-                {licFile && <button type="button" onClick={e => { e.preventDefault(); setLicFile(null); }} className="text-[#9b9890] hover:text-[#b91c1c] cursor-pointer" aria-label="Remove file"><X size={13} /></button>}
+                {licFile && <button type="button" onClick={e => { e.preventDefault(); setLicFile(null); }} className="text-[#8a948d] hover:text-[#b91c1c] cursor-pointer" aria-label="Remove file"><X size={13} /></button>}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,image/*,application/pdf" onChange={e => setLicFile(e.target.files?.[0] ?? null)} />
               </label>
             </div>
@@ -304,10 +304,10 @@ export function VendorForm({ mode, initial, groups, onClose, onDone, base = '/ma
         </div>
 
         <div className="px-6 py-4 border-t border-[#f0eee8] flex items-center justify-between gap-3 sticky bottom-0 bg-white">
-          <p className="text-[11.5px] text-[#9b9890] flex-1">{mode === 'add' && service ? 'Adding only records them — send the invitation from their page when ready.' : ''}</p>
+          <p className="text-[11.5px] text-[#8a948d] flex-1">{mode === 'add' && service ? 'Adding only records them — send the invitation from their page when ready.' : ''}</p>
           <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="h-10 px-4 rounded-xl text-sm font-semibold text-[#6b6860] border border-[#e8e6e0] bg-white hover:border-[#c9c6be] cursor-pointer">Cancel</button>
-            <button type="submit" disabled={!!busy} className="h-10 px-5 rounded-xl text-sm font-bold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+            <button type="button" onClick={onClose} className="h-10 px-4 rounded-xl text-sm font-semibold text-[#5f6b63] border border-[#e4e9e5] bg-white hover:border-[#c9c6be] cursor-pointer">Cancel</button>
+            <button type="submit" disabled={!!busy} className="h-10 px-5 rounded-xl text-sm font-bold text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
               {busy ?? (mode === 'add' ? 'Add vendor' : 'Save changes')}
             </button>
           </div>

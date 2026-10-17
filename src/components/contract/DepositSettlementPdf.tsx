@@ -33,12 +33,12 @@ const isImg = (s: string | null | undefined): s is string => typeof s === 'strin
 
 const NAVY = '#1a3c6e';
 const s = StyleSheet.create({
-  page: { paddingTop: 36, paddingBottom: 44, paddingHorizontal: 40, fontSize: 10, color: '#1a1916', fontFamily: 'Helvetica' },
+  page: { paddingTop: 36, paddingBottom: 44, paddingHorizontal: 40, fontSize: 10, color: '#14201a', fontFamily: 'Helvetica' },
   h1: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: NAVY },
-  sub: { fontSize: 9, color: '#6b6860', marginTop: 2 },
+  sub: { fontSize: 9, color: '#5f6b63', marginTop: 2 },
   metaRow: { flexDirection: 'row', marginTop: 14, gap: 24 },
   metaCol: { flexGrow: 1 },
-  metaLabel: { fontSize: 8, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.5 },
+  metaLabel: { fontSize: 8, color: '#8a948d', textTransform: 'uppercase', letterSpacing: 0.5 },
   metaVal: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 1 },
   sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: NAVY, marginTop: 20, marginBottom: 6, borderBottom: '1px solid #e3e0d9', paddingBottom: 3 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, borderBottom: '0.5px solid #f0ede7' },
@@ -51,8 +51,8 @@ const s = StyleSheet.create({
   sigRow: { flexDirection: 'row', gap: 40, marginTop: 34 },
   sigCol: { flexGrow: 1 },
   sigImg: { height: 44, marginBottom: 4, objectFit: 'contain' },
-  sigLine: { borderTop: '1px solid #1a1916', paddingTop: 3, fontSize: 9, color: '#6b6860' },
-  muted: { fontSize: 9, color: '#9b9890' },
+  sigLine: { borderTop: '1px solid #14201a', paddingTop: 3, fontSize: 9, color: '#5f6b63' },
+  muted: { fontSize: 9, color: '#8a948d' },
 });
 
 export default function DepositSettlementPdf({ data }: { data: SettlementPdfData }) {

@@ -1,18 +1,31 @@
 /**
- * RP Contracts list — minimal table of every contract under this RP.
+ * RP Contracts list — every contract under this RP (Genspark OS layout).
  *
  * Route: /rental-provider/dashboard/contracts
  *
  * The detail page's back arrow lands here. Also the destination of the dashboard's
- * "All contracts" link. Lists every contract from GET /api/contracts.
+ * "All contracts" link and the prototype `/prototype/os/rp/contracts` re-export.
+ *
+ * Parity with previous page:
+ *  - [x] GET /api/contracts — company customers relabelled by company name (tenantDisplayName).
+ *  - [x] Search over ref, customer, email, unit name/number, building, status, contract type.
+ *  - [x] "N contracts" count, loading / error / empty states (same copy).
+ *  - [x] Columns: Contract (ref link + RENEWAL chip), Customer (+ email), Unit (+ building),
+ *        Period, Annual rent (AED, as the API returns it), Status (+ "↻ Renewal <status>" chip).
+ *  - [x] Ref link → /rental-provider/dashboard/contracts/:id/v2 (row click + labelled "Open" too).
+ *  - [x] "Back to dashboard" link (now a labelled button in the page head).
+ *  - No "New contract" here, as before — this is a read surface; the Leases page carries it.
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, FileText, Loader2, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { tenantDisplayName } from '@/lib/tenantName';
+import {
+  OsPage, PageHead, Pill, Btn, TableWrap, SearchField, SkeletonRows, EmptyRow, Callout, fmtAed, type Tone,
+} from '@/components/os/kit';
 
 interface RpContract {
   id: number;
@@ -32,23 +45,21 @@ interface RpContract {
   property?: { id?: number | null; buildingName?: string | null };
 }
 
-const STATUS_PILL: Record<string, { bg: string; text: string; label: string }> = {
-  active:     { bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]', label: 'Active' },
-  issued:     { bg: 'bg-[#fef3c7]', text: 'text-[#854d0e]', label: 'Issued' },
-  pending:    { bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', label: 'Pending' },
-  terminated: { bg: 'bg-[#fee2e2]', text: 'text-[#b91c1c]', label: 'Terminated' },
-  expired:    { bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', label: 'Expired' },
+const STATUS_PILL: Record<string, { tone: Tone; label: string }> = {
+  active:     { tone: 'primary', label: 'Active' },
+  issued:     { tone: 'amber',   label: 'Issued' },
+  pending:    { tone: 'neutral', label: 'Pending' },
+  terminated: { tone: 'danger',  label: 'Terminated' },
+  expired:    { tone: 'neutral', label: 'Expired' },
 };
 
-function fmtAed(v: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(v);
-}
 function fmtDate(d: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export default function ContractsListPage() {
+  const router = useRouter();
   const [contracts, setContracts] = useState<RpContract[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,105 +90,61 @@ export default function ContractsListPage() {
   }, [contracts, q]);
 
   return (
-    <div className="min-h-screen bg-[#f7f6f2]">
-      <div className="bg-white border-b border-[#e8e6e0] px-4 sm:px-6 py-4 sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link href="/rental-provider/dashboard" className="text-[#6b6860] hover:text-[#1a1916]" title="Back to dashboard">
-              <ArrowLeft size={18} />
-            </Link>
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-[#1a1916]">All Contracts</p>
-              <p className="text-[11px] text-[#9b9890] mt-0.5">{loading ? 'Loading…' : `${filtered.length} contract${filtered.length === 1 ? '' : 's'}`}</p>
-            </div>
-          </div>
-          {/* No "New Contract" here — contract lists are read/edit surfaces.
-              Leases start from a lead or the Add-customer flow, mirroring the
-              Leases register. */}
-        </div>
-      </div>
+    <OsPage>
+      <PageHead
+        eyebrow="Operations › Long-term leases"
+        title="All contracts"
+        lede={loading ? 'Every contract under your account — every status, every renewal cycle.' : `${filtered.length} contract${filtered.length === 1 ? '' : 's'} — every status, every renewal cycle.`}
+        actions={<Btn href="/rental-provider/dashboard">Back to dashboard</Btn>}
+      />
 
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-        {/* Search */}
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input
-            type="text"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Search by reference, customer, unit, building…"
-            className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]"
-          />
-        </div>
+      {error && <Callout tone="bad" title="Couldn't load contracts.">{error}</Callout>}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">{error}</div>
-        )}
-
-        {loading ? (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 flex items-center justify-center">
-            <Loader2 size={20} className="animate-spin text-[#2e9f82]" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
-            <FileText size={24} className="mx-auto text-[#c8c6c0] mb-3" />
-            <p className="text-sm font-semibold text-[#1a1916]">No contracts found</p>
-            <p className="text-xs text-[#9b9890] mt-1">{q ? 'Try a different search term.' : 'Create your first contract to get started.'}</p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold">Contract</th>
-                    <th className="px-4 py-3 text-left font-semibold">Customer</th>
-                    <th className="px-4 py-3 text-left font-semibold">Unit</th>
-                    <th className="px-4 py-3 text-left font-semibold">Period</th>
-                    <th className="px-4 py-3 text-right font-semibold">Annual Rent</th>
-                    <th className="px-4 py-3 text-left font-semibold">Status</th>
+      <TableWrap toolbar={<SearchField value={q} onChange={setQ} placeholder="Search by reference, customer, unit, building…" />}>
+        <table className="gx-tbl">
+          <thead>
+            <tr>
+              <th>Contract</th><th>Customer</th><th>Unit</th><th>Period</th>
+              <th className="num">Annual rent</th><th>Status</th><th className="act">Actions</th>
+            </tr>
+          </thead>
+          {loading ? <SkeletonRows rows={6} cols={7} /> : filtered.length === 0 ? (
+            <EmptyRow cols={7} title="No contracts found" text={q ? ' Try a different search term.' : ' Create your first contract to get started.'} />
+          ) : (
+            <tbody>
+              {filtered.map(c => {
+                const status = STATUS_PILL[c.status] ?? { tone: 'neutral' as Tone, label: c.status };
+                const href = `/rental-provider/dashboard/contracts/${c.id}/v2`;
+                return (
+                  <tr key={c.id} className="click" onClick={() => router.push(href)}>
+                    <td>
+                      <Link href={href} className="strong" onClick={e => e.stopPropagation()}>{c.ref}</Link>
+                      {c.contractType === 'renewal' && <> <Pill tone="amber" dot={false}>Renewal</Pill></>}
+                    </td>
+                    <td>
+                      <span className="strong">{c.tenant.name ?? '—'}</span>
+                      {c.tenant.email && <span className="sub">{c.tenant.email}</span>}
+                    </td>
+                    <td>
+                      {c.unit.number ? `Unit ${c.unit.number}` : (c.unit.name ?? '—')}
+                      {c.property?.buildingName && <span className="sub">{c.property.buildingName}</span>}
+                    </td>
+                    <td className="nowrap">{fmtDate(c.startDate)}<span className="sub">→ {fmtDate(c.endDate)}</span></td>
+                    <td className="num strong">{fmtAed(c.annualRent)}</td>
+                    <td>
+                      <Pill tone={status.tone}>{status.label}</Pill>
+                      {c.renewalStatus && <span className="sub"><Pill tone="amber" dot={false}>↻ Renewal {c.renewalStatus}</Pill></span>}
+                    </td>
+                    <td className="act" onClick={e => e.stopPropagation()}>
+                      <Btn size="xs" variant="primary" href={href}>Open</Btn>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(c => {
-                    const status = STATUS_PILL[c.status] ?? { bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]', label: c.status };
-                    return (
-                      <tr key={c.id} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] transition-colors">
-                        <td className="px-4 py-3">
-                          <Link href={`/rental-provider/dashboard/contracts/${c.id}/v2`} className="font-semibold text-[#1a1916] hover:text-[#2e9f82]">
-                            {c.ref}
-                          </Link>
-                          {c.contractType === 'renewal' && (
-                            <span className="ml-1.5 inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#fef3c7] text-[#854d0e]">RENEWAL</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="text-[#1a1916] truncate">{c.tenant.name ?? '—'}</p>
-                          {c.tenant.email && <p className="text-[11px] text-[#9b9890] truncate">{c.tenant.email}</p>}
-                        </td>
-                        <td className="px-4 py-3 text-[#6b6860]">
-                          <p className="truncate">{c.unit.number ? `Unit ${c.unit.number}` : (c.unit.name ?? '—')}</p>
-                          {c.property?.buildingName && <p className="text-[11px] text-[#9b9890] truncate">{c.property.buildingName}</p>}
-                        </td>
-                        <td className="px-4 py-3 text-[12px] text-[#6b6860]">
-                          {fmtDate(c.startDate)}<br />→ {fmtDate(c.endDate)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold text-[#1a1916]">{fmtAed(c.annualRent)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${status.bg} ${status.text}`}>{status.label}</span>
-                          {c.renewalStatus && (
-                            <div className="mt-1 inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#fef3c7] text-[#854d0e]">↻ Renewal {c.renewalStatus}</div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+                );
+              })}
+            </tbody>
+          )}
+        </table>
+      </TableWrap>
+    </OsPage>
   );
 }

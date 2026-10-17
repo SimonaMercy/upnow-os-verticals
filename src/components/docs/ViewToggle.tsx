@@ -18,7 +18,7 @@ export function ViewToggle({
   return (
     <div style={{
       display: 'inline-flex',
-      border: '1px solid #e8e6e0',
+      border: '1px solid #e4e9e5',
       borderRadius: 7,
       overflow: 'hidden',
       backgroundColor: '#ffffff',
@@ -32,8 +32,8 @@ export function ViewToggle({
             style={{
               padding: '4px 11px',
               border: 'none',
-              backgroundColor: isActive ? '#f0faf6' : 'transparent',
-              color: isActive ? '#1a5a4a' : '#9b9890',
+              backgroundColor: isActive ? '#eef7f2' : 'transparent',
+              color: isActive ? '#0f4f36' : '#8a948d',
               fontWeight: isActive ? 700 : 500,
               fontSize: 11,
               cursor: 'pointer',

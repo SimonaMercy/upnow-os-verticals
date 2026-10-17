@@ -350,7 +350,7 @@ export function StartNoticeModal({ base, rp, leaseId, onClose, onSaved }: {
                       <div className="px-3 py-2 text-[12px] text-[#8a8f8c]">No lease matches.</div>
                     ) : leaseOptions.slice(0, 8).map(l => (
                       <button key={l.id} type="button" onClick={() => setLease(String(l.id))}
-                        className="w-full text-left px-3 py-2 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#f0faf6] cursor-pointer">
+                        className="w-full text-left px-3 py-2 text-[12.5px] border-b border-[#f1f3f1] last:border-0 hover:bg-[#eef7f2] cursor-pointer">
                         <div className="font-medium truncate">{leaseLine(l)}</div>
                         <div className="text-[11px] text-[#8a8f8c]">{fmtD(l.startDate)} → {fmtD(l.endDate)} · annual rent {money(l.annualRent)}</div>
                       </button>

@@ -1,20 +1,20 @@
 /* UpNow RP unit forms — Claude-Design handoff build (shared).
    Used by the full-page "Add Units" experience (.app) AND the edit modals
    (.modalCard): per-unit "Edit Unit" (UnitFormModal) + plan-wide "By Layout"
-   (FinancialsModal). Same token system, app green (#2e9f82), font inherited. */
+   (FinancialsModal). Same token system, app green (#047246), font inherited. */
 
 .app, .modalCard {
-  --green:    #2e9f82;
+  --green:    #047246;
   --green-d:  #1a7a5a;
-  --green-t:  #d8f2e8;
+  --green-t:  #d8efe3;
   --green-t2: #ebf8f2;
   --green-t3: #f0fdf8;
-  --ink:    #1a1916;
-  --ink-2:  #3d3b35;
+  --ink:    #14201a;
+  --ink-2:  #46534c;
   --ink-3:  #5a635c;
-  --mute:   #9b9890;
+  --mute:   #8a948d;
   --mute-2: #b0ae9a;
-  --line:    #e8e6e0;
+  --line:    #e4e9e5;
   --line-2:  #f0eeea;
   --paper:   #fbfcfb;
   --paper-2: #f6f8f5;
@@ -40,7 +40,7 @@
 .app input:focus, .app textarea:focus, .app select:focus,
 .modalCard input:focus, .modalCard textarea:focus, .modalCard select:focus {
   border-color: var(--green) !important;
-  box-shadow: 0 0 0 3px rgba(46,159,130,.12);
+  box-shadow: 0 0 0 3px rgba(4,114,70,.12);
 }
 
 /* ── Modal shell (edit modals) ────────────────────────── */
@@ -399,7 +399,7 @@
 .saveBtn {
   display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #fff;
   background: var(--green); border: none; padding: 12px 24px; border-radius: 11px; cursor: pointer;
-  box-shadow: 0 6px 16px rgba(46,159,130,.26);
+  box-shadow: 0 6px 16px rgba(4,114,70,.26);
 }
 .saveBtn:hover { background: var(--green-d); }
 .saveBtn:disabled { opacity: .55; cursor: default; box-shadow: none; }

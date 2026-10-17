@@ -240,16 +240,16 @@ export function PortfolioMapView({
     <div>
       <div className={`relative ${heightClass}`}>
         {error ? (
-          <div className="h-full w-full rounded-xl bg-[#f4f3ef] border border-[#e8e6e0] flex items-center justify-center text-sm text-[#9b9890]">
+          <div className="h-full w-full rounded-xl bg-[#eef1ef] border border-[#e4e9e5] flex items-center justify-center text-sm text-[#8a948d]">
             <MapPin size={16} className="mr-2 text-[#c9c7c1]" />
             {error}
           </div>
         ) : (
           <>
-            <div ref={containerRef} className="h-full w-full rounded-xl overflow-hidden border border-[#e8e6e0]" />
+            <div ref={containerRef} className="h-full w-full rounded-xl overflow-hidden border border-[#e4e9e5]" />
             {!mapLoaded && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#f4f3ef] text-xs text-[#9b9890]">
-                <Loader2 size={16} className="mr-2 animate-spin text-[#2e9f82]" />
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-[#eef1ef] text-xs text-[#8a948d]">
+                <Loader2 size={16} className="mr-2 animate-spin text-[#047246]" />
                 Loading map…
               </div>
             )}
@@ -269,7 +269,7 @@ export function PortfolioMapView({
       </div>
 
       {missing.length > 0 && (
-        <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#e8e6e0] bg-[#fef3c7] px-3 py-2">
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#e4e9e5] bg-[#fef3c7] px-3 py-2">
           <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#fef3c7] text-[#854d0e] border border-[#854d0e]/20 shrink-0 mt-0.5">
             {missing.length} unpinned
           </span>
@@ -280,11 +280,11 @@ export function PortfolioMapView({
         </div>
       )}
       {/* Pin legend */}
-      <div className="flex items-center gap-4 mt-2 text-[11px] text-[#6b6860] flex-wrap">
+      <div className="flex items-center gap-4 mt-2 text-[11px] text-[#5f6b63] flex-wrap">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#1B4DB1] border-2 border-white shadow" /> Fully occupied</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#C026A3] border-2 border-white shadow" /> Has vacancies</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#3F3F46] border-2 border-white shadow" /> No unit data</span>
-        <span className="text-[#9b9890]">· number on the pin = units · tap a pin for details</span>
+        <span className="text-[#8a948d]">· number on the pin = units · tap a pin for details</span>
       </div>
     </div>
   );
@@ -336,7 +336,7 @@ function MapDetailCard({
       {/* Body */}
       <div className="flex flex-col gap-1.5 p-3.5">
         <div className="flex items-start gap-2">
-          <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[#1a1916]">{property.buildingName}</h3>
+          <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[#14201a]">{property.buildingName}</h3>
           {property.spaceCategory && (
             <span className="shrink-0 rounded-full bg-[#f1efe9] px-2 py-0.5 text-[11px] font-semibold text-[#57544d]">
               {categoryDisplayLabel(property.spaceCategory)}
@@ -352,8 +352,8 @@ function MapDetailCard({
         )}
 
         {(property.fullAddress || hasPin) && (
-          <p className="flex items-center gap-1 truncate text-xs text-[#6b6860]">
-            <MapPin size={12} className="shrink-0" style={{ color: hasPin ? '#2e9f82' : '#c5c3bc' }} />
+          <p className="flex items-center gap-1 truncate text-xs text-[#5f6b63]">
+            <MapPin size={12} className="shrink-0" style={{ color: hasPin ? '#047246' : '#c5c3bc' }} />
             {property.fullAddress ?? 'Pinned on map'}
           </p>
         )}
@@ -361,7 +361,7 @@ function MapDetailCard({
         {(occupied != null || vacant != null) && (
           <div className="flex items-center gap-3 text-xs text-[#57544d]">
             {occupied != null && (
-              <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-[#2e9f82]" />{occupied} occupied</span>
+              <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-[#047246]" />{occupied} occupied</span>
             )}
             {vacant != null && (
               <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-[#d97706]" />{vacant} vacant</span>
@@ -371,8 +371,8 @@ function MapDetailCard({
 
         {property.rentTotal != null && property.rentTotal > 0 && (
           <div className="whitespace-nowrap">
-            <span className="text-lg font-bold text-[#2e9f82]">AED {Math.round(property.rentTotal).toLocaleString('en-AE')}</span>
-            <span className="ml-0.5 text-xs text-[#6b6860]">/yr</span>
+            <span className="text-lg font-bold text-[#047246]">AED {Math.round(property.rentTotal).toLocaleString('en-AE')}</span>
+            <span className="ml-0.5 text-xs text-[#5f6b63]">/yr</span>
           </div>
         )}
 
@@ -382,7 +382,7 @@ function MapDetailCard({
               <button
                 type="button"
                 onClick={() => onViewDetails(property.id)}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#2e9f82] px-3 py-2 text-[13px] font-semibold text-white hover:bg-[#268a70]"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#047246] px-3 py-2 text-[13px] font-semibold text-white hover:bg-[#268a70]"
               >
                 View details <ArrowRight size={14} />
               </button>
@@ -393,7 +393,7 @@ function MapDetailCard({
                 onClick={() => onEdit(property.id)}
                 aria-label="Edit property"
                 title="Edit property"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef]"
               >
                 <Pencil size={15} />
               </button>

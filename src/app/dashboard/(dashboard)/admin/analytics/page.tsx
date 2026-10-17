@@ -47,38 +47,38 @@ const ROLE_LABELS: Record<string, string> = {
   service_provider: 'Service Providers', super_admin: 'Internal',
 };
 
-const tip = { borderRadius: 10, border: '1px solid #e8e6e0', fontSize: 12 };
+const tip = { borderRadius: 10, border: '1px solid #e4e9e5', fontSize: 12 };
 const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 function Card({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-5">
-      <div className="mb-3"><h3 className="text-sm font-bold text-[#3f3d39]">{title}</h3>{sub && <p className="text-xs text-[#9b9890]">{sub}</p>}</div>
+    <div className="rounded-2xl border border-[#e4e9e5] bg-white p-5">
+      <div className="mb-3"><h3 className="text-sm font-bold text-[#3f3d39]">{title}</h3>{sub && <p className="text-xs text-[#8a948d]">{sub}</p>}</div>
       {children}
     </div>
   );
 }
 function Kpi({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string | number; sub?: string }) {
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4">
-      <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold flex items-center gap-1.5">{icon}{label}</div>
-      <div className="text-2xl font-bold text-[#1a1916] mt-1 tabular-nums">{value}</div>
-      {sub && <div className="text-xs text-[#9b9890] mt-0.5">{sub}</div>}
+    <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4">
+      <div className="text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold flex items-center gap-1.5">{icon}{label}</div>
+      <div className="text-2xl font-bold text-[#14201a] mt-1 tabular-nums">{value}</div>
+      {sub && <div className="text-xs text-[#8a948d] mt-0.5">{sub}</div>}
     </div>
   );
 }
 function Empty({ msg }: { msg: string }) {
-  return <div className="h-[180px] grid place-items-center text-sm text-[#9b9890]">{msg}</div>;
+  return <div className="h-[180px] grid place-items-center text-sm text-[#8a948d]">{msg}</div>;
 }
-function HBar({ data, color = '#2e9f82' }: { data: NV[]; color?: string }) {
+function HBar({ data, color = '#047246' }: { data: NV[]; color?: string }) {
   if (!data.length) return <Empty msg="No data yet" />;
   return (
     <ResponsiveContainer width="100%" height={Math.max(180, data.length * 30)}>
       <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} allowDecimals={false} />
-        <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} tickFormatter={titleCase} />
-        <Tooltip contentStyle={tip} cursor={{ fill: '#fafaf8' }} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} allowDecimals={false} />
+        <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: '#5f6b63' }} axisLine={false} tickLine={false} tickFormatter={titleCase} />
+        <Tooltip contentStyle={tip} cursor={{ fill: '#f6f8f6' }} />
         <Bar dataKey="value" radius={[0, 4, 4, 0]} fill={color} />
       </BarChart>
     </ResponsiveContainer>
@@ -112,7 +112,7 @@ export default function AdminAnalyticsPage() {
       {/* ── Platform activity (from the Activity board, last 30 days) ── */}
       <section>
         <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-lg font-bold text-[#1a1916]">Platform activity · last 30 days</h2>
+          <h2 className="text-lg font-bold text-[#14201a]">Platform activity · last 30 days</h2>
           <Link href="/dashboard/admin/activity" className="text-sm font-semibold text-[#2a78d6] hover:underline">
             Open live Activity board →
           </Link>
@@ -134,9 +134,9 @@ export default function AdminAnalyticsPage() {
                     <span className="w-5 text-xs font-bold text-[#c4c2bc] shrink-0 tabular-nums">{i + 1}</span>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-[#3f3d39] truncate">{l.unit}</div>
-                      <div className="text-xs text-[#9b9890] truncate">{l.property}</div>
+                      <div className="text-xs text-[#8a948d] truncate">{l.property}</div>
                     </div>
-                    <span className="text-xs text-[#6b6860] shrink-0 tabular-nums">{l.views.toLocaleString('en-US')} views · {l.visitors} vis</span>
+                    <span className="text-xs text-[#5f6b63] shrink-0 tabular-nums">{l.views.toLocaleString('en-US')} views · {l.visitors} vis</span>
                     <span className={`text-xs font-semibold shrink-0 tabular-nums ${l.leads > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{l.leads} leads</span>
                     <ChevronRight size={14} className="text-[#c4c2bc] shrink-0" />
                   </Link>
@@ -150,7 +150,7 @@ export default function AdminAnalyticsPage() {
 
       {/* ── RP analytics ── */}
       <section>
-        <h2 className="text-lg font-bold text-[#1a1916] mb-3">Rental Provider analytics</h2>
+        <h2 className="text-lg font-bold text-[#14201a] mb-3">Rental Provider analytics</h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Kpi icon={<Users size={12} />} label="Active customers" value={rp?.activeCustomers ?? '—'} />
           <Kpi icon={<Home size={12} />} label="Total units" value={rp?.occupancy.total ?? '—'} sub={rp ? `${rp.occupancy.occupied} occupied · ${rp.occupancy.vacant} vacant` : ''} />
@@ -158,15 +158,15 @@ export default function AdminAnalyticsPage() {
           <Kpi icon={<Building2 size={12} />} label="Listed units" value={rp?.occupancy.listed ?? '—'} />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card title="Unit mix" sub="Units by type"><HBar data={rp?.unitMix ?? []} color="#2e9f82" /></Card>
+          <Card title="Unit mix" sub="Units by type"><HBar data={rp?.unitMix ?? []} color="#047246" /></Card>
           <Card title="Rental income by year" sub="Active leases, annual rent">
             {rp && rp.rentalByYear.length ? (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={rp.rentalByYear} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-                  <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={52} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} />
-                  <Tooltip contentStyle={tip} cursor={{ fill: '#fafaf8' }} formatter={(v: unknown) => [`AED ${Number(v).toLocaleString('en-AE')}`, 'Rent']} />
+                  <XAxis dataKey="year" tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={52} tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} />
+                  <Tooltip contentStyle={tip} cursor={{ fill: '#f6f8f6' }} formatter={(v: unknown) => [`AED ${Number(v).toLocaleString('en-AE')}`, 'Rent']} />
                   <Bar dataKey="total" radius={[4, 4, 0, 0]} fill="#1f5a3f" />
                 </BarChart>
               </ResponsiveContainer>
@@ -179,7 +179,7 @@ export default function AdminAnalyticsPage() {
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Pie data={[{ name: 'Occupied', value: rp.occupancy.occupied }, { name: 'Vacant', value: rp.occupancy.vacant }, { name: 'Other', value: Math.max(0, rp.occupancy.total - rp.occupancy.occupied - rp.occupancy.vacant) }]} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2}>
-                    {[0, 1, 2].map((i) => <Cell key={i} fill={['#2e9f82', '#d97706', '#d6d3cd'][i]} />)}
+                    {[0, 1, 2].map((i) => <Cell key={i} fill={['#047246', '#d97706', '#d6d3cd'][i]} />)}
                   </Pie>
                   <Tooltip contentStyle={tip} />
                 </PieChart>
@@ -191,9 +191,9 @@ export default function AdminAnalyticsPage() {
               <div className="divide-y divide-[#f0ede8] -mx-1 max-h-[200px] overflow-auto">
                 {managers.map((m) => (
                   <Link key={m.id} href={`/dashboard/admin/users/${m.id}`} className="flex items-center gap-2 px-1 py-2 hover:bg-[#faf9f7] rounded transition">
-                    <span className="w-7 h-7 rounded-full bg-[#f4f3ef] grid place-items-center text-xs font-bold text-[#6b6860] shrink-0">{(m.name || '?').slice(0, 1).toUpperCase()}</span>
-                    <div className="min-w-0 flex-1"><div className="text-sm font-medium text-[#3f3d39] truncate">{m.name}</div><div className="text-xs text-[#9b9890] truncate">{m.email}</div></div>
-                    <span className="text-xs text-[#6b6860] shrink-0">{m.landlordCount} RP</span>
+                    <span className="w-7 h-7 rounded-full bg-[#eef1ef] grid place-items-center text-xs font-bold text-[#5f6b63] shrink-0">{(m.name || '?').slice(0, 1).toUpperCase()}</span>
+                    <div className="min-w-0 flex-1"><div className="text-sm font-medium text-[#3f3d39] truncate">{m.name}</div><div className="text-xs text-[#8a948d] truncate">{m.email}</div></div>
+                    <span className="text-xs text-[#5f6b63] shrink-0">{m.landlordCount} RP</span>
                     <ChevronRight size={14} className="text-[#c4c2bc] shrink-0" />
                   </Link>
                 ))}
@@ -205,7 +205,7 @@ export default function AdminAnalyticsPage() {
 
       {/* ── SP analytics ── */}
       <section>
-        <h2 className="text-lg font-bold text-[#1a1916] mb-3">Service Provider analytics</h2>
+        <h2 className="text-lg font-bold text-[#14201a] mb-3">Service Provider analytics</h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Kpi icon={<Building2 size={12} />} label="Providers" value={sp?.providers ?? '—'} />
           <Kpi icon={<Wrench size={12} />} label="Active technicians" value={sp?.technicians.active ?? '—'} sub={sp ? `${sp.technicians.total} total` : ''} />
@@ -221,7 +221,7 @@ export default function AdminAnalyticsPage() {
           <Card title="Technicians" sub="Active workforce">
             {sp ? (
               <div className="h-[180px] grid place-items-center">
-                <div className="text-center"><MapPin className="mx-auto text-[#c4c2bc] mb-2" size={28} /><div className="text-4xl font-bold text-[#1a1916]">{sp.technicians.active}</div><div className="text-sm text-[#9b9890]">active of {sp.technicians.total}</div></div>
+                <div className="text-center"><MapPin className="mx-auto text-[#c4c2bc] mb-2" size={28} /><div className="text-4xl font-bold text-[#14201a]">{sp.technicians.active}</div><div className="text-sm text-[#8a948d]">active of {sp.technicians.total}</div></div>
               </div>
             ) : <Empty msg="—" />}
           </Card>

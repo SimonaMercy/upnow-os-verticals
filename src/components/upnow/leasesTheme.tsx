@@ -3,7 +3,7 @@
  * UpNow marketspace design: Plus Jakarta Sans for the interface, Roboto Serif
  * for page titles. Both are self-hosted (public/fonts/marketspace, declared in
  * globals.css), so nothing is fetched at build time. Scoped to these views via
- * `.leases-theme`; the rest of the app keeps Manrope. Also carries the print fix.
+ * `.leases-theme` (the rest of the app now uses the same font globally). Also carries the print fix.
  */
 const CSS = `
 /* Marketspace look: Plus Jakarta Sans for the interface, Roboto Serif for page titles. */

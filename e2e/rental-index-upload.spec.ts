@@ -214,8 +214,8 @@ test.describe.serial('Rental Index Report upload — Issue + Edit Payment Plan',
     // Upload widget should be gone; green file card should replace it
     await expect(page.getByText('Attach PDF or image')).not.toBeVisible({ timeout: 5_000 });
 
-    // Green-bordered file card must be visible (bg-[#f0faf6] + border-[#2e9f82] is unique to the card)
-    const fileCard = page.locator('[class*="bg-[#f0faf6]"][class*="border-[#2e9f82]"]').first();
+    // Green-bordered file card must be visible (bg-[#eef7f2] + border-[#047246] is unique to the card)
+    const fileCard = page.locator('[class*="bg-[#eef7f2]"][class*="border-[#047246]"]').first();
     await expect(fileCard).toBeVisible();
 
     // "View" link inside the file card
@@ -268,7 +268,7 @@ test.describe.serial('Rental Index Report upload — Issue + Edit Payment Plan',
     // The plan form opens; the file card should already show (state synced from existing plan URL)
     await expect(page.getByText('Attach PDF or image')).not.toBeVisible({ timeout: 6_000 });
 
-    const fileCard = page.locator('[class*="bg-[#f0faf6]"][class*="border-[#2e9f82]"]').first();
+    const fileCard = page.locator('[class*="bg-[#eef7f2]"][class*="border-[#047246]"]').first();
     await expect(fileCard).toBeVisible({ timeout: 5_000 });
     await expect(fileCard.getByRole('link', { name: /View/i })).toBeVisible();
   });
@@ -286,7 +286,7 @@ test.describe.serial('Rental Index Report upload — Issue + Edit Payment Plan',
     await page.getByRole('button', { name: /Edit Payment Plan/i }).click();
 
     // Remove existing file card
-    const fileCard = page.locator('[class*="bg-[#f0faf6]"][class*="border-[#2e9f82]"]').first();
+    const fileCard = page.locator('[class*="bg-[#eef7f2]"][class*="border-[#047246]"]').first();
     await expect(fileCard).toBeVisible({ timeout: 5_000 });
     await fileCard.getByRole('button').click();  // X button
 

@@ -129,7 +129,7 @@ export function BreachesListView({ base, rp, leaseHrefOf, caseHrefOf, legalHref,
       {err && <p className="text-[11px] text-red-600 mt-3">{err}</p>}
       {rows == null && !err && <div className="flex items-center gap-2 text-[12px] text-[#8a8f8c] mt-6"><Loader2 size={14} className="animate-spin" /> Loading…</div>}
       {rows && list.length === 0 && !err && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center mt-4">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center mt-4">
           <ShieldAlert size={20} className="mx-auto text-[#9a5b00]" />
           <p className="text-[12.5px] text-[#5b615e] mt-2">{showClosed ? 'No resolved or escalated breaches yet.' : 'No open breaches. Report one from a lease’s Breaches section.'}</p>
         </div>

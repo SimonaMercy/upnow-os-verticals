@@ -26,9 +26,9 @@ export type ReaderSlot = {
 };
 
 const C = {
-  ink: '#1a1916', ink2: '#2b342e', body: '#5a635c', mute: '#9aa39c',
-  green: '#2e9f82', greenT: '#1a7a5a', greenBg: '#eef9f4', greenBg2: '#eef6f1',
-  greenBd: '#cfe9df', line: '#e8e6e0', line2: '#eef1ec', line4: '#f4f6f3',
+  ink: '#14201a', ink2: '#2b342e', body: '#5a635c', mute: '#9aa39c',
+  green: '#047246', greenT: '#1a7a5a', greenBg: '#eef9f4', greenBg2: '#eef6f1',
+  greenBd: '#cfe9df', line: '#e4e9e5', line2: '#eef1ec', line4: '#f4f6f3',
   soft: '#fbfcfb', amber: '#b07415',
 };
 

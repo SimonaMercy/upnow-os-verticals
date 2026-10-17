@@ -3,7 +3,7 @@
  *
  * Mirrors the Rental Provider settings page — same four tabs (Profile, Rules,
  * Team, Notifications), same ?tab= URL persistence, and the SAME design
- * vocabulary (white rounded-2xl shadow-sm cards, #1a1916/#6b6860 type,
+ * vocabulary (white rounded-2xl shadow-sm cards, #14201a/#5f6b63 type,
  * var(--color-primary) actions) so both portals read as one product.
  *   - Profile:       editable business identity + customer-queries contact +
  *                    account, with the KYC documents checklist embedded
@@ -96,8 +96,8 @@ function Card({ title, description, action, children }: {
     <section className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
-          <h2 className="font-semibold text-base text-[#1a1916]">{title}</h2>
-          {description && <p className="text-xs text-[#9b9890] mt-0.5">{description}</p>}
+          <h2 className="font-semibold text-base text-[#14201a]">{title}</h2>
+          {description && <p className="text-xs text-[#8a948d] mt-0.5">{description}</p>}
         </div>
         {action}
       </div>
@@ -109,8 +109,8 @@ function Card({ title, description, action, children }: {
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="shrink-0 text-xs text-[#9b9890]">{label}</span>
-      <span className="min-w-0 truncate text-right text-sm font-medium text-[#1a1916]">{value}</span>
+      <span className="shrink-0 text-xs text-[#8a948d]">{label}</span>
+      <span className="min-w-0 truncate text-right text-sm font-medium text-[#14201a]">{value}</span>
     </div>
   );
 }
@@ -120,9 +120,9 @@ function Field({ label, value, onChange, placeholder }: {
 }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium mb-1 text-[#6b6860]">{label}</span>
+      <span className="block text-xs font-medium mb-1 text-[#5f6b63]">{label}</span>
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full rounded-xl px-3 py-2.5 text-sm outline-none border border-[#e6ebe7] focus:border-[#2e9f82] text-[#1a1916]" />
+        className="w-full rounded-xl px-3 py-2.5 text-sm outline-none border border-[#e6ebe7] focus:border-[#047246] text-[#14201a]" />
     </label>
   );
 }
@@ -132,8 +132,8 @@ function TogglePill({ on, label, onClick }: { on: boolean; label: string; onClic
     <button type="button" onClick={onClick}
       className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer border ${
         on
-          ? 'border-[#2e9f82] text-[#2e9f82] bg-[#2e9f82]/10'
-          : 'border-[#e6ebe7] text-[#6b6860] bg-white hover:bg-[#f4f3ef]'
+          ? 'border-[#047246] text-[#047246] bg-[#047246]/10'
+          : 'border-[#e6ebe7] text-[#5f6b63] bg-white hover:bg-[#eef1ef]'
       }`}>
       {label}{on && ' ✓'}
     </button>
@@ -144,7 +144,7 @@ function TogglePill({ on, label, onClick }: { on: boolean; label: string; onClic
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
-      className={`relative inline-flex rounded-full transition-colors cursor-pointer flex-shrink-0 ${on ? 'bg-[#2e9f82]' : 'bg-[#c9c7c1]'}`}
+      className={`relative inline-flex rounded-full transition-colors cursor-pointer flex-shrink-0 ${on ? 'bg-[#047246]' : 'bg-[#c9c7c1]'}`}
       style={{ height: 22, width: 40 }}>
       <span className={`inline-block w-4 h-4 rounded-full bg-white shadow transition-transform absolute top-[3px] ${on ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
     </button>
@@ -157,7 +157,7 @@ function SaveBar({ saving, saved, error, onSave }: {
   return (
     <div className="flex items-center gap-3 flex-wrap mt-4">
       {error && <p className="text-xs text-red-600 flex-1">{error}</p>}
-      {saved && !saving && !error && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
+      {saved && !saving && !error && <p className="text-xs text-[#047246] flex-1">Saved.</p>}
       <button
         type="button" onClick={onSave} disabled={saving}
         className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
@@ -280,7 +280,7 @@ function ProfileTab() {
           title={lightVendor ? 'Business details' : 'Business Profile'}
           description={lightVendor ? 'As on your trade licence.' : 'Your legal identity on UpNow — keep it matching your trade licence.'}
           action={approved ? (
-            <span className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold bg-[#2e9f82]/10 text-[#2e9f82]">
+            <span className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold bg-[#047246]/10 text-[#047246]">
               <BadgeCheck size={13} /> Verified
             </span>
           ) : undefined}
@@ -290,8 +290,8 @@ function ProfileTab() {
             <div className="grid grid-cols-2 gap-3">
               <Field label="Owner / signatory" value={ownerName} onChange={setOwnerName} placeholder="Full name" />
               <label className="block">
-                <span className="block text-xs font-medium mb-1 text-[#6b6860]">Entity type</span>
-                <span className="flex h-[42px] items-center rounded-xl px-3 text-sm font-medium bg-[#f6f7f4] text-[#6b6860]">
+                <span className="block text-xs font-medium mb-1 text-[#5f6b63]">Entity type</span>
+                <span className="flex h-[42px] items-center rounded-xl px-3 text-sm font-medium bg-[#f6f7f4] text-[#5f6b63]">
                   {profile?.entityType ? pretty(profile.entityType) : '—'}
                 </span>
               </label>
@@ -301,28 +301,28 @@ function ProfileTab() {
               <Field label="VAT TRN (optional)" value={trn} onChange={setTrn} placeholder="100XXXXXXXXXXXX" />
             </div>
             {!lightVendor && <div>
-              <span className="block text-xs font-medium mb-1.5 text-[#6b6860]">Emirates served</span>
+              <span className="block text-xs font-medium mb-1.5 text-[#5f6b63]">Emirates served</span>
               <div className="flex flex-wrap gap-1.5">
                 {EMIRATES.map((em) => (
                   <TogglePill key={em.value} label={em.label} on={emirates.includes(em.value)}
                     onClick={() => setEmirates((s) => s.includes(em.value) ? s.filter((v) => v !== em.value) : [...s, em.value])} />
                 ))}
               </div>
-              <p className="text-xs text-[#9b9890] mt-1.5">
+              <p className="text-xs text-[#8a948d] mt-1.5">
                 Zones for each city are picked in <b>Rules → Coverage</b>.
               </p>
             </div>}
             {!lightVendor && (profile?.serviceCategories?.length ?? 0) > 0 && (
               <div>
-                <span className="block text-xs font-medium mb-1.5 text-[#6b6860]">Service categories</span>
+                <span className="block text-xs font-medium mb-1.5 text-[#5f6b63]">Service categories</span>
                 <div className="flex flex-wrap gap-1.5">
                   {(profile!.serviceCategories!).map((c) => (
-                    <span key={c} className="rounded-full px-2.5 py-1 text-xs font-medium bg-[#f6f7f4] text-[#1a1916]">{catLabel(c)}</span>
+                    <span key={c} className="rounded-full px-2.5 py-1 text-xs font-medium bg-[#f6f7f4] text-[#14201a]">{catLabel(c)}</span>
                   ))}
                 </div>
-                <p className="text-xs text-[#9b9890] mt-1.5">
+                <p className="text-xs text-[#8a948d] mt-1.5">
                   Change what you offer in{' '}
-                  <Link href="/dashboard/service-provider/services" className="font-medium underline text-[#2e9f82]">My Services</Link>.
+                  <Link href="/dashboard/service-provider/services" className="font-medium underline text-[#047246]">My Services</Link>.
                 </p>
               </div>
             )}
@@ -339,21 +339,21 @@ function ProfileTab() {
             <div className="space-y-3">
               <Field label="Name" value={contactName} onChange={setContactName} placeholder="Contact name" />
               <label className="block">
-                <span className="block text-xs font-medium mb-1 text-[#6b6860]">Mobile</span>
+                <span className="block text-xs font-medium mb-1 text-[#5f6b63]">Mobile</span>
                 <div className="flex gap-2">
-                  <span className="flex items-center rounded-xl px-3 text-sm font-medium bg-[#f6f7f4] text-[#6b6860]">+971</span>
+                  <span className="flex items-center rounded-xl px-3 text-sm font-medium bg-[#f6f7f4] text-[#5f6b63]">+971</span>
                   <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} inputMode="tel" placeholder="50 712 3482"
-                    className="min-w-0 flex-1 rounded-xl px-3 py-2.5 text-sm outline-none border border-[#e6ebe7] focus:border-[#2e9f82] text-[#1a1916]" />
+                    className="min-w-0 flex-1 rounded-xl px-3 py-2.5 text-sm outline-none border border-[#e6ebe7] focus:border-[#047246] text-[#14201a]" />
                 </div>
               </label>
               <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border border-[#e6ebe7]">
-                <span className="flex items-center gap-2 text-sm font-medium text-[#1a1916]">
-                  <MessageCircle size={14} className="text-[#2e9f82]" /> Available on WhatsApp
+                <span className="flex items-center gap-2 text-sm font-medium text-[#14201a]">
+                  <MessageCircle size={14} className="text-[#047246]" /> Available on WhatsApp
                 </span>
                 <Toggle on={whatsapp} onChange={setWhatsapp} />
               </div>
               <div>
-                <span className="block text-xs font-medium mb-1.5 text-[#6b6860]">Languages</span>
+                <span className="block text-xs font-medium mb-1.5 text-[#5f6b63]">Languages</span>
                 <div className="flex flex-wrap gap-1.5">
                   {CONTACT_LANGUAGES.map((lang) => (
                     <TogglePill key={lang} label={lang} on={languages.includes(lang)}
@@ -373,7 +373,7 @@ function ProfileTab() {
             {!lightVendor && <Row
               label="Review status"
               value={approved
-                ? <span className="text-[#2e9f82]">Approved</span>
+                ? <span className="text-[#047246]">Approved</span>
                 : pretty(profile?.complianceStatus ?? 'pending_review')}
             />}
           </Card>
@@ -398,7 +398,7 @@ function ProfileTab() {
                 </p>
               ))}
             </div>
-            <p className="mt-1.5 text-xs text-[#6b6860]">
+            <p className="mt-1.5 text-xs text-[#5f6b63]">
               Expired or rejected documents pause new bookings — replace them below.
             </p>
           </div>
@@ -486,7 +486,7 @@ function TeamTab() {
               <p className="text-sm font-semibold text-red-700">
                 {`${uncovered.length} listed service${uncovered.length === 1 ? '' : 's'} can't receive bookings yet`}
               </p>
-              <p className="text-xs text-[#6b6860] mt-0.5">
+              <p className="text-xs text-[#5f6b63] mt-0.5">
                 No lead-capable technician holds these skills — assign them in the skills section below and dispatch resumes instantly.
               </p>
             </div>
@@ -494,13 +494,13 @@ function TeamTab() {
           <div className="divide-y divide-[#f0efeb]">
             {gapGroups.map((g) => (
               <div key={g.category} className="flex items-baseline gap-4 px-6 py-3">
-                <span className="w-28 shrink-0 text-xs font-semibold uppercase tracking-wide text-[#9b9890]">
+                <span className="w-28 shrink-0 text-xs font-semibold uppercase tracking-wide text-[#8a948d]">
                   {catLabel(g.category)}
                 </span>
-                <p className="text-sm text-[#1a1916] leading-relaxed">
+                <p className="text-sm text-[#14201a] leading-relaxed">
                   {g.items.join(' · ')}
                 </p>
-                <span className="ml-auto shrink-0 text-xs text-[#9b9890]">{g.items.length}</span>
+                <span className="ml-auto shrink-0 text-xs text-[#8a948d]">{g.items.length}</span>
               </div>
             ))}
           </div>
@@ -532,14 +532,14 @@ function NotificationsTab() {
   return (
     <div className="max-w-3xl">
       <div className="bg-white rounded-2xl p-6 shadow-sm">
-        <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
-        <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about.</p>
+        <h2 className="font-semibold text-base text-[#14201a] mb-1">Notification Preferences</h2>
+        <p className="text-xs text-[#8a948d] mb-4">Choose which updates you want to be notified about.</p>
         <div className="space-y-4">
           {NOTIF_KEYS.map((key) => (
             <div key={key} className="flex items-center justify-between py-1">
               <div>
-                <p className="text-sm font-medium text-[#1a1916]">{NOTIF_LABELS[key].title}</p>
-                <p className="text-xs text-[#9b9890]">{NOTIF_LABELS[key].description}</p>
+                <p className="text-sm font-medium text-[#14201a]">{NOTIF_LABELS[key].title}</p>
+                <p className="text-xs text-[#8a948d]">{NOTIF_LABELS[key].description}</p>
               </div>
               <Toggle on={notifs[key]} onChange={(v) => setNotifs((prev) => ({ ...prev, [key]: v }))} />
             </div>
@@ -592,8 +592,8 @@ export default function ServiceProviderSettingsPage() {
     <div className="p-6">
       {/* Header — a light vendor reaches each section from its own nav item, so the page is named for it */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">{light ? (tab === 'team' ? 'Technicians' : 'Profile') : 'Settings'}</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">
+        <h1 className="text-2xl font-bold text-[#14201a]">{light ? (tab === 'team' ? 'Technicians' : 'Profile') : 'Settings'}</h1>
+        <p className="text-sm text-[#5f6b63] mt-0.5">
           {light
             ? (tab === 'team' ? 'The people who work your jobs.' : 'Your business details and how you charge.')
             : 'Manage your business profile, operating rules, team and preferences.'}
@@ -601,11 +601,11 @@ export default function ServiceProviderSettingsPage() {
       </div>
 
       {/* Top-level tabs — same construction as RP settings (none for a light vendor: its nav is the switch) */}
-      {!light && <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e8e6e0] mb-6 w-fit max-w-full flex-wrap">
+      {!light && <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-[#e4e9e5] mb-6 w-fit max-w-full flex-wrap">
         {MAIN_TABS.map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => selectTab(key)}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
-              tab === key ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+              tab === key ? 'bg-[#047246] text-white' : 'text-[#5f6b63] hover:bg-[#eef1ef]'
             }`}>
             <Icon size={14} /> {label}
           </button>

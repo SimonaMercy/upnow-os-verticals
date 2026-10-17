@@ -73,17 +73,17 @@ interface Detail {
 }
 
 const STAGE_META: Record<string, { label: string; bg: string; fg: string }> = {
-  requested:         { label: 'Requested',         bg: '#f4f3ef', fg: '#6b6860' },
+  requested:         { label: 'Requested',         bg: '#eef1ef', fg: '#5f6b63' },
   awaiting_approval: { label: 'Awaiting approval', bg: '#fef3c7', fg: '#92400e' },
   in_progress:       { label: 'In progress',       bg: '#e0f2fe', fg: '#0369a1' },
   sign_off:          { label: 'Sign-off',          bg: '#ede9fe', fg: '#6d28d9' },
   close_out:         { label: 'Close-out',         bg: '#dcfce7', fg: '#15803d' },
   closed:            { label: 'Closed',            bg: '#dcfce7', fg: '#15803d' },
   declined:          { label: 'Declined',          bg: '#fee2e2', fg: '#b91c1c' },
-  cancelled:         { label: 'Cancelled',         bg: '#f4f3ef', fg: '#9b9890' },
+  cancelled:         { label: 'Cancelled',         bg: '#eef1ef', fg: '#8a948d' },
 };
 const COVER_META: Record<string, { label: string; bg: string; fg: string }> = {
-  covered:     { label: 'Covered — landlord pays', bg: '#d8f2e8', fg: '#1a7a5a' },
+  covered:     { label: 'Covered — landlord pays', bg: '#d8efe3', fg: '#1a7a5a' },
   chargeable:  { label: 'Chargeable — customer pays', bg: '#e0f2fe', fg: '#0369a1' },
   not_offered: { label: 'Not offered', bg: '#fee2e2', fg: '#b91c1c' },
 };
@@ -174,10 +174,10 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
     finally { setBusy(null); }
   };
 
-  if (loading && !d) return <div className="p-8 text-sm text-[#9b9890]">Loading request…</div>;
+  if (loading && !d) return <div className="p-8 text-sm text-[#8a948d]">Loading request…</div>;
   if (!d) return (
     <div className="p-8">
-      <p className="text-sm text-[#6b6860]">Maintenance request not found.</p>
+      <p className="text-sm text-[#5f6b63]">Maintenance request not found.</p>
       <Link href={backHref} className="text-sm text-[#1a7a5a] font-medium mt-2 inline-block">← Back to Operations</Link>
     </div>
   );
@@ -296,7 +296,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {!d.inHouse && (d.photos?.length ?? 0) > 0 && (
         <div className={card}>
           <h2 className="text-[14px] font-bold text-[#1c1f1d]">{d.photos!.some(p => isVideoUrl(p.viewUrl)) ? 'Photos & videos' : 'Photos'} from the customer · {d.photos!.length}</h2>
-          <p className="text-xs text-[#6b6860] mt-1">The same pictures brief the provider on their job page.</p>
+          <p className="text-xs text-[#5f6b63] mt-1">The same pictures brief the provider on their job page.</p>
           <ul className="flex gap-2 flex-wrap mt-3">
             {d.photos!.map((p, k) => (
               <li key={p.id}>
@@ -304,11 +304,11 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                   onClick={() => setGallery({ photos: d.photos!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? (isVideoUrl(r.viewUrl) ? 'Customer video' : 'Customer photo') })), start: k })}>
                   {isVideoUrl(p.viewUrl) ? (
                     <>
-                      <video src={p.viewUrl} muted playsInline preload="metadata" className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] bg-black hover:opacity-90" />
+                      <video src={p.viewUrl} muted playsInline preload="metadata" className="w-24 h-24 object-cover rounded-xl border border-[#e4e9e5] bg-black hover:opacity-90" />
                       <span className="absolute inset-0 flex items-center justify-center pointer-events-none"><span className="w-8 h-8 rounded-full bg-black/55 text-white flex items-center justify-center"><Play size={14} fill="currentColor" /></span></span>
                     </>
                   ) : (
-                    <img src={p.viewUrl} alt={p.caption ?? 'Customer photo'} className="w-24 h-24 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
+                    <img src={p.viewUrl} alt={p.caption ?? 'Customer photo'} className="w-24 h-24 object-cover rounded-xl border border-[#e4e9e5] hover:opacity-90" />
                   )}
                 </button>
               </li>
@@ -342,16 +342,16 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           qs === 'submitted' ? { label: showApprove ? 'Awaiting your approval' : 'Submitted', bg: '#fef3c7', fg: '#92400e' }
           : qs === 'approved' ? { label: 'Approved', bg: '#d1fae5', fg: '#065f46' }
           : qs === 'rejected' ? { label: 'Rejected — provider to re-quote', bg: '#fee2e2', fg: '#991b1b' }
-          : { label: qs, bg: '#f4f3ef', fg: '#6b6860' };
+          : { label: qs, bg: '#eef1ef', fg: '#5f6b63' };
         const discount = d.quote.discountAed ?? 0;
         const line = 'flex items-baseline justify-between gap-4 py-2';
         return (
         <div className={card}>
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2"><FileText size={14} /> Quotation</h2>
-              <p className="text-xs text-[#6b6860] mt-0.5">
-                From <span className="font-semibold text-[#1a1916]">{d.provider?.name ?? 'the provider'}</span>
+              <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2"><FileText size={14} /> Quotation</h2>
+              <p className="text-xs text-[#5f6b63] mt-0.5">
+                From <span className="font-semibold text-[#14201a]">{d.provider?.name ?? 'the provider'}</span>
                 {d.quote.submittedAt ? <> · submitted {fmtDt(d.quote.submittedAt)}</> : null}
                 {d.quote.validUntil ? <> · valid until {fmtDt(d.quote.validUntil)}</> : null}
               </p>
@@ -359,59 +359,59 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
             <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full" style={{ background: qMeta.bg, color: qMeta.fg }}>{qMeta.label}</span>
           </div>
 
-          <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#fbfaf7] px-4 py-1 max-w-md">
+          <div className="mt-3 rounded-xl border border-[#e4e9e5] bg-[#fbfaf7] px-4 py-1 max-w-md">
             {(d.quote.items?.length ?? 0) > 0 ? (
               d.quote.items!.map((it, i) => (
                 <div key={i} className={line + ' border-b border-[#f0eee8]'}>
                   <span className="text-sm text-[#4a4842] min-w-0">
                     {it.name}
-                    {it.description && <span className="block text-[11px] text-[#9b9890]">{it.description}</span>}
+                    {it.description && <span className="block text-[11px] text-[#8a948d]">{it.description}</span>}
                     {(it.quantity !== 1 || it.unitPriceAed * it.quantity !== it.totalAed) && (
-                      <span className="block text-[11px] text-[#9b9890] tabular-nums">{it.quantity} × {aed(it.unitPriceAed)}</span>
+                      <span className="block text-[11px] text-[#8a948d] tabular-nums">{it.quantity} × {aed(it.unitPriceAed)}</span>
                     )}
                   </span>
-                  <span className="text-sm font-medium text-[#1a1916] tabular-nums shrink-0">{aed(it.totalAed)}</span>
+                  <span className="text-sm font-medium text-[#14201a] tabular-nums shrink-0">{aed(it.totalAed)}</span>
                 </div>
               ))
             ) : (
               <>
                 <div className={line + ' border-b border-[#f0eee8]'}>
-                  <span className="text-sm text-[#6b6860]">Labor</span>
-                  <span className="text-sm font-medium text-[#1a1916] tabular-nums">{aed(d.quote.laborAed)}</span>
+                  <span className="text-sm text-[#5f6b63]">Labor</span>
+                  <span className="text-sm font-medium text-[#14201a] tabular-nums">{aed(d.quote.laborAed)}</span>
                 </div>
                 <div className={line}>
-                  <span className="text-sm text-[#6b6860]">Materials</span>
-                  <span className="text-sm font-medium text-[#1a1916] tabular-nums">{aed(d.quote.materialsAed)}</span>
+                  <span className="text-sm text-[#5f6b63]">Materials</span>
+                  <span className="text-sm font-medium text-[#14201a] tabular-nums">{aed(d.quote.materialsAed)}</span>
                 </div>
               </>
             )}
             {discount > 0 && (
               <div className={line}>
-                <span className="text-sm text-[#6b6860]">Discount</span>
+                <span className="text-sm text-[#5f6b63]">Discount</span>
                 <span className="text-sm font-medium text-[#1a7a5a] tabular-nums">− {aed(discount)}</span>
               </div>
             )}
-            <div className={line + ' border-t-2 border-[#e8e6e0]'}>
-              <span className="text-sm font-bold text-[#1a1916]">Total <span className="font-normal text-[#9b9890] text-xs">incl. VAT</span></span>
+            <div className={line + ' border-t-2 border-[#e4e9e5]'}>
+              <span className="text-sm font-bold text-[#14201a]">Total <span className="font-normal text-[#8a948d] text-xs">incl. VAT</span></span>
               <span className="text-lg font-bold text-[#1a7a5a] tabular-nums">{aed(d.quote.totalAed)}</span>
             </div>
           </div>
 
           {d.quote.summary && (
             <div className="mt-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Scope of work</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-[#8a948d]">Scope of work</p>
               <p className="text-sm text-[#4a4842] mt-1 whitespace-pre-wrap">{d.quote.summary}</p>
             </div>
           )}
 
           {(d.quoteAttachments?.length ?? 0) > 0 && (
             <div className="mt-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-[#9b9890]">Attached quotations · {d.quoteAttachments!.length}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-[#8a948d]">Attached quotations · {d.quoteAttachments!.length}</p>
               <div className="flex gap-2 flex-wrap mt-1.5">
                 {d.quoteAttachments!.map((a, k) => (
                   <button key={a.id} type="button" title={a.caption ?? 'View quotation'} className="block cursor-pointer"
                     onClick={() => setGallery({ photos: d.quoteAttachments!.map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? 'Supplier quotation' })), start: k })}>
-                    <img src={a.viewUrl} alt={a.caption ?? 'Supplier quotation'} className="w-20 h-20 object-cover rounded-xl border border-[#e8e6e0] hover:opacity-90" />
+                    <img src={a.viewUrl} alt={a.caption ?? 'Supplier quotation'} className="w-20 h-20 object-cover rounded-xl border border-[#e4e9e5] hover:opacity-90" />
                   </button>
                 ))}
               </div>
@@ -424,34 +424,34 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                   <CheckCircle2 size={14} /> {busy === 'approve' ? 'Approving…' : `Approve — ${aed(d.quote.totalAed)}`}
                 </button>
-                <button type="button" disabled={!!busy} onClick={() => { setRejecting(true); setRejectReason(''); }} className={btn + ' border border-[#e8e6e0] text-[#b91c1c] bg-white'}>
+                <button type="button" disabled={!!busy} onClick={() => { setRejecting(true); setRejectReason(''); }} className={btn + ' border border-[#e4e9e5] text-[#b91c1c] bg-white'}>
                   <XCircle size={14} /> Reject — ask to re-quote
                 </button>
               </div>
-              <p className="text-xs text-[#9b9890] mt-2">Approving tells {d.provider?.name ?? 'the provider'} to start the work. You settle with them directly — the cost lands on this request at close-out.</p>
+              <p className="text-xs text-[#8a948d] mt-2">Approving tells {d.provider?.name ?? 'the provider'} to start the work. You settle with them directly — the cost lands on this request at close-out.</p>
             </>
           )}
           {showApprove && rejecting && (
             <div className="mt-4 rounded-xl border border-[#fecaca] bg-[#fffbfa] p-3">
               <p className="text-xs font-semibold text-[#991b1b]">Why are you rejecting this quote?</p>
-              <p className="text-[11.5px] text-[#9b9890] mt-0.5">The provider reads this word for word — say what should change (price, scope, timing) so the revised quote comes back right.</p>
+              <p className="text-[11.5px] text-[#8a948d] mt-0.5">The provider reads this word for word — say what should change (price, scope, timing) so the revised quote comes back right.</p>
               <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2} autoFocus
                 placeholder="e.g. AED 325 is high for a cartridge swap — re-quote labor at one hour, or itemise the extra time."
-                className="w-full mt-2 border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#b91c1c]" />
+                className="w-full mt-2 border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#b91c1c]" />
               <div className="flex items-center gap-2 mt-2">
                 <button type="button" disabled={!!busy || !rejectReason.trim()}
                   onClick={() => { void act('reject', '/reject-quote', { reason: rejectReason.trim() }).then(() => setRejecting(false)); }}
                   className={btn + ' text-white'} style={{ background: '#b91c1c' }}>
                   {busy === 'reject' ? 'Sending…' : 'Send rejection'}
                 </button>
-                <button type="button" disabled={!!busy} onClick={() => setRejecting(false)} className={btn + ' border border-[#e8e6e0] text-[#6b6860] bg-white'}>
+                <button type="button" disabled={!!busy} onClick={() => setRejecting(false)} className={btn + ' border border-[#e4e9e5] text-[#5f6b63] bg-white'}>
                   Keep the quote
                 </button>
               </div>
             </div>
           )}
           {open && d.stage === 'awaiting_approval' && d.coverage === 'chargeable' && (
-            <p className="text-xs text-[#6b6860] mt-3">Chargeable work — the customer approves this quote from their own portal.</p>
+            <p className="text-xs text-[#5f6b63] mt-3">Chargeable work — the customer approves this quote from their own portal.</p>
           )}
         </div>
         );
@@ -460,13 +460,13 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {/* ── fixed price (Phase B) ── */}
       {prePriced && d.booking && (
         <div className={card}>
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2"><FileText size={14} /> Fixed price · from the provider's catalog</h2>
+          <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2"><FileText size={14} /> Fixed price · from the provider's catalog</h2>
           <div className="grid sm:grid-cols-3 gap-2 mt-3 text-sm">
-            <div><p className="text-[11px] text-[#9b9890]">Total (incl. VAT)</p><p className="font-bold text-[#1a7a5a]">{aed(d.booking.totalAed)}</p></div>
-            <div><p className="text-[11px] text-[#9b9890]">Who pays</p><p className="font-medium">{d.booking.payer === 'customer' ? 'Customer' : 'Landlord'}</p></div>
-            <div><p className="text-[11px] text-[#9b9890]">Job</p><p className="font-medium">BK-{d.booking.id} · {d.booking.status}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">Total (incl. VAT)</p><p className="font-bold text-[#1a7a5a]">{aed(d.booking.totalAed)}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">Who pays</p><p className="font-medium">{d.booking.payer === 'customer' ? 'Customer' : 'Landlord'}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">Job</p><p className="font-medium">BK-{d.booking.id} · {d.booking.status}</p></div>
           </div>
-          <p className="text-xs text-[#6b6860] mt-2">
+          <p className="text-xs text-[#5f6b63] mt-2">
             No quote round-trip: the provider's own catalog priced this category.{' '}
             {d.coverage === 'covered'
               ? 'Approve to start the work, or pass and the provider quotes after a visit.'
@@ -477,7 +477,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
               <button type="button" disabled={!!busy} onClick={() => act('approve', '/approve')} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                 <CheckCircle2 size={14} /> {busy === 'approve' ? 'Approving…' : 'Approve price'}
               </button>
-              <button type="button" disabled={!!busy} onClick={() => act('reject', '/reject-quote')} className={btn + ' border border-[#e8e6e0] text-[#b91c1c] bg-white'}>
+              <button type="button" disabled={!!busy} onClick={() => act('reject', '/reject-quote')} className={btn + ' border border-[#e4e9e5] text-[#b91c1c] bg-white'}>
                 <XCircle size={14} /> {busy === 'reject' ? 'Passing…' : 'Pass — ask for a quote'}
               </button>
             </div>
@@ -509,8 +509,8 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                   ...(saveAsRule !== 'no' ? { saveAsRule } : {}),
                   ...(threshold && a === 'cover' ? { approvalThresholdAed: Number(threshold) } : {}),
                 })}
-                className={btn + (a === 'cover' ? ' text-white' : a === 'charge' ? ' text-white' : ' border border-[#e8e6e0] text-[#b91c1c] bg-white')}
-                style={a === 'cover' ? { background: '#2e9f82' } : a === 'charge' ? { background: '#0369a1' } : undefined}>
+                className={btn + (a === 'cover' ? ' text-white' : a === 'charge' ? ' text-white' : ' border border-[#e4e9e5] text-[#b91c1c] bg-white')}
+                style={a === 'cover' ? { background: '#047246' } : a === 'charge' ? { background: '#0369a1' } : undefined}>
                 {busy === a ? 'Saving…' : a === 'cover' ? 'Cover it' : a === 'charge' ? 'Charge the customer' : 'Decline'}
               </button>
             ))}
@@ -520,8 +520,8 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
 
       {/* ── change provider (routed, not started) — a link, not a card ── */}
       {canChangeProvider && !changingProvider && (
-        <p className="text-xs text-[#6b6860] px-1">
-          Routed to <span className="font-semibold text-[#1a1916]">{d.provider!.name}</span> per your settings.{' '}
+        <p className="text-xs text-[#5f6b63] px-1">
+          Routed to <span className="font-semibold text-[#14201a]">{d.provider!.name}</span> per your settings.{' '}
           <button type="button" onClick={() => setChangingProvider(true)} className="underline font-semibold text-[#1a7a5a] cursor-pointer">Change provider</button>
         </p>
       )}
@@ -532,12 +532,12 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-[14px] font-bold text-[#1c1f1d]">{needsRouting ? 'Route to a linked provider' : 'Change provider'}</h2>
             {!needsRouting && (
-              <button type="button" onClick={() => setChangingProvider(false)} className="text-xs text-[#9b9890] hover:text-[#1a1916] cursor-pointer">Keep {d.provider?.name}</button>
+              <button type="button" onClick={() => setChangingProvider(false)} className="text-xs text-[#8a948d] hover:text-[#14201a] cursor-pointer">Keep {d.provider?.name}</button>
             )}
           </div>
           {assignable.length === 0 ? (
             <div className="mt-2">
-              <p className="text-sm text-[#6b6860]">
+              <p className="text-sm text-[#5f6b63]">
                 You have no vendor recorded yet. Add your own crew or a contractor on the Vendors page and
                 they can take this job straight away — no invitation, no email.
               </p>
@@ -559,7 +559,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
                 {busy === 'reassign' ? 'Routing…' : 'Route job'}
               </button>
               {picked && (
-                <p className="basis-full text-[11px] text-[#6b6860]">
+                <p className="basis-full text-[11px] text-[#5f6b63]">
                   {picked.selfManaged !== false
                     ? <>This job runs on this page — task list, before and after photos, bills and mark-as-done.
                         {picked.relationship === 'internal_team' ? ' Your crew' : ` ${picked.name}`} is recorded as
@@ -577,7 +577,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
       {showSignOff && (
         <div className={card}>
           <h2 className="text-[14px] font-bold text-[#1c1f1d]">Provider marked the job complete</h2>
-          <p className="text-xs text-[#6b6860] mt-1">{d.customer ? 'The customer normally confirms from their portal; sign off here on their behalf.' : 'No occupant on this request — you confirm the work yourself.'}</p>
+          <p className="text-xs text-[#5f6b63] mt-1">{d.customer ? 'The customer normally confirms from their portal; sign off here on their behalf.' : 'No occupant on this request — you confirm the work yourself.'}</p>
           <button type="button" disabled={!!busy} onClick={() => act('sign-off', '/sign-off')} className={btn + ' text-white mt-3'} style={{ background: '#1a7a52' }}>
             <ShieldCheck size={14} /> {busy === 'sign-off' ? 'Signing…' : 'Sign work off'}
           </button>
@@ -596,7 +596,7 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
             </select>
             <input placeholder="Invoice ref (optional)" value={invoiceRef} onChange={e => setInvoiceRef(e.target.value)} className={field + ' w-44'} />
             {allocation === 'tenant' && (
-              <p className="basis-full text-[11px] text-[#6b6860]">
+              <p className="basis-full text-[11px] text-[#5f6b63]">
                 Raises a pending maintenance-fee row on the customer's lease payments for the invoice total — unless the customer already paid the provider directly, in which case nothing is charged twice.
               </p>
             )}
@@ -614,16 +614,16 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
         <div className={card}>
           <h2 className="text-sm font-bold text-[#15803d] flex items-center gap-2"><CheckCircle2 size={14} /> Closed {fmtDt(d.closedAt)}</h2>
           <div className="grid sm:grid-cols-3 gap-2 mt-3 text-sm">
-            <div><p className="text-[11px] text-[#9b9890]">Cost allocation</p><p className="font-medium">{d.costAllocation?.replace(/_/g, ' ') ?? '—'}</p></div>
-            <div><p className="text-[11px] text-[#9b9890]">Invoice</p><p className="font-medium">{aed(d.invoiceTotalAed)}{d.invoiceRef ? ` · ${d.invoiceRef}` : ''}</p></div>
-            <div><p className="text-[11px] text-[#9b9890]">of which VAT</p><p className="font-medium">{aed(d.invoiceVatAed)}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">Cost allocation</p><p className="font-medium">{d.costAllocation?.replace(/_/g, ' ') ?? '—'}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">Invoice</p><p className="font-medium">{aed(d.invoiceTotalAed)}{d.invoiceRef ? ` · ${d.invoiceRef}` : ''}</p></div>
+            <div><p className="text-[11px] text-[#8a948d]">of which VAT</p><p className="font-medium">{aed(d.invoiceVatAed)}</p></div>
           </div>
         </div>
       )}
       {d.declinedAt && (
         <div className={card}>
           <h2 className="text-sm font-bold text-[#b91c1c]">Declined {fmtDt(d.declinedAt)}</h2>
-          {d.declinedReason && <p className="text-sm text-[#6b6860] mt-1">{d.declinedReason}</p>}
+          {d.declinedReason && <p className="text-sm text-[#5f6b63] mt-1">{d.declinedReason}</p>}
         </div>
       )}
 
@@ -654,13 +654,13 @@ export function MaintenanceRequestView({ base, rp, id, backHref }: {
             <li key={e.id} className="flex items-start gap-2.5 text-[12px]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#1a7a52] mt-[5px] shrink-0" />
               <div className="min-w-0">
-                <span className="font-medium text-[#1a1916]">{EVENT_LABEL[e.type] ?? e.type}</span>
+                <span className="font-medium text-[#14201a]">{EVENT_LABEL[e.type] ?? e.type}</span>
                 <span className="block text-[10.5px] text-[#8a8f8c]">{fmtDt(e.at)}{e.actorRole ? ` · ${RAISED_BY[e.actorRole]?.replace(/^(the|a) /, '') ?? e.actorRole.replace(/_/g, ' ')}` : ''}</span>
-                {e.payload?.reason != null && <p className="text-xs text-[#6b6860]">{HOLD_TEXT[String(e.payload.reason)] ?? String(e.payload.reason)}{e.payload?.vendorName ? ` — ${String(e.payload.vendorName)}` : ''}</p>}
+                {e.payload?.reason != null && <p className="text-xs text-[#5f6b63]">{HOLD_TEXT[String(e.payload.reason)] ?? String(e.payload.reason)}{e.payload?.vendorName ? ` — ${String(e.payload.vendorName)}` : ''}</p>}
                 {e.type === 'cost_recovered' && e.payload?.amountAed != null && (
-                  <p className="text-xs text-[#6b6860]">{aed(Number(e.payload.amountAed))} · payment #{String(e.payload.paymentId)}</p>
+                  <p className="text-xs text-[#5f6b63]">{aed(Number(e.payload.amountAed))} · payment #{String(e.payload.paymentId)}</p>
                 )}
-                {e.type === 'note' && e.payload?.note != null && <p className="text-xs text-[#6b6860]">{String(e.payload.note)}</p>}
+                {e.type === 'note' && e.payload?.note != null && <p className="text-xs text-[#5f6b63]">{String(e.payload.note)}</p>}
                 {e.type === 'comment' && e.payload?.text != null && (
                   <p className="text-xs text-[#3d423f] whitespace-pre-wrap">{e.payload?.by != null && <span className="font-semibold">{String(e.payload.by)}: </span>}{String(e.payload.text)}</p>
                 )}

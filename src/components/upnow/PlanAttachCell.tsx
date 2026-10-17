@@ -61,8 +61,8 @@ export function PlanAttachCell({ slot, refs, uploading, onFiles, onRemove, readO
             : 'Attach a cheque photo, transfer screenshot, card slip or cash receipt'}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8,
-            border: `1px solid ${refs.length ? 'rgba(46,159,130,0.4)' : 'var(--mist-strong)'}`,
-            background: refs.length ? 'rgba(46,159,130,0.07)' : 'var(--paper)',
+            border: `1px solid ${refs.length ? 'rgba(4,114,70,0.4)' : 'var(--mist-strong)'}`,
+            background: refs.length ? 'rgba(4,114,70,0.07)' : 'var(--paper)',
             cursor: uploading ? 'progress' : 'pointer', fontSize: 11, fontWeight: 700,
             color: refs.length ? 'var(--jade-deep)' : 'var(--ink-2)', whiteSpace: 'nowrap',
           }}>

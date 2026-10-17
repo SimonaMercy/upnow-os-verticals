@@ -22,11 +22,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 
-const PALETTE = ['#2e9f82', '#1e5fae', '#b45309', '#8250df'];
+const PALETTE = ['#047246', '#1e5fae', '#b45309', '#8250df'];
 const [JADE, BLUE, AMBER, PURPLE] = PALETTE;
 const RED = '#dc2626';
 const GRID = '#f0ede8';
-const TICK = { fontSize: 11, fill: '#9b9890' } as const;
+const TICK = { fontSize: 11, fill: '#8a948d' } as const;
 
 /** Compact AED from fils for chart axes: 7.5M, 689K, 950. */
 const fmtAedShort = (fils: number | null | undefined) => {
@@ -44,9 +44,9 @@ const fmtAed = (fils: number | null | undefined) =>
 function Card({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4">
       <div className="flex items-center gap-1.5 mb-2">
-        <p className="text-sm font-bold text-[#1a1916]">{title}</p>
+        <p className="text-sm font-bold text-[#14201a]">{title}</p>
         {hint && (
           <span className="relative inline-flex print:hidden">
             <button
@@ -54,7 +54,7 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
               aria-label={`About ${title}`}
               onClick={() => setOpen(o => !o)}
               onBlur={() => setTimeout(() => setOpen(false), 150)}
-              className="text-[#9b9890] hover:text-[#2e9f82] transition-colors">
+              className="text-[#8a948d] hover:text-[#047246] transition-colors">
               <Info size={13} />
             </button>
             {open && (
@@ -124,7 +124,7 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages, granularity 
       <XAxis dataKey="date" tick={TICK} axisLine={false} tickLine={false} minTickGap={24} />
       <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
       <Tooltip />
-      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
       {lineMembers.map((name, i) => (
         <Line key={name} type="monotone" dataKey={name} stroke={PALETTE[i]} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
       ))}
@@ -140,8 +140,8 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages, granularity 
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={150} tick={TICK} axisLine={false} tickLine={false} />
-              <Tooltip cursor={{ fill: '#fafaf8' }} />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+              <Tooltip cursor={{ fill: '#f6f8f6' }} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
               <Bar dataKey="contractsWorked" name="Contracts" stackId="w" fill={JADE} stroke="#fff" strokeWidth={2} />
               <Bar dataKey="leadsWorked" name="Leads" stackId="w" fill={BLUE} stroke="#fff" strokeWidth={2} />
               <Bar dataKey="documentsWorked" name="Documents" stackId="w" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[0, 3, 3, 0]} />
@@ -156,8 +156,8 @@ export function ManagerPerformanceCharts({ rows, daily, dailyPages, granularity 
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis type="category" dataKey="name" width={150} tick={TICK} axisLine={false} tickLine={false} />
-              <Tooltip cursor={{ fill: '#fafaf8' }} />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+              <Tooltip cursor={{ fill: '#f6f8f6' }} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
               <Bar dataKey="created" name="Created" stackId="v" fill={JADE} stroke="#fff" strokeWidth={2} />
               <Bar dataKey="updated" name="Updated" stackId="v" fill={BLUE} stroke="#fff" strokeWidth={2} />
               <Bar dataKey="deleted" name="Deleted" stackId="v" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[0, 3, 3, 0]} />
@@ -216,8 +216,8 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
             <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip cursor={{ fill: '#fafaf8' }} />
-            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Tooltip cursor={{ fill: '#f6f8f6' }} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
             <Bar dataKey="due" name="Due for renewal" fill={BLUE} radius={[3, 3, 0, 0]} />
             <Bar dataKey="renewalContracts" name="Renewals signed" fill={JADE} radius={[3, 3, 0, 0]} />
             <Bar dataKey="newLeases" name="New contracts" fill={PURPLE} radius={[3, 3, 0, 0]} />
@@ -230,8 +230,8 @@ export function LeaseActivityCharts({ rows }: { rows: LeaseActivityRow[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
             <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
-            <Tooltip cursor={{ fill: '#fafaf8' }} />
-            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Tooltip cursor={{ fill: '#f6f8f6' }} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
             <Bar dataKey="ejariRegistered" name="Contract Registration completed" stackId="e" fill={JADE} stroke="#fff" strokeWidth={2} />
             <Bar dataKey="ejariPending" name="Awaiting Contract Registration" stackId="e" fill={AMBER} stroke="#fff" strokeWidth={2} radius={[3, 3, 0, 0]} />
           </BarChart>
@@ -270,8 +270,8 @@ export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
             <YAxis tickFormatter={fmtAedShort} tick={TICK} axisLine={false} tickLine={false} width={44} />
-            <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
-            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Tooltip cursor={{ fill: '#f6f8f6' }} formatter={tip} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
             <Bar dataKey="receivedFils" name="Received" stackId="c" fill={JADE} stroke="#fff" strokeWidth={1} />
             <Bar dataKey="pendingFils" name="Pending" stackId="c" fill={AMBER} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
             {/* Its own stack, so the Expected column is never read as including a
@@ -287,8 +287,8 @@ export function ExecutiveCashflowCharts({ rows }: { rows: CashflowRow[] }) {
             <XAxis dataKey="label" tick={TICK} axisLine={false} tickLine={false} />
             <YAxis yAxisId="money" tickFormatter={fmtAedShort} tick={TICK} axisLine={false} tickLine={false} width={44} />
             <YAxis yAxisId="rate" orientation="right" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={40} />
-            <Tooltip cursor={{ fill: '#fafaf8' }} formatter={tip} />
-            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+            <Tooltip cursor={{ fill: '#f6f8f6' }} formatter={tip} />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
             <Bar yAxisId="money" dataKey="receivedFils" name="Received" stackId="n" fill={JADE} barSize={18} stroke="#fff" strokeWidth={1} />
             <Bar yAxisId="money" dataKey="penaltyFils" name="Penalty" stackId="n" fill={AMBER} barSize={18} stroke="#fff" strokeWidth={1} radius={[3, 3, 0, 0]} />
             <Line yAxisId="rate" type="monotone" dataKey="collectionRate" name="Collection %" stroke={BLUE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />

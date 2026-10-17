@@ -968,7 +968,7 @@ export function TeamPanel() {
     // sits inline, right-aligned.
     <div>
       <div className="flex items-center justify-between gap-4 mb-5 flex-wrap">
-        <p className="text-sm text-[#6b6860]">Manage the asset managers working under your account.</p>
+        <p className="text-sm text-[#5f6b63]">Manage the asset managers working under your account.</p>
         <button
           onClick={() => setShowInviteModal(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"

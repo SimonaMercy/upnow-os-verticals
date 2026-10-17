@@ -131,7 +131,7 @@ export async function FeaturedListings() {
                   <span
                     className="absolute top-3 right-3 text-xs font-semibold px-2.5 py-1 rounded-full"
                     style={{
-                      backgroundColor: unit.availability === 'available' ? '#d8f2e8' : '#fef3c7',
+                      backgroundColor: unit.availability === 'available' ? '#d8efe3' : '#fef3c7',
                       color: unit.availability === 'available' ? '#1a7a5a' : '#92400e',
                     }}
                   >

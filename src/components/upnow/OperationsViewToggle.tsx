@@ -32,9 +32,9 @@ export default function OperationsViewToggle({ active }: { active: 'list' | 'boa
         <LayoutGrid size={14} /> Board
       </Link>
       <style jsx global>{`
-        .ops-view-toggle{ display:inline-flex; align-items:center; gap:2px; padding:3px; background:#fff; border:1px solid #e8e6e0; border-radius:10px; }
-        .ops-view-toggle a{ display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:8px; font-size:12.5px; font-weight:600; color:#6b6860; text-decoration:none; line-height:1; white-space:nowrap; transition:color .15s, background .15s; }
-        .ops-view-toggle a:hover{ color:#3d3b35; }
+        .ops-view-toggle{ display:inline-flex; align-items:center; gap:2px; padding:3px; background:#fff; border:1px solid #e4e9e5; border-radius:10px; }
+        .ops-view-toggle a{ display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:8px; font-size:12.5px; font-weight:600; color:#5f6b63; text-decoration:none; line-height:1; white-space:nowrap; transition:color .15s, background .15s; }
+        .ops-view-toggle a:hover{ color:#46534c; }
         .ops-view-toggle a.on{ color:#1a7a5a; background:#ebf8f2; }
         .ops-view-toggle a svg{ opacity:.9; }
       `}</style>

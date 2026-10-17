@@ -203,24 +203,24 @@ export function BouncedChequesReport({
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4 print:mb-2">
         <div>
           {onBack ? (
-            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </button>
           ) : (
-            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </Link>
           )}
           <h1 className="text-2xl font-bold">Bounced Cheques</h1>
-          <p className="text-[12.5px] text-[#6b6860] mt-1">
-            The bounced-cheque sheet for {label}, by the cheque&rsquo;s own date. <strong className="font-semibold text-[#3d3b35]">Paid</strong> = the replacement
-            money has cleared in full; anything less is <strong className="font-semibold text-[#3d3b35]">Pending</strong>. Hold cheques are the ones swapped before they were banked.
+          <p className="text-[12.5px] text-[#5f6b63] mt-1">
+            The bounced-cheque sheet for {label}, by the cheque&rsquo;s own date. <strong className="font-semibold text-[#46534c]">Paid</strong> = the replacement
+            money has cleared in full; anything less is <strong className="font-semibold text-[#46534c]">Pending</strong>. Hold cheques are the ones swapped before they were banked.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5">
-            <CalendarRange size={15} className="text-[#2e9f82]" />
-            <span className="text-xs font-medium text-[#6b6860]">Year</span>
+          <label className="inline-flex items-center gap-2 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5">
+            <CalendarRange size={15} className="text-[#047246]" />
+            <span className="text-xs font-medium text-[#5f6b63]">Year</span>
             <select
               value={year === 'all' ? 'all' : String(year)}
               onChange={e => setReportsYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
@@ -230,16 +230,16 @@ export function BouncedChequesReport({
               <option value="all">All years</option>
             </select>
           </label>
-          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-50">
+          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246] disabled:opacity-50">
             <Download size={15} /> CSV
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
             <Printer size={15} /> Print
           </button>
         </div>
       </div>
 
-      {loading && !data && <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
+      {loading && !data && <div className="flex items-center gap-2 text-[#5f6b63] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
       {error && !loading && <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>}
 
       {data && (
@@ -249,23 +249,23 @@ export function BouncedChequesReport({
             <select
               value={property}
               onChange={e => setProperty(e.target.value)}
-              className="text-sm bg-white border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none"
+              className="text-sm bg-white border border-[#e4e9e5] rounded-xl px-3 py-2 focus:outline-none"
               aria-label="Property">
               <option value="">All properties</option>
               {data.buildings.map(b => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
             </select>
-            <span className="text-[12.5px] text-[#6b6860] ml-1">
+            <span className="text-[12.5px] text-[#5f6b63] ml-1">
               {data.totals.bounced} bounced · {data.totals.cleared} paid · {data.totals.pending} pending
               {data.totals.pending > 0 && <> — <span className="font-semibold text-[#b4532a]">AED {fmtInt(data.totals.pendingAmount)}</span> still to collect</>}
               {data.totals.hold > 0 && <> · {data.totals.hold} on hold</>}
             </span>
-            <div className="ml-auto inline-flex rounded-xl border border-[#e8e6e0] bg-white p-0.5">
+            <div className="ml-auto inline-flex rounded-xl border border-[#e4e9e5] bg-white p-0.5">
               {(['all', 'pending', 'cleared'] as View[]).map(v => {
                 const n = v === 'all' ? data.totals.bounced : v === 'pending' ? data.totals.pending : data.totals.cleared;
                 const on = view === v;
                 return (
                   <button key={v} type="button" onClick={() => setView(v)}
-                    className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors ${on ? 'bg-[#1c1f1d] text-white' : 'text-[#3d3b35] hover:bg-[#f4f3ef]'}`}>
+                    className={`px-3.5 py-1.5 rounded-[10px] text-xs font-semibold transition-colors ${on ? 'bg-[#1c1f1d] text-white' : 'text-[#46534c] hover:bg-[#eef1ef]'}`}>
                     {VIEW_LABEL[v]} <span className={on ? 'text-white/70' : 'text-[#8a8780]'}>· {n}</span>
                   </button>
                 );
@@ -342,7 +342,7 @@ type Tone = 'green' | 'amber' | 'red' | 'grey';
 /* ── the sheet blocks ──────────────────────────────────────────────────────── */
 function Sheet({ title, count, hint, empty, children }: { title: string; count: number; hint?: string; empty: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-[14px] border border-[#e8e6e0] bg-white px-4 sm:px-6 py-5 mb-5 print:border-0 print:px-0 print:mb-6 print:break-inside-avoid">
+    <div className="rounded-[14px] border border-[#e4e9e5] bg-white px-4 sm:px-6 py-5 mb-5 print:border-0 print:px-0 print:mb-6 print:break-inside-avoid">
       <div className="text-center mb-3">
         <div className="text-[15px] font-extrabold tracking-wide uppercase">{title}</div>
         {hint && <div className="text-[11.5px] text-[#8a8780] mt-0.5">{hint}</div>}
@@ -362,7 +362,7 @@ const CHIP: Record<Tone, string> = {
   green: 'bg-[#e6f4ef] text-[#1f6f5a]',
   amber: 'bg-[#fbeedd] text-[#9a5a14]',
   red:   'bg-[#fbe6e2] text-[#9c3a2a]',
-  grey:  'bg-[#f1efe9] text-[#6b6860]',
+  grey:  'bg-[#f1efe9] text-[#5f6b63]',
 };
 function SheetTable({ rows, total, totalNote, dateHeader = 'Date', chequeHeader = 'Cheque No.', withReplacement = false }: {
   rows: SheetRow[]; total: number; totalNote?: string; dateHeader?: string; chequeHeader?: string; withReplacement?: boolean;
@@ -405,7 +405,7 @@ function SheetTable({ rows, total, totalNote, dateHeader = 'Date', chequeHeader 
               <td className={`${cell} text-center tabular-nums`}>{r.instalment ?? '—'}</td>
               <td className={`${cell} tabular-nums`}>{r.cheque ?? '—'}</td>
               <td className={cell}>
-                <Link href={r.href} className="font-medium hover:text-[#2e9f82]">{r.party ?? 'Lease'}</Link>
+                <Link href={r.href} className="font-medium hover:text-[#047246]">{r.party ?? 'Lease'}</Link>
               </td>
               <td className={`${cell} text-right tabular-nums font-semibold whitespace-nowrap`}>{fmtAed(r.amount)}</td>
               {withReplacement && (
@@ -417,7 +417,7 @@ function SheetTable({ rows, total, totalNote, dateHeader = 'Date', chequeHeader 
               )}
               <td className={`${cell} text-[11.5px]`}>
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${CHIP[r.chip.tone]}`}>{r.chip.label}</span>
-                {r.notes.length > 0 && <div className="text-[#6b6860] mt-0.5 leading-snug">{r.notes.join(' · ')}</div>}
+                {r.notes.length > 0 && <div className="text-[#5f6b63] mt-0.5 leading-snug">{r.notes.join(' · ')}</div>}
               </td>
             </tr>
           ))}

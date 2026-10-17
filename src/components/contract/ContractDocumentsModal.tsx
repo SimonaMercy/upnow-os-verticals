@@ -53,17 +53,17 @@ export default function ContractDocumentsModal({ contractId, onClose }: { contra
     <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
       <div className="w-[min(560px,100%)] max-h-[84vh] flex flex-col bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
         {/* Green header */}
-        <div className="flex items-center justify-between gap-3 bg-[#2e9f82] text-white px-5 py-3.5 shrink-0">
+        <div className="flex items-center justify-between gap-3 bg-[#047246] text-white px-5 py-3.5 shrink-0">
           <div className="flex items-center gap-2 font-bold text-sm"><FolderOpen size={16} /> Contract Documents</div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/20 transition-colors" aria-label="Close"><X size={18} /></button>
         </div>
         <div className="p-5 overflow-y-auto">
           {error ? (
-            <div className="flex flex-col items-center gap-2 py-8 text-center"><AlertCircle size={20} className="text-[#b91c1c]" /><p className="text-sm text-[#6b6860]">{error}</p></div>
+            <div className="flex flex-col items-center gap-2 py-8 text-center"><AlertCircle size={20} className="text-[#b91c1c]" /><p className="text-sm text-[#5f6b63]">{error}</p></div>
           ) : !docs ? (
-            <div className="flex items-center justify-center py-10"><Loader2 size={22} className="animate-spin text-[#2e9f82]" /></div>
+            <div className="flex items-center justify-center py-10"><Loader2 size={22} className="animate-spin text-[#047246]" /></div>
           ) : groups.length === 0 ? (
-            <p className="text-sm text-[#9b9890] text-center py-8">No documents on file for this contract.</p>
+            <p className="text-sm text-[#8a948d] text-center py-8">No documents on file for this contract.</p>
           ) : (
             <div className="space-y-4">
               {groups.map(g => (

@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback } from 'react';
 import { Search, ChevronDown, LayoutGrid, Rows3, SlidersHorizontal, X, Check, MapPin, Home, Building2, Factory, Mountain } from 'lucide-react';
-import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { NEW_SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useBackClose } from '@/lib/useSlideOver';
 
@@ -52,7 +52,7 @@ const SPACE_TYPES: Record<string, { label: string; value: string }[]> = {
 
 const CATEGORIES = [
   { label: 'All Spaces', value: '' },
-  ...SPACE_CATEGORIES.map(c => ({ label: c.label, value: c.id })),
+  ...NEW_SPACE_CATEGORIES.map(c => ({ label: c.label, value: c.id })),
 ];
 
 const BEDROOM_OPTIONS = [

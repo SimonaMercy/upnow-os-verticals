@@ -22,10 +22,10 @@ function Overview({
 
   return (
     <div style={{ maxWidth: 840, paddingBlock: 32, paddingInline: 32 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1916', margin: '0 0 8px' }}>
+      <h1 style={{ fontSize: 24, fontWeight: 800, color: '#14201a', margin: '0 0 8px' }}>
         {spec.info.title}
       </h1>
-      <div style={{ fontSize: 13, color: '#9b9890', marginBottom: 18 }}>
+      <div style={{ fontSize: 13, color: '#8a948d', marginBottom: 18 }}>
         v{spec.info.version} · {total} endpoints · {groups.length} {groups.length === 1 ? 'product' : 'products'}
       </div>
 
@@ -33,35 +33,35 @@ function Overview({
         <Markdown
           text={spec.info.description}
           style={{
-            backgroundColor: '#ffffff', border: '1px solid #e8e6e0', borderRadius: 12,
+            backgroundColor: '#ffffff', border: '1px solid #e4e9e5', borderRadius: 12,
             padding: '16px 20px', marginBottom: 24,
-            fontSize: 14, color: '#3d3b35', lineHeight: 1.7,
+            fontSize: 14, color: '#46534c', lineHeight: 1.7,
           }}
         />
       )}
 
       {groups.map(group => (
         <div key={group.name} style={{
-          backgroundColor: '#ffffff', border: '1px solid #e8e6e0', borderRadius: 12,
+          backgroundColor: '#ffffff', border: '1px solid #e4e9e5', borderRadius: 12,
           marginBottom: 16, overflow: 'hidden',
         }}>
           <button
             onClick={() => onSelectGroup(group.name)}
             style={{
               width: '100%', textAlign: 'left', cursor: 'pointer',
-              padding: '12px 20px', backgroundColor: '#fafaf8',
+              padding: '12px 20px', backgroundColor: '#f6f8f6',
               border: 'none', borderBottom: '1px solid #f0f0f0',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
             }}
           >
             <span style={{
-              fontSize: 12, fontWeight: 800, color: '#3d3b35',
+              fontSize: 12, fontWeight: 800, color: '#46534c',
               textTransform: 'uppercase', letterSpacing: '0.07em',
             }}>
               {group.name}
             </span>
             <span style={{
-              fontSize: 11, backgroundColor: '#f0faf6', color: '#2e9f82',
+              fontSize: 11, backgroundColor: '#eef7f2', color: '#047246',
               padding: '2px 8px', borderRadius: 99, fontWeight: 700,
             }}>
               {group.endpointCount} endpoints
@@ -74,13 +74,13 @@ function Overview({
                 borderBottom: '1px solid #f6f5f2',
                 display: 'flex', gap: 12, alignItems: 'baseline',
               }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1916', minWidth: 190 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#14201a', minWidth: 190 }}>
                   {section.label}
                 </span>
-                <span style={{ fontSize: 12.5, color: '#6b6860', flex: 1, lineHeight: 1.6 }}>
+                <span style={{ fontSize: 12.5, color: '#5f6b63', flex: 1, lineHeight: 1.6 }}>
                   {section.description ?? ''}
                 </span>
-                <span style={{ fontSize: 11, color: '#9b9890', fontFamily: 'monospace' }}>
+                <span style={{ fontSize: 11, color: '#8a948d', fontFamily: 'monospace' }}>
                   {section.endpoints.length}
                 </span>
               </div>
@@ -90,7 +90,7 @@ function Overview({
       ))}
 
       <p style={{ fontSize: 12, color: '#c4c2bc', marginTop: 20 }}>
-        Press <kbd style={{ backgroundColor: '#f4f3ef', border: '1px solid #e8e6e0', borderRadius: 4, padding: '1px 6px', fontFamily: 'monospace', fontSize: 11 }}>⌘K</kbd> to search every endpoint.
+        Press <kbd style={{ backgroundColor: '#eef1ef', border: '1px solid #e4e9e5', borderRadius: 4, padding: '1px 6px', fontFamily: 'monospace', fontSize: 11 }}>⌘K</kbd> to search every endpoint.
       </p>
     </div>
   );
@@ -108,7 +108,7 @@ export function DocsMain({ endpoint, spec, groups, onSelectGroup }: Props) {
     <main style={{
       flex: 1,
       overflowY: 'auto',
-      backgroundColor: '#fafaf8',
+      backgroundColor: '#f6f8f6',
       display: 'flex',
       flexDirection: 'column',
     }}>

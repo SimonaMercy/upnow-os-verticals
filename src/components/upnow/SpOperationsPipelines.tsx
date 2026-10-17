@@ -10,8 +10,9 @@
  *   → escrow_release | dispute | cancelled
  * partitioned so a booking shows in exactly ONE tab:
  *   - Requests    booked / confirmed / assigned    (accept → schedule → assign)
- *   - Quotes      quote_after_callout bookings whose quote is not yet approved
- *                 (ServiceQuote: draft → submitted; approved re-enters Requests)
+ *   - Quotes      quote-priced bookings whose quote is not yet approved:
+ *                 Callout booked (no quote yet) → drafted → sent → declined /
+ *                 expired (approved re-enters Requests)
  *   - Active Jobs en_route / in_progress           (work happening today)
  *   - Closure     completed / dispute (sign-off → payout). "Payment released"
  *                 is an ESCROW fact: nothing ever writes booking status
@@ -38,6 +39,10 @@ import {
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import { OpsPipelineStyle } from '@/components/upnow/OperationsPipelines';
+import {
+  STAGES_FOR_TAB as PIPELINE_STAGES, bookingPipeline as pipelineOf, bookingStage,
+  type SpPipelineTab,
+} from '@/lib/homeServices/spPipeline';
 
 /* ── Booking shape (defensive subset of the future GET /bookings) ──────────── */
 export interface SpBooking {
@@ -54,6 +59,8 @@ export interface SpBooking {
   customer?: { name?: string | null; email?: string | null } | null;
   customerName?: string | null;
   service?: { name?: string | null; category?: string | null; pricingMode?: string | null } | null;
+  /** Top-level pricing mode on the booking row ('quote' = inspection, then quote). */
+  pricingMode?: string | null;
   serviceName?: string | null;
   category?: string | null;
   technician?: { name?: string | null } | null;
@@ -83,7 +90,7 @@ interface Props {
 }
 
 /* ── Tabs ──────────────────────────────────────────────────────────────────── */
-export type SpPipelineTab = 'requests' | 'quotes' | 'active' | 'closure';
+export type { SpPipelineTab };
 type TabKey = SpPipelineTab;
 const TABS: { key: TabKey; label: string; icon: typeof Inbox }[] = [
   { key: 'requests', label: 'Requests',    icon: Inbox },
@@ -92,43 +99,9 @@ const TABS: { key: TabKey; label: string; icon: typeof Inbox }[] = [
   { key: 'closure',  label: 'Closure',     icon: Wallet },
 ];
 
-/* ── Stage lanes per pipeline (fixed, in lifecycle order) ──────────────────── */
-interface StageDef { key: string; title: string; match: string[] }
-
-const REQUEST_STAGES: StageDef[] = [
-  { key: 'booked',    title: 'New request',         match: ['booked'] },
-  { key: 'confirmed', title: 'Confirmed',           match: ['confirmed'] },
-  { key: 'assigned',  title: 'Technician assigned', match: ['assigned'] },
-];
-// Quotes: lane = the ServiceQuote state (draft → submitted → awaiting customer).
-// A booking with NO quote yet sits in the callout lane.
-const QUOTE_STAGES: StageDef[] = [
-  { key: 'callout',   title: 'Callout booked',  match: [] },
-  { key: 'draft',     title: 'Quote drafted',   match: ['draft'] },
-  { key: 'submitted', title: 'Sent to customer', match: ['submitted'] },
-];
-const ACTIVE_STAGES: StageDef[] = [
-  { key: 'en_route',    title: 'En route',    match: ['en_route'] },
-  { key: 'in_progress', title: 'In progress', match: ['in_progress'] },
-];
-// Closure lanes partition on TWO sources: Dispute reads the booking status;
-// Payment released reads the escrow row (stageOf handles this — the match
-// arrays here only cover the defensive booking-status fallback).
-const CLOSURE_STAGES: StageDef[] = [
-  { key: 'completed', title: 'Completion & sign-off', match: ['completed'] },
-  { key: 'released',  title: 'Payment released',      match: ['escrow_release'] },
-  { key: 'dispute',   title: 'Dispute',               match: ['dispute'] },
-];
-const STAGES_FOR_TAB: Record<TabKey, StageDef[]> = {
-  requests: REQUEST_STAGES,
-  quotes: QUOTE_STAGES,
-  active: ACTIVE_STAGES,
-  closure: CLOSURE_STAGES,
-};
-
-const REQUEST_SET = new Set(['booked', 'confirmed', 'assigned']);
-const ACTIVE_SET = new Set(['en_route', 'in_progress']);
-const CLOSURE_SET = new Set(['completed', 'escrow_release', 'dispute']);
+/* ── Stage lanes + partition: pure, shared and unit-tested in
+   src/lib/homeServices/spPipeline.ts (one tab and one lane per booking). ── */
+const STAGES_FOR_TAB = PIPELINE_STAGES;
 
 /* ── Small helpers (same conventions as the rentals tracker) ───────────────── */
 function daysSince(dateStr: string | null | undefined, nowMs: number): number | null {
@@ -178,36 +151,11 @@ const norm = (s: string | null | undefined) => (s ?? '').toLowerCase();
 // Exported so the SP dashboard's KPI + pipeline-snapshot counts always agree
 // with the Operations page.
 export function bookingPipeline(b: SpBooking): SpPipelineTab | null {
-  const st = norm(b.status);
-  if (st === 'cancelled') return null;
-  // A quote-mode booking waits in Quotes until the customer approves; approval
-  // (or a non-quote booking) flows through the normal status pipelines.
-  const q = norm(b.quote?.status);
-  const quotePending = (q === 'draft' || q === 'submitted')
-    || (norm(b.service?.pricingMode) === 'quote' && REQUEST_SET.has(st) && !b.quote);
-  if (quotePending && !ACTIVE_SET.has(st) && !CLOSURE_SET.has(st)) return 'quotes';
-  if (REQUEST_SET.has(st)) return 'requests';
-  if (ACTIVE_SET.has(st)) return 'active';
-  if (CLOSURE_SET.has(st)) return 'closure';
-  return null;
+  return pipelineOf(b);
 }
 
 function stageOf(b: SpBooking, tab: TabKey): string {
-  const stages = STAGES_FOR_TAB[tab];
-  if (tab === 'quotes') {
-    const q = norm(b.quote?.status);
-    return stages.find(s => s.match.includes(q))?.key ?? 'callout';
-  }
-  const st = norm(b.status);
-  if (tab === 'closure') {
-    if (st === 'dispute') return 'dispute';
-    if (st === 'escrow_release' || norm(b.escrowStatus) === 'released') return 'released';
-    // A landlord-paid maintenance job has no escrow to release — the landlord
-    // settles it off-platform at close-out. Once completed it is done here.
-    if (b.source === 'rp_maintenance' && b.payer === 'rental_provider' && st === 'completed') return 'released';
-    return 'completed';
-  }
-  return stages.find(s => s.match.includes(st))?.key ?? stages[0].key;
+  return bookingStage(b, tab);
 }
 
 function toCard(b: SpBooking, tab: TabKey, href: string | null, nowMs: number): CardVM {
@@ -430,8 +378,8 @@ export default function SpOperationsPipelines({
               <button key={em} type="button"
                 onClick={() => setFilterEmirate(filterEmirate === em ? 'all' : em)}
                 style={{
-                  border: '1px solid', borderColor: filterEmirate === em ? 'var(--ink, #1a1916)' : '#e8e8e4',
-                  background: filterEmirate === em ? 'var(--ink, #1a1916)' : '#fff',
+                  border: '1px solid', borderColor: filterEmirate === em ? 'var(--ink, #14201a)' : '#e8e8e4',
+                  background: filterEmirate === em ? 'var(--ink, #14201a)' : '#fff',
                   color: filterEmirate === em ? '#fff' : 'var(--mute, #5f5f5a)',
                   borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 600,
                   cursor: 'pointer', textTransform: 'capitalize',

@@ -102,17 +102,17 @@ export function WaLightbox({ item, rp, onClose }: { item: LightboxItem; rp: Rp; 
 function Ticks({ m }: { m: WaMessage }) {
   if (m.direction !== 'out') return null;
   if (m.status === 'not_sent' || m.ack === -1) return <AlertCircle size={13} className="text-[#b42318]" aria-label="Not sent" />;
-  if (m.status === 'sending' || m.ack === 0) return <Clock size={12} className="text-[#9b9890]" aria-label="Sending" />;
+  if (m.status === 'sending' || m.ack === 0) return <Clock size={12} className="text-[#8a948d]" aria-label="Sending" />;
   // Older messages brought in from history carry no delivery state: they were sent.
-  if (m.ack === 1 || m.ack == null) return <Check size={14} className="text-[#9b9890]" aria-label="Sent" />;
-  if (m.ack === 2) return <CheckCheck size={14} className="text-[#9b9890]" aria-label="Delivered" />;
+  if (m.ack === 1 || m.ack == null) return <Check size={14} className="text-[#8a948d]" aria-label="Sent" />;
+  if (m.ack === 2) return <CheckCheck size={14} className="text-[#8a948d]" aria-label="Delivered" />;
   return <CheckCheck size={14} className="text-[#2f9be0]" aria-label={m.ack === 4 ? 'Played' : 'Read'} />;
 }
 
 function MediaUnavailable({ m }: { m: WaMessage }) {
   const expired = m.media?.state === 'expired';
   return (
-    <div className="flex items-center gap-2 text-xs text-[#6b6860] bg-black/[0.04] rounded-lg px-3 py-2.5 min-w-[200px]">
+    <div className="flex items-center gap-2 text-xs text-[#5f6b63] bg-black/[0.04] rounded-lg px-3 py-2.5 min-w-[200px]">
       {expired ? <Ban size={14} className="shrink-0" /> : <Loader2 size={14} className="shrink-0 animate-spin" />}
       <span>{expired ? 'This file is no longer on WhatsApp. Ask them to send it again.' : 'Still arriving from WhatsApp…'}</span>
     </div>
@@ -130,7 +130,7 @@ function Photo({ m, rp, onOpen, sticker = false }: { m: WaMessage; rp: Rp; onOpe
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={url} alt={m.body || (sticker ? 'Sticker' : 'Photo')} loading="lazy" className={sticker ? 'w-[130px] h-[130px] object-contain' : 'w-full max-h-[340px] object-cover'} />
         </button>
-      ) : <span className="text-xs text-[#9b9890] py-10">{failed ? 'Could not load the photo' : 'Loading…'}</span>}
+      ) : <span className="text-xs text-[#8a948d] py-10">{failed ? 'Could not load the photo' : 'Loading…'}</span>}
     </div>
   );
 }
@@ -202,7 +202,7 @@ function VoiceNote({ m, rp }: { m: WaMessage; rp: Rp }) {
   return (
     <div className="w-[290px] max-w-full">
       <div className="flex items-center gap-2.5">
-        <button type="button" onClick={() => void toggle()} aria-label={playing ? 'Pause' : 'Play'} className="w-9 h-9 shrink-0 rounded-full bg-[#2e9f82] text-white grid place-items-center hover:bg-[#26856d] cursor-pointer">
+        <button type="button" onClick={() => void toggle()} aria-label={playing ? 'Pause' : 'Play'} className="w-9 h-9 shrink-0 rounded-full bg-[#047246] text-white grid place-items-center hover:bg-[#26856d] cursor-pointer">
           {loading ? <Loader2 size={16} className="animate-spin" /> : playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
         </button>
         <div className="flex-1 min-w-0">
@@ -211,11 +211,11 @@ function VoiceNote({ m, rp }: { m: WaMessage; rp: Rp }) {
             onKeyDown={(e) => { if (e.key === 'ArrowRight') void seek((pos + 5) / (dur || 1)); if (e.key === 'ArrowLeft') void seek((pos - 5) / (dur || 1)); }}
             className="h-5 flex items-center cursor-pointer group">
             <div className="h-1 w-full rounded-full bg-black/10 relative">
-              <div className="absolute inset-y-0 left-0 rounded-full bg-[#2e9f82]" style={{ width: `${pct}%` }} />
-              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-[#2e9f82] shadow" style={{ left: `${pct}%` }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-[#047246]" style={{ width: `${pct}%` }} />
+              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-[#047246] shadow" style={{ left: `${pct}%` }} />
             </div>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-[#6b6860] tabular-nums">
+          <div className="flex items-center gap-1.5 text-[11px] text-[#5f6b63] tabular-nums">
             {voice ? <Mic size={11} className={m.ack === 4 ? 'text-[#2f9be0]' : ''} /> : null}
             <span>{clock(playing || pos > 0 ? pos : dur)}</span>
             {!voice && m.media.name ? <span className="truncate">· {m.media.name}</span> : null}
@@ -226,8 +226,8 @@ function VoiceNote({ m, rp }: { m: WaMessage; rp: Rp }) {
       {failed && <div className="mt-1.5 text-[11px] text-[#b42318]">This browser could not play it. <button type="button" onClick={() => void download(rp, m.id)} className="underline cursor-pointer">Download</button></div>}
       {voice && (
         <div className="mt-2 pt-2 border-t border-black/[0.07] text-[13px] leading-snug text-[#2b2a27]">
-          <span className="block text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">Transcript</span>
-          {m.transcript ? <span className="whitespace-pre-wrap break-words" dir="auto">{m.transcript}</span> : <span className="text-[#9b9890]">Being written out…</span>}
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-[#8a948d] mb-0.5">Transcript</span>
+          {m.transcript ? <span className="whitespace-pre-wrap break-words" dir="auto">{m.transcript}</span> : <span className="text-[#8a948d]">Being written out…</span>}
         </div>
       )}
     </div>
@@ -238,18 +238,18 @@ function DocumentCard({ m, rp }: { m: WaMessage; rp: Rp }) {
   const name = m.media?.name || m.body || 'Document';
   const ext = (name.split('.').pop() ?? '').slice(0, 4).toUpperCase();
   const open = async () => { try { window.open(await mediaLink(rp, m.id), '_blank', 'noopener'); } catch { /* the link simply does not open */ } };
-  if (!m.media?.stored) return (<div><div className="text-sm font-medium text-[#1a1916] mb-1.5 break-all">{name}</div><MediaUnavailable m={m} /></div>);
+  if (!m.media?.stored) return (<div><div className="text-sm font-medium text-[#14201a] mb-1.5 break-all">{name}</div><MediaUnavailable m={m} /></div>);
   return (
     <div className="flex items-center gap-3 w-[290px] max-w-full bg-black/[0.04] rounded-lg px-3 py-2.5">
-      <div className="w-10 h-11 shrink-0 rounded-md bg-white border border-[#e8e6e0] grid place-items-center text-[#6b6860] relative">
+      <div className="w-10 h-11 shrink-0 rounded-md bg-white border border-[#e4e9e5] grid place-items-center text-[#5f6b63] relative">
         <FileText size={18} />
-        {ext && ext.length <= 4 ? <span className="absolute -bottom-1.5 text-[8px] font-bold bg-[#1a1916] text-white rounded px-1">{ext}</span> : null}
+        {ext && ext.length <= 4 ? <span className="absolute -bottom-1.5 text-[8px] font-bold bg-[#14201a] text-white rounded px-1">{ext}</span> : null}
       </div>
       <button type="button" onClick={() => void open()} className="flex-1 min-w-0 text-left cursor-pointer">
-        <div className="text-sm font-medium text-[#1a1916] truncate" title={name}>{name}</div>
-        <div className="text-[11px] text-[#6b6860]">{[fileSize(m.media.size), 'Open'].filter(Boolean).join(' · ')}</div>
+        <div className="text-sm font-medium text-[#14201a] truncate" title={name}>{name}</div>
+        <div className="text-[11px] text-[#5f6b63]">{[fileSize(m.media.size), 'Open'].filter(Boolean).join(' · ')}</div>
       </button>
-      <button type="button" onClick={() => void download(rp, m.id)} aria-label={`Download ${name}`} className="shrink-0 w-8 h-8 rounded-full border border-[#d9d6cf] grid place-items-center text-[#4a4842] hover:border-[#2e9f82] hover:text-[#1a7a5a] cursor-pointer"><Download size={14} /></button>
+      <button type="button" onClick={() => void download(rp, m.id)} aria-label={`Download ${name}`} className="shrink-0 w-8 h-8 rounded-full border border-[#d9d6cf] grid place-items-center text-[#4a4842] hover:border-[#047246] hover:text-[#1a7a5a] cursor-pointer"><Download size={14} /></button>
     </div>
   );
 }
@@ -262,10 +262,10 @@ function LocationCard({ m }: { m: WaMessage }) {
     <a href={href} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 w-[280px] max-w-full bg-black/[0.04] hover:bg-black/[0.07] rounded-lg px-3 py-2.5">
       <span className="w-10 h-10 shrink-0 rounded-full bg-[#fdecea] text-[#c0392b] grid place-items-center"><MapPin size={18} /></span>
       <span className="flex-1 min-w-0">
-        <span className="block text-sm font-medium text-[#1a1916] truncate">{l.name || 'Location'}</span>
-        <span className="block text-[11px] text-[#6b6860] truncate">{l.address || `${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`}</span>
+        <span className="block text-sm font-medium text-[#14201a] truncate">{l.name || 'Location'}</span>
+        <span className="block text-[11px] text-[#5f6b63] truncate">{l.address || `${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`}</span>
       </span>
-      <ExternalLink size={14} className="shrink-0 text-[#6b6860]" />
+      <ExternalLink size={14} className="shrink-0 text-[#5f6b63]" />
     </a>
   );
 }
@@ -284,9 +284,9 @@ function ContactCards({ m }: { m: WaMessage }) {
     <div className="space-y-1.5 w-[270px] max-w-full">
       {cards.map((c, i) => (
         <div key={i} className="flex items-center gap-3 bg-black/[0.04] rounded-lg px-3 py-2.5">
-          <span className="w-9 h-9 shrink-0 rounded-full bg-[#e8e6e0] text-[#6b6860] grid place-items-center"><User size={16} /></span>
+          <span className="w-9 h-9 shrink-0 rounded-full bg-[#e4e9e5] text-[#5f6b63] grid place-items-center"><User size={16} /></span>
           <span className="flex-1 min-w-0">
-            <span className="block text-sm font-medium text-[#1a1916] truncate">{c.name}</span>
+            <span className="block text-sm font-medium text-[#14201a] truncate">{c.name}</span>
             {c.phones.map((p) => (
               <button key={p} type="button" onClick={() => copy(p)} className="block text-[11px] text-[#1d6fb8] hover:underline cursor-pointer tabular-nums" title="Copy the number">{copied === p ? 'Copied' : p}</button>
             ))}
@@ -327,7 +327,7 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
   if (m.type === 'call_log') {
     return (
       <div id={`wa-msg-${m.id}`} className="flex justify-center">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-[#6b6860] bg-white border border-[#e8e6e0] rounded-full px-3 py-1">
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-[#5f6b63] bg-white border border-[#e4e9e5] rounded-full px-3 py-1">
           <Phone size={11} /> {out ? 'Outgoing' : 'Incoming'} WhatsApp call{m.body ? ` · ${m.body}` : ''} · {waTime(m.sentAt)}
         </span>
       </div>
@@ -340,10 +340,10 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
 
   let content: ReactNode;
   if (m.isRevoked) {
-    content = <span className="inline-flex items-center gap-1.5 text-sm italic text-[#9b9890]"><Ban size={13} /> This message was deleted</span>;
+    content = <span className="inline-flex items-center gap-1.5 text-sm italic text-[#8a948d]"><Ban size={13} /> This message was deleted</span>;
   } else {
     const caption = m.body && !['vcard', 'multi_vcard'].includes(m.type) && !(m.type === 'document' && m.body === m.media?.name)
-      ? <div className="text-sm text-[#1a1916] whitespace-pre-wrap break-words leading-relaxed mt-1.5" dir="auto">{formatWa(m.body)}</div> : null;
+      ? <div className="text-sm text-[#14201a] whitespace-pre-wrap break-words leading-relaxed mt-1.5" dir="auto">{formatWa(m.body)}</div> : null;
     switch (m.type) {
       case 'image': content = <><Photo m={m} rp={rp} onOpen={onOpenMedia} />{caption}</>; break;
       case 'sticker': content = <Photo m={m} rp={rp} onOpen={onOpenMedia} sticker />; break;
@@ -354,17 +354,17 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
       case 'vcard': case 'multi_vcard': content = <ContactCards m={m} />; break;
       default:
         content = m.body
-          ? <div className="text-sm text-[#1a1916] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{formatWa(m.body)}</div>
-          : <span className="text-sm italic text-[#6b6860]">{PHONE_ONLY[m.type] ?? 'This kind of message shows on the phone only.'}</span>;
-        if (m.body && PHONE_ONLY[m.type]) content = <><span className="block text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">{PHONE_ONLY[m.type]}</span>{content}</>;
+          ? <div className="text-sm text-[#14201a] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{formatWa(m.body)}</div>
+          : <span className="text-sm italic text-[#5f6b63]">{PHONE_ONLY[m.type] ?? 'This kind of message shows on the phone only.'}</span>;
+        if (m.body && PHONE_ONLY[m.type]) content = <><span className="block text-[10px] font-semibold uppercase tracking-wide text-[#8a948d] mb-0.5">{PHONE_ONLY[m.type]}</span>{content}</>;
     }
   }
 
   const actions = m.isRevoked ? null : (
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity mb-1">
-        <button type="button" onClick={() => onReply(m)} aria-label="Reply" title="Reply" className="w-7 h-7 rounded-full grid place-items-center text-[#6b6860] hover:bg-white hover:text-[#1a7a5a] cursor-pointer"><Reply size={14} /></button>
-        {copyText ? <button type="button" onClick={copy} aria-label="Copy text" title={copied ? 'Copied' : 'Copy text'} className="w-7 h-7 rounded-full grid place-items-center text-[#6b6860] hover:bg-white hover:text-[#1a7a5a] cursor-pointer">{copied ? <Check size={14} /> : <Copy size={14} />}</button> : null}
-        {m.media?.stored ? <button type="button" onClick={() => void download(rp, m.id)} aria-label="Download" title="Download" className="w-7 h-7 rounded-full grid place-items-center text-[#6b6860] hover:bg-white hover:text-[#1a7a5a] cursor-pointer"><Download size={14} /></button> : null}
+        <button type="button" onClick={() => onReply(m)} aria-label="Reply" title="Reply" className="w-7 h-7 rounded-full grid place-items-center text-[#5f6b63] hover:bg-white hover:text-[#1a7a5a] cursor-pointer"><Reply size={14} /></button>
+        {copyText ? <button type="button" onClick={copy} aria-label="Copy text" title={copied ? 'Copied' : 'Copy text'} className="w-7 h-7 rounded-full grid place-items-center text-[#5f6b63] hover:bg-white hover:text-[#1a7a5a] cursor-pointer">{copied ? <Check size={14} /> : <Copy size={14} />}</button> : null}
+        {m.media?.stored ? <button type="button" onClick={() => void download(rp, m.id)} aria-label="Download" title="Download" className="w-7 h-7 rounded-full grid place-items-center text-[#5f6b63] hover:bg-white hover:text-[#1a7a5a] cursor-pointer"><Download size={14} /></button> : null}
       </div>
   );
 
@@ -376,14 +376,14 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
       {out && actions}
       <div className={`relative max-w-[min(78%,560px)] ${sticker ? '' : `rounded-2xl px-3 py-2 shadow-[0_1px_0.5px_rgba(0,0,0,0.08)] ${out ? 'bg-[#dff3ea] rounded-br-md' : 'bg-white rounded-bl-md'}`} ${m.reactions?.length ? 'mb-3' : ''}`}>
         {who && !out && <div className="text-xs font-semibold mb-0.5 truncate" style={{ color: authorTone(m.authorPhone || who) }}>{who}</div>}
-        {m.isForwarded && !m.isRevoked && <div className="flex items-center gap-1 text-[11px] italic text-[#9b9890] mb-0.5"><Forward size={11} /> Forwarded</div>}
+        {m.isForwarded && !m.isRevoked && <div className="flex items-center gap-1 text-[11px] italic text-[#8a948d] mb-0.5"><Forward size={11} /> Forwarded</div>}
         {m.quotedSnippet && !m.isRevoked && (
-          <button type="button" onClick={() => m.quotedId && onJumpTo(m.quotedId)} className={`block w-full text-left mb-1.5 rounded-lg border-l-[3px] border-[#2e9f82] bg-black/[0.05] px-2.5 py-1.5 ${m.quotedId ? 'cursor-pointer hover:bg-black/[0.08]' : 'cursor-default'}`}>
+          <button type="button" onClick={() => m.quotedId && onJumpTo(m.quotedId)} className={`block w-full text-left mb-1.5 rounded-lg border-l-[3px] border-[#047246] bg-black/[0.05] px-2.5 py-1.5 ${m.quotedId ? 'cursor-pointer hover:bg-black/[0.08]' : 'cursor-default'}`}>
             <span className="block text-xs text-[#4a4842] line-clamp-2 break-words">{m.quotedSnippet}</span>
           </button>
         )}
         {content}
-        <div className={`flex items-center justify-end gap-1 mt-1 text-[10.5px] text-[#9b9890] tabular-nums ${sticker ? 'bg-white/80 rounded-full px-1.5 w-fit ml-auto' : ''}`}>
+        <div className={`flex items-center justify-end gap-1 mt-1 text-[10.5px] text-[#8a948d] tabular-nums ${sticker ? 'bg-white/80 rounded-full px-1.5 w-fit ml-auto' : ''}`}>
           {out && who ? <span className="mr-auto pr-3 truncate max-w-[180px]">{who}{m.sentByRole === 'manager' ? ' · manager' : ''}</span>
             : outside ? <span className="mr-auto pr-3 truncate max-w-[300px] italic" title={outside}>{outside}</span> : null}
           {m.editedAt && !m.isRevoked ? <span>Edited</span> : null}
@@ -397,8 +397,8 @@ export function WaMessageBubble({ m, rp, isGroup, onReply, onOpenMedia, onJumpTo
           </div>
         )}
         {m.reactions?.length ? (
-          <div className={`absolute -bottom-3.5 ${out ? 'right-2' : 'left-2'} flex items-center gap-0.5 bg-white border border-[#e8e6e0] rounded-full px-1.5 py-0.5 text-xs shadow-sm`}>
-            {m.reactions.map((r) => <span key={r.emoji} title={r.mine ? 'Includes yours' : undefined}>{r.emoji}{r.count > 1 ? <span className="text-[10px] text-[#6b6860] ml-0.5">{r.count}</span> : null}</span>)}
+          <div className={`absolute -bottom-3.5 ${out ? 'right-2' : 'left-2'} flex items-center gap-0.5 bg-white border border-[#e4e9e5] rounded-full px-1.5 py-0.5 text-xs shadow-sm`}>
+            {m.reactions.map((r) => <span key={r.emoji} title={r.mine ? 'Includes yours' : undefined}>{r.emoji}{r.count > 1 ? <span className="text-[10px] text-[#5f6b63] ml-0.5">{r.count}</span> : null}</span>)}
           </div>
         ) : null}
       </div>

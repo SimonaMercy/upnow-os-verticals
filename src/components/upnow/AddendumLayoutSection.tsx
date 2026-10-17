@@ -102,7 +102,7 @@ export default function AddendumLayoutSection({
           <div className="flex items-start gap-2">
             <Star size={14} className="text-[#b45309] fill-[#b45309] mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-[#1a1916] truncate">Suggested default · {suggested.name}</p>
+              <p className="text-xs font-semibold text-[#14201a] truncate">Suggested default · {suggested.name}</p>
               <p className="text-[10px] text-[#a16207] mt-0.5">
                 Your {suggested.source === 'subcategory' ? 'sub-category' : 'category'} default{scope ? ` for ${scope}` : ''}. Apply it as a starting point, or write the terms below.
               </p>
@@ -122,10 +122,10 @@ export default function AddendumLayoutSection({
         </div>
       )}
 
-      <div className="rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5 space-y-2.5">
+      <div className="rounded-lg border border-[#e4e9e5] bg-white px-3 py-2.5 space-y-2.5">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-[#9b9890]">Selected addendum</p>
-          <p className="text-[11px] text-[#9b9890] mt-0.5">{n ? `${n} term${n === 1 ? '' : 's'} written` : (hasExistingFile ? 'File addendum attached' : 'No terms yet')}</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#8a948d]">Selected addendum</p>
+          <p className="text-[11px] text-[#8a948d] mt-0.5">{n ? `${n} term${n === 1 ? '' : 's'} written` : (hasExistingFile ? 'File addendum attached' : 'No terms yet')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AddendumTemplatePicker
@@ -138,7 +138,7 @@ export default function AddendumLayoutSection({
           <div className="flex items-center gap-2 ml-auto">
             {n > 0 && (
               <button type="button" onClick={() => setPreviewOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#047246] text-xs font-semibold hover:bg-[#eef7f2] cursor-pointer">
                 <Eye size={13} /> Preview
               </button>
             )}
@@ -153,13 +153,13 @@ export default function AddendumLayoutSection({
       {dirty && (
         <div className="flex items-center gap-3">
           <button type="button" onClick={saveTerms} disabled={busy === 'save'}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white text-xs font-semibold hover:bg-[#268a70] disabled:opacity-60 cursor-pointer">
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#047246] text-white text-xs font-semibold hover:bg-[#268a70] disabled:opacity-60 cursor-pointer">
             {busy === 'save' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save addendum
           </button>
-          <span className="text-[10px] text-[#9b9890]">Saves a new version for this floor-plan.</span>
+          <span className="text-[10px] text-[#8a948d]">Saves a new version for this floor-plan.</span>
         </div>
       )}
-      {saved && !dirty && <p className="text-[11px] text-[#2e9f82]">Addendum saved.</p>}
+      {saved && !dirty && <p className="text-[11px] text-[#047246]">Addendum saved.</p>}
       {err && <p className="text-[11px] text-red-600">{err}</p>}
 
       {editorOpen && <AddendumEditorModal value={terms} onChange={setTerms} onClose={() => setEditorOpen(false)} />}

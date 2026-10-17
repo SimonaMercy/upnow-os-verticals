@@ -65,6 +65,9 @@ import {
   type CustomerJourneyMode as Mode,
 } from '@/lib/customerJourney';
 import type { DocReq } from '@/lib/docRequirements';
+// Per-subcategory stage names (residential / commercial / industrial / land)
+// over the SAME states — see lib/spaceJourney.ts.
+import { journeyOptionsFor, journeyPosition, presentCustomerState, type JourneyOptions } from '@/lib/spaceJourney';
 import { useAuth } from '@/contexts/AuthContext';
 import MoveOutReasonSelect from '@/components/upnow/MoveOutReasonSelect';
 import { moveOutReason, moveOutReasonLabel, moveOutReasonReady } from '@/lib/moveOutReasons';
@@ -73,16 +76,16 @@ import { deriveSpaceCategoryFromUnitType, effectiveSpaceCategory } from '@/lib/u
 /* ─── Brand palette ─────────────────────────────────────────────────── */
 const PALETTE: React.CSSProperties = {
   // @ts-expect-error custom CSS props
-  '--ink': '#1a1916',
-  '--ink-2': '#3d3b35',
-  '--mute': '#9b9890',
+  '--ink': '#14201a',
+  '--ink-2': '#46534c',
+  '--mute': '#8a948d',
   '--paper': '#ffffff',
   '--surface': '#f9f8f6',
   '--mist': '#f0ede8',
-  '--mist-strong': '#e8e6e0',
-  '--jade': '#2e9f82',
+  '--mist-strong': '#e4e9e5',
+  '--jade': '#047246',
   '--jade-deep': '#1f5a3f',
-  '--jade-soft': '#d8f2e8',
+  '--jade-soft': '#d8efe3',
   '--saffron': '#f59e0b',
   '--saffron-deep': '#c2410c',
   '--saffron-soft': '#fff7ed',
@@ -323,49 +326,26 @@ interface ApiContract {
 }
 
 /**
- * 8-step customer journey (Phase 1 collapse — May 30, 2026):
- *   booked → docs_required → payment_review → awaiting_rp_confirm
- *          → signature → utility → move_in → ejari → active
+ * 8-step customer journey (7 for land):
+ *   booked → docs_required / docs_under_review → payment_review / awaiting_rp_confirm
+ *          → signature → ejari → utility / utility_review → move_in / move_in_review → active
  *
- * `docs_required` is conditional — hidden from the timeline when the customer's
- *  KYC is complete AND occupants=1 AND no RP-requested extras. `deriveStateKey`
- *  skips straight to `payment_review` in that case.
+ * Registration (Ejari) comes straight after the signatures and BEFORE utility:
+ * the utility account is opened against the registration certificate. The
+ * tenancy goes live on the move-in counter-signature, not on registration.
  *
- * StateKey / StateDef / STATE_DEFS / deriveStateKey now live in
- * lib/customerJourney.ts so the My Spaces LIST resolves the very same step
- * (it used to guess from lead.stage alone and contradict this page).
+ * The STOP NAMES depend on the subcategory (MarketSpace): residential reads
+ * Viewing → Documents → Offer & cheques → Contract & signatures → Ejari → DEWA
+ * → Move-in → Active; commercial reads Site visit → Company documents → Heads
+ * of terms → …; land runs 7 stops ending in Handover → Active land lease. The
+ * rails, labels and indices live in lib/spaceJourney.ts so the My Spaces list,
+ * this page and the RP's lead/contract screens all name the same stop.
+ *
+ * StateKey / StateDef / STATE_DEFS / deriveStateKey live in
+ * lib/customerJourney.ts so the My Spaces LIST resolves the very same step.
  */
 
 interface Step { key: string; label: string; short: string; icon: string }
-
-// Mirrors the RP rail (contracts/:id/v2): Registration is step 5, BEFORE utility,
-// because the utility account is opened against the registration certificate —
-// the customer literally cannot do the utility step until registration is done.
-// See the note on STEPS_NEW there for the 2026-08-01 → 08-08 detour that had
-// Registration last.
-const STEPS_NEW: Step[] = [
-  { key: 'booked',          label: 'Booked',             short: 'Booked',   icon: 'calendar' },
-  { key: 'documents',       label: 'Documents',          short: 'Docs',     icon: 'document' },
-  { key: 'payment',         label: 'Payment & cheques',  short: 'Payment',  icon: 'wallet'   },
-  { key: 'sign',            label: 'Sign contract',      short: 'Sign',     icon: 'pen'      },
-  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
-  { key: 'utility',         label: 'Utility',            short: 'Utility',  icon: 'bolt'     },
-  { key: 'move_in',         label: 'Move-in',            short: 'Move-in',  icon: 'key'      },
-  { key: 'active',          label: 'Active tenancy',     short: 'Active',   icon: 'active'   },
-];
-// Renewal journey mirrors the RP renewal pipeline (Operations kanban):
-// Terms → Cheques/PDC → Signatures → Ejari → Active. The customer reviews and
-// confirms the renewal cheques BEFORE signing (the RP confirms collection in
-// between), matching the new-lease order. Document refresh stays a conditional
-// gate (only fires when KYC has actually expired), so it isn't a default step.
-const STEPS_RENEWAL: Step[] = [
-  { key: 'terms_offered',   label: 'Terms offered',      short: 'Terms',    icon: 'envelope' },
-  { key: 'documents',       label: 'Renewal documents',  short: 'Docs',     icon: 'document' },
-  { key: 'cheques',         label: 'Cheques / PDC',      short: 'Cheques',  icon: 'wallet'   },
-  { key: 'sign',            label: 'Sign renewal',       short: 'Sign',     icon: 'pen'      },
-  { key: 'ejari',           label: 'Contract Registration', short: 'Registration', icon: 'stamp' },
-  { key: 'active',          label: 'Renewal active',     short: 'Active',   icon: 'active'   },
-];
 
 /** A single uploaded cheque photo with its AI-extracted fields. The
  *  full schema is built out in Phase 4 (Step 3 — AI cheque extraction);
@@ -430,50 +410,35 @@ interface Resolved {
   requestedAdditionalDocs: string[];
 }
 
-/**
- * Map state-machine state → timeline step key so we can compute which
- * step is "current" after filtering. Anything not in this map (renewal
- * / termination / dead-end states) falls back to STATE_DEFS.currentIndex
- * since those flows render their own dedicated step list anyway.
- */
-const STATE_TO_STEP_KEY: Partial<Record<StateKey, string>> = {
-  booked:               'booked',
-  docs_required:        'documents',
-  docs_under_review:    'documents',
-  payment_review:       'payment',
-  awaiting_rp_confirm:  'payment',
-  signature:            'sign',
-  ejari:                'ejari',
-  utility:              'utility',
-  move_in:              'move_in',
-  active:               'active',
-};
+/** The subcategory/emirate/booking-kind options for this space — decides the
+ *  stop names. Land is read off the unit type; mixed-use resolves per unit. */
+function journeyOpts(stateKey: StateKey, resolved?: Resolved | null): JourneyOptions {
+  const c = resolved?.contract ?? resolved?.renewalContract ?? null;
+  return journeyOptionsFor(stateKey, {
+    unitType: resolved?.unit?.unitType ?? c?.unit?.unitType ?? null,
+    spaceCategory: c?.property?.spaceCategory ?? null,
+    emirate: c?.property?.emirate ?? resolved?.unit?.property?.emirate?.name ?? null,
+    viewing: resolved?.viewing ?? null,
+    direct: !!resolved && !resolved.viewing,
+  });
+}
 
-/**
- * Decide which timeline steps this particular customer needs to walk
- * through. The 8-step journey is fixed for new tenancies — every pin
- * stays visible from Booked → Active so the static "Step N of 8" labels
- * in STATE_DEFS line up with the timeline highlight (previous attempts
- * to hide the Docs pin once uploaded caused exactly that mismatch).
- */
-function getVisibleSteps(_resolved: Resolved | null, currentStateKey: StateKey): Step[] {
-  const def = STATE_DEFS[currentStateKey];
-  return def.mode === 'renewal' ? STEPS_RENEWAL : STEPS_NEW;
+/** The shared state copy, re-dressed with this space's stop names. */
+function presentDef(stateKey: StateKey, resolved?: Resolved | null): StateDef {
+  return presentCustomerState(STATE_DEFS[stateKey], stateKey, journeyOpts(stateKey, resolved));
 }
 
 function stepsFor(stateKey: StateKey, resolved?: Resolved | null):
   { steps: (Step & { state: 'done' | 'current' | 'future' | 'declined' })[]; mode: Mode; currentIndex: number } {
   const def = STATE_DEFS[stateKey];
-  const visibleSteps = getVisibleSteps(resolved ?? null, stateKey);
-  // Recompute currentIndex against the (possibly filtered) step list so
-  // the highlight stays anchored to the right step after hiding Docs.
-  const stepKey = STATE_TO_STEP_KEY[stateKey];
-  const computedIdx = stepKey ? visibleSteps.findIndex(s => s.key === stepKey) : -1;
-  const currentIndex = computedIdx >= 0 ? computedIdx : def.currentIndex;
+  // The rail is fixed per subcategory — every pin stays visible so the
+  // "Step N of T" line and the highlighted pin are always the same stop.
+  const pos = journeyPosition(stateKey, journeyOpts(stateKey, resolved));
+  const currentIndex = pos.index >= 0 ? pos.index : def.currentIndex;
   return {
     mode: def.mode,
     currentIndex,
-    steps: visibleSteps.map((s, i) => ({
+    steps: pos.steps.map((s, i) => ({
       ...s,
       state: def.mode === 'rejected'
         ? 'declined'
@@ -1126,7 +1091,7 @@ function Modal({ title, onClose, children, footer }: { title: string; onClose: (
 /* ─── Signature canvas ────────────────────────────────────────────── */
 /* ─── Action card shell ────────────────────────────────────────────── */
 function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey; resolved: Resolved; onRefresh: () => void }) {
-  const def = STATE_DEFS[stateKey];
+  const def = presentDef(stateKey, resolved);
   const { steps, currentIndex } = stepsFor(stateKey, resolved);
   const currentStep = steps[currentIndex];
   const iconName = currentStep?.icon ?? 'document';
@@ -1144,6 +1109,7 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
         <Pill tone={def.tone}>{def.label}</Pill>
       </div>
       {def.body && <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.6, margin: 0 }}>{def.body}</p>}
+      <TermStartNote stateKey={stateKey} resolved={resolved} />
       <ActionBody stateKey={stateKey} resolved={resolved} onRefresh={onRefresh} />
       {def.timing && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px dashed var(--mist-strong)', flexWrap: 'wrap', gap: 8 }}>
@@ -1153,6 +1119,27 @@ function QuestActionCard({ stateKey, resolved, onRefresh }: { stateKey: StateKey
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The lease's contractual start date, shown beside the setup steps. In UpNow a
+ * new tenancy goes LIVE on the move-in counter-signature (it is what flips the
+ * contract to active), not on the start date — so a customer who signs early
+ * would otherwise not know when the term actually begins, and one who moves in
+ * late would not know the term already began.
+ */
+const TERM_NOTE_STATES = new Set<StateKey>(['signature', 'ejari', 'utility', 'utility_review', 'move_in', 'move_in_review']);
+function TermStartNote({ stateKey, resolved }: { stateKey: StateKey; resolved: Resolved }) {
+  const start = resolved.contract?.startDate?.slice(0, 10);
+  if (!start || !TERM_NOTE_STATES.has(stateKey)) return null;
+  const lease = journeyOpts(stateKey, resolved).subcategory === 'residential' ? 'Tenancy' : 'Lease';
+  return (
+    <p style={{ fontSize: 12.5, color: 'var(--ink-2)', margin: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <Calendar size={13} style={{ color: 'var(--mute)' }} />
+      <strong style={{ color: 'var(--ink)' }}>{lease} starts {fmtDateLong(start)}</strong>
+      <span style={{ color: 'var(--mute)' }}>· it shows as active here once the move-in inspection is counter-signed.</span>
+    </p>
   );
 }
 
@@ -1588,7 +1575,7 @@ function InterestedPopup({
                         style={{
                           display: 'flex', alignItems: 'center', justifyContent: 'center', height: 32, borderRadius: 8,
                           fontSize: 12, fontWeight: 700, border: 'none', fontFamily: 'inherit',
-                          background: isSelected ? 'var(--jade)' : isPast ? 'transparent' : 'rgba(46,159,130,0.12)',
+                          background: isSelected ? 'var(--jade)' : isPast ? 'transparent' : 'rgba(4,114,70,0.12)',
                           color: isSelected ? 'var(--paper)' : isPast ? 'var(--mist-strong)' : 'var(--jade-deep)',
                           cursor: isPast ? 'not-allowed' : 'pointer',
                         }}>
@@ -1741,9 +1728,9 @@ function KycSection({ title, accent, allDone, children }: { title: string; accen
   // eslint-disable-next-line react-hooks/set-state-in-effect
   React.useEffect(() => { if (allDone) setCollapsed(true); }, [allDone]);
   return (
-    <div style={{ background: 'var(--surface)', border: `1px solid ${allDone && collapsed ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, borderRadius: 14, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--surface)', border: `1px solid ${allDone && collapsed ? 'rgba(4,114,70,0.35)' : 'var(--mist-strong)'}`, borderRadius: 14, overflow: 'hidden' }}>
       <button type="button" onClick={() => setCollapsed(c => !c)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '9px 14px', background: allDone && collapsed ? 'rgba(46,159,130,0.06)' : accent ? 'var(--jade-soft)' : 'var(--mist)', border: 'none', borderBottom: collapsed ? 'none' : '1px solid var(--mist-strong)', cursor: 'pointer', gap: 8, fontFamily: 'inherit' }}>
+        style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '9px 14px', background: allDone && collapsed ? 'rgba(4,114,70,0.06)' : accent ? 'var(--jade-soft)' : 'var(--mist)', border: 'none', borderBottom: collapsed ? 'none' : '1px solid var(--mist-strong)', cursor: 'pointer', gap: 8, fontFamily: 'inherit' }}>
         <p style={{ fontSize: 10, fontWeight: 700, color: accent ? 'var(--jade-deep)' : 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1, textAlign: 'left' }}>{title}</p>
         {allDone && collapsed && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', background: 'var(--jade-soft)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Done</span>}
         <ChevronDown size={14} style={{ color: 'var(--mute)', flexShrink: 0, transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.2s' }} />
@@ -2153,7 +2140,7 @@ function CompanyDetailsCard({
 
 function KycContactChip({ icon, value, verified }: { icon: React.ReactNode; value: string; verified: boolean }) {
   return (
-    <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '8px 11px', borderRadius: 9, background: verified ? 'rgba(46,159,130,0.06)' : 'var(--mist)', border: `1px solid ${verified ? 'rgba(46,159,130,0.3)' : 'var(--mist-strong)'}` }}>
+    <div style={{ display: 'flex', gap: 7, alignItems: 'center', padding: '8px 11px', borderRadius: 9, background: verified ? 'rgba(4,114,70,0.06)' : 'var(--mist)', border: `1px solid ${verified ? 'rgba(4,114,70,0.3)' : 'var(--mist-strong)'}` }}>
       <span style={{ color: verified ? 'var(--jade-deep)' : 'var(--mute)', flexShrink: 0, display: 'flex' }}>{icon}</span>
       <span style={{ fontSize: 13, color: 'var(--ink-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value || '—'}</span>
       {verified && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--jade-deep)', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'var(--jade-soft)', padding: '2px 7px', borderRadius: 999, flexShrink: 0 }}>Verified</span>}
@@ -2195,8 +2182,8 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
         viewer button and the file picker never opened: "Replace" did nothing.
         The picker now hangs off its own <label> around the action pill alone —
         the same shape the payment-reference rows below already use. */}
-    <div data-doc-key={req.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, background: isRejected ? 'var(--brick-soft)' : uploaded ? 'rgba(46,159,130,0.06)' : 'var(--paper)', border: `1.5px solid ${isRejected ? 'var(--brick)' : uploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}` }}>
-      <div style={{ width: 38, height: 38, borderRadius: 10, background: isRejected ? 'rgba(193,74,52,0.12)' : uploaded ? 'rgba(46,159,130,0.12)' : 'var(--mist)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <div data-doc-key={req.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, background: isRejected ? 'var(--brick-soft)' : uploaded ? 'rgba(4,114,70,0.06)' : 'var(--paper)', border: `1.5px solid ${isRejected ? 'var(--brick)' : uploaded ? 'rgba(4,114,70,0.35)' : 'var(--mist-strong)'}` }}>
+      <div style={{ width: 38, height: 38, borderRadius: 10, background: isRejected ? 'rgba(193,74,52,0.12)' : uploaded ? 'rgba(4,114,70,0.12)' : 'var(--mist)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         {isRejected ? <AlertCircle size={18} style={{ color: 'var(--brick)' }} /> : uploaded ? <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} /> : <FileText size={18} style={{ color: 'var(--mute)' }} />}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -2235,7 +2222,7 @@ function KycDocRow({ req, myDocs, localPreviews, docUploading, onUpload }: {
           renders (it used to appear only on an uploaded/rejected row, which was
           survivable while the whole row was clickable — now a bare icon would be
           the entire tap target). */}
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '7px 12px', borderRadius: 9, border: `1px solid ${isRejected ? 'var(--brick)' : uploaded ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong)'}`, background: 'var(--paper)', fontSize: 11, fontWeight: 700, color: isRejected ? 'var(--brick)' : uploaded ? 'var(--jade-deep)' : 'var(--ink-2)', cursor: isUp ? 'progress' : 'pointer' }}>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '7px 12px', borderRadius: 9, border: `1px solid ${isRejected ? 'var(--brick)' : uploaded ? 'rgba(4,114,70,0.35)' : 'var(--mist-strong)'}`, background: 'var(--paper)', fontSize: 11, fontWeight: 700, color: isRejected ? 'var(--brick)' : uploaded ? 'var(--jade-deep)' : 'var(--ink-2)', cursor: isUp ? 'progress' : 'pointer' }}>
         <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} disabled={isUp}
           // Clear the value so re-picking the SAME file still fires onChange —
           // otherwise a customer replacing a doc with a corrected scan of the
@@ -2664,7 +2651,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
                 <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div>
                     <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
-                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{phoneDevOtp}</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#14201a' }}>{phoneDevOtp}</p>
                   </div>
                   <button type="button" onClick={() => setPhoneOtp(phoneDevOtp)}
                     style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
@@ -2700,7 +2687,7 @@ function InlineKycDocsForm({ resolved, onRefresh }: { resolved: Resolved; onRefr
                 <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fef3c7', border: '1px dashed #f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div>
                     <p style={{ fontSize: 9, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, margin: 0 }}>Dev OTP</p>
-                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#1a1916' }}>{emailDevOtp}</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: '4px', fontFamily: 'monospace', margin: '2px 0 0', color: '#14201a' }}>{emailDevOtp}</p>
                   </div>
                   <button type="button" onClick={() => setEmailOtp(emailDevOtp)}
                     style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6, background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer' }}>Auto-fill</button>
@@ -3018,8 +3005,8 @@ function RenewalDocumentsAction({
     return (
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
-        background: needsUpload ? 'var(--saffron-soft, #fff7ed)' : 'rgba(46,159,130,0.08)',
-        border: `1px solid ${needsUpload ? 'var(--saffron, #f59e0b)' : 'rgba(46,159,130,0.35)'}`,
+        background: needsUpload ? 'var(--saffron-soft, #fff7ed)' : 'rgba(4,114,70,0.08)',
+        border: `1px solid ${needsUpload ? 'var(--saffron, #f59e0b)' : 'rgba(4,114,70,0.35)'}`,
         cursor: isUploading ? 'progress' : 'pointer',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3074,7 +3061,7 @@ function RenewalDocumentsAction({
             Declared under renewal: {pendingPapers.join(', ')}. You undertook to provide the renewed documents once issued; your rental provider will decide whether to proceed on this basis.
           </p>
         )}
-        <div style={{ background: 'rgba(46,159,130,0.08)', border: '1px solid rgba(46,159,130,0.35)', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 8 }}>
+        <div style={{ background: 'rgba(4,114,70,0.08)', border: '1px solid rgba(4,114,70,0.35)', borderRadius: 14, padding: '16px 18px', display: 'grid', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CheckCircle2 size={18} style={{ color: 'var(--jade-deep)' }} />
             <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Documents submitted for review</p>
@@ -3226,21 +3213,21 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>Payment Summary — ${buildingName}</title>
 <style>
-  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1a1916;padding:32px;max-width:780px;margin:0 auto}
-  h1{font-size:22px;margin:0 0 4px;letter-spacing:-0.02em} h2{font-size:13px;margin:24px 0 8px;color:#1f5a3f;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #d8f2e8;padding-bottom:4px}
-  .sub{font-size:11px;color:#6b6860;margin-bottom:16px}
+  *{box-sizing:border-box} body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#14201a;padding:32px;max-width:780px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px;letter-spacing:-0.02em} h2{font-size:13px;margin:24px 0 8px;color:#1f5a3f;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #d8efe3;padding-bottom:4px}
+  .sub{font-size:11px;color:#5f6b63;margin-bottom:16px}
   .grid{display:grid;grid-template-columns:160px 1fr;gap:6px 16px;font-size:12px;margin-bottom:8px}
-  .grid .l{color:#9b9890;text-transform:uppercase;font-size:10px;letter-spacing:.05em;padding-top:2px}
-  .grid .v{color:#1a1916;font-weight:600}
+  .grid .l{color:#8a948d;text-transform:uppercase;font-size:10px;letter-spacing:.05em;padding-top:2px}
+  .grid .v{color:#14201a;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e8e6e0}
-  th{background:#f9f8f6;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6b6860}
-  tfoot td{font-weight:700;background:#d8f2e8;color:#1f5a3f;border-top:2px solid #2e9f82}
-  .footer{margin-top:32px;font-size:10px;color:#9b9890;text-align:center;border-top:1px solid #e8e6e0;padding-top:12px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e4e9e5}
+  th{background:#f9f8f6;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#5f6b63}
+  tfoot td{font-weight:700;background:#d8efe3;color:#1f5a3f;border-top:2px solid #047246}
+  .footer{margin-top:32px;font-size:10px;color:#8a948d;text-align:center;border-top:1px solid #e4e9e5;padding-top:12px}
   @media print{body{padding:16px} .noprint{display:none}}
   .btnrow{margin:0 0 24px;display:flex;gap:8px}
-  .btn{display:inline-block;padding:10px 16px;background:#2e9f82;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer}
-  .btn.alt{background:#f9f8f6;color:#3d3b35;border:1px solid #e8e6e0}
+  .btn{display:inline-block;padding:10px 16px;background:#047246;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer}
+  .btn.alt{background:#f9f8f6;color:#46534c;border:1px solid #e4e9e5}
 </style></head>
 <body>
   <div class="btnrow noprint">
@@ -3280,7 +3267,7 @@ function printPaymentPlan(resolved: Resolved, tenantName: string) {
     <tfoot><tr><td colspan="2">Total</td><td style="text-align:right">${aed(plan.totalAmountFils)}</td><td></td></tr></tfoot>
   </table>
 
-  ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#3d3b35;white-space:pre-wrap">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
+  ${plan.notes ? `<h2>Notes</h2><p style="font-size:12px;color:#46534c;white-space:pre-wrap">${plan.notes.replace(/</g, '&lt;')}</p>` : ''}
 
   <div class="footer">Generated by UpNow · ${new Date().toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day:'numeric', month:'short', year:'numeric' })}</div>
 </body></html>`;
@@ -3799,8 +3786,8 @@ function SignatureAction({ resolved, onRefresh, renewal }: { resolved: Resolved;
       {/* Highlighted "Step 1 — Review" card with a subtle pulsing ring to draw attention */}
       <style>{`
         @keyframes reviewCardPulse {
-          0%, 100% { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 0 rgba(46,159,130,0.45); }
-          50%      { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 10px rgba(46,159,130,0); }
+          0%, 100% { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 0 rgba(4,114,70,0.45); }
+          50%      { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 10px rgba(4,114,70,0); }
         }
         .review-card-pulse { animation: reviewCardPulse 1.8s ease-out infinite; }
       `}</style>
@@ -4067,8 +4054,8 @@ function MoveInAction({ resolved }: { resolved: Resolved }) {
           is an action prompt, so it stops once the customer has signed. */}
       <style>{`
         @keyframes inspectReviewPulse {
-          0%, 100% { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 0 rgba(46,159,130,0.45); }
-          50%      { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 10px rgba(46,159,130,0); }
+          0%, 100% { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 0 rgba(4,114,70,0.45); }
+          50%      { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 10px rgba(4,114,70,0); }
         }
         .inspect-review-pulse { animation: inspectReviewPulse 1.8s ease-out infinite; }
       `}</style>
@@ -4959,8 +4946,8 @@ function RenewalOfferedAction({ resolved, onRefresh }: { resolved: Resolved; onR
         <>
           <style>{`
             @keyframes renewalReviewPulse {
-              0%, 100% { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 0 rgba(46,159,130,0.45); }
-              50%      { box-shadow: 0 4px 14px -6px rgba(46,159,130,0.45), 0 0 0 10px rgba(46,159,130,0); }
+              0%, 100% { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 0 rgba(4,114,70,0.45); }
+              50%      { box-shadow: 0 4px 14px -6px rgba(4,114,70,0.45), 0 0 0 10px rgba(4,114,70,0); }
             }
             .renewal-review-pulse { animation: renewalReviewPulse 1.8s ease-out infinite; }
           `}</style>
@@ -5674,7 +5661,7 @@ export default function CustomerSpaceV2Page() {
   const maintCandidate = resolved.contract ?? resolved.renewalContract;
   const maintContract = maintCandidate && ['issued', 'active'].includes(maintCandidate.status) ? maintCandidate : null;
   const { steps, currentIndex } = stepsFor(stateKey, resolved);
-  const def = STATE_DEFS[stateKey];
+  const def = presentDef(stateKey, resolved);
 
   return (
     <div style={{ ...PALETTE, minHeight: '100vh', background: 'var(--surface)' }}>
@@ -5707,12 +5694,12 @@ function DualView({ resolved, onRefresh }: { resolved: Resolved; onRefresh: () =
   const resolvedOriginalOnly: Resolved = { ...resolved, renewalContract: null, contract: resolved.contract ? { ...resolved.contract, renewalAccepted: null } : null };
   const originalStateKey: StateKey = 'active';
   const { steps: originalSteps, currentIndex: originalCurrentIdx } = stepsFor(originalStateKey, resolvedOriginalOnly);
-  const originalDef = STATE_DEFS[originalStateKey];
+  const originalDef = presentDef(originalStateKey, resolvedOriginalOnly);
 
   // Section 02 — Renewal. Full derivation (renewal-aware).
   const renewalStateKey = deriveStateKey(resolved);
   const { steps: renewalSteps, currentIndex: renewalCurrentIdx } = stepsFor(renewalStateKey, resolved);
-  const renewalDef = STATE_DEFS[renewalStateKey];
+  const renewalDef = presentDef(renewalStateKey, resolved);
 
   const c = resolved.contract;
   const rc = resolved.renewalContract;

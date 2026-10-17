@@ -68,7 +68,7 @@ export function EmailLayoutFrame({ rp, messageId, fallback }: { rp: Rp; messageI
 
   if (failed || layout === null) return <>{fallback}</>;
   if (layout === undefined) {
-    return <div className="flex items-center gap-1.5 py-2 text-xs text-[#9b9890]"><Loader2 size={12} className="animate-spin" /> Opening the email…</div>;
+    return <div className="flex items-center gap-1.5 py-2 text-xs text-[#8a948d]"><Loader2 size={12} className="animate-spin" /> Opening the email…</div>;
   }
   return (
     <div>
@@ -78,7 +78,7 @@ export function EmailLayoutFrame({ rp, messageId, fallback }: { rp: Rp; messageI
       {layout.short && (
         <div className="mt-2.5 flex flex-wrap gap-2">
           <button type="button" onClick={() => setShowQuoted((v) => !v)} aria-expanded={showQuoted}
-            className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">
+            className="text-[11px] text-[#5f6b63] border border-[#e4e9e5] rounded-full px-2.5 py-0.5 hover:border-[#8a948d] cursor-pointer">
             {showQuoted ? 'Hide earlier emails' : 'Earlier emails quoted below'}
           </button>
         </div>

@@ -13,10 +13,10 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 
-const JADE = '#2e9f82';
+const JADE = '#047246';
 const BLUE = '#1e5fae';
 const GRID = '#f0ede8';
-const TICK = { fontSize: 11, fill: '#9b9890' } as const;
+const TICK = { fontSize: 11, fill: '#8a948d' } as const;
 
 export interface MemberActivityItem {
   at: string;
@@ -57,20 +57,20 @@ const KIND_STYLE: Record<string, string> = {
   created: 'bg-[#e6f5ee] text-[#1f6f54]',
   updated: 'bg-[#eaf2fb] text-[#1e5fae]',
   deleted: 'bg-[#fdeee4] text-[#b45309]',
-  other: 'bg-[#f4f3ef] text-[#6b6860]',
+  other: 'bg-[#eef1ef] text-[#5f6b63]',
 };
 
 function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
-      <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold flex items-center gap-1">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3">
+      <p className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold flex items-center gap-1">
         {label}
         {hint && (
           <span className="relative inline-flex print:hidden normal-case tracking-normal">
             <button type="button" aria-label={`About ${label}`} onClick={() => setOpen(o => !o)}
               onBlur={() => setTimeout(() => setOpen(false), 150)}
-              className="text-[#c8c6c0] hover:text-[#2e9f82]"><Info size={11} /></button>
+              className="text-[#c8c6c0] hover:text-[#047246]"><Info size={11} /></button>
             {open && (
               <span className="absolute z-40 top-full mt-1.5 left-0 w-60 bg-white border border-[#e3e0d9] rounded-xl p-2.5 text-[11px] font-normal leading-relaxed text-[#4a4742] whitespace-normal"
                 style={{ boxShadow: '0 12px 32px rgba(20,18,15,.16)' }}>{hint}</span>
@@ -78,7 +78,7 @@ function Tile({ label, value, hint }: { label: string; value: string | number; h
           </span>
         )}
       </p>
-      <p className="text-base font-bold text-[#1a1916] mt-1">{value}</p>
+      <p className="text-base font-bold text-[#14201a] mt-1">{value}</p>
     </div>
   );
 }
@@ -168,14 +168,14 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
       <div className="flex items-start justify-between gap-4 mb-5 print:hidden">
         <div>
           <button type="button" onClick={onBack}
-            className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
             <ArrowLeft size={12} /> Manager Performance
           </button>
-          <h1 className="text-2xl font-bold text-[#1a1916] flex items-center gap-2.5">
+          <h1 className="text-2xl font-bold text-[#14201a] flex items-center gap-2.5">
             {member.name}
-            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#f4f3ef] text-[#6b6860] capitalize">{member.role}</span>
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#eef1ef] text-[#5f6b63] capitalize">{member.role}</span>
           </h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Everything they did in the selected period, day by day.</p>
+          <p className="text-sm text-[#5f6b63] mt-0.5">Everything they did in the selected period, day by day.</p>
         </div>
         <button onClick={() => window.print()}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white"
@@ -200,15 +200,15 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
       <div className="grid lg:grid-cols-2 gap-3 mb-5">
         {/* Personal timeline */}
         {hasSeries && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-            <p className="text-sm font-bold text-[#1a1916] mb-2">Their rhythm</p>
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4">
+            <p className="text-sm font-bold text-[#14201a] mb-2">Their rhythm</p>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={series} margin={{ top: 4, right: 16, bottom: 0, left: -18 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
                 <XAxis dataKey="date" tick={TICK} axisLine={false} tickLine={false} minTickGap={24} />
                 <YAxis tick={TICK} axisLine={false} tickLine={false} allowDecimals={false} />
                 <Tooltip />
-                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#6b6860' }} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#5f6b63' }} />
                 <Line type="monotone" dataKey="Actions" stroke={JADE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
                 <Line type="monotone" dataKey="Pages" stroke={BLUE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
               </LineChart>
@@ -216,8 +216,8 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
           </div>
         )}
         {/* Work mix summary */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 flex flex-col justify-center">
-          <p className="text-sm font-bold text-[#1a1916] mb-3">Type of work</p>
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4 flex flex-col justify-center">
+          <p className="text-sm font-bold text-[#14201a] mb-3">Type of work</p>
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-xl bg-[#e6f5ee] px-4 py-3 text-center">
               <p className="text-xl font-bold text-[#1f6f54]">{member.created}</p>
@@ -232,7 +232,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
               <p className="text-[11px] font-semibold text-[#b45309] mt-0.5">Deleted</p>
             </div>
           </div>
-          <p className="text-[11px] text-[#9b9890] mt-3">
+          <p className="text-[11px] text-[#8a948d] mt-3">
             {member.pagesViewed} pages · {member.reportsViewed} reports opened in the period.
           </p>
         </div>
@@ -240,18 +240,18 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
 
       {/* Pages viewed — the presence detail behind the "Pages viewed" count */}
       {pages.length > 0 && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] mb-3 overflow-hidden print:break-inside-avoid">
-          <div className="px-5 py-2.5 bg-[#fafaf8] border-b border-[#f0ede8] flex items-center justify-between">
-            <p className="text-xs font-bold text-[#1a1916]">Pages viewed</p>
-            <p className="text-[11px] text-[#9b9890]">{pages.length} distinct page{pages.length === 1 ? '' : 's'} · {member.pagesViewed} visits</p>
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] mb-3 overflow-hidden print:break-inside-avoid">
+          <div className="px-5 py-2.5 bg-[#f6f8f6] border-b border-[#f0ede8] flex items-center justify-between">
+            <p className="text-xs font-bold text-[#14201a]">Pages viewed</p>
+            <p className="text-[11px] text-[#8a948d]">{pages.length} distinct page{pages.length === 1 ? '' : 's'} · {member.pagesViewed} visits</p>
           </div>
           <table className="w-full text-sm">
             <tbody>
               {pages.map((p, i) => (
-                <tr key={i} className="border-t border-[#f7f5f1] first:border-t-0 hover:bg-[#fafaf8]">
-                  <td className="pl-5 pr-3 py-2.5 text-[#1a1916] font-medium">{p.label}</td>
-                  <td className="px-3 py-2.5 text-[#6b6860] whitespace-nowrap text-right w-24">{p.count} visit{p.count === 1 ? '' : 's'}</td>
-                  <td className="pl-3 pr-5 py-2.5 text-[#9b9890] whitespace-nowrap text-right">last {p.lastAt.split(',')[1]?.trim() ?? p.lastAt}</td>
+                <tr key={i} className="border-t border-[#f7f5f1] first:border-t-0 hover:bg-[#f6f8f6]">
+                  <td className="pl-5 pr-3 py-2.5 text-[#14201a] font-medium">{p.label}</td>
+                  <td className="px-3 py-2.5 text-[#5f6b63] whitespace-nowrap text-right w-24">{p.count} visit{p.count === 1 ? '' : 's'}</td>
+                  <td className="pl-3 pr-5 py-2.5 text-[#8a948d] whitespace-nowrap text-right">last {p.lastAt.split(',')[1]?.trim() ?? p.lastAt}</td>
                 </tr>
               ))}
             </tbody>
@@ -262,19 +262,19 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3 print:hidden">
         <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
           <input
             type="text" value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search loaded actions…"
-            className="pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm w-64 focus:outline-none focus:border-[#2e9f82]" />
+            className="pl-9 pr-3 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm w-64 focus:outline-none focus:border-[#047246]" />
         </div>
         <button onClick={() => setKind(null)}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!kind ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${!kind ? 'bg-[#047246] text-white border-[#047246]' : 'bg-white text-[#5f6b63] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
           All · {counts?.all ?? '…'}
         </button>
         {kinds.map(([k, n]) => (
           <button key={k} onClick={() => setKind(kind === k ? null : k)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border capitalize transition-colors ${kind === k ? 'bg-[#2e9f82] text-white border-[#2e9f82]' : 'bg-white text-[#6b6860] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border capitalize transition-colors ${kind === k ? 'bg-[#047246] text-white border-[#047246]' : 'bg-white text-[#5f6b63] border-[#e3e0d9] hover:border-[#c5c2bc]'}`}>
             {k} · {n}
           </button>
         ))}
@@ -282,29 +282,29 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
 
       {/* Day-grouped feed */}
       {byDay.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center text-sm text-[#9b9890]">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center text-sm text-[#8a948d]">
           {feedLoading ? 'Loading…' : 'Nothing matches.'}
         </div>
       ) : byDay.map(g => (
-        <div key={g.day} className="bg-white rounded-2xl border border-[#e8e6e0] mb-3 overflow-hidden print:break-inside-avoid">
-          <div className="px-5 py-2.5 bg-[#fafaf8] border-b border-[#f0ede8] flex items-center justify-between">
-            <p className="text-xs font-bold text-[#1a1916]">{g.day}</p>
-            <p className="text-[11px] text-[#9b9890]">{g.items.length} action{g.items.length === 1 ? '' : 's'}</p>
+        <div key={g.day} className="bg-white rounded-2xl border border-[#e4e9e5] mb-3 overflow-hidden print:break-inside-avoid">
+          <div className="px-5 py-2.5 bg-[#f6f8f6] border-b border-[#f0ede8] flex items-center justify-between">
+            <p className="text-xs font-bold text-[#14201a]">{g.day}</p>
+            <p className="text-[11px] text-[#8a948d]">{g.items.length} action{g.items.length === 1 ? '' : 's'}</p>
           </div>
           <table className="w-full text-sm">
             <tbody>
               {g.items.map((it, i) => (
-                <tr key={i} className="border-t border-[#f7f5f1] first:border-t-0 hover:bg-[#fafaf8]">
-                  <td className="pl-5 pr-3 py-2.5 text-[#6b6860] whitespace-nowrap w-20">{it.at.split(',')[1]?.trim()}</td>
+                <tr key={i} className="border-t border-[#f7f5f1] first:border-t-0 hover:bg-[#f6f8f6]">
+                  <td className="pl-5 pr-3 py-2.5 text-[#5f6b63] whitespace-nowrap w-20">{it.at.split(',')[1]?.trim()}</td>
                   <td className="px-3 py-2.5 w-24">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${KIND_STYLE[it.kind] ?? KIND_STYLE.other}`}>{it.kind}</span>
                   </td>
-                  <td className="px-3 py-2.5 text-[#1a1916] font-medium">{it.action}</td>
+                  <td className="px-3 py-2.5 text-[#14201a] font-medium">{it.action}</td>
                   <td className="px-3 py-2.5 text-[#4a4742]">{it.detail}</td>
                   <td className="px-3 py-2.5 text-right pr-5 w-20">
                     {it.contractId != null && (
                       <Link href={`${contractsBase}/${it.contractId}/v2`}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                        className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">
                         Open <ExternalLink size={12} />
                       </Link>
                     )}
@@ -320,7 +320,7 @@ export function MemberActivityView({ member, daily, dailyPages, contractsBase, f
           <button
             onClick={() => void fetchPage(nextOffset, kind, false)}
             disabled={feedLoading}
-            className="px-4 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] bg-white text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] disabled:opacity-50">
+            className="px-4 py-2 rounded-xl text-sm font-medium border border-[#e4e9e5] bg-white text-[#5f6b63] hover:text-[#14201a] hover:border-[#c5c2bc] disabled:opacity-50">
             {feedLoading ? 'Loading…' : 'Load more'}
           </button>
         </div>

@@ -60,7 +60,7 @@ export function HowItWorks() {
                 style={{
                   color: activeTab === tab ? 'var(--white)' : 'var(--neutral-600)',
                   backgroundColor: activeTab === tab ? 'var(--primary)' : 'transparent',
-                  boxShadow: activeTab === tab ? '0 2px 8px rgba(46,159,130,0.3)' : 'none',
+                  boxShadow: activeTab === tab ? '0 2px 8px rgba(4,114,70,0.3)' : 'none',
                 }}
               >
                 {tab === 'services' ? 'For Services' : 'For Spaces'}
@@ -91,7 +91,7 @@ export function HowItWorks() {
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = 'translateY(-4px)';
-                e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.04), 0 12px 32px -4px rgba(46,159,130,0.12)';
+                e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.04), 0 12px 32px -4px rgba(4,114,70,0.12)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = 'translateY(0)';

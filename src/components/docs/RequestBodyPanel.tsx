@@ -25,12 +25,12 @@ export function RequestBodyPanel({ body, spec }: Props) {
   return (
     <div>
       {body.description && (
-        <p style={{ fontSize: 14, color: '#6b6860', marginBottom: 12, marginTop: 0 }}>{body.description}</p>
+        <p style={{ fontSize: 14, color: '#5f6b63', marginBottom: 12, marginTop: 0 }}>{body.description}</p>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <code style={{
           fontSize: 11, fontFamily: 'monospace', backgroundColor: '#f6f8fa',
-          padding: '3px 9px', borderRadius: 5, border: '1px solid #e8e6e0', color: '#6b6860',
+          padding: '3px 9px', borderRadius: 5, border: '1px solid #e4e9e5', color: '#5f6b63',
         }}>
           {contentType}
         </code>
@@ -52,7 +52,7 @@ export function RequestBodyPanel({ body, spec }: Props) {
       ) : samples.length > 0 ? (
         <SamplePanel samples={samples} />
       ) : (
-        <p style={{ fontSize: 13, color: '#9b9890', fontStyle: 'italic' }}>No schema defined</p>
+        <p style={{ fontSize: 13, color: '#8a948d', fontStyle: 'italic' }}>No schema defined</p>
       )}
     </div>
   );

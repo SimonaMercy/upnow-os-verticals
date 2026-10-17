@@ -22,8 +22,8 @@ export function DocExpiryField({ value, onChange, onCommit, saving, disabled, cl
 }) {
   return (
     <div className={className ?? 'mt-2'}>
-      <label className="text-[11px] font-semibold text-[#6b6860] flex items-center gap-1 mb-1">
-        <CalendarClock size={12} className="text-[#2e9f82]" /> Expiry date
+      <label className="text-[11px] font-semibold text-[#5f6b63] flex items-center gap-1 mb-1">
+        <CalendarClock size={12} className="text-[#047246]" /> Expiry date
       </label>
       <div className="flex items-center gap-2">
         <input
@@ -33,9 +33,9 @@ export function DocExpiryField({ value, onChange, onCommit, saving, disabled, cl
           autoFocus={autoFocus}
           onChange={e => onChange(e.target.value)}
           onBlur={e => onCommit?.(e.target.value)}
-          className="text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30 disabled:opacity-50"
+          className="text-sm border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 text-[#14201a] focus:outline-none focus:ring-2 focus:ring-[#047246]/30 disabled:opacity-50"
         />
-        {saving && <Loader2 size={13} className="animate-spin text-[#9b9890]" />}
+        {saving && <Loader2 size={13} className="animate-spin text-[#8a948d]" />}
       </div>
     </div>
   );

@@ -125,13 +125,13 @@ const STAGES = [
   { n: 4, label: 'Notes', icon: MessageSquare },
 ] as const;
 
-const FIELD = 'w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] bg-white focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30';
-const LABEL = 'block text-sm font-medium text-[#3d3b35] mb-1.5';
-const CARD = 'bg-white border border-[#e8e6e0] rounded-2xl p-6';
-const STAGE_TITLE = 'text-lg font-bold text-[#1a1916]';
-const STAGE_SUB = 'text-sm text-[#9b9890] mt-0.5 mb-5';
+const FIELD = 'w-full text-sm border border-[#e4e9e5] rounded-xl px-3 py-2.5 text-[#14201a] bg-white focus:outline-none focus:ring-2 focus:ring-[#047246]/30';
+const LABEL = 'block text-sm font-medium text-[#46534c] mb-1.5';
+const CARD = 'bg-white border border-[#e4e9e5] rounded-2xl p-6';
+const STAGE_TITLE = 'text-lg font-bold text-[#14201a]';
+const STAGE_SUB = 'text-sm text-[#8a948d] mt-0.5 mb-5';
 const PILL = (on: boolean) => `py-2 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-  on ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82]'
+  on ? 'border-[#047246] bg-[#d8efe3] text-[#1a7a5a]' : 'border-[#e4e9e5] text-[#5f6b63] hover:border-[#047246]'
 }`;
 
 /** One labelled money line of the payment summary. Zero-value lines are dropped
@@ -139,12 +139,12 @@ const PILL = (on: boolean) => `py-2 rounded-xl text-xs font-medium border transi
 function SummaryRow({ label, hint, fils }: { label: string; hint?: string; fils: number }) {
   if (!fils) return null;
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2 border-b border-[#f4f3ef]">
-      <dt className="text-[#3d3b35]">
+    <div className="flex items-baseline justify-between gap-4 py-2 border-b border-[#eef1ef]">
+      <dt className="text-[#46534c]">
         {label}
-        {hint && <span className="block text-[11px] text-[#9b9890]">{hint}</span>}
+        {hint && <span className="block text-[11px] text-[#8a948d]">{hint}</span>}
       </dt>
-      <dd className="text-[#1a1916] font-medium tabular-nums shrink-0">{aed(fils)}</dd>
+      <dd className="text-[#14201a] font-medium tabular-nums shrink-0">{aed(fils)}</dd>
     </div>
   );
 }
@@ -159,22 +159,22 @@ function UnitContext({ unit, building, address, onChange }: {
 }) {
   const spec = unitSpecLine(unit);
   return (
-    <div className="rounded-xl border border-[#2e9f82] bg-[#edf7f3] px-4 py-3">
+    <div className="rounded-xl border border-[#047246] bg-[#edf7f3] px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold text-[#1a1916] min-w-0">Unit {unit.unitNumber}</p>
-        <button type="button" onClick={onChange} className="text-xs text-[#2e9f82] font-medium cursor-pointer shrink-0">Change</button>
+        <p className="text-sm font-semibold text-[#14201a] min-w-0">Unit {unit.unitNumber}</p>
+        <button type="button" onClick={onChange} className="text-xs text-[#047246] font-medium cursor-pointer shrink-0">Change</button>
       </div>
-      {building && <p className="text-xs text-[#3d3b35] mt-0.5">{building}</p>}
-      {spec && <p className="text-xs text-[#6b6860] mt-0.5">{spec}</p>}
+      {building && <p className="text-xs text-[#46534c] mt-0.5">{building}</p>}
+      {spec && <p className="text-xs text-[#5f6b63] mt-0.5">{spec}</p>}
       {address && (
-        <p className="flex items-start gap-1 text-xs text-[#9b9890] mt-0.5">
+        <p className="flex items-start gap-1 text-xs text-[#8a948d] mt-0.5">
           <MapPin size={11} className="mt-0.5 shrink-0" />{address}
         </p>
       )}
       {unit.rentalPrice != null && (
         <div className="flex items-baseline justify-between gap-3 mt-2.5 pt-2.5 border-t border-[#c5e8df]">
-          <span className="text-xs text-[#6b6860]">Asking rent</span>
-          <span className="text-sm font-bold text-[#1a7a5a] tabular-nums">{aedWhole(Number(unit.rentalPrice))}<span className="font-normal text-[#9b9890]">/yr</span></span>
+          <span className="text-xs text-[#5f6b63]">Asking rent</span>
+          <span className="text-sm font-bold text-[#1a7a5a] tabular-nums">{aedWhole(Number(unit.rentalPrice))}<span className="font-normal text-[#8a948d]">/yr</span></span>
         </div>
       )}
     </div>
@@ -412,13 +412,13 @@ export function NewLeadModal({
             type="button"
             onClick={dismiss}
             aria-label="Back"
-            className="w-[34px] h-[34px] shrink-0 rounded-[9px] border border-[#e8e6e0] bg-white flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] hover:text-[#1a1916] transition-colors cursor-pointer"
+            className="w-[34px] h-[34px] shrink-0 rounded-[9px] border border-[#e4e9e5] bg-white flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] hover:text-[#14201a] transition-colors cursor-pointer"
           >
             <ArrowLeft size={18} />
           </button>
           <div className="min-w-0">
-            <h1 className="text-[17px] font-extrabold tracking-[-0.01em] leading-tight text-[#1a1916]">Add a Lead</h1>
-            <p className="text-xs text-[#9b9890] mt-0.5">
+            <h1 className="text-[17px] font-extrabold tracking-[-0.01em] leading-tight text-[#14201a]">Add a Lead</h1>
+            <p className="text-xs text-[#8a948d] mt-0.5">
               For an enquiry that came to you directly — a walk-in, a call, a message.
             </p>
           </div>
@@ -437,21 +437,21 @@ export function NewLeadModal({
                     onClick={() => goTo(s.n)}
                     disabled={s.n > stage && !stageReady[stage]}
                     className={`flex items-center gap-2 rounded-xl px-2.5 py-1.5 transition-colors ${
-                      current ? 'bg-[#d8f2e8]' : 'hover:bg-[#f4f3ef]'
+                      current ? 'bg-[#d8efe3]' : 'hover:bg-[#eef1ef]'
                     } ${s.n > stage && !stageReady[stage] ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                   >
                     <span className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${
-                      done ? 'bg-[#2e9f82] text-white'
-                        : current ? 'bg-[#2e9f82] text-white'
-                        : 'bg-[#f4f3ef] text-[#9b9890]'
+                      done ? 'bg-[#047246] text-white'
+                        : current ? 'bg-[#047246] text-white'
+                        : 'bg-[#eef1ef] text-[#8a948d]'
                     }`}>
                       {done ? <Check size={13} /> : s.n}
                     </span>
-                    <span className={`text-xs font-semibold ${current ? 'text-[#1a7a5a]' : done ? 'text-[#1a1916]' : 'text-[#9b9890]'}`}>
+                    <span className={`text-xs font-semibold ${current ? 'text-[#1a7a5a]' : done ? 'text-[#14201a]' : 'text-[#8a948d]'}`}>
                       {s.label}
                     </span>
                   </button>
-                  {i < STAGES.length - 1 && <span className="flex-1 h-px bg-[#e8e6e0]" />}
+                  {i < STAGES.length - 1 && <span className="flex-1 h-px bg-[#e4e9e5]" />}
                 </li>
               );
             })}
@@ -489,7 +489,7 @@ export function NewLeadModal({
                   <button
                     type="button"
                     onClick={() => { setPickingExisting(v => !v); setTenantId(''); }}
-                    className="text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer shrink-0 mt-1"
+                    className="text-xs font-medium text-[#047246] hover:underline cursor-pointer shrink-0 mt-1"
                   >
                     {pickingExisting ? 'Add someone new' : 'Pick an existing customer'}
                   </button>
@@ -497,12 +497,12 @@ export function NewLeadModal({
 
                 {pickingExisting ? (
                   selectedTenant ? (
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-[#2e9f82] bg-[#edf7f3] px-3 py-2.5">
-                      <span className="text-sm text-[#1a1916] min-w-0 break-words">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-[#047246] bg-[#edf7f3] px-3 py-2.5">
+                      <span className="text-sm text-[#14201a] min-w-0 break-words">
                         {selectedTenant.user?.name ?? selectedTenant.user?.email}
-                        {selectedTenant.user?.name && <span className="text-[#9b9890]"> · {selectedTenant.user.email}</span>}
+                        {selectedTenant.user?.name && <span className="text-[#8a948d]"> · {selectedTenant.user.email}</span>}
                       </span>
-                      <button type="button" onClick={() => setTenantId('')} className="text-xs text-[#2e9f82] font-medium cursor-pointer shrink-0">Change</button>
+                      <button type="button" onClick={() => setTenantId('')} className="text-xs text-[#047246] font-medium cursor-pointer shrink-0">Change</button>
                     </div>
                   ) : (
                     <>
@@ -515,9 +515,9 @@ export function NewLeadModal({
                           placeholder="Search your customers…"
                         />
                       </div>
-                      <div className="max-h-64 overflow-y-auto rounded-xl border border-[#e8e6e0] divide-y divide-[#f0ede8] mt-2">
+                      <div className="max-h-64 overflow-y-auto rounded-xl border border-[#e4e9e5] divide-y divide-[#f0ede8] mt-2">
                         {filteredTenants.length === 0 ? (
-                          <p className="px-3 py-3 text-xs text-[#9b9890]">No customer matches — add someone new instead.</p>
+                          <p className="px-3 py-3 text-xs text-[#8a948d]">No customer matches — add someone new instead.</p>
                         ) : filteredTenants.map(t => (
                           <button
                             key={t.id}
@@ -525,8 +525,8 @@ export function NewLeadModal({
                             onClick={() => setTenantId(String(t.id))}
                             className="w-full text-left px-3 py-2 hover:bg-[#f9f8f6] cursor-pointer"
                           >
-                            <span className="block text-sm text-[#1a1916]">{t.user?.name ?? t.user?.email}</span>
-                            {t.user?.name && <span className="block text-xs text-[#9b9890]">{t.user.email}</span>}
+                            <span className="block text-sm text-[#14201a]">{t.user?.name ?? t.user?.email}</span>
+                            {t.user?.name && <span className="block text-xs text-[#8a948d]">{t.user.email}</span>}
                           </button>
                         ))}
                       </div>
@@ -545,13 +545,13 @@ export function NewLeadModal({
                           type="button"
                           onClick={() => setCustomerType(v)}
                           className={`text-left px-4 py-3 rounded-xl border-2 transition-all cursor-pointer ${
-                            customerType === v ? 'border-[#2e9f82] bg-[#f0faf6]' : 'border-[#e8e6e0] bg-[#f9f8f6] hover:border-[#c5e8df]'
+                            customerType === v ? 'border-[#047246] bg-[#eef7f2]' : 'border-[#e4e9e5] bg-[#f9f8f6] hover:border-[#c5e8df]'
                           }`}
                         >
-                          <span className="flex items-center gap-2 text-sm font-semibold text-[#1a1916]">
-                            <Icon size={14} className={customerType === v ? 'text-[#2e9f82]' : 'text-[#9b9890]'} /> {title}
+                          <span className="flex items-center gap-2 text-sm font-semibold text-[#14201a]">
+                            <Icon size={14} className={customerType === v ? 'text-[#047246]' : 'text-[#8a948d]'} /> {title}
                           </span>
-                          <span className="block text-[11px] text-[#6b6860] mt-1 leading-snug">{sub}</span>
+                          <span className="block text-[11px] text-[#5f6b63] mt-1 leading-snug">{sub}</span>
                         </button>
                       ))}
                     </div>
@@ -577,12 +577,12 @@ export function NewLeadModal({
                         )}
                       </div>
                       <div>
-                        <label className={LABEL}>Phone <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                        <label className={LABEL}>Phone <span className="text-[#8a948d] font-normal">(optional)</span></label>
                         <input className={FIELD} value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" />
                       </div>
                     </div>
 
-                    <p className="flex items-start gap-1.5 text-xs text-[#9b9890] mt-3 max-w-2xl">
+                    <p className="flex items-start gap-1.5 text-xs text-[#8a948d] mt-3 max-w-2xl">
                       <UserPlus size={12} className="mt-0.5 shrink-0" />
                       They get a portal account on this email — same as booking on the website — so they can
                       upload documents and payments themselves. An existing account is reused.
@@ -600,7 +600,7 @@ export function NewLeadModal({
                     <h2 className={STAGE_TITLE}>Which unit are they after?</h2>
                     <p className={STAGE_SUB}>Your available units, grouped by building.</p>
                   </div>
-                  {unitsLoaded && <span className="text-xs text-[#9b9890] shrink-0 mt-1.5">{availableCount} available</span>}
+                  {unitsLoaded && <span className="text-xs text-[#8a948d] shrink-0 mt-1.5">{availableCount} available</span>}
                 </div>
 
                 <div className="relative">
@@ -612,9 +612,9 @@ export function NewLeadModal({
                         placeholder="Search a unit number or building…"
                       />
                 </div>
-                <div className="max-h-[380px] overflow-y-auto rounded-xl border border-[#e8e6e0] mt-2">
+                <div className="max-h-[380px] overflow-y-auto rounded-xl border border-[#e4e9e5] mt-2">
                       {unitGroups.length === 0 ? (
-                        <p className="px-3 py-3 text-xs text-[#9b9890]">
+                        <p className="px-3 py-3 text-xs text-[#8a948d]">
                           {!unitsLoaded ? 'Loading your units…'
                             : units.length === 0 ? 'No units on your portfolio yet.'
                             : unitSearch ? 'No available unit matches that search.'
@@ -623,8 +623,8 @@ export function NewLeadModal({
                       ) : unitGroups.map(g => (
                         <div key={g.building}>
                           <div className="sticky top-0 bg-[#f9f8f6] px-3 py-1.5 border-b border-[#f0ede8]">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#6b6860]">{g.building}</p>
-                            {g.address && <p className="text-[11px] text-[#9b9890] truncate">{g.address}</p>}
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#5f6b63]">{g.building}</p>
+                            {g.address && <p className="text-[11px] text-[#8a948d] truncate">{g.address}</p>}
                           </div>
                           {g.units.map(u => (
                             <button
@@ -636,20 +636,20 @@ export function NewLeadModal({
                               }`}
                             >
                               <span className="min-w-0">
-                                <span className="block text-sm font-medium text-[#1a1916] truncate">Unit {u.unitNumber}</span>
+                                <span className="block text-sm font-medium text-[#14201a] truncate">Unit {u.unitNumber}</span>
                                 {unitSpecLine(u) && (
-                                  <span className="block text-xs text-[#9b9890] truncate mt-0.5">{unitSpecLine(u)}</span>
+                                  <span className="block text-xs text-[#8a948d] truncate mt-0.5">{unitSpecLine(u)}</span>
                                 )}
                               </span>
                               <span className="flex items-center gap-3 shrink-0">
                                 {u.rentalPrice != null && (
                                   <span className="text-right">
-                                    <span className="block text-sm font-medium text-[#1a1916] tabular-nums">{aedWhole(Number(u.rentalPrice))}</span>
-                                    <span className="block text-[11px] text-[#9b9890]">per year</span>
+                                    <span className="block text-sm font-medium text-[#14201a] tabular-nums">{aedWhole(Number(u.rentalPrice))}</span>
+                                    <span className="block text-[11px] text-[#8a948d]">per year</span>
                                   </span>
                                 )}
                                 {unitId === String(u.id) && (
-                                  <span className="w-5 h-5 rounded-full bg-[#2e9f82] text-white flex items-center justify-center">
+                                  <span className="w-5 h-5 rounded-full bg-[#047246] text-white flex items-center justify-center">
                                     <Check size={12} />
                                   </span>
                                 )}
@@ -679,13 +679,13 @@ export function NewLeadModal({
                       type="button"
                       onClick={() => setMode(m)}
                       className={`text-left px-4 py-3 rounded-xl border-2 transition-all cursor-pointer ${
-                        mode === m ? 'border-[#2e9f82] bg-[#f0faf6]' : 'border-[#e8e6e0] bg-[#f9f8f6] hover:border-[#c5e8df]'
+                        mode === m ? 'border-[#047246] bg-[#eef7f2]' : 'border-[#e4e9e5] bg-[#f9f8f6] hover:border-[#c5e8df]'
                       }`}
                     >
-                      <span className="flex items-center gap-2 text-sm font-semibold text-[#1a1916]">
-                        <Icon size={14} className={mode === m ? 'text-[#2e9f82]' : 'text-[#9b9890]'} /> {title}
+                      <span className="flex items-center gap-2 text-sm font-semibold text-[#14201a]">
+                        <Icon size={14} className={mode === m ? 'text-[#047246]' : 'text-[#8a948d]'} /> {title}
                       </span>
-                      <span className="block text-[11px] text-[#6b6860] mt-1 leading-snug">{sub}</span>
+                      <span className="block text-[11px] text-[#5f6b63] mt-1 leading-snug">{sub}</span>
                     </button>
                   ))}
                 </div>
@@ -700,14 +700,14 @@ export function NewLeadModal({
                       </label>
                       <MiniCalendar value={date} onChange={setDate} />
                       {date && (
-                        <p className="mt-2 text-xs text-center font-medium" style={{ color: '#2e9f82' }}>
+                        <p className="mt-2 text-xs text-center font-medium" style={{ color: '#047246' }}>
                           {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short' })}
                         </p>
                       )}
                     </div>
                     <div>
                       <label className={LABEL}>
-                        Preferred time <span className="text-[#9b9890] font-normal">(optional)</span>
+                        Preferred time <span className="text-[#8a948d] font-normal">(optional)</span>
                       </label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
                         {TIME_SLOTS.filter(slot => {
@@ -721,9 +721,9 @@ export function NewLeadModal({
                             onClick={() => setTime(time === slot ? '' : slot)}
                             className="w-full py-2.5 rounded-lg text-xs font-medium border transition-all cursor-pointer"
                             style={{
-                              borderColor: time === slot ? '#2e9f82' : '#e8e6e0',
+                              borderColor: time === slot ? '#047246' : '#e4e9e5',
                               backgroundColor: time === slot ? '#edf7f3' : '#fff',
-                              color: time === slot ? '#2e9f82' : '#3d3b35',
+                              color: time === slot ? '#047246' : '#46534c',
                             }}
                           >
                             {fmtSlot(slot)}
@@ -738,13 +738,13 @@ export function NewLeadModal({
                     <div>
                       <label className={LABEL}>Move-in date <span className="text-red-500">*</span></label>
                       {preferredStartDays.length > 0 && (
-                        <p className="text-xs text-[#9b9890] mb-1.5">
+                        <p className="text-xs text-[#8a948d] mb-1.5">
                           Contracts start on the {preferredStartDays.map(d => `${d}${['st','nd','rd'][((d % 10) - 1)] || 'th'}`).join(', ')} of the month.
                         </p>
                       )}
                       <MiniCalendar value={moveIn} onChange={setMoveIn} allowedDays={preferredStartDays} />
                       {moveIn && (
-                        <p className="mt-2 text-xs text-center font-medium" style={{ color: '#2e9f82' }}>
+                        <p className="mt-2 text-xs text-center font-medium" style={{ color: '#047246' }}>
                           {new Date(moveIn + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short' })}
                         </p>
                       )}
@@ -758,7 +758,7 @@ export function NewLeadModal({
                           </button>
                         ))}
                       </div>
-                      <p className="text-xs text-[#9b9890] mt-3 leading-relaxed">
+                      <p className="text-xs text-[#8a948d] mt-3 leading-relaxed">
                         The payment plan is generated from this — you review and edit it before sharing it
                         with the customer.
                       </p>
@@ -784,7 +784,7 @@ export function NewLeadModal({
                     ))}
                   </div>
 
-                  <label className={LABEL}>Notes <span className="text-[#9b9890] font-normal">(optional)</span></label>
+                  <label className={LABEL}>Notes <span className="text-[#8a948d] font-normal">(optional)</span></label>
                   <textarea
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
@@ -801,22 +801,22 @@ export function NewLeadModal({
                     2..N, and the customer's own journey shows the same slots. */}
                 {asksOccupants && (
                   <section className={CARD}>
-                    <h2 className={STAGE_TITLE}>Who will live there? <span className="text-[#9b9890] font-normal text-base">(optional)</span></h2>
+                    <h2 className={STAGE_TITLE}>Who will live there? <span className="text-[#8a948d] font-normal text-base">(optional)</span></h2>
                     <p className={STAGE_SUB}>Total occupants including the customer. Each extra occupant gets optional Emirates ID, passport and visa slots on the lead&rsquo;s document checklist — nothing becomes mandatory.</p>
                     <div className="inline-flex items-center gap-3">
-                      <span className="w-8 h-8 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><Users size={15} /></span>
-                      <div className="inline-flex items-center rounded-full border border-[#e8e6e0] bg-white overflow-hidden">
+                      <span className="w-8 h-8 rounded-lg bg-[#eef9f4] text-[#047246] flex items-center justify-center shrink-0"><Users size={15} /></span>
+                      <div className="inline-flex items-center rounded-full border border-[#e4e9e5] bg-white overflow-hidden">
                         <button type="button" aria-label="Remove an occupant" onClick={() => setOccupants(n => Math.max(1, n - 1))} disabled={occupants <= 1}
-                          className="w-9 h-9 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed">
+                          className="w-9 h-9 flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-40 disabled:cursor-not-allowed">
                           <Minus size={14} />
                         </button>
-                        <span className="min-w-[2.5rem] text-center text-sm font-semibold text-[#1a1916] tabular-nums">{occupants}</span>
+                        <span className="min-w-[2.5rem] text-center text-sm font-semibold text-[#14201a] tabular-nums">{occupants}</span>
                         <button type="button" aria-label="Add an occupant" onClick={() => setOccupants(n => Math.min(12, n + 1))} disabled={occupants >= 12}
-                          className="w-9 h-9 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed">
+                          className="w-9 h-9 flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-40 disabled:cursor-not-allowed">
                           <Plus size={14} />
                         </button>
                       </div>
-                      <span className="text-sm text-[#6b6860]">{occupants === 1 ? 'Just the customer' : `${occupants - 1} more ${occupants - 1 === 1 ? 'person' : 'people'} with the customer`}</span>
+                      <span className="text-sm text-[#5f6b63]">{occupants === 1 ? 'Just the customer' : `${occupants - 1} more ${occupants - 1 === 1 ? 'person' : 'people'} with the customer`}</span>
                     </div>
                   </section>
                 )}
@@ -824,7 +824,7 @@ export function NewLeadModal({
                 {/* Review — exactly what's about to be created */}
                 <section className={CARD}>
                   <h3 className={STAGE_TITLE}>Review</h3>
-                  <p className="text-sm text-[#9b9890] mt-0.5 mb-4">Check it over, then create the lead.</p>
+                  <p className="text-sm text-[#8a948d] mt-0.5 mb-4">Check it over, then create the lead.</p>
 
                   <dl className="text-sm max-w-2xl">
                     {([
@@ -847,9 +847,9 @@ export function NewLeadModal({
                         : []),
                       ['Enquiry source', SOURCES.find(([v]) => v === source)?.[1] ?? source],
                     ] as [string, string][]).map(([k, v]) => (
-                      <div key={k} className="flex items-baseline justify-between gap-6 py-2 border-b border-[#f4f3ef]">
-                        <dt className="text-[#9b9890] shrink-0">{k}</dt>
-                        <dd className="text-[#1a1916] font-medium text-right break-words">{v}</dd>
+                      <div key={k} className="flex items-baseline justify-between gap-6 py-2 border-b border-[#eef1ef]">
+                        <dt className="text-[#8a948d] shrink-0">{k}</dt>
+                        <dd className="text-[#14201a] font-medium text-right break-words">{v}</dd>
                       </div>
                     ))}
                   </dl>
@@ -871,9 +871,9 @@ export function NewLeadModal({
                   />
 
                   {cost && (
-                    <section className="bg-white border border-[#e8e6e0] rounded-2xl p-5">
-                      <h3 className="text-sm font-bold text-[#1a1916]">Payment summary</h3>
-                      <p className="text-[11px] text-[#9b9890] mt-0.5 mb-3">First year, at the asking rent</p>
+                    <section className="bg-white border border-[#e4e9e5] rounded-2xl p-5">
+                      <h3 className="text-sm font-bold text-[#14201a]">Payment summary</h3>
+                      <p className="text-[11px] text-[#8a948d] mt-0.5 mb-3">First year, at the asking rent</p>
 
                       <dl className="text-[13px]">
                         <SummaryRow label="Annual rent" fils={cost.rentFils} />
@@ -889,16 +889,16 @@ export function NewLeadModal({
                         ))}
                       </dl>
 
-                      <div className="flex items-baseline justify-between gap-3 mt-3 pt-3 border-t-2 border-[#e8e6e0]">
+                      <div className="flex items-baseline justify-between gap-3 mt-3 pt-3 border-t-2 border-[#e4e9e5]">
                         <div>
-                          <p className="text-[13px] font-semibold text-[#1a1916]">Total payable</p>
-                          <p className="text-[11px] text-[#9b9890]">VAT included</p>
+                          <p className="text-[13px] font-semibold text-[#14201a]">Total payable</p>
+                          <p className="text-[11px] text-[#8a948d]">VAT included</p>
                         </div>
                         <p className="text-lg font-bold text-[#1a7a5a] tabular-nums">{aed(cost.totalFils)}</p>
                       </div>
 
                       {stage >= 3 && mode === 'interested' && (
-                        <p className="text-[11px] text-[#9b9890] mt-3 leading-relaxed">
+                        <p className="text-[11px] text-[#8a948d] mt-3 leading-relaxed">
                           Rent split across {installments} payment{installments === '1' ? '' : 's'};
                           the deposit and fees come with the first. Editable on the lead before you share it.
                         </p>
@@ -908,9 +908,9 @@ export function NewLeadModal({
                 </>
               ) : (
                 stage >= 2 && (
-                  <div className="rounded-2xl border border-dashed border-[#e8e6e0] px-5 py-6 text-center">
+                  <div className="rounded-2xl border border-dashed border-[#e4e9e5] px-5 py-6 text-center">
                     <Home size={18} className="mx-auto text-[#c8c6c0]" />
-                    <p className="text-xs text-[#9b9890] mt-2">
+                    <p className="text-xs text-[#8a948d] mt-2">
                       Pick a unit and its payment summary appears here.
                     </p>
                   </div>
@@ -926,7 +926,7 @@ export function NewLeadModal({
           <button
             type="button"
             onClick={() => (stage === 1 ? dismiss() : goTo(stage - 1))}
-            className="text-sm font-bold text-[#6b6860] hover:text-[#1a1916] px-3 py-2.5 cursor-pointer"
+            className="text-sm font-bold text-[#5f6b63] hover:text-[#14201a] px-3 py-2.5 cursor-pointer"
           >
             {stage === 1 ? 'Cancel' : 'Back'}
           </button>
@@ -935,8 +935,8 @@ export function NewLeadModal({
               type="button"
               disabled={!stageReady[stage]}
               onClick={() => goTo(stage + 1)}
-              className="inline-flex items-center gap-2 text-sm font-bold text-white bg-[#2e9f82] rounded-[11px] px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:opacity-90 transition-opacity"
-              style={{ boxShadow: '0 6px 16px rgba(46,159,130,.26)' }}
+              className="inline-flex items-center gap-2 text-sm font-bold text-white bg-[#047246] rounded-[11px] px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:opacity-90 transition-opacity"
+              style={{ boxShadow: '0 6px 16px rgba(4,114,70,.26)' }}
             >
               Continue <ArrowRight size={14} />
             </button>
@@ -945,8 +945,8 @@ export function NewLeadModal({
               type="button"
               disabled={!canCreate}
               onClick={submit}
-              className="inline-flex items-center gap-2 text-sm font-bold text-white bg-[#2e9f82] rounded-[11px] px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:opacity-90 transition-opacity"
-              style={{ boxShadow: '0 6px 16px rgba(46,159,130,.26)' }}
+              className="inline-flex items-center gap-2 text-sm font-bold text-white bg-[#047246] rounded-[11px] px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:opacity-90 transition-opacity"
+              style={{ boxShadow: '0 6px 16px rgba(4,114,70,.26)' }}
             >
               {saving && <Loader2 size={14} className="animate-spin" />}
               {saving ? 'Creating…' : mode === 'viewing' ? 'Create Lead & Book Viewing' : 'Create Lead & Build Plan'}

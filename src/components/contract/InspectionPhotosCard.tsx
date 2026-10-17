@@ -36,21 +36,21 @@ export function InspectionPhotosCard({ title, photos, hint }: {
   const shown = expanded ? photos : photos.slice(0, PREVIEW);
   const hidden = photos.length - shown.length;
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-4 overflow-hidden">
-      <div className="px-5 py-3 border-b border-[#f4f3ef] bg-[#fafaf8] flex items-center gap-2">
-        <Camera size={15} className="text-[#2e9f82]" />
-        <span className="text-sm font-bold text-[#1a1916]">{title} ({photos.length})</span>
-        <span className="ml-auto text-[11px] text-[#9b9890] hidden sm:inline">Tap a photo to view it full size</span>
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-4 overflow-hidden">
+      <div className="px-5 py-3 border-b border-[#eef1ef] bg-[#f6f8f6] flex items-center gap-2">
+        <Camera size={15} className="text-[#047246]" />
+        <span className="text-sm font-bold text-[#14201a]">{title} ({photos.length})</span>
+        <span className="ml-auto text-[11px] text-[#8a948d] hidden sm:inline">Tap a photo to view it full size</span>
       </div>
       <div className="px-5 py-4">
-        {hint && <p className="text-xs text-[#6b6860] mb-3">{hint}</p>}
+        {hint && <p className="text-xs text-[#5f6b63] mb-3">{hint}</p>}
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {shown.map((p, k) => {
             const more = hidden > 0 && k === shown.length - 1;
             return (
               <button key={p.id} type="button" onClick={() => setStart(k)}
                 aria-label={more ? `View all ${photos.length} photos` : `View photo ${k + 1} of ${photos.length}`}
-                className="relative block w-full aspect-square rounded-lg overflow-hidden border border-[#e8e6e0] bg-[#f4f3ef] cursor-zoom-in">
+                className="relative block w-full aspect-square rounded-lg overflow-hidden border border-[#e4e9e5] bg-[#eef1ef] cursor-zoom-in">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.url} alt={p.caption || `${title} ${k + 1}`} loading="lazy" className="w-full h-full object-cover" />
                 {more ? (
@@ -67,11 +67,11 @@ export function InspectionPhotosCard({ title, photos, hint }: {
         </div>
         {photos.length > PREVIEW && (
           <div className="mt-3 flex items-center gap-3">
-            <button type="button" onClick={() => setStart(0)} className="text-xs font-semibold text-[#2e9f82] hover:underline cursor-pointer">
+            <button type="button" onClick={() => setStart(0)} className="text-xs font-semibold text-[#047246] hover:underline cursor-pointer">
               View all {photos.length} photos
             </button>
             <span className="text-[#d6d4cc]">·</span>
-            <button type="button" onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-[#6b6860] hover:underline cursor-pointer">
+            <button type="button" onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-[#5f6b63] hover:underline cursor-pointer">
               {expanded ? 'Show fewer' : 'Show all here'}
             </button>
           </div>

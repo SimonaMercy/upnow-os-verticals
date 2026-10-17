@@ -56,12 +56,12 @@ export default function ManagerTenantsPage() {
   if (!permsLoading && !allowed) {
     return (
       <div className="p-6">
-        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
+        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-2xl px-7 py-10 mt-12">
           <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]">
             <Lock size={20} />
           </div>
-          <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-          <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">
+          <p className="text-base font-bold text-[#14201a]">Permission required</p>
+          <p className="text-sm text-[#5f6b63] mt-1.5 leading-relaxed">
             This landlord hasn’t granted you the <strong>Manage Agreements</strong> permission, so their customers aren’t available.
           </p>
         </div>
@@ -82,8 +82,8 @@ export default function ManagerTenantsPage() {
       {showAdd && effectiveRp != null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}
           role="dialog" aria-modal="true" aria-labelledby="add-customer-title">
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <h2 id="add-customer-title" className="text-lg font-bold text-[#1a1916] mb-3">Add a new customer</h2>
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] p-5 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <h2 id="add-customer-title" className="text-lg font-bold text-[#14201a] mb-3">Add a new customer</h2>
             <CustomerForm
               mode="create"
               method="POST"

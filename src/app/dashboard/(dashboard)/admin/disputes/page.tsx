@@ -1,24 +1,45 @@
 'use client';
 
 /**
- * Admin · Disputes (SP-265 case management) — a queue, not a list: open first,
- * priority → age; "mine" / "unassigned" filters; each row carries owner,
- * priority, SLA clocks (breach = a fact stamped by the 5-min cron); expanding
- * a row opens the case: threaded notes (internal · questions · answers),
- * evidence photos (SP-258), booking trail, and the resolve actions.
+ * Admin › Trust & safety › Disputes (SP-265 case management) — Genspark OS rebuild.
+ * A queue, not a list: the server orders it (open first, priority → age).
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - GET /disputes/queue (+ ?mine=1 | ?unassigned=1) — queue + admins list; the
+ *    All / My disputes / Unassigned (count) filter is still server-side.
+ *  - GET /disputes/:id/case — lazy case load when a case is opened (now in a Drawer
+ *    instead of an inline expander); reloaded after every action.
+ *  - PATCH /disputes/:id/assign { userId: number | null } — Owner select (Unassigned + admins).
+ *  - PATCH /disputes/:id/priority { priority } — Priority select (critical/high/medium/low).
+ *  - POST /disputes/:id/notes { kind, body } — note composer, kind = internal |
+ *    question_to_customer | question_to_provider, maxLength 4000, "Add note" / "Send question".
+ *  - PATCH /disputes/:id/resolve { outcome: 'refund_customer' | 'favor_provider' } —
+ *    "Refund customer (full)" / "Find for provider" (now behind a confirm step; same payload).
+ *  - Owner / priority / notes / resolve only while the case is open (open, under_review,
+ *    awaiting_evidence, escalated); closed cases show resolution summary + resolved date.
+ *  - Row facts: #id · title, priority, status (Open / Under review / Awaiting answer /
+ *    Escalated / Refunded / For provider / Closed), Unassigned flag, SLA-late flag
+ *    (first response / resolution), opened-ago, customer vs provider, service, BK-id,
+ *    amount (AED number — NOT fils → fmtAed), owner, SLA clocks, note count.
+ *  - Case: description, provider's response, threaded notes (kind chip, author, time),
+ *    evidence photos by kind (problem / before / after, opens full image in a new tab),
+ *    booking trail, link to /dashboard/admin/bookings/:bookingId.
+ *  - Header summary (N open · N unassigned · N past an SLA clock), error banner,
+ *    loading and empty states.
+ *  New: KPIs from the same queue, client-side search + Open/Closed state Seg.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { AlertTriangle, ChevronDown, ChevronUp, Clock, Loader2, MessageSquare, ShieldAlert, UserCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import {
+  Btn, Callout, Drawer, EmptyRow, ErrorRow, Field, KV, Kpi, Kpis, Modal, OsPage, PageHead, Pill, ScopeStrip,
+  SearchField, Seg, SkeletonRows, TableWrap, Timeline, fmtAed, type Tone,
+} from '@/components/os/kit';
 
-const PRIMARY = '#2e9f82'; const INK = '#1a1916'; const MUTE = '#6b6860'; const FAINT = '#9b9890'; const BORDER = '1px solid #ececea';
-const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: '#fff', border: BORDER, borderRadius: 16, ...extra });
-const aed = (n: number | string | null) => (n == null ? '—' : `AED ${Number(n).toLocaleString('en-AE')}`);
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dubai' }) : '—');
 const ago = (iso: string | null) => { if (!iso) return ''; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
-const inH = (iso: string | null) => { if (!iso) return ''; const m = Math.round((new Date(iso).getTime() - Date.now()) / 60000); const a = Math.abs(m); const s = a < 60 ? `${a}m` : a < 1440 ? `${Math.floor(a / 60)}h` : `${Math.floor(a / 1440)}d`; return m >= 0 ? `in ${s}` : `${s} ago`; };
+const inH = (iso: string | null) => { if (!iso) return '—'; const m = Math.round((new Date(iso).getTime() - Date.now()) / 60000); const a = Math.abs(m); const s = a < 60 ? `${a}m` : a < 1440 ? `${Math.floor(a / 60)}h` : `${Math.floor(a / 1440)}d`; return m >= 0 ? `in ${s}` : `${s} ago`; };
+const toFils = (n: number | string | null) => Math.round((Number(n) || 0) * 100);
 
 type Priority = 'critical' | 'high' | 'medium' | 'low';
 interface Sla { firstResponseDueAt: string | null; resolutionDueAt: string | null; firstRespondedAt: string | null; firstResponseBreachedAt: string | null; resolutionBreachedAt: string | null; firstResponseLate: boolean; resolutionLate: boolean }
@@ -34,34 +55,45 @@ interface Case extends Omit<Row, 'notes'> { viewer: string; notes: Note[]; evide
 interface Queue { admins: Array<{ id: number; name: string }>; disputes: Row[] }
 
 const OPEN = new Set(['open', 'under_review', 'awaiting_evidence', 'escalated']);
-const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
-  open: { label: 'Open', bg: '#fee2e2', fg: '#991b1b' }, under_review: { label: 'Under review', bg: '#fef3c7', fg: '#92400e' },
-  awaiting_evidence: { label: 'Awaiting answer', bg: '#e0e7ff', fg: '#4338ca' }, escalated: { label: 'Escalated', bg: '#fee2e2', fg: '#991b1b' },
-  resolved: { label: 'Refunded', bg: '#d8f2e8', fg: '#1a7a5a' }, rejected: { label: 'For provider', bg: '#eef1ee', fg: '#4b5563' }, closed: { label: 'Closed', bg: '#eef1ee', fg: '#4b5563' },
+const STATUS: Record<string, { label: string; tone: Tone }> = {
+  open: { label: 'Open', tone: 'danger' }, under_review: { label: 'Under review', tone: 'amber' },
+  awaiting_evidence: { label: 'Awaiting answer', tone: 'info' }, escalated: { label: 'Escalated', tone: 'danger' },
+  resolved: { label: 'Refunded', tone: 'primary' }, rejected: { label: 'For provider', tone: 'neutral' }, closed: { label: 'Closed', tone: 'neutral' },
 };
-const PRIO: Record<Priority, { label: string; bg: string; fg: string }> = {
-  critical: { label: 'Critical', bg: '#fee2e2', fg: '#991b1b' }, high: { label: 'High', bg: '#fef3c7', fg: '#92400e' }, medium: { label: 'Medium', bg: '#eef1ee', fg: '#4b5563' }, low: { label: 'Low', bg: '#f5f5f4', fg: '#9b9890' },
+const PRIO: Record<Priority, { label: string; tone: Tone }> = {
+  critical: { label: 'Critical', tone: 'danger' }, high: { label: 'High', tone: 'amber' }, medium: { label: 'Medium', tone: 'neutral' }, low: { label: 'Low', tone: 'outline' },
 };
-const NOTE_UI: Record<string, { label: string; bg: string; fg: string }> = {
-  internal: { label: 'Internal', bg: '#f5f5f4', fg: '#6b6860' }, question_to_customer: { label: 'Question → customer', bg: '#e0e7ff', fg: '#4338ca' },
-  question_to_provider: { label: 'Question → provider', bg: '#e0e7ff', fg: '#4338ca' }, answer: { label: 'Answer', bg: '#d8f2e8', fg: '#1a7a5a' }, system: { label: 'System', bg: '#fff', fg: '#9b9890' },
+const NOTE_UI: Record<string, { label: string; tone: Tone }> = {
+  internal: { label: 'Internal', tone: 'neutral' }, question_to_customer: { label: 'Question → customer', tone: 'info' },
+  question_to_provider: { label: 'Question → provider', tone: 'info' }, answer: { label: 'Answer', tone: 'primary' }, system: { label: 'System', tone: 'outline' },
 };
-const chip = (t: { label: string; bg: string; fg: string }) => <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: t.bg, color: t.fg, whiteSpace: 'nowrap' }}>{t.label}</span>;
+const NOTE_KINDS = ['internal', 'question_to_customer', 'question_to_provider'] as const;
+type NoteKind = typeof NOTE_KINDS[number];
 const mediaOf = (m: Case['evidence'], kind: Media['kind']): Media[] => (Array.isArray(m) ? m.filter((x) => x.kind === kind) : m?.[kind] ?? []);
+const StatusPill = ({ s }: { s: string }) => { const t = STATUS[s] ?? STATUS.open; return <Pill tone={t.tone}>{t.label}</Pill>; };
+const PrioPill = ({ p }: { p: Priority }) => { const t = PRIO[p] ?? PRIO.medium; return <Pill tone={t.tone} dot={false}>{t.label}</Pill>; };
+
+type Outcome = 'refund_customer' | 'favor_provider';
 
 export default function AdminDisputesPage() {
   const [q, setQ] = useState<Queue | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState<'all' | 'mine' | 'unassigned'>('all');
+  const [state, setState] = useState<'all' | 'open' | 'closed'>('all');
+  const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [c, setC] = useState<Case | null>(null);
-  const [noteKind, setNoteKind] = useState<'internal' | 'question_to_customer' | 'question_to_provider'>('internal');
+  const [noteKind, setNoteKind] = useState<NoteKind>('internal');
   const [noteBody, setNoteBody] = useState('');
+  const [confirm, setConfirm] = useState<Outcome | null>(null);
 
   const load = useCallback(async () => {
-    try { setQ(await apiGet<Queue>(`/disputes/queue${filter === 'mine' ? '?mine=1' : filter === 'unassigned' ? '?unassigned=1' : ''}`)); setError(null); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not load disputes'); }
+    try {
+      setQ(await apiGet<Queue>(`/disputes/queue${filter === 'mine' ? '?mine=1' : filter === 'unassigned' ? '?unassigned=1' : ''}`));
+      setError(null); setLoadFailed(false);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load disputes'); setLoadFailed(true); }
   }, [filter]);
   useEffect(() => { const t = setTimeout(() => { void load(); }, 0); return () => clearTimeout(t); }, [load]);
   const loadCase = useCallback(async (id: number) => { try { setC(await apiGet<Case>(`/disputes/${id}/case`)); } catch (e) { setError((e as Error)?.message || 'Could not load case'); } }, []);
@@ -73,145 +105,258 @@ export default function AdminDisputesPage() {
     catch (e) { setError(e instanceof Error ? e.message : 'Action failed'); }
     finally { setBusy(null); }
   };
-  const resolve = (id: number, outcome: 'refund_customer' | 'favor_provider') => act(`resolve-${id}`, () => apiPatch(`/disputes/${id}/resolve`, { outcome }));
+  const resolve = (id: number, outcome: Outcome) => act(`resolve-${id}`, async () => { await apiPatch(`/disputes/${id}/resolve`, { outcome }); setConfirm(null); });
   const assign = (id: number, userId: number | null) => act(`assign-${id}`, () => apiPatch(`/disputes/${id}/assign`, { userId }));
   const setPriority = (id: number, priority: Priority) => act(`prio-${id}`, () => apiPatch(`/disputes/${id}/priority`, { priority }));
   const addNote = (id: number) => act(`note-${id}`, async () => { await apiPost(`/disputes/${id}/notes`, { kind: noteKind, body: noteBody }); setNoteBody(''); });
 
-  if (!q) return <div style={{ padding: 24, color: FAINT }}>{error ?? 'Loading disputes…'}</div>;
-  const rows = q.disputes;
-  const openCount = rows.filter((d) => OPEN.has(d.status)).length;
+  const rows = useMemo(() => q?.disputes ?? [], [q]);
+  const openRows = rows.filter((d) => OPEN.has(d.status));
+  const openCount = openRows.length;
   const unassignedCount = rows.filter((d) => d.unassigned).length;
   const lateCount = rows.filter((d) => d.sla.firstResponseLate || d.sla.resolutionLate).length;
+  const openValue = openRows.reduce((s, d) => s + toFils(d.amount), 0) / 100;
+  const visible = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return rows.filter((d) => (state === 'all' || (state === 'open') === OPEN.has(d.status))
+      && (!s || [d.title, d.customerName, d.providerName, d.serviceName, `#${d.id}`, d.bookingId ? `bk-${d.bookingId}` : null]
+        .some((x) => x?.toLowerCase().includes(s))));
+  }, [rows, state, search]);
+  const d = rows.find((x) => x.id === openId) ?? null;
+  const isOpen = d ? OPEN.has(d.status) : false;
+  const loading = !q && !loadFailed;
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: '8px 4px 48px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: PRIMARY }}>Support</div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Disputes</h1>
-      <p style={{ color: MUTE, fontSize: 14, marginTop: 4 }}>{openCount} open · {unassignedCount} unassigned · {lateCount} past an SLA clock. Priority → age; assign an owner, ask a question, then resolve.</p>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Trust & safety"
+        title="Disputes"
+        lede={q
+          ? `${openCount} open · ${unassignedCount} unassigned · ${lateCount} past an SLA clock. Priority → age; assign an owner, ask a question, then resolve.`
+          : 'Priority → age; assign an owner, ask a question, then resolve.'}
+        actions={<Btn size="sm" onClick={() => void load()}>Refresh</Btn>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Trust & safety' },
+        { label: 'Queue', value: filter === 'all' ? 'All disputes' : filter === 'mine' ? 'My disputes' : 'Unassigned' },
+        { label: 'Cases', value: q ? rows.length : '…' },
+      ]} />
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-        {(['all', 'mine', 'unassigned'] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)} style={{ padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: filter === f ? `1px solid ${PRIMARY}` : BORDER, background: filter === f ? '#e6f4ef' : '#fff', color: filter === f ? PRIMARY : MUTE }}>
-            {f === 'all' ? 'All' : f === 'mine' ? 'My disputes' : `Unassigned${unassignedCount ? ` (${unassignedCount})` : ''}`}
-          </button>
-        ))}
+      {error && !loadFailed && <div style={{ marginBottom: 14 }}><Callout tone="bad" title="Something went wrong.">{error}</Callout></div>}
+
+      <Kpis>
+        <Kpi k="Open cases" v={q ? openCount : '—'} d="open, under review, awaiting answer or escalated" />
+        <Kpi k="Unassigned" v={q ? unassignedCount : '—'} d="need an owner" />
+        <Kpi k="Past an SLA clock" v={q ? lateCount : '—'} d="first response or resolution late" />
+        <Kpi dark k="Value in open disputes" v={q ? fmtAed(openValue, Math.round(openValue) !== openValue) : '—'} d="booking amounts under dispute" />
+      </Kpis>
+
+      <div style={{ marginBottom: 14 }}>
+        <Callout tone="warn" title="Money stays put until you decide.">
+          While a case is open the provider&apos;s share is on hold and excluded from payouts. &ldquo;Refund customer (full)&rdquo; refunds the whole booking amount; &ldquo;Find for provider&rdquo; closes the case without a refund.
+        </Callout>
       </div>
 
-      {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
+      <TableWrap toolbar={<>
+        <SearchField value={search} onChange={setSearch} placeholder="Search case, customer, provider, service or BK-id" />
+        <Seg label="Queue" value={filter} onChange={setFilter} options={[
+          { v: 'all', l: 'All' }, { v: 'mine', l: 'My disputes' },
+          { v: 'unassigned', l: 'Unassigned', n: filter === 'all' && q ? unassignedCount : undefined },
+        ]} />
+        <Seg label="Case state" value={state} onChange={setState} options={[
+          { v: 'all', l: 'Any state' }, { v: 'open', l: 'Open', n: q ? openCount : undefined }, { v: 'closed', l: 'Closed' },
+        ]} />
+      </>}>
+        <table className="gx-tbl">
+          <thead><tr>
+            <th>Case</th><th>Parties</th><th>Service</th><th className="num">Amount</th><th>Priority</th><th>Status</th>
+            <th>Owner</th><th>SLA</th><th className="act">Actions</th>
+          </tr></thead>
+          {loading ? <SkeletonRows cols={9} /> : loadFailed ? <ErrorRow cols={9} onRetry={() => void load()} /> : visible.length === 0 ? (
+            <EmptyRow cols={9} title="No disputes here." text={rows.length ? 'Clear the search or pick another state.' : 'Nothing in this queue right now.'} />
+          ) : (
+            <tbody>
+              {visible.map((r) => {
+                const open = OPEN.has(r.status);
+                const late = r.sla.firstResponseLate || r.sla.resolutionLate;
+                return (
+                  <tr key={r.id} className="click" onClick={() => setOpenId(r.id)}>
+                    <td className="strong" style={{ maxWidth: 260 }}>
+                      #{r.id} · {r.title}
+                      <span className="sub">opened {ago(r.openedAt)} ago · {r.notes} note{r.notes === 1 ? '' : 's'}</span>
+                    </td>
+                    <td>{r.customerName}<span className="sub">vs {r.providerName ?? 'provider'}</span></td>
+                    <td>{r.serviceName ?? 'service'}{r.bookingId && <span className="sub mono">BK-{r.bookingId}</span>}</td>
+                    <td className="num">{fmtAed(r.amount)}</td>
+                    <td><PrioPill p={r.priority} /></td>
+                    <td><StatusPill s={r.status} /></td>
+                    <td>{r.unassigned ? <Pill tone="amber">Unassigned</Pill> : r.assignedToName ?? 'nobody'}</td>
+                    <td className="nowrap">
+                      {late ? <Pill tone="danger">{r.sla.firstResponseLate ? 'First response late' : 'Resolution late'}</Pill>
+                        : open ? <span>resolve {inH(r.sla.resolutionDueAt)}</span> : <span className="sub">—</span>}
+                    </td>
+                    <td className="act" onClick={(e) => e.stopPropagation()}>
+                      <Btn size="xs" variant={open ? 'primary' : undefined} onClick={() => setOpenId(r.id)}>{open ? 'Review' : 'Open'}</Btn>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          )}
+        </table>
+      </TableWrap>
 
-      {rows.length === 0 ? (
-        <div style={card({ marginTop: 18, padding: '34px 18px', textAlign: 'center', color: FAINT, fontSize: 14 })}>No disputes here. 🎉</div>
-      ) : (
-        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {rows.map((d) => {
-            const st = STATUS[d.status] ?? STATUS.open;
-            const isOpen = OPEN.has(d.status);
-            const expanded = openId === d.id;
-            const late = d.sla.firstResponseLate || d.sla.resolutionLate;
-            return (
-              <div key={d.id} style={card({ padding: '14px 18px', borderColor: late ? '#f3c6c6' : d.unassigned ? '#f5d9a8' : isOpen ? '#e4e7e2' : '#ececea' })}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: INK }}>#{d.id} · {d.title}</span>
-                  {chip(PRIO[d.priority] ?? PRIO.medium)}
-                  {chip(st)}
-                  {d.unassigned && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: '#fef6e7', color: '#92400e' }}><UserCircle size={11} /> Unassigned</span>}
-                  {late && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '3px 9px', background: '#fee2e2', color: '#991b1b' }}><AlertTriangle size={11} /> {d.sla.firstResponseLate ? 'First response late' : 'Resolution late'}</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: FAINT }}>opened {ago(d.openedAt)} ago</span>
-                  <button onClick={() => setOpenId(expanded ? null : d.id)} aria-label={expanded ? 'Collapse' : 'Open case'} style={{ border: 0, background: 'none', cursor: 'pointer', color: FAINT }}>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+      {/* Case drawer */}
+      <Drawer
+        open={!!d && !confirm}
+        onClose={() => setOpenId(null)}
+        title={d ? `#${d.id} · ${d.title}` : ''}
+        sub={d ? <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}><PrioPill p={d.priority} /><StatusPill s={d.status} />{d.unassigned && <Pill tone="amber">Unassigned</Pill>}</span> : null}
+        footer={d && (
+          <>
+            <Btn onClick={() => setOpenId(null)}>Close</Btn>
+            {d.bookingId && <Btn href={`/dashboard/admin/bookings/${d.bookingId}`}>Open booking BK-{d.bookingId}</Btn>}
+            {isOpen && <Btn disabled={!!busy} onClick={() => setConfirm('favor_provider')}>Find for provider</Btn>}
+            {isOpen && <Btn variant="primary" disabled={!!busy} onClick={() => setConfirm('refund_customer')}>Refund customer (full)</Btn>}
+          </>
+        )}
+      >
+        {d && (!c || c.id !== d.id ? (
+          <div className="gx-empty"><b>Loading case…</b></div>
+        ) : (
+          <div style={{ display: 'grid', gap: 18 }}>
+            {error && <Callout tone="bad">{error}</Callout>}
+            <KV items={[
+              { k: 'Customer', v: d.customerName },
+              { k: 'Provider', v: d.providerName ?? 'provider' },
+              { k: 'Service', v: <>{d.serviceName ?? 'service'} {d.bookingId && <span className="mono">BK-{d.bookingId}</span>}</> },
+              { k: 'Amount', v: fmtAed(d.amount) },
+              { k: 'Opened', v: `${fmt(d.openedAt)} (${ago(d.openedAt)} ago)` },
+              { k: 'First response', v: <span style={d.sla.firstResponseLate ? { color: 'var(--ms-danger)' } : undefined}>{d.sla.firstRespondedAt ? `done ${ago(d.sla.firstRespondedAt)} ago` : inH(d.sla.firstResponseDueAt)}</span> },
+              { k: 'Resolve by', v: <span style={d.sla.resolutionLate ? { color: 'var(--ms-danger)' } : undefined}>{isOpen ? inH(d.sla.resolutionDueAt) : '—'}</span> },
+              ...(!isOpen ? [{ k: 'Resolution', v: `${d.resolutionSummary ?? 'Closed'} · ${fmt(d.resolvedAt)}` }] : []),
+            ]} />
+
+            <div className="gx-two">
+              <Field label="Owner" htmlFor="dsp-owner">
+                <select id="dsp-owner" className="gx-sel" value={d.assignedToUserId ?? ''} disabled={!!busy || !isOpen}
+                  onChange={(e) => assign(d.id, e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">Unassigned</option>
+                  {(q?.admins ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Priority" htmlFor="dsp-prio">
+                <select id="dsp-prio" className="gx-sel" value={d.priority} disabled={!!busy || !isOpen}
+                  onChange={(e) => setPriority(d.id, e.target.value as Priority)}>
+                  {(['critical', 'high', 'medium', 'low'] as Priority[]).map((p) => <option key={p} value={p}>{PRIO[p].label}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            {d.description && <div><div className="gx-lb">Customer&apos;s complaint</div><p style={{ fontSize: 12.5, lineHeight: 1.55, marginTop: 4 }}>{d.description}</p></div>}
+            {d.providerResponse && (
+              <Callout tone="info" title="Provider's response.">{d.providerResponse}</Callout>
+            )}
+
+            {/* Thread */}
+            <div>
+              <div className="gx-lb" style={{ marginBottom: 6 }}>Case thread</div>
+              {c.notes.length === 0 ? <p style={{ fontSize: 12, color: 'var(--ms-ink-3)' }}>No notes yet.</p> : (
+                <div style={{ display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+                  {c.notes.map((n) => (
+                    <div key={n.id} className="gx-cell" style={{ border: '1px solid var(--ms-border)', borderRadius: 10, padding: '7px 10px', background: n.kind === 'internal' ? 'var(--ms-surface-2)' : 'var(--ms-surface)' }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--ms-ink-3)' }}>
+                        <Pill tone={(NOTE_UI[n.kind] ?? NOTE_UI.system).tone} dot={false}>{(NOTE_UI[n.kind] ?? NOTE_UI.system).label}</Pill>
+                        <span>{n.authorName ?? n.authorRole}</span><span style={{ marginLeft: 'auto' }}>{fmt(n.createdAt)}</span>
+                      </div>
+                      <p style={{ fontSize: 12.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>{n.body}</p>
+                    </div>
+                  ))}
                 </div>
-                <div style={{ fontSize: 13, color: MUTE, marginTop: 6, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                  <span>{d.customerName} vs {d.providerName ?? 'provider'} · {d.serviceName ?? 'service'} <span style={{ fontFamily: 'ui-monospace, monospace' }}>BK-{d.bookingId}</span> · {aed(d.amount)}</span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UserCircle size={12} /> {d.assignedToName ?? 'nobody'}</span>
-                  {isOpen && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: d.sla.firstResponseLate ? '#b42318' : MUTE }}><Clock size={12} /> first response {d.sla.firstRespondedAt ? `done ${ago(d.sla.firstRespondedAt)} ago` : inH(d.sla.firstResponseDueAt)}</span>}
-                  {isOpen && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: d.sla.resolutionLate ? '#b42318' : MUTE }}><Clock size={12} /> resolve {inH(d.sla.resolutionDueAt)}</span>}
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><MessageSquare size={12} /> {d.notes}</span>
+              )}
+              {isOpen && (
+                <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                  <Seg label="Note type" value={noteKind} onChange={setNoteKind}
+                    options={NOTE_KINDS.map((k) => ({ v: k, l: NOTE_UI[k].label }))} />
+                  <Field label={noteKind === 'internal' ? 'Internal note' : 'Question'} htmlFor="dsp-note"
+                    hint={noteKind === 'internal' ? 'Never shown to the parties.' : 'The party is notified and can answer here.'}>
+                    <textarea id="dsp-note" className="gx-ta" rows={3} maxLength={4000} value={noteBody} onChange={(e) => setNoteBody(e.target.value)}
+                      placeholder={noteKind === 'internal' ? 'Internal note — never shown to the parties' : 'Your question — the party is notified and can answer here'} />
+                  </Field>
+                  <div>
+                    <Btn size="sm" disabled={!!busy || !noteBody.trim()} onClick={() => addNote(d.id)}>
+                      {busy === `note-${d.id}` ? 'Saving…' : noteKind === 'internal' ? 'Add note' : 'Send question'}
+                    </Btn>
+                  </div>
                 </div>
+              )}
+            </div>
 
-                {expanded && (
-                  <div style={{ marginTop: 14, borderTop: BORDER, paddingTop: 14 }}>
-                    {!c || c.id !== d.id ? <p style={{ fontSize: 12.5, color: FAINT }}><Loader2 size={12} className="animate-spin" style={{ display: 'inline' }} /> Loading case…</p> : (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-                        <div>
-                          {/* Ownership + priority */}
-                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <label style={{ fontSize: 12, color: MUTE }}>Owner</label>
-                            <select value={d.assignedToUserId ?? ''} disabled={!!busy || !isOpen} onChange={(e) => assign(d.id, e.target.value ? Number(e.target.value) : null)} style={{ border: BORDER, borderRadius: 8, padding: '5px 8px', fontSize: 12.5 }}>
-                              <option value="">Unassigned</option>
-                              {q.admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                            </select>
-                            <label style={{ fontSize: 12, color: MUTE, marginLeft: 8 }}>Priority</label>
-                            <select value={d.priority} disabled={!!busy || !isOpen} onChange={(e) => setPriority(d.id, e.target.value as Priority)} style={{ border: BORDER, borderRadius: 8, padding: '5px 8px', fontSize: 12.5 }}>
-                              {(['critical', 'high', 'medium', 'low'] as Priority[]).map((p) => <option key={p} value={p}>{PRIO[p].label}</option>)}
-                            </select>
-                          </div>
-                          {d.description && <p style={{ fontSize: 13.5, color: '#4A544D', marginTop: 10, lineHeight: 1.5 }}>{d.description}</p>}
-                          {d.providerResponse && (
-                            <div style={{ marginTop: 10, padding: '9px 12px', background: '#F5F7F4', borderRadius: 9, borderLeft: '3px solid #0B7A4E' }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: '#0B7A4E' }}>Provider&apos;s response</div>
-                              <p style={{ fontSize: 13, color: '#182420', marginTop: 4, lineHeight: 1.5 }}>{d.providerResponse}</p>
-                            </div>
-                          )}
-                          {/* Thread */}
-                          <div style={{ marginTop: 12 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: FAINT }}>Case thread</div>
-                            <div style={{ display: 'grid', gap: 6, marginTop: 6, maxHeight: 320, overflowY: 'auto' }}>
-                              {c.notes.map((n) => (
-                                <div key={n.id} style={{ border: BORDER, borderRadius: 10, padding: '7px 10px', background: n.kind === 'internal' ? '#fafaf8' : '#fff' }}>
-                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: FAINT }}>{chip(NOTE_UI[n.kind] ?? NOTE_UI.system)}<span>{n.authorName ?? n.authorRole}</span><span style={{ marginLeft: 'auto' }}>{fmt(n.createdAt)}</span></div>
-                                  <p style={{ fontSize: 13, color: INK, marginTop: 4, whiteSpace: 'pre-wrap' }}>{n.body}</p>
-                                </div>
-                              ))}
-                            </div>
-                            {isOpen && (
-                              <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  {(['internal', 'question_to_customer', 'question_to_provider'] as const).map((k) => (
-                                    <button key={k} onClick={() => setNoteKind(k)} style={{ padding: '4px 9px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: noteKind === k ? `1px solid ${PRIMARY}` : BORDER, background: noteKind === k ? '#e6f4ef' : '#fff', color: noteKind === k ? PRIMARY : MUTE }}>{NOTE_UI[k].label}</button>
-                                  ))}
-                                </div>
-                                <textarea value={noteBody} onChange={(e) => setNoteBody(e.target.value)} maxLength={4000} placeholder={noteKind === 'internal' ? 'Internal note — never shown to the parties' : 'Your question — the party is notified and can answer here'} style={{ border: BORDER, borderRadius: 9, padding: '7px 10px', fontSize: 13, minHeight: 56 }} />
-                                <div><button disabled={!!busy || !noteBody.trim()} onClick={() => addNote(d.id)} style={{ background: '#fff', border: BORDER, borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600, color: INK, cursor: 'pointer' }}>{busy === `note-${d.id}` ? '…' : noteKind === 'internal' ? 'Add note' : 'Send question'}</button></div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          {/* Evidence + trail + outcome */}
-                          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: FAINT }}>Evidence (SP-258)</div>
-                          {(['problem', 'before', 'after'] as const).map((k) => {
-                            const list = mediaOf(c.evidence, k);
-                            return (
-                              <div key={k} style={{ marginTop: 6 }}>
-                                <div style={{ fontSize: 11.5, color: MUTE }}>{k === 'problem' ? 'Problem — from the customer' : k === 'before' ? 'Before work' : 'Finished work'} · {list.length}</div>
-                                {list.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>{list.map((m) => <a key={m.id} href={m.viewUrl} target="_blank" rel="noreferrer"><img src={m.viewUrl} alt={m.caption ?? k} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: BORDER }} /></a>)}</div>}
-                              </div>
-                            );
-                          })}
-                          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: FAINT, marginTop: 12 }}>Booking trail</div>
-                          <div style={{ display: 'grid', gap: 3, marginTop: 4, maxHeight: 180, overflowY: 'auto', fontSize: 12, color: MUTE }}>
-                            {c.trail.length === 0 ? <span>—</span> : c.trail.map((t) => <div key={t.id}><span style={{ color: FAINT }}>{fmt(t.createdAt)}</span> · {t.fromStatus ? `${t.fromStatus} → ` : ''}{t.toStatus}{t.reason ? ` — ${t.reason}` : ''}</div>)}
-                          </div>
-                          {d.bookingId && <Link href={`/dashboard/admin/bookings/${d.bookingId}`} style={{ fontSize: 12.5, color: PRIMARY, fontWeight: 600, display: 'inline-block', marginTop: 8 }}>Open booking BK-{d.bookingId} →</Link>}
-
-                          {isOpen ? (
-                            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-                              <button disabled={!!busy} onClick={() => resolve(d.id, 'refund_customer')} style={{ background: PRIMARY, color: '#fff', border: 'none', borderRadius: 9, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{busy === `resolve-${d.id}` ? '…' : 'Refund customer (full)'}</button>
-                              <button disabled={!!busy} onClick={() => resolve(d.id, 'favor_provider')} style={{ background: '#fff', border: BORDER, borderRadius: 9, padding: '8px 14px', fontSize: 13, fontWeight: 600, color: MUTE, cursor: 'pointer' }}>Find for provider</button>
-                            </div>
-                          ) : (
-                            <p style={{ fontSize: 12.5, color: FAINT, marginTop: 12, fontStyle: 'italic', display: 'inline-flex', gap: 6, alignItems: 'center' }}><ShieldAlert size={12} /> {d.resolutionSummary ?? 'Closed'} · {fmt(d.resolvedAt)}</p>
-                          )}
-                        </div>
+            {/* Evidence */}
+            <div>
+              <div className="gx-lb" style={{ marginBottom: 6 }}>Evidence (SP-258)</div>
+              {(['problem', 'before', 'after'] as const).map((k) => {
+                const list = mediaOf(c.evidence, k);
+                return (
+                  <div key={k} style={{ marginTop: 6 }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--ms-ink-2)' }}>{k === 'problem' ? 'Problem — from the customer' : k === 'before' ? 'Before work' : 'Finished work'} · {list.length}</div>
+                    {list.length > 0 && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        {list.map((m) => (
+                          <a key={m.id} href={m.viewUrl} target="_blank" rel="noreferrer" title={m.caption ?? `Open ${k} photo`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={m.viewUrl} alt={m.caption ?? k} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--ms-border)' }} />
+                          </a>
+                        ))}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+                );
+              })}
+            </div>
+
+            {/* Booking trail */}
+            <div>
+              <div className="gx-lb" style={{ marginBottom: 6 }}>Booking trail</div>
+              {c.trail.length === 0 ? <p style={{ fontSize: 12, color: 'var(--ms-ink-3)' }}>—</p> : (
+                <Timeline items={c.trail.map((t) => ({
+                  t: <>{t.fromStatus ? `${t.fromStatus} → ` : ''}{t.toStatus}</>,
+                  s: <>{fmt(t.createdAt)}{t.reason ? ` — ${t.reason}` : ''}</>,
+                  state: 'done' as const,
+                }))} />
+              )}
+            </div>
+          </div>
+        ))}
+      </Drawer>
+
+      {/* Resolve confirm */}
+      <Modal
+        open={!!d && !!confirm}
+        onClose={() => { if (!busy) setConfirm(null); }}
+        title={confirm === 'refund_customer' ? 'Refund customer in full?' : 'Find for provider?'}
+        width={460}
+        footer={d && confirm && (
+          <>
+            <Btn disabled={!!busy} onClick={() => setConfirm(null)}>Cancel</Btn>
+            <Btn variant={confirm === 'refund_customer' ? 'primary' : undefined} disabled={!!busy} onClick={() => resolve(d.id, confirm)}>
+              {busy === `resolve-${d.id}` ? 'Resolving…' : confirm === 'refund_customer' ? 'Refund customer (full)' : 'Find for provider'}
+            </Btn>
+          </>
+        )}
+      >
+        {d && (
+          <div style={{ display: 'grid', gap: 10, fontSize: 12.5 }}>
+            <p>
+              Case <b>#{d.id}</b> · {d.customerName} vs {d.providerName ?? 'provider'} · <b>{fmtAed(d.amount)}</b>.
+              {confirm === 'refund_customer'
+                ? ' The customer is refunded the full booking amount and the case closes.'
+                : ' The case closes in the provider’s favour with no refund.'}
+            </p>
+            {error && <Callout tone="bad">{error}</Callout>}
+          </div>
+        )}
+      </Modal>
+    </OsPage>
   );
 }

@@ -101,24 +101,24 @@ export function DateRangePicker({
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
       <button type="button" onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 text-sm border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white hover:border-[#2e9f82] focus:outline-none focus:border-[#2e9f82] cursor-pointer min-w-[220px]">
-        <Calendar size={14} className="text-[#6b6860] shrink-0" />
-        <span className={triggerLabel ? 'text-[#1a1916]' : 'text-[#9b9890]'}>{triggerLabel || placeholder}</span>
+        className="flex items-center gap-2 text-sm border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white hover:border-[#047246] focus:outline-none focus:border-[#047246] cursor-pointer min-w-[220px]">
+        <Calendar size={14} className="text-[#5f6b63] shrink-0" />
+        <span className={triggerLabel ? 'text-[#14201a]' : 'text-[#8a948d]'}>{triggerLabel || placeholder}</span>
         {triggerLabel && (
           <span onClick={clear} role="button" aria-label="Clear date range"
-            className="ml-auto text-[#9b9890] hover:text-[#1a1916]"><X size={13} /></span>
+            className="ml-auto text-[#8a948d] hover:text-[#14201a]"><X size={13} /></span>
         )}
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1.5 left-0 w-max rounded-xl border border-[#e8e6e0] bg-white shadow-xl p-2 flex flex-col sm:flex-row gap-1"
+        <div className="absolute z-50 mt-1.5 left-0 w-max rounded-xl border border-[#e4e9e5] bg-white shadow-xl p-2 flex flex-col sm:flex-row gap-1"
           style={{ maxWidth: 'calc(100vw - 2rem)' }}>
           {/* Preset shortcuts */}
           <div className="flex sm:flex-col gap-0.5 flex-wrap sm:w-[132px] sm:border-r sm:border-[#f0ede8] sm:pr-1.5 pb-1 sm:pb-0">
             {presets.map(p => (
               <button key={p.label} type="button" onClick={() => setDraft(p.range())}
                 className={`text-left text-xs px-2.5 py-1.5 rounded-lg cursor-pointer whitespace-nowrap transition-colors ${
-                  isActivePreset(p) ? 'bg-[#d8f2e8] text-[#1a7a5a] font-semibold' : 'text-[#3d3b35] hover:bg-[#f7f6f2]'}`}>
+                  isActivePreset(p) ? 'bg-[#d8efe3] text-[#1a7a5a] font-semibold' : 'text-[#46534c] hover:bg-[#f7f6f2]'}`}>
                 {p.label}
               </button>
             ))}
@@ -134,16 +134,16 @@ export function DateRangePicker({
               weekStartsOn={1}
             />
             <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-2 border-t border-[#f0ede8]">
-              <span className="text-xs text-[#6b6860]">
+              <span className="text-xs text-[#5f6b63]">
                 {draft?.from
                   ? `${fmtLabel(draft.from)}${draft.to && !sameDay(draft.to, draft.from) ? ` – ${fmtLabel(draft.to)}` : ''}`
                   : 'Pick a start and end date'}
               </span>
               <div className="flex items-center gap-2 shrink-0">
                 <button type="button" onClick={() => setOpen(false)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f7f6f2] cursor-pointer">Cancel</button>
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#f7f6f2] cursor-pointer">Cancel</button>
                 <button type="button" onClick={apply} disabled={!draft?.from}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">Apply</button>
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">Apply</button>
               </div>
             </div>
           </div>

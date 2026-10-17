@@ -664,10 +664,10 @@ export default function ManagerPaymentsPage() {
   if (!permsLoading && !inScope) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
+        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-2xl px-7 py-10 mt-12">
           <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]"><Lock size={20} /></div>
-          <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-          <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">This landlord hasn’t granted you the <strong>Manage Deposits</strong> permission, so their payments aren’t available.</p>
+          <p className="text-base font-bold text-[#14201a]">Permission required</p>
+          <p className="text-sm text-[#5f6b63] mt-1.5 leading-relaxed">This landlord hasn’t granted you the <strong>Manage Deposits</strong> permission, so their payments aren’t available.</p>
         </div>
       </div>
     );
@@ -829,14 +829,14 @@ export default function ManagerPaymentsPage() {
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#8a8f8c]"><Loader2 size={16} className="animate-spin" /> Loading…</div>
       ) : error ? (
-        <div className="mt-3.5 bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+        <div className="mt-3.5 bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
           <p className="text-sm text-[#b42318]">{error}</p>
           <button type="button" onClick={load} className="text-[12px] font-semibold text-[#1a7a52] mt-2 cursor-pointer">Retry</button>
         </div>
       ) : !shown.length && (layout === 'list' || !unitGroups.length) ? (
-        <div className="mt-3.5 bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+        <div className="mt-3.5 bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
           {custodyOn ? <Landmark size={28} className="mx-auto mb-2 text-[#c5c3bc]" /> : <Wallet size={28} className="mx-auto mb-2 text-[#c5c3bc]" />}
-          <p className="text-sm text-[#9b9890]">{emptyMsg}</p>
+          <p className="text-sm text-[#8a948d]">{emptyMsg}</p>
         </div>
       ) : (
         <div className="bg-white border border-[#e6e8e6] rounded-[14px] mt-3.5 overflow-hidden">

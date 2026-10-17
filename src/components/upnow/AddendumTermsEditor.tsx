@@ -25,7 +25,7 @@ const AddendumTermsPreview = dynamic(() => import('@/components/contract/Addendu
   ),
 });
 
-const FIELD = 'px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#b45309]';
+const FIELD = 'px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] text-sm focus:outline-none focus:border-[#b45309]';
 
 const EN_PLACEHOLDER = `Write your addendum here — one term per line.\nType a line in CAPITALS to make it a section heading; leave a blank line between sections.\n\nADDENDUM TO TENANCY CONTRACT\nBoth parties have mutually agreed upon the following terms:\n\nRENEWAL TERMS\nThis contract shall be renewable for the same period and on the same terms unless either party gives three months' notice before expiry.\nIn case of late renewal, the Landlord may charge 5% of the annual rent as a late penalty.\n\nPAYMENT TERMS\nThe Landlord will only accept cheques issued by the Tenant.`;
 
@@ -61,7 +61,7 @@ export default function AddendumTermsEditor({ value, onChange, height = 560 }: {
         <div className="flex items-center gap-1.5 mb-2">
           {(['en', 'ar'] as const).map(l => (
             <button key={l} type="button" onClick={() => setLang(l)}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${lang === l ? 'bg-[#b45309] text-white' : 'bg-[#f4f3ef] text-[#6b6860] hover:bg-[#ece9e2]'}`}>
+              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${lang === l ? 'bg-[#b45309] text-white' : 'bg-[#eef1ef] text-[#5f6b63] hover:bg-[#ece9e2]'}`}>
               {l === 'en' ? `English${count(value.en) ? ` · ${count(value.en)}` : ''}` : `العربية${count(value.ar) ? ` · ${count(value.ar)}` : ''}`}
             </button>
           ))}
@@ -78,7 +78,7 @@ export default function AddendumTermsEditor({ value, onChange, height = 560 }: {
           dir={lang === 'ar' ? 'rtl' : 'ltr'}
           placeholder={lang === 'en' ? EN_PLACEHOLDER : 'اكتب الملحق هنا — بنداً واحداً في كل سطر. اكتب سطراً بأحرف كبيرة ليصبح عنوان قسم.'}
           spellCheck
-          className="flex-1 w-full rounded-xl border border-[#e8e6e0] p-3 text-sm leading-relaxed focus:outline-none focus:border-[#b45309] resize-none"
+          className="flex-1 w-full rounded-xl border border-[#e4e9e5] p-3 text-sm leading-relaxed focus:outline-none focus:border-[#b45309] resize-none"
           style={lang === 'ar' ? { textAlign: 'right' } : undefined}
         />
 
@@ -86,17 +86,17 @@ export default function AddendumTermsEditor({ value, onChange, height = 560 }: {
           One term per line · a line in <b>ALL CAPITALS</b> is a section heading · blank line = new section.
         </p>
         <div className="mt-1.5 rounded-lg border border-dashed border-[#d6d3cc] bg-[#faf9f6] px-3 py-1.5 flex items-center gap-2">
-          <Lock size={13} className="text-[#9b9890] shrink-0" />
-          <p className="text-[10px] text-[#9b9890]">A Tenant &amp; Landlord signature block is added automatically at the end — it can’t be edited or removed.</p>
+          <Lock size={13} className="text-[#8a948d] shrink-0" />
+          <p className="text-[10px] text-[#8a948d]">A Tenant &amp; Landlord signature block is added automatically at the end — it can’t be edited or removed.</p>
         </div>
       </div>
 
       {/* ── PREVIEW ───────────────────────────────────────────── */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center gap-1.5 mb-2 text-[11px] font-bold uppercase tracking-wide text-[#6b6860]">
+        <div className="flex items-center gap-1.5 mb-2 text-[11px] font-bold uppercase tracking-wide text-[#5f6b63]">
           <Eye size={13} /> Live preview
         </div>
-        <div className="flex-1 min-h-0 rounded-xl border border-[#e8e6e0] overflow-hidden bg-[#52555a]">
+        <div className="flex-1 min-h-0 rounded-xl border border-[#e4e9e5] overflow-hidden bg-[#52555a]">
           {canPreview
             ? <AddendumTermsPreview terms={previewTerms} height={Math.max(280, height - 34)} />
             : <div className="h-full grid place-items-center text-[#cfcfcf] text-xs px-6 text-center">

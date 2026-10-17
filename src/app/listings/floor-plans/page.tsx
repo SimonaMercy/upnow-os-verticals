@@ -60,9 +60,9 @@ export default function FloorPlansPage() {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto px-5 py-8">
-        <h1 className="text-2xl font-bold text-[#1a1916]">Floor plans</h1>
+        <h1 className="text-2xl font-bold text-[#14201a]">Floor plans</h1>
         {data && data.properties.length > 0 && (
-          <p className="text-sm text-[#6b6860] mt-1">{data.properties.find(p => p.id === propertyId)?.buildingName?.trim()}</p>
+          <p className="text-sm text-[#5f6b63] mt-1">{data.properties.find(p => p.id === propertyId)?.buildingName?.trim()}</p>
         )}
 
         {/* Filters */}
@@ -80,39 +80,39 @@ export default function FloorPlansPage() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-sm text-[#9b9890]"><Loader2 size={16} className="animate-spin" /> Loading floor plans…</div>
+          <div className="flex items-center justify-center gap-2 py-24 text-sm text-[#8a948d]"><Loader2 size={16} className="animate-spin" /> Loading floor plans…</div>
         ) : filtered.length === 0 ? (
-          <p className="text-center text-sm text-[#9b9890] py-24">No floor plans match these filters.</p>
+          <p className="text-center text-sm text-[#8a948d] py-24">No floor plans match these filters.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-12 mt-10">
             {filtered.map(p => (
               <div key={p.planLabel} className="flex flex-col items-center text-center">
                 {/* Floor plan image */}
-                <div className="w-full aspect-[4/3] flex items-center justify-center bg-[#fafaf8] rounded-sm overflow-hidden">
+                <div className="w-full aspect-[4/3] flex items-center justify-center bg-[#f6f8f6] rounded-sm overflow-hidden">
                   <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
                 </div>
 
                 {/* Zoom / share */}
                 <div className="flex items-center gap-3 my-4">
                   {p.floorPlanUrl && (
-                    <a href={p.floorPlanUrl} target="_blank" rel="noreferrer" className="w-9 h-9 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f7f6f2]" title="Zoom">
+                    <a href={p.floorPlanUrl} target="_blank" rel="noreferrer" className="w-9 h-9 rounded-full border border-[#e4e9e5] flex items-center justify-center text-[#5f6b63] hover:bg-[#f7f6f2]" title="Zoom">
                       <ZoomIn size={15} />
                     </a>
                   )}
-                  <button onClick={() => share(p)} className="w-9 h-9 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f7f6f2]" title="Copy link">
+                  <button onClick={() => share(p)} className="w-9 h-9 rounded-full border border-[#e4e9e5] flex items-center justify-center text-[#5f6b63] hover:bg-[#f7f6f2]" title="Copy link">
                     <Share2 size={15} />
                   </button>
                 </div>
 
-                <p className="text-sm font-semibold tracking-[0.15em] text-[#1a1916] uppercase">{p.displayName}</p>
-                <p className="text-base font-bold text-[#1a1916] mt-2">
+                <p className="text-sm font-semibold tracking-[0.15em] text-[#14201a] uppercase">{p.displayName}</p>
+                <p className="text-base font-bold text-[#14201a] mt-2">
                   {bedLabel(p.bedrooms)}{p.bathrooms != null ? ` / ${p.bathrooms} Bath` : ''}
                 </p>
-                <p className="text-sm text-[#6b6860] mt-1.5">{sizeLabel(p.sqftMin, p.sqftMax)} Sq. Ft.</p>
-                {p.priceFrom != null && <p className="text-sm text-[#6b6860]">Starting at AED {aed(p.priceFrom)}/yr</p>}
+                <p className="text-sm text-[#5f6b63] mt-1.5">{sizeLabel(p.sqftMin, p.sqftMax)} Sq. Ft.</p>
+                {p.priceFrom != null && <p className="text-sm text-[#5f6b63]">Starting at AED {aed(p.priceFrom)}/yr</p>}
 
                 <Link href={`/listings/units/${p.sampleUnitId}`}
-                  className="mt-4 inline-block px-7 py-2.5 rounded-full border border-[#1a1916] text-xs font-semibold tracking-wider uppercase text-[#1a1916] hover:bg-[#1a1916] hover:text-white transition-colors">
+                  className="mt-4 inline-block px-7 py-2.5 rounded-full border border-[#14201a] text-xs font-semibold tracking-wider uppercase text-[#14201a] hover:bg-[#14201a] hover:text-white transition-colors">
                   View availability
                 </Link>
               </div>
@@ -151,10 +151,10 @@ function Select({ label, value, onChange, options }: {
   return (
     <div className="relative">
       <select value={value} onChange={e => onChange(e.target.value)}
-        className="appearance-none border border-[#d8d6d0] rounded-md pl-3 pr-9 py-2 text-sm text-[#1a1916] bg-white focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+        className="appearance-none border border-[#d8d6d0] rounded-md pl-3 pr-9 py-2 text-sm text-[#14201a] bg-white focus:outline-none focus:border-[#047246] cursor-pointer">
         {options.map(o => <option key={o.value} value={o.value}>{label === 'Bedrooms' || label === 'Bathrooms' || label === 'Price' ? (o.value === 'all' ? label : o.label) : o.label}</option>)}
       </select>
-      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
+      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8a948d] pointer-events-none" />
     </div>
   );
 }

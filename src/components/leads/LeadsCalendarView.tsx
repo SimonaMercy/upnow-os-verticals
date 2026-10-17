@@ -147,25 +147,25 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCursor(c => addMonths(c, -1))}
-              className="w-8 h-8 rounded-lg border border-[#e8e6e0] hover:bg-[#f4f3ef] flex items-center justify-center text-[#3d3b35] cursor-pointer"
+              className="w-8 h-8 rounded-lg border border-[#e4e9e5] hover:bg-[#eef1ef] flex items-center justify-center text-[#46534c] cursor-pointer"
               aria-label="Previous month"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={() => setCursor(c => addMonths(c, 1))}
-              className="w-8 h-8 rounded-lg border border-[#e8e6e0] hover:bg-[#f4f3ef] flex items-center justify-center text-[#3d3b35] cursor-pointer"
+              className="w-8 h-8 rounded-lg border border-[#e4e9e5] hover:bg-[#eef1ef] flex items-center justify-center text-[#46534c] cursor-pointer"
               aria-label="Next month"
             >
               <ChevronRight size={16} />
             </button>
-            <h2 className="text-lg font-semibold text-[#1a1916] ml-1">
+            <h2 className="text-lg font-semibold text-[#14201a] ml-1">
               {format(cursor, 'MMMM yyyy')}
             </h2>
           </div>
           <button
             onClick={() => { const t = new Date(); setCursor(startOfMonth(t)); setSelectedDay(t); }}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#3d3b35] hover:bg-[#f4f3ef] cursor-pointer"
+            className="text-xs font-medium px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-[#46534c] hover:bg-[#eef1ef] cursor-pointer"
           >
             Today
           </button>
@@ -174,7 +174,7 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
         {/* Weekday header */}
         <div className="grid grid-cols-7 gap-1 mb-1">
           {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
-            <div key={d} className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890] text-center py-1">
+            <div key={d} className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d] text-center py-1">
               {d}
             </div>
           ))}
@@ -195,12 +195,12 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                 onClick={() => setSelectedDay(day)}
                 className={`aspect-square rounded-lg p-1.5 flex flex-col items-stretch text-left transition-all cursor-pointer ${
                   selected
-                    ? 'bg-[#1a1916] text-white ring-2 ring-offset-1 ring-[#1a1916]'
+                    ? 'bg-[#14201a] text-white ring-2 ring-offset-1 ring-[#14201a]'
                     : today
-                      ? 'bg-[#d8f2e8] text-[#1f5a3f] hover:bg-[#c4ebdb]'
+                      ? 'bg-[#d8efe3] text-[#1f5a3f] hover:bg-[#c4ebdb]'
                       : inMonth
-                        ? 'bg-white text-[#1a1916] hover:bg-[#f4f3ef]'
-                        : 'bg-[#fafaf8] text-[#c8c6c0] hover:bg-[#f4f3ef]'
+                        ? 'bg-white text-[#14201a] hover:bg-[#eef1ef]'
+                        : 'bg-[#f6f8f6] text-[#c8c6c0] hover:bg-[#eef1ef]'
                 }`}
               >
                 <div className={`text-[11px] font-semibold ${selected ? 'text-white' : ''}`}>
@@ -217,7 +217,7 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                         />
                       ))}
                       {dayViews.length > 5 && (
-                        <span className={`text-[9px] font-bold leading-none ${selected ? 'text-white/80' : 'text-[#9b9890]'}`}>
+                        <span className={`text-[9px] font-bold leading-none ${selected ? 'text-white/80' : 'text-[#8a948d]'}`}>
                           +{dayViews.length - 5}
                         </span>
                       )}
@@ -233,14 +233,14 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
       {/* ─── Day agenda panel ─────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-[#ede9e3] p-4 sm:p-5 self-start">
         <div className="flex items-baseline justify-between mb-1">
-          <h3 className="text-base font-semibold text-[#1a1916]">
+          <h3 className="text-base font-semibold text-[#14201a]">
             {format(selectedDay, 'EEEE, d MMMM')}
           </h3>
           {isToday(selectedDay) && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#2e9f82]">Today</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#047246]">Today</span>
           )}
         </div>
-        <p className="text-xs text-[#9b9890] mb-4">
+        <p className="text-xs text-[#8a948d] mb-4">
           {selectedViewings.length === 0
             ? 'No viewings'
             : `${selectedViewings.length} viewing${selectedViewings.length === 1 ? '' : 's'}`}
@@ -248,10 +248,10 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
 
         {selectedViewings.length === 0 ? (
           <div className="flex flex-col items-center text-center py-8">
-            <div className="w-10 h-10 rounded-full bg-[#f4f3ef] flex items-center justify-center mb-2">
+            <div className="w-10 h-10 rounded-full bg-[#eef1ef] flex items-center justify-center mb-2">
               <CalendarDays size={18} className="text-[#c8c6c0]" />
             </div>
-            <p className="text-xs text-[#9b9890]">Nothing scheduled this day.</p>
+            <p className="text-xs text-[#8a948d]">Nothing scheduled this day.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -262,8 +262,8 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                   className="border border-[#ede9e3] rounded-xl p-3 hover:border-[#d4d0c8] transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-1.5 text-[#1a1916] text-sm font-semibold">
-                      <Clock size={13} className="text-[#9b9890]" />
+                    <div className="flex items-center gap-1.5 text-[#14201a] text-sm font-semibold">
+                      <Clock size={13} className="text-[#8a948d]" />
                       {format(v.scheduledAt, 'HH:mm')}
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${STAGE_PILL[v.stage]}`}>
@@ -271,14 +271,14 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 text-sm text-[#1a1916] mb-1">
-                    <User size={12} className="text-[#9b9890]" />
+                  <div className="flex items-center gap-1.5 text-sm text-[#14201a] mb-1">
+                    <User size={12} className="text-[#8a948d]" />
                     <span className="font-medium truncate">{v.lead.customerName}</span>
                   </div>
 
                   {v.lead.unit && (
-                    <div className="flex items-center gap-1.5 text-xs text-[#6b6860] mb-1">
-                      <MapPin size={11} className="text-[#9b9890] shrink-0" />
+                    <div className="flex items-center gap-1.5 text-xs text-[#5f6b63] mb-1">
+                      <MapPin size={11} className="text-[#8a948d] shrink-0" />
                       <span className="truncate">
                         {v.lead.unit.property?.buildingName ?? '—'}
                         {v.lead.unit.unitNumber ? ` · ${v.lead.unit.unitNumber}` : ''}
@@ -287,16 +287,16 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                   )}
 
                   {v.lead.leadPhone && (
-                    <div className="flex items-center gap-1.5 text-xs text-[#6b6860] mb-2">
-                      <Phone size={11} className="text-[#9b9890] shrink-0" />
-                      <a href={`tel:${v.lead.leadPhone}`} className="hover:text-[#2e9f82] truncate">
+                    <div className="flex items-center gap-1.5 text-xs text-[#5f6b63] mb-2">
+                      <Phone size={11} className="text-[#8a948d] shrink-0" />
+                      <a href={`tel:${v.lead.leadPhone}`} className="hover:text-[#047246] truncate">
                         {v.lead.leadPhone}
                       </a>
                     </div>
                   )}
 
                   {v.notes && (
-                    <p className="text-[11px] text-[#6b6860] bg-[#fafaf8] rounded-md p-2 mb-2 leading-relaxed">
+                    <p className="text-[11px] text-[#5f6b63] bg-[#f6f8f6] rounded-md p-2 mb-2 leading-relaxed">
                       {v.notes}
                     </p>
                   )}
@@ -304,7 +304,7 @@ export function LeadsCalendarView({ leads, onOpenLead }: Props) {
                   {onOpenLead && (
                     <button
                       onClick={() => onOpenLead(v.lead.id)}
-                      className="w-full text-xs text-[#2e9f82] font-medium border border-[#2e9f82] rounded-lg py-1.5 hover:bg-[#f0fdf4] flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full text-xs text-[#047246] font-medium border border-[#047246] rounded-lg py-1.5 hover:bg-[#f0fdf4] flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       Open lead <ExternalLink size={11} />
                     </button>

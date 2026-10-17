@@ -430,13 +430,13 @@ function PhotosSection({ propertyId, unitId }: { propertyId: number; unitId: num
 
   return (
     <div>
-      <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Photos</label>
+      <label className="block text-xs font-medium text-[#5f6b63] mb-1.5">Photos</label>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only" onChange={onFiles} />
       {loading ? (
-        <div className="text-xs text-[#9b9890] py-2">Loading photos…</div>
+        <div className="text-xs text-[#8a948d] py-2">Loading photos…</div>
       ) : photos.length === 0 ? (
         <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
-          className="w-full border-2 border-dashed border-[#e8e6e0] rounded-xl py-8 flex flex-col items-center justify-center gap-1.5 text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
+          className="w-full border-2 border-dashed border-[#e4e9e5] rounded-xl py-8 flex flex-col items-center justify-center gap-1.5 text-[#8a948d] hover:border-[#047246] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
           <Upload size={20} />
           <span className="text-xs font-medium">Add photos</span>
           <span className="text-[10px] text-[#b0ae9a]">PNG, JPG or WebP · multiple allowed</span>
@@ -446,18 +446,18 @@ function PhotosSection({ propertyId, unitId }: { propertyId: number; unitId: num
           {photos.map((p, i) => (
             <div key={p.id} className="relative group aspect-[4/3]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.caption ?? 'Unit photo'} className="w-full h-full object-cover rounded-lg border border-[#e8e6e0]" />
+              <img src={p.url} alt={p.caption ?? 'Unit photo'} className="w-full h-full object-cover rounded-lg border border-[#e4e9e5]" />
               {i === 0 && (
                 <span className="absolute bottom-1 left-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">Cover</span>
               )}
               <button type="button" onClick={() => void remove(p.id)} disabled={busy}
-                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 border border-[#e8e6e0] text-[#9b9890] hover:text-[#b91c1c] flex items-center justify-center cursor-pointer shadow disabled:opacity-50">
+                className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 border border-[#e4e9e5] text-[#8a948d] hover:text-[#b91c1c] flex items-center justify-center cursor-pointer shadow disabled:opacity-50">
                 <X size={12} />
               </button>
             </div>
           ))}
           <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
-            className="aspect-[4/3] border-2 border-dashed border-[#e8e6e0] rounded-lg flex flex-col items-center justify-center gap-1 text-[#9b9890] hover:border-[#2e9f82] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
+            className="aspect-[4/3] border-2 border-dashed border-[#e4e9e5] rounded-lg flex flex-col items-center justify-center gap-1 text-[#8a948d] hover:border-[#047246] hover:bg-[#f0fdf8] cursor-pointer disabled:opacity-50">
             <Upload size={18} />
             <span className="text-[11px] font-medium">Add</span>
           </button>
@@ -498,7 +498,7 @@ function AddendumsSection({ files, onAdd, onRemove, existing }: {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <label className="block text-xs font-medium text-[#3d3b35]">Addendums / Amendments <span className="text-[#9b9890] font-normal">(optional)</span></label>
+        <label className="block text-xs font-medium text-[#46534c]">Addendums / Amendments <span className="text-[#8a948d] font-normal">(optional)</span></label>
         <a href={ADDENDUM_SAMPLE_URL} download className="inline-flex items-center gap-1 text-[11px] font-medium text-[#b45309] hover:underline">
           <Download size={11} /> Download sample
         </a>
@@ -507,21 +507,21 @@ function AddendumsSection({ files, onAdd, onRemove, existing }: {
         onChange={e => { const fs = Array.from(e.target.files ?? []); e.target.value = ''; if (fs.length) void onFiles(fs); }} />
       {(existing ?? []).map(d => (
         <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.url, caption: d.name })}
-          className="w-full flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5 text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
+          className="w-full flex items-center gap-2 border border-[#e4e9e5] rounded-lg px-3 py-2 mb-1.5 text-[#14201a] hover:bg-[#eef1ef] cursor-pointer">
           <Upload size={14} className="text-[#b45309] shrink-0" />
           <span className="text-sm truncate flex-1">{d.name}</span>
-          <span className="text-[11px] text-[#9b9890]">attached</span>
+          <span className="text-[11px] text-[#8a948d]">attached</span>
         </button>
       ))}
       {files.map((f, i) => (
-        <div key={i} className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2 mb-1.5">
-          <Upload size={14} className="text-[#2e9f82] shrink-0" />
-          <span className="text-sm text-[#1a1916] truncate flex-1">{f.name}</span>
-          <button type="button" onClick={() => onRemove(i)} className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
+        <div key={i} className="flex items-center gap-2 border border-[#e4e9e5] rounded-lg px-3 py-2 mb-1.5">
+          <Upload size={14} className="text-[#047246] shrink-0" />
+          <span className="text-sm text-[#14201a] truncate flex-1">{f.name}</span>
+          <button type="button" onClick={() => onRemove(i)} className="w-5 h-5 rounded-full bg-[#eef1ef] flex items-center justify-center text-[#8a948d] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
         </div>
       ))}
       <button type="button" onClick={() => inputRef.current?.click()} disabled={checking}
-        className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e8e6e0] rounded-lg py-2.5 text-xs text-[#9b9890] hover:border-[#b45309] hover:bg-[#fffbeb] transition-colors cursor-pointer disabled:opacity-50">
+        className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-[#e4e9e5] rounded-lg py-2.5 text-xs text-[#8a948d] hover:border-[#b45309] hover:bg-[#fffbeb] transition-colors cursor-pointer disabled:opacity-50">
         {checking ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} className="text-[#c8c6c0]" />}
         {checking ? 'Checking signature fields…' : 'Attach addendum / amendment (Word .docx)'}
       </button>
@@ -549,7 +549,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   return (
     <div ref={ref} className="relative">
       <input
-        className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]"
+        className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]"
         placeholder="e.g. Sea View, Marina View…"
         value={value}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
@@ -557,13 +557,13 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
         onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}
       />
       {showDropdown && (
-        <ul className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e8e6e0] rounded-xl shadow-xl max-h-48 overflow-y-auto">
+        <ul className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e4e9e5] rounded-xl shadow-xl max-h-48 overflow-y-auto">
           {filtered.map(v => (
             <li key={v}>
               <button
                 type="button"
                 onMouseDown={() => { onChange(v); setOpen(false); }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-[#f4f3ef] text-[#1a1916] cursor-pointer"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-[#eef1ef] text-[#14201a] cursor-pointer"
               >
                 {v}
               </button>
@@ -973,7 +973,7 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
               <button type="button" className={ds.linkBtn} onClick={() => setForm(f => ({ ...f, additionalPayments: [...f.additionalPayments, { label: '', amount: '', vat: '' }] }))}>+ Add payment</button>
             </div>
             {form.additionalPayments.length === 0 ? (
-              <p style={{ fontSize: 11, color: '#9b9890', fontStyle: 'italic', marginTop: 8 }}>None — only rent, deposit and the fees above apply.</p>
+              <p style={{ fontSize: 11, color: '#8a948d', fontStyle: 'italic', marginTop: 8 }}>None — only rent, deposit and the fees above apply.</p>
             ) : (
               <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div className={ds.payGrid}><span className={ds.payHead}>Label</span><span className={ds.payHead}>Net AED</span><span className={ds.payHead}>VAT AED</span><span /></div>
@@ -1044,8 +1044,8 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
                 className={cn(
                   'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors',
                   form.unitType
-                    ? 'bg-[#d8f2e8] text-[#1a7a5a] hover:bg-[#c0e8d6] cursor-pointer'
-                    : 'bg-[#f4f3ef] text-[#9b9890] cursor-not-allowed',
+                    ? 'bg-[#d8efe3] text-[#1a7a5a] hover:bg-[#c0e8d6] cursor-pointer'
+                    : 'bg-[#eef1ef] text-[#8a948d] cursor-not-allowed',
                 )}
               >
                 <Sparkles size={12} />
@@ -1077,7 +1077,7 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
           <div className={ds.docGrid} style={(propertyStandalone === false && !layoutBulk) ? undefined : { gridTemplateColumns: '1fr' }}>
             {/* Floor plan */}
             <div>
-              <label className={ds.lbl}>Floor plan <span style={{ color: '#9b9890', fontWeight: 600 }}>(optional)</span></label>
+              <label className={ds.lbl}>Floor plan <span style={{ color: '#8a948d', fontWeight: 600 }}>(optional)</span></label>
               {floorPlan ? (
                 <div className={ds.docFile}>
                   <span className={ds.docFileIcon}><Layers size={20} /></span>
@@ -1103,7 +1103,7 @@ export function UnitFormModal({ open, propertyCategory, propertyEmirate, initial
             {/* Title deed — per-unit (multi-unit / non-standalone properties); never in layout bulk */}
             {propertyStandalone === false && !layoutBulk && (
               <div>
-                <label className={ds.lbl}>Title Deed <span style={{ color: '#9b9890', fontWeight: 600 }}>(this unit)</span></label>
+                <label className={ds.lbl}>Title Deed <span style={{ color: '#8a948d', fontWeight: 600 }}>(this unit)</span></label>
                 {titleDeed ? (
                   <div className={ds.docFile}>
                     <span className={ds.docFileIcon}><FileText size={20} /></span>

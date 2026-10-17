@@ -1,32 +1,51 @@
 /**
- * Admin: Platform Billing (dashboard/admin/billing)
+ * Admin › Spaces › Platform billing (dashboard/admin/billing) — Genspark OS rebuild.
  *
  * RP commercial model (agency, final recommendation) — what UpNow bills each
  * Rental Provider per calendar month: platform subscription (AED 499/month,
- * recurring, per the commercial-model PDF) + lease origination (AED 300, new
- * lease activated) + lease renewal (AED 100) + lease settlement (AED 100,
- * settlement paid, once per tenancy chain). VAT (5%) is always its own line,
- * never folded into net. Phase 1 = statement CALCULATOR with per-provider
- * drill-down; invoice generation is later.
+ * recurring) + lease origination (AED 300, new lease activated) + lease renewal
+ * (AED 100) + lease settlement (AED 100, settlement paid, once per tenancy chain).
+ * VAT (5%) is always its own line, never folded into net. Fee amounts are versioned
+ * in fee_config; editing is SUPER_ADMIN-only. All money is WHOLE AED (VAT can be 2dp)
+ * — NOT fils — so it is shown with fmtAed (2 dp only when fractional).
  *
- * Fee amounts are versioned in fee_config; editing is SUPER_ADMIN-only.
- * Backend contract: /admin/billing/* . All money WHOLE AED (VAT can be 2dp).
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - Permission: admin or super_admin only ("Admin access required." otherwise); fee
+ *    edits super_admin only ("Fee edits are super-admin only." note for admins).
+ *  - GET /admin/billing/config — fee schedule + VAT rate; error → retry.
+ *  - PATCH /admin/billing/config { [feeKey]: wholeAed } — inline fee edit (Enter saves,
+ *    Esc cancels; validation "Whole AED, 0–100,000"); on save reloads statements + trend.
+ *  - GET /admin/billing/trend?months=12 — "Platform revenue by stream" stacked bar chart
+ *    (recharts, same 4 streams/colours, tooltip "<Month> — N subscribed"); error → retry.
+ *  - GET /admin/billing/statements?month=YYYY-MM — month navigator (previous / next,
+ *    next disabled at the current Dubai month); KPIs Gross billed / Providers billed /
+ *    Lease events / Settlements show "…" while loading and "—" on error (never AED 0).
+ *  - Provider statements table (Subscription, New leases, Renewals, Settlements, Net, VAT,
+ *    Gross) with totals footer + the billable-events footnote; error → retry; empty copy.
+ *  - Per-provider drill-down (was an expandable row, now an "Open" Drawer, same content):
+ *    GET /admin/billing/statements/:rpId?month= — line items (subscription, new lease /
+ *    renewal per contract, settlements) with Net / VAT / Gross; GET /admin/billing/receipts
+ *    ?month= — existing RP invoice + UpNow-Admin receipt for that provider; POST
+ *    /admin/billing/receipts/:rpId?month= — "Issue receipts" (only when gross > 0);
+ *    "PDF" per receipt → downloadPlatformReceipt (REUSED, unchanged).
+ *  - Fee Edit / Save / Cancel are LABELLED buttons (the old ones were icon-only).
+ *  New: provider search over the statement rows (name, email, #id), a "Platform fees, not
+ *  rent" money-rule callout. No manager route re-exports this page.
  */
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import {
-  Receipt, Landmark, FilePlus2, RefreshCw, Scale, ChevronLeft, ChevronRight,
-  ChevronDown, Loader2, Pencil, Check, X, Building2, Users, Download,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
+import { useAuth } from '@/contexts/AuthContext';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { downloadPlatformReceipt, type PlatformReceiptDoc } from '@/components/upnow/PlatformReceiptPdf';
 import {
-  downloadPlatformReceipt, type PlatformReceiptDoc,
-} from '@/components/upnow/PlatformReceiptPdf';
+  Btn, Callout, Card, Cols, Drawer, EmptyRow, KV, Kpi, Kpis, Locked, OsPage, PageHead, Pill, ScopeStrip, SearchField,
+  SkeletonRows, TableWrap, fmtAed, fmtDate,
+} from '@/components/os/kit';
 
 /* ── API types (exact contract) ── */
 interface BillingFees {
@@ -67,23 +86,19 @@ interface ProviderStatement {
   subscription: { periodMonth: string; feeAed: number } | null;
   leases: LeaseLine[];
   settlements: SettlementLine[];
-  totals: StatementRow extends infer _ ? Omit<StatementRow, 'rentalProviderId' | 'name' | 'email' | 'joinedAt'> : never;
+  totals: Omit<StatementRow, 'rentalProviderId' | 'name' | 'email' | 'joinedAt'>;
 }
 interface TrendPoint {
-  // `subscribers` = providers paying the monthly subscription that month;
-  // statement rows can exceed this in history months (events pre-date signup).
+  // `subscribers` = providers paying the monthly subscription that month.
   month: string; subscribers: number; newLeases: number; renewals: number; settlements: number;
   subscriptionAed: number; newLeaseAed: number; renewalAed: number; settlementAed: number;
   netAed: number; vatAed: number;
 }
 interface Trend { months: TrendPoint[]; vatRatePct: number }
 
-/* ── Style constants (match admin/risk generation) ──
-   Stream palette validated (dataviz six checks, light surface):
-   GREEN sub · BLUE origination · AMBER renewal · PURPLE settlement. */
-const GREEN = '#2e9f82', BLUE = '#3b6fb5', AMBER = '#d97706', PURPLE = '#7c3aed';
-const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
-
+/* Stream palette (validated earlier): GREEN sub · BLUE origination · AMBER renewal · PURPLE settlement. */
+const GREEN = '#047246', BLUE = '#3b6fb5', AMBER = '#d97706', PURPLE = '#7c3aed';
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e4e9e5', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
 const STREAMS = [
   { key: 'subscriptionAed', label: 'Subscription', color: GREEN },
   { key: 'newLeaseAed', label: 'Lease origination', color: BLUE },
@@ -91,77 +106,27 @@ const STREAMS = [
   { key: 'settlementAed', label: 'Settlements', color: PURPLE },
 ] as const;
 
-/* ── Formatting helpers ── */
-// Fractional amounts always render fixed 2dp ('AED 49.90', never 'AED 49.9')
-// so a money column mixing VAT and whole-AED fees stays aligned.
-function fmtAED(n: number | null | undefined): string {
-  if (n == null) return '—';
-  const dp = Number.isInteger(n) ? 0 : 2;
-  return `AED ${n.toLocaleString('en-AE', { minimumFractionDigits: dp, maximumFractionDigits: 2 })}`;
-}
-// One decimal for non-integer thousands ('1.5K') — Math.round would label the
-// 1,500 gridline '2K', colliding with the real 2,000 tick.
+/* ── Formatting ── whole AED; fractional (VAT) always 2 dp so a column stays aligned. */
+const fmtAED = (n: number | null | undefined) => (n == null ? '—' : fmtAed(n, !Number.isInteger(n)));
 const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(v % 1000 ? 1 : 0)}K` : String(v));
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-function monthShort(m: string): string {
-  const [y, mo] = m.split('-').map(Number);
-  return `${MONTH_NAMES[mo - 1]} ${String(y).slice(2)}`;
-}
-function monthLong(m: string): string {
-  const [y, mo] = m.split('-').map(Number);
-  return `${['January','February','March','April','May','June','July','August','September','October','November','December'][mo - 1]} ${y}`;
-}
-function currentMonth(): string {
-  return new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 7);
-}
+const MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function monthShort(m: string): string { const [y, mo] = m.split('-').map(Number); return `${MONTH_NAMES[mo - 1]} ${String(y).slice(2)}`; }
+function monthLong(m: string): string { const [y, mo] = m.split('-').map(Number); return `${MONTH_LONG[mo - 1]} ${y}`; }
+/** Current month in Asia/Dubai (UTC+4). */
+function currentMonth(): string { return new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 7); }
 function shiftMonth(m: string, delta: 1 | -1): string {
   const [y, mo] = m.split('-').map(Number);
   const idx = y * 12 + (mo - 1) + delta;
   return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
 }
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' });
-}
-
-/* ── Small building blocks ── */
-function KpiTile({ icon: Icon, label, value, sub }: {
-  icon: React.ComponentType<{ size?: number }>; label: string; value: string; sub?: string;
-}) {
-  return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">
-        <Icon size={12} /> {label}
-      </div>
-      <p className="text-xl font-bold mt-1.5 leading-none text-[#1a1916]">{value}</p>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
-    </div>
-  );
-}
-
-function StreamChip({ color, children }: { color: string; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-[#6b6860]">
-      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      {children}
-    </span>
-  );
-}
-
-function KindChip({ kind }: { kind: 'new' | 'renewal' }) {
-  const c = kind === 'new' ? BLUE : AMBER;
-  return (
-    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `${c}1a`, color: c }}>
-      {kind === 'new' ? 'New lease' : 'Renewal'}
-    </span>
-  );
-}
 
 /* ── Fee schedule card (SUPER_ADMIN can edit) ── */
-const FEE_META: { key: keyof BillingFees; label: string; trigger: string; color: string }[] = [
-  { key: 'subscriptionAed', label: 'Platform subscription', trigger: 'per provider / month', color: GREEN },
-  { key: 'leaseOriginationAed', label: 'Lease origination', trigger: 'per new lease activated', color: BLUE },
-  { key: 'leaseRenewalAed', label: 'Lease renewal', trigger: 'per renewal activated', color: AMBER },
-  { key: 'leaseSettlementAed', label: 'Lease settlement', trigger: 'per settlement completed', color: PURPLE },
+const FEE_META: { key: keyof BillingFees; label: string; trigger: string }[] = [
+  { key: 'subscriptionAed', label: 'Platform subscription', trigger: 'per provider / month' },
+  { key: 'leaseOriginationAed', label: 'Lease origination', trigger: 'per new lease activated' },
+  { key: 'leaseRenewalAed', label: 'Lease renewal', trigger: 'per renewal activated' },
+  { key: 'leaseSettlementAed', label: 'Lease settlement', trigger: 'per settlement completed' },
 ];
 
 function FeeScheduleCard({ config, canEdit, onSaved }: {
@@ -187,74 +152,69 @@ function FeeScheduleCard({ config, canEdit, onSaved }: {
       setSaving(false);
     }
   }
+  const cancel = () => { setEditing(null); setError(null); };
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-[#1a1916]">Fee schedule</h3>
-        <span className="text-[10px] text-[#9b9890]">exclusive of {config.vatRatePct}% VAT</span>
+    <Card title="Fee schedule" sub={`Exclusive of ${config.vatRatePct}% VAT`}>
+      <table className="gx-tbl">
+        <thead><tr><th>Fee</th><th className="num">Amount</th>{canEdit && <th className="act">Action</th>}</tr></thead>
+        <tbody>
+          {FEE_META.map((f) => (
+            <tr key={f.key}>
+              <td><span className="strong">{f.label}</span><span className="sub">{f.trigger}</span></td>
+              <td className="num">
+                {editing === f.key ? (
+                  <input
+                    autoFocus type="number" min={0} max={100000} value={draft} aria-label={`${f.label} in whole AED`}
+                    className="gx-inp" style={{ width: 96, textAlign: 'right' }}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !saving) save();
+                      if (e.key === 'Escape') cancel();
+                    }}
+                  />
+                ) : <span className="strong">{fmtAED(config.fees[f.key])}</span>}
+              </td>
+              {canEdit && (
+                <td className="act">
+                  {editing === f.key ? (
+                    <span className="gx-btn-row" style={{ justifyContent: 'flex-end' }}>
+                      <Btn size="xs" variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
+                      <Btn size="xs" onClick={cancel}>Cancel</Btn>
+                    </span>
+                  ) : (
+                    <Btn size="xs" onClick={() => { setEditing(f.key); setDraft(String(config.fees[f.key])); setError(null); }}>Edit</Btn>
+                  )}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="gx-pad">
+        {error && <Callout tone="bad">{error}</Callout>}
+        {!canEdit && <div className="gx-hint">Fee edits are super-admin only.</div>}
       </div>
-      <ul className="mt-3 space-y-2.5">
-        {FEE_META.map((f) => (
-          <li key={f.key} className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: f.color }} />
-            <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-semibold text-[#1a1916] leading-tight">{f.label}</p>
-              <p className="text-[10px] text-[#9b9890]">{f.trigger}</p>
-            </div>
-            {editing === f.key ? (
-              <span className="flex items-center gap-1">
-                <input
-                  autoFocus type="number" min={0} max={100000} value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !saving) save();
-                    if (e.key === 'Escape') { setEditing(null); setError(null); }
-                  }}
-                  className="w-20 px-1.5 py-0.5 text-[12px] text-right border border-[#e8e6e0] rounded-md focus:outline-none focus:border-[#2e9f82]"
-                />
-                <button onClick={save} disabled={saving} className="p-1 rounded-md text-[#1a7a5a] hover:bg-[#f0faf6]" title="Save">
-                  {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                </button>
-                <button onClick={() => { setEditing(null); setError(null); }} className="p-1 rounded-md text-[#9b9890] hover:bg-[#f5f4f0]" title="Cancel">
-                  <X size={13} />
-                </button>
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5">
-                <span className="text-[13px] font-bold text-[#1a1916] tabular-nums">{fmtAED(config.fees[f.key])}</span>
-                {canEdit && (
-                  <button
-                    onClick={() => { setEditing(f.key); setDraft(String(config.fees[f.key])); setError(null); }}
-                    className="p-1 rounded-md text-[#9b9890] hover:bg-[#f5f4f0]" title="Edit fee"
-                  >
-                    <Pencil size={12} />
-                  </button>
-                )}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-      {error && <p className="text-[11px] text-[#b91c1c] mt-2">{error}</p>}
-      {!canEdit && <p className="text-[10px] text-[#9b9890] mt-3">Fee edits are super-admin only.</p>}
-    </div>
+    </Card>
   );
 }
 
-/* ── Provider drill-down (line items for one month) ── */
+/* ── Provider drill-down (line items for one month) — shown in the Drawer ── */
 function ProviderDetail({ rpId, month }: { rpId: number; month: string }) {
   const [detail, setDetail] = useState<ProviderStatement | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
-    setDetail(null); setFailed(false);
-    apiGet<ProviderStatement>(`/admin/billing/statements/${rpId}?month=${month}`)
-      .then((d) => { if (live) setDetail(d); })
-      .catch(() => { if (live) setFailed(true); });
-    return () => { live = false; };
-  }, [rpId, month]);
+    const timer = setTimeout(() => {
+      setDetail(null); setFailed(false);
+      apiGet<ProviderStatement>(`/admin/billing/statements/${rpId}?month=${month}`)
+        .then((d) => { if (live) setDetail(d); })
+        .catch(() => { if (live) setFailed(true); });
+    }, 0);
+    return () => { live = false; clearTimeout(timer); };
+  }, [rpId, month, attempt]);
 
   // Issued receipts for this provider-month (RP tax invoice + UpNow-Admin receipt).
   const [receipts, setReceipts] = useState<{ rpInvoice: PlatformReceiptDoc; upnowAdmin: PlatformReceiptDoc } | null>(null);
@@ -263,17 +223,19 @@ function ProviderDetail({ rpId, month }: { rpId: number; month: string }) {
 
   useEffect(() => {
     let live = true;
-    setReceipts(null); setReceiptErr(null);
-    apiGet<{ month: string; receipts: PlatformReceiptDoc[] }>(`/admin/billing/receipts?month=${month}`)
-      .then((d) => {
-        if (!live) return;
-        const mine = d.receipts.filter((r) => r.rentalProviderId === rpId);
-        const rp = mine.find((r) => r.series === 'rp_invoice');
-        const adm = mine.find((r) => r.series === 'upnow_admin');
-        if (rp && adm) setReceipts({ rpInvoice: rp, upnowAdmin: adm });
-      })
-      .catch(() => {});
-    return () => { live = false; };
+    const timer = setTimeout(() => {
+      setReceipts(null); setReceiptErr(null);
+      apiGet<{ month: string; receipts: PlatformReceiptDoc[] }>(`/admin/billing/receipts?month=${month}`)
+        .then((d) => {
+          if (!live) return;
+          const mine = d.receipts.filter((r) => r.rentalProviderId === rpId);
+          const rp = mine.find((r) => r.series === 'rp_invoice');
+          const adm = mine.find((r) => r.series === 'upnow_admin');
+          if (rp && adm) setReceipts({ rpInvoice: rp, upnowAdmin: adm });
+        })
+        .catch(() => {});
+    }, 0);
+    return () => { live = false; clearTimeout(timer); };
   }, [rpId, month]);
 
   const issueReceipts = async () => {
@@ -290,129 +252,102 @@ function ProviderDetail({ rpId, month }: { rpId: number; month: string }) {
     }
   };
 
-  if (failed) return <p className="text-[12px] text-[#9b9890] py-3">Could not load line items.</p>;
-  if (!detail) return <p className="text-[12px] text-[#9b9890] py-3 flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading line items…</p>;
+  if (failed) {
+    return (
+      <Callout tone="bad" title="Could not load line items.">
+        <div style={{ marginTop: 6 }}><Btn size="sm" onClick={() => setAttempt((a) => a + 1)}>Try again</Btn></div>
+      </Callout>
+    );
+  }
 
-  const rows: { key: string; date: string; what: React.ReactNode; who: string; fee: number }[] = [
+  const rows: { key: string; date: string; kind: ReactNode; what: string; who: string; fee: number }[] = detail ? [
     ...(detail.subscription ? [{
-      key: 'sub',
-      date: `${monthLong(detail.subscription.periodMonth)}`,
-      what: <StreamChip color={GREEN}>Platform subscription</StreamChip>,
-      who: '—',
-      fee: detail.subscription.feeAed,
+      key: 'sub', date: monthLong(detail.subscription.periodMonth),
+      kind: <Pill tone="primary">Subscription</Pill>, what: 'Platform subscription', who: '—', fee: detail.subscription.feeAed,
     }] : []),
     ...detail.leases.map((l) => ({
-      key: `lease-${l.contractId}`,
-      date: fmtDate(l.activatedAt),
-      what: (
-        <span className="flex items-center gap-2 min-w-0">
-          <KindChip kind={l.kind} />
-          <span className="truncate text-[#1a1916]">Contract #{l.contractId} · {l.unitLabel}</span>
-        </span>
-      ),
-      who: l.tenantName ?? '—',
-      fee: l.feeAed,
+      key: `lease-${l.contractId}`, date: fmtDate(l.activatedAt),
+      kind: l.kind === 'new' ? <Pill tone="info">New lease</Pill> : <Pill tone="amber">Renewal</Pill>,
+      what: `Contract #${l.contractId} · ${l.unitLabel}`, who: l.tenantName ?? '—', fee: l.feeAed,
     })),
     ...detail.settlements.map((s) => ({
-      key: `set-${s.settlementId}`,
-      date: fmtDate(s.paidAt),
-      what: (
-        <span className="flex items-center gap-2 min-w-0">
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `${PURPLE}1a`, color: PURPLE }}>Settlement</span>
-          <span className="truncate text-[#1a1916]">Contract #{s.contractId} · {s.unitLabel}</span>
-        </span>
-      ),
-      who: s.tenantName ?? '—',
-      fee: s.feeAed,
+      key: `set-${s.settlementId}`, date: fmtDate(s.paidAt),
+      kind: <Pill tone="dark">Settlement</Pill>,
+      what: `Contract #${s.contractId} · ${s.unitLabel}`, who: s.tenantName ?? '—', fee: s.feeAed,
     })),
-  ];
+  ] : [];
 
   return (
-    <div className="py-2">
-      {rows.length === 0 ? (
-        <p className="text-[12px] text-[#9b9890] py-2">No billable items this month.</p>
-      ) : (
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
-              <th className="py-1.5 font-semibold w-28">Date</th>
-              <th className="py-1.5 font-semibold">Item</th>
-              <th className="py-1.5 font-semibold w-44">Customer</th>
-              <th className="py-1.5 font-semibold text-right w-24">Fee</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#f0ede8]">
-            {rows.map((r) => (
-              <tr key={r.key}>
-                <td className="py-1.5 text-[#6b6860] whitespace-nowrap">{r.date}</td>
-                <td className="py-1.5 pr-3">{r.what}</td>
-                <td className="py-1.5 text-[#6b6860] truncate max-w-44">{r.who}</td>
-                <td className="py-1.5 text-right font-semibold text-[#1a1916] tabular-nums">{fmtAED(r.fee)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-[#e8e6e0]">
-              <td colSpan={3} className="py-1.5 text-right text-[#6b6860]">Net</td>
-              <td className="py-1.5 text-right font-semibold tabular-nums">{fmtAED(detail.totals.netAed)}</td>
-            </tr>
-            <tr>
-              <td colSpan={3} className="py-1 text-right text-[#6b6860]">VAT 5%</td>
-              <td className="py-1 text-right text-[#6b6860] tabular-nums">{fmtAED(detail.totals.vatAed)}</td>
-            </tr>
-            <tr>
-              <td colSpan={3} className="py-1.5 text-right font-bold text-[#1a1916]">Gross</td>
-              <td className="py-1.5 text-right font-bold text-[#1a1916] tabular-nums">{fmtAED(detail.totals.grossAed)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      )}
-
-      {/* Receipts — issue the RP tax invoice + UpNow-Admin receipt (gapless numbered) */}
-      {detail.totals.grossAed > 0 && (
-        <div className="mt-4 pt-3 border-t border-[#f0ede8]">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]">Receipts</span>
-            {!receipts && (
-              <button
-                type="button"
-                onClick={issueReceipts}
-                disabled={issuing}
-                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
-                style={{ backgroundColor: GREEN }}
-              >
-                {issuing ? (<><Loader2 size={12} className="animate-spin" /> Issuing…</>) : (<><FilePlus2 size={12} /> Issue receipts</>)}
-              </button>
-            )}
-          </div>
-          {receiptErr && <p className="text-[11px] text-red-600 mb-1.5">{receiptErr}</p>}
-          {receipts ? (
-            <div className="space-y-1.5">
-              {[receipts.rpInvoice, receipts.upnowAdmin].map((r) => (
-                <div key={r.series} className="flex items-center justify-between gap-3 rounded-lg border border-[#f0ede8] px-3 py-2">
-                  <span className="min-w-0 text-[12px]">
-                    <span className="font-semibold text-[#1a1916]">{r.docType}</span>
-                    <span className="text-[#9b9890]"> · </span>
-                    <span className="tabular-nums text-[#6b6860]">{r.receiptNo}</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => downloadPlatformReceipt(r)}
-                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md border border-[#e2ded7] text-[#1a1916] hover:bg-[#faf9f6]"
-                  >
-                    <Download size={12} /> PDF
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[11px] text-[#9b9890]">
-              Issue the Rental-Provider tax invoice (UPN-RP) + UpNow-Admin receipt (UPN-ADM) for {monthLong(month)} — each a separate gapless numbered series.
-            </p>
-          )}
+    <>
+      {detail && (
+        <div style={{ marginBottom: 14 }}>
+          <KV items={[
+            { k: 'Provider', v: detail.provider.name },
+            { k: 'Email', v: detail.provider.email ?? `#${detail.provider.rentalProviderId}` },
+            { k: 'Joined', v: fmtDate(detail.provider.joinedAt) },
+            { k: 'Month', v: monthLong(month) },
+          ]} />
         </div>
       )}
-    </div>
+      <TableWrap>
+        <table className="gx-tbl">
+          <thead><tr><th>Date</th><th>Item</th><th>Customer</th><th className="num">Fee</th></tr></thead>
+          {!detail ? <SkeletonRows rows={3} cols={4} /> : rows.length === 0 ? (
+            <EmptyRow cols={4} title="No billable items this month." />
+          ) : (
+            <>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="nowrap">{r.date}</td>
+                    <td><div className="gx-cell">{r.kind}<span className="strong">{r.what}</span></div></td>
+                    <td>{r.who}</td>
+                    <td className="num strong">{fmtAED(r.fee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr><td colSpan={3} className="num">Net</td><td className="num strong">{fmtAED(detail.totals.netAed)}</td></tr>
+                <tr><td colSpan={3} className="num">VAT 5%</td><td className="num">{fmtAED(detail.totals.vatAed)}</td></tr>
+                <tr><td colSpan={3} className="num strong">Gross</td><td className="num strong">{fmtAED(detail.totals.grossAed)}</td></tr>
+              </tfoot>
+            </>
+          )}
+        </table>
+      </TableWrap>
+
+      {/* Receipts — the RP tax invoice + UpNow-Admin receipt (gapless numbered) */}
+      {detail && detail.totals.grossAed > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <Card title="Receipts" right={!receipts && (
+            <Btn size="sm" variant="primary" onClick={issueReceipts} disabled={issuing}>{issuing ? 'Issuing…' : 'Issue receipts'}</Btn>
+          )}>
+            <div className="gx-pad">
+              {receiptErr && <div style={{ marginBottom: 8 }}><Callout tone="bad">{receiptErr}</Callout></div>}
+              {receipts ? (
+                <table className="gx-tbl">
+                  <tbody>
+                    {[receipts.rpInvoice, receipts.upnowAdmin].map((r) => (
+                      <tr key={r.series}>
+                        <td className="strong">{r.docType}</td>
+                        <td className="mono">{r.receiptNo}</td>
+                        <td className="act">
+                          <Btn size="xs" onClick={() => downloadPlatformReceipt(r)}><Download size={12} aria-hidden /> PDF</Btn>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="gx-hint">
+                  Issue the Rental-Provider tax invoice (UPN-RP) + UpNow-Admin receipt (UPN-ADM) for {monthLong(month)} — each a separate gapless numbered series.
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -430,7 +365,8 @@ export default function AdminBillingPage() {
   const [trend, setTrend] = useState<Trend | null>(null);
   const [trendFailed, setTrendFailed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [openRow, setOpenRow] = useState<StatementRow | null>(null);
+  const [q, setQ] = useState('');
 
   const loadConfig = useCallback(() => {
     setConfigFailed(false);
@@ -443,13 +379,13 @@ export default function AdminBillingPage() {
 
   useEffect(() => {
     if (!allowed) return;
-    loadConfig();
-    loadTrend();
+    const timer = setTimeout(() => { loadConfig(); loadTrend(); }, 0);
+    return () => clearTimeout(timer);
   }, [allowed, loadConfig, loadTrend]);
 
   const loadStatements = useCallback((m: string) => {
     setLoading(true);
-    setExpanded(null);
+    setOpenRow(null);
     setStmtError(false);
     apiGet<Statements>(`/admin/billing/statements?month=${m}`)
       .then(setStatements)
@@ -457,70 +393,81 @@ export default function AdminBillingPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { if (allowed) loadStatements(month); }, [allowed, month, loadStatements]);
+  useEffect(() => {
+    if (!allowed) return;
+    const timer = setTimeout(() => loadStatements(month), 0);
+    return () => clearTimeout(timer);
+  }, [allowed, month, loadStatements]);
 
-  if (!allowed) return <p className="p-8 text-sm text-[#9b9890]">Admin access required.</p>;
+  const visibleRows = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const rows = statements?.rows ?? [];
+    return s ? rows.filter((r) => [r.name, r.email, `#${r.rentalProviderId}`].some((x) => x?.toLowerCase().includes(s))) : rows;
+  }, [statements, q]);
 
-  // Undefined while loading/errored so KPI sub-labels never show a stale
-  // previous month's figures under a '…' value.
+  if (!allowed) {
+    return (
+      <OsPage>
+        <Locked title="Admin access required." text="Platform billing is available to admins and super-admins only." />
+      </OsPage>
+    );
+  }
+
+  // Undefined while loading/errored so KPI sub-labels never show a stale month's figures.
   const t = !loading && !stmtError ? statements?.totals : undefined;
+  const kpiVal = (v: string) => (loading ? '…' : stmtError ? '—' : v);
   const chartData = (trend?.months ?? []).map((p) => ({ ...p, label: monthShort(p.month) }));
+  const atCurrent = month >= currentMonth();
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-52">
-          <h1 className="text-xl font-bold text-[#1a1916] flex items-center gap-2">
-            <Receipt size={20} className="text-[#2e9f82]" /> Platform Billing
-          </h1>
-          <p className="text-[12px] text-[#9b9890] mt-0.5">
-            Agency model — what UpNow bills each rental provider for the month. Rent flows tenant → provider; these are platform fees only.
-          </p>
-        </div>
-        <div className="flex items-center gap-1 bg-white border border-[#e8e6e0] rounded-xl px-1.5 py-1">
-          <button onClick={() => setMonth((m) => shiftMonth(m, -1))} className="p-1.5 rounded-lg hover:bg-[#f5f4f0] text-[#6b6860]" title="Previous month">
-            <ChevronLeft size={15} />
-          </button>
-          <span className="text-[13px] font-semibold text-[#1a1916] min-w-28 text-center">{monthLong(month)}</span>
-          <button
-            onClick={() => setMonth((m) => shiftMonth(m, 1))}
-            disabled={month >= currentMonth()}
-            className="p-1.5 rounded-lg hover:bg-[#f5f4f0] text-[#6b6860] disabled:opacity-30"
-            title="Next month"
-          >
-            <ChevronRight size={15} />
-          </button>
-        </div>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Spaces"
+        title="Platform billing"
+        lede="Agency model — what UpNow bills each rental provider for the month. Rent flows customer → provider; these are platform fees only."
+        actions={<>
+          <Btn size="sm" onClick={() => setMonth((m) => shiftMonth(m, -1))} title="Previous month"><ChevronLeft size={14} aria-hidden /> Previous</Btn>
+          <Pill tone="dark" dot={false}>{monthLong(month)}</Pill>
+          <Btn size="sm" onClick={() => setMonth((m) => shiftMonth(m, 1))} disabled={atCurrent} title="Next month">Next <ChevronRight size={14} aria-hidden /></Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Spaces' },
+        { label: 'Month', value: monthLong(month) },
+        { label: 'VAT', value: `${statements?.vatRatePct ?? config?.vatRatePct ?? 5}% — separate line` },
+        { label: 'Fees', value: isSuperAdmin ? 'Editable (super-admin)' : 'Read-only' },
+      ]} />
+
+      {/* '—' on fetch failure so an error is never mistaken for AED 0 */}
+      <Kpis>
+        <Kpi dark k="Gross billed" v={kpiVal(fmtAED(t?.grossAed ?? 0))} d={t ? `${fmtAED(t.netAed)} net + ${fmtAED(t.vatAed)} VAT` : undefined} />
+        <Kpi k="Providers billed" v={kpiVal(String(t?.providers ?? 0))} d={t && statements ? `${t.subscribedProviders} × ${fmtAED(statements.fees.subscriptionAed)}/mo subscription` : undefined} />
+        <Kpi k="Lease events" v={kpiVal(String((t?.newLeases ?? 0) + (t?.renewals ?? 0)))} d={t ? `${t.newLeases} new · ${t.renewals} renewals` : undefined} />
+        <Kpi k="Settlements" v={kpiVal(String(t?.settlements ?? 0))} d="settlement & closure completed" />
+      </Kpis>
+
+      <div style={{ marginBottom: 14 }}>
+        <Callout tone="info" title="Platform fees, not rent.">
+          UpNow bills each provider a monthly subscription plus per-event fees (origination, renewal, settlement) in whole AED, exclusive of VAT.
+          VAT is always its own line and never folded into net; rent flows customer → provider and never passes through these statements. Fee changes are super-admin only and apply at current rates.
+        </Callout>
       </div>
 
-      {/* KPI row — '—' on fetch failure so an error is never mistaken for AED 0 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiTile icon={Landmark} label="Gross billed" value={loading ? '…' : stmtError ? '—' : fmtAED(t?.grossAed ?? 0)} sub={t ? `${fmtAED(t.netAed)} net + ${fmtAED(t.vatAed)} VAT` : undefined} />
-        <KpiTile icon={Users} label="Providers billed" value={loading ? '…' : stmtError ? '—' : String(t?.providers ?? 0)} sub={t ? `${t.subscribedProviders} × ${fmtAED(statements!.fees.subscriptionAed)}/mo subscription` : undefined} />
-        <KpiTile icon={FilePlus2} label="Lease events" value={loading ? '…' : stmtError ? '—' : String((t?.newLeases ?? 0) + (t?.renewals ?? 0))} sub={t ? `${t.newLeases} new · ${t.renewals} renewals` : undefined} />
-        <KpiTile icon={Scale} label="Settlements" value={loading ? '…' : stmtError ? '—' : String(t?.settlements ?? 0)} sub="settlement & closure completed" />
-      </div>
-
-      {/* Trend + fee schedule */}
-      <div className="grid md:grid-cols-3 gap-3">
-        <div className="md:col-span-2 bg-white rounded-2xl border border-[#e8e6e0] p-4">
-          <h3 className="text-sm font-bold text-[#1a1916]">Platform revenue by stream</h3>
-          <p className="text-[11px] text-[#9b9890] mt-0.5">Net AED per month, last 12 months, at current fee rates — historical activity included.</p>
-          <div className="mt-2 h-56">
+      <Cols kind="2">
+        <Card title="Platform revenue by stream" sub="Net AED per month, last 12 months, at current fee rates — historical activity included.">
+          <div className="gx-pad" style={{ height: 260 }}>
             {trendFailed ? (
-              <div className="h-full flex flex-col items-center justify-center gap-2 text-[12px] text-[#9b9890]">
-                Could not load the revenue trend.
-                <button onClick={loadTrend} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f5f4f0]">
-                  <RefreshCw size={12} /> Retry
-                </button>
-              </div>
+              <Callout tone="bad" title="Could not load the revenue trend.">
+                <div style={{ marginTop: 6 }}><Btn size="sm" onClick={loadTrend}>Try again</Btn></div>
+              </Callout>
+            ) : !trend ? (
+              <div className="gx-skel" style={{ height: '100%' }} />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={{ stroke: '#e8e6e0' }} tickLine={false} />
-                  <YAxis tickFormatter={aedAxis} tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={{ stroke: '#e4e9e5' }} tickLine={false} />
+                  <YAxis tickFormatter={aedAxis} tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} />
                   <Tooltip
                     contentStyle={tooltipStyle}
                     formatter={(v, name) => [fmtAED(Number(v)), String(name)]}
@@ -537,7 +484,7 @@ export default function AdminBillingPage() {
               </ResponsiveContainer>
             )}
           </div>
-        </div>
+        </Card>
         {config ? (
           <FeeScheduleCard
             config={config}
@@ -545,126 +492,95 @@ export default function AdminBillingPage() {
             onSaved={(c) => { setConfig(c); loadStatements(month); loadTrend(); }}
           />
         ) : (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 flex flex-col items-center justify-center gap-2 text-[12px] text-[#9b9890]">
-            {configFailed ? (
-              <>
-                Could not load the fee schedule.
-                <button onClick={loadConfig} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f5f4f0]">
-                  <RefreshCw size={12} /> Retry
-                </button>
-              </>
-            ) : (
-              <span className="flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> Loading fee schedule…</span>
-            )}
-          </div>
+          <Card title="Fee schedule">
+            <div className="gx-pad">
+              {configFailed ? (
+                <Callout tone="bad" title="Could not load the fee schedule.">
+                  <div style={{ marginTop: 6 }}><Btn size="sm" onClick={loadConfig}>Try again</Btn></div>
+                </Callout>
+              ) : <div className="gx-skel" style={{ height: 120 }} />}
+            </div>
+          </Card>
         )}
-      </div>
+      </Cols>
 
-      {/* Statement table */}
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[#f0ede8]">
-          <Building2 size={14} className="text-[#6b6860]" />
-          <h3 className="text-sm font-bold text-[#1a1916] flex-1">Provider statements — {monthLong(month)}</h3>
-          <span className="text-[11px] text-[#9b9890]">{loading ? '…' : `${statements?.rows.length ?? 0} providers`}</span>
-        </div>
-
-        {loading ? (
-          <p className="px-4 py-8 text-[12px] text-center text-[#9b9890] flex items-center justify-center gap-2">
-            <Loader2 size={14} className="animate-spin" /> Calculating statements…
-          </p>
-        ) : stmtError ? (
-          <div className="px-4 py-8 text-[12px] text-center text-[#b91c1c] flex flex-col items-center gap-2">
-            Could not load statements for {monthLong(month)} — the figures above are unavailable, not zero.
-            <button onClick={() => loadStatements(month)} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f5f4f0]">
-              <RefreshCw size={12} /> Retry
-            </button>
-          </div>
-        ) : !statements || statements.rows.length === 0 ? (
-          <p className="px-4 py-8 text-[12px] text-center text-[#9b9890]">No billable activity or providers in this month.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px] min-w-[760px]">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890] border-b border-[#f0ede8]">
-                  <th className="px-4 py-2 font-semibold">Provider</th>
-                  <th className="px-2 py-2 font-semibold text-right">Subscription</th>
-                  <th className="px-2 py-2 font-semibold text-right">New leases</th>
-                  <th className="px-2 py-2 font-semibold text-right">Renewals</th>
-                  <th className="px-2 py-2 font-semibold text-right">Settlements</th>
-                  <th className="px-2 py-2 font-semibold text-right">Net</th>
-                  <th className="px-2 py-2 font-semibold text-right">VAT</th>
-                  <th className="px-4 py-2 font-semibold text-right">Gross</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f0ede8]">
-                {statements.rows.map((r) => (
-                  <Fragment key={r.rentalProviderId}>
-                    <tr
-                      onClick={() => setExpanded((e) => (e === r.rentalProviderId ? null : r.rentalProviderId))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setExpanded((x) => (x === r.rentalProviderId ? null : r.rentalProviderId));
-                        }
-                      }}
-                      tabIndex={0}
-                      role="button"
-                      aria-expanded={expanded === r.rentalProviderId}
-                      className="cursor-pointer hover:bg-[#fafaf8] focus:outline-none focus-visible:bg-[#f5f4f0]"
-                    >
-                      <td className="px-4 py-2.5">
-                        <span className="flex items-center gap-1.5">
-                          <ChevronDown size={13} className={`text-[#9b9890] transition-transform ${expanded === r.rentalProviderId ? '' : '-rotate-90'}`} />
-                          <span className="min-w-0">
-                            <span className="block font-semibold text-[#1a1916] truncate max-w-56">{r.name}</span>
-                            <span className="block text-[10px] text-[#9b9890] truncate max-w-56">{r.email ?? `#${r.rentalProviderId}`}</span>
-                          </span>
-                        </span>
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#6b6860]">{fmtAED(r.subscriptionAed)}</td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#6b6860]">
-                        {r.newLeaseCount > 0 ? <>{r.newLeaseCount} · <span className="text-[#1a1916] font-semibold">{fmtAED(r.newLeaseAed)}</span></> : '—'}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#6b6860]">
-                        {r.renewalCount > 0 ? <>{r.renewalCount} · <span className="text-[#1a1916] font-semibold">{fmtAED(r.renewalAed)}</span></> : '—'}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#6b6860]">
-                        {r.settlementCount > 0 ? <>{r.settlementCount} · <span className="text-[#1a1916] font-semibold">{fmtAED(r.settlementAed)}</span></> : '—'}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums font-semibold text-[#1a1916]">{fmtAED(r.netAed)}</td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#6b6860]">{fmtAED(r.vatAed)}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a1916]">{fmtAED(r.grossAed)}</td>
-                    </tr>
-                    {expanded === r.rentalProviderId && (
-                      <tr>
-                        <td colSpan={8} className="px-10 pb-2 bg-[#fafaf8]">
-                          <ProviderDetail rpId={r.rentalProviderId} month={month} />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+      <TableWrap toolbar={<>
+        <span className="strong">Provider statements — {monthLong(month)}</span>
+        <span className="gx-hint">{loading ? '…' : `${statements?.rows.length ?? 0} providers`}</span>
+        <div style={{ marginLeft: 'auto' }}><SearchField value={q} onChange={setQ} placeholder="Search provider, email or #id" /></div>
+      </>}>
+        <table className="gx-tbl">
+          <thead>
+            <tr>
+              <th>Provider</th><th className="num">Subscription</th><th className="num">New leases</th>
+              <th className="num">Renewals</th><th className="num">Settlements</th><th className="num">Net</th>
+              <th className="num">VAT</th><th className="num">Gross</th><th className="act">Action</th>
+            </tr>
+          </thead>
+          {loading ? <SkeletonRows rows={5} cols={9} /> : stmtError ? (
+            <tbody><tr><td colSpan={9}>
+              <div className="gx-empty">
+                <b>Could not load statements for {monthLong(month)}</b>
+                The figures above are unavailable, not zero.
+                <div style={{ marginTop: 8 }}><Btn size="sm" onClick={() => loadStatements(month)}>Try again</Btn></div>
+              </div>
+            </td></tr></tbody>
+          ) : !statements || statements.rows.length === 0 ? (
+            <EmptyRow cols={9} title="No billable activity or providers in this month." text="Use Previous to look at an earlier month." />
+          ) : visibleRows.length === 0 ? (
+            <EmptyRow cols={9} title="No providers match" text="Clear the search to see every statement." />
+          ) : (
+            <>
+              <tbody>
+                {visibleRows.map((r) => (
+                  <tr key={r.rentalProviderId} className="click" onClick={() => setOpenRow(r)}>
+                    <td><span className="strong">{r.name}</span><span className="sub">{r.email ?? `#${r.rentalProviderId}`}</span></td>
+                    <td className="num">{fmtAED(r.subscriptionAed)}</td>
+                    <td className="num">{r.newLeaseCount > 0 ? <>{r.newLeaseCount} · <b>{fmtAED(r.newLeaseAed)}</b></> : '—'}</td>
+                    <td className="num">{r.renewalCount > 0 ? <>{r.renewalCount} · <b>{fmtAED(r.renewalAed)}</b></> : '—'}</td>
+                    <td className="num">{r.settlementCount > 0 ? <>{r.settlementCount} · <b>{fmtAED(r.settlementAed)}</b></> : '—'}</td>
+                    <td className="num strong">{fmtAED(r.netAed)}</td>
+                    <td className="num">{fmtAED(r.vatAed)}</td>
+                    <td className="num strong">{fmtAED(r.grossAed)}</td>
+                    <td className="act" onClick={(e) => e.stopPropagation()}>
+                      <Btn size="xs" onClick={() => setOpenRow(r)}>Open</Btn>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t border-[#e8e6e0] bg-[#fafaf8]">
-                  <td className="px-4 py-2.5 font-bold text-[#1a1916]">Total — {statements.totals.providers} providers</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-semibold">{fmtAED(statements.totals.subscriptionAed)}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-semibold">{fmtAED(statements.totals.newLeaseAed)}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-semibold">{fmtAED(statements.totals.renewalAed)}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-semibold">{fmtAED(statements.totals.settlementAed)}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-bold text-[#1a1916]">{fmtAED(statements.totals.netAed)}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums font-semibold">{fmtAED(statements.totals.vatAed)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-[#1a7a5a]">{fmtAED(statements.totals.grossAed)}</td>
+                <tr>
+                  <td className="strong">Total — {statements.totals.providers} providers{q.trim() ? ' (all, not just matches)' : ''}</td>
+                  <td className="num strong">{fmtAED(statements.totals.subscriptionAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.newLeaseAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.renewalAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.settlementAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.netAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.vatAed)}</td>
+                  <td className="num strong">{fmtAED(statements.totals.grossAed)}</td>
+                  <td />
                 </tr>
               </tfoot>
-            </table>
-          </div>
-        )}
-        <p className="px-4 py-2.5 text-[10px] text-[#9b9890] border-t border-[#f0ede8]">
-          Billable events: new lease / renewal on activation (amendments excluded) · settlement on payment (once per tenancy chain) · monthly subscription for every provider existing in the month.
-          History included from each lease&apos;s real activation month. VAT {statements?.vatRatePct ?? 5}% shown separately. Statement view only — no invoices are issued from this page.
-        </p>
+            </>
+          )}
+        </table>
+      </TableWrap>
+      <div style={{ marginTop: 12 }}>
+        <Callout tone="info" title="Billable events.">
+          New lease / renewal on activation (amendments excluded) · settlement on payment (once per tenancy chain) · monthly subscription for every provider existing in the month.
+          History included from each lease&apos;s real activation month. VAT {statements?.vatRatePct ?? 5}% shown separately. Receipts are issued per provider from the provider&apos;s statement.
+        </Callout>
       </div>
-    </div>
+
+      <Drawer
+        open={!!openRow}
+        onClose={() => setOpenRow(null)}
+        title={openRow?.name ?? ''}
+        sub={openRow ? `Statement · ${monthLong(month)} · ${fmtAED(openRow.grossAed)} gross` : undefined}
+        footer={<Btn onClick={() => setOpenRow(null)}>Close</Btn>}
+      >
+        {openRow && <ProviderDetail rpId={openRow.rentalProviderId} month={month} />}
+      </Drawer>
+    </OsPage>
   );
 }

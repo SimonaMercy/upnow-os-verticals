@@ -100,18 +100,18 @@ function MiniCalendar({ value, onChange }: { value: string; onChange: (v: string
   const cells: (number | null)[] = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   while (cells.length % 7 !== 0) cells.push(null);
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] overflow-hidden">
+    <div className="rounded-2xl border border-[#e4e9e5] overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 bg-[#f9f8f6]">
-        <button type="button" onClick={() => setCursor(c => { const m = c.month === 0 ? 11 : c.month - 1; return { year: c.month === 0 ? c.year - 1 : c.year, month: m }; })} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronLeft size={16} className="text-[#6b6860]" />
+        <button type="button" onClick={() => setCursor(c => { const m = c.month === 0 ? 11 : c.month - 1; return { year: c.month === 0 ? c.year - 1 : c.year, month: m }; })} className="p-1.5 rounded-lg hover:bg-[#e4e9e5] transition-colors cursor-pointer">
+          <ChevronLeft size={16} className="text-[#5f6b63]" />
         </button>
-        <span className="text-sm font-semibold text-[#1a1916]">{MONTHS[cursor.month]} {cursor.year}</span>
-        <button type="button" onClick={() => setCursor(c => { const m = c.month === 11 ? 0 : c.month + 1; return { year: c.month === 11 ? c.year + 1 : c.year, month: m }; })} className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-          <ChevronRight size={16} className="text-[#6b6860]" />
+        <span className="text-sm font-semibold text-[#14201a]">{MONTHS[cursor.month]} {cursor.year}</span>
+        <button type="button" onClick={() => setCursor(c => { const m = c.month === 11 ? 0 : c.month + 1; return { year: c.month === 11 ? c.year + 1 : c.year, month: m }; })} className="p-1.5 rounded-lg hover:bg-[#e4e9e5] transition-colors cursor-pointer">
+          <ChevronRight size={16} className="text-[#5f6b63]" />
         </button>
       </div>
-      <div className="grid grid-cols-7 border-b border-[#e8e6e0]">
-        {DAYS.map(d => <div key={d} className="text-center text-xs font-medium py-2 text-[#9b9890]">{d}</div>)}
+      <div className="grid grid-cols-7 border-b border-[#e4e9e5]">
+        {DAYS.map(d => <div key={d} className="text-center text-xs font-medium py-2 text-[#8a948d]">{d}</div>)}
       </div>
       <div className="grid grid-cols-7 p-2 gap-y-1">
         {cells.map((day, i) => {
@@ -124,7 +124,7 @@ function MiniCalendar({ value, onChange }: { value: string; onChange: (v: string
           return (
             <button key={i} type="button" disabled={isPast} onClick={() => onChange(iso)}
               className="text-xs rounded-lg py-1.5 w-full text-center transition-all cursor-pointer"
-              style={{ backgroundColor: isSelected ? '#2e9f82' : isToday && !isSelected ? '#edf7f3' : 'transparent', color: isSelected ? '#fff' : isPast ? '#c8c6c0' : '#1a1916', fontWeight: isSelected || isToday ? 600 : 400, cursor: isPast ? 'not-allowed' : 'pointer' }}>
+              style={{ backgroundColor: isSelected ? '#047246' : isToday && !isSelected ? '#edf7f3' : 'transparent', color: isSelected ? '#fff' : isPast ? '#c8c6c0' : '#14201a', fontWeight: isSelected || isToday ? 600 : 400, cursor: isPast ? 'not-allowed' : 'pointer' }}>
               {day}
             </button>
           );
@@ -173,23 +173,23 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: Viewing; on
     <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-2xl p-7 w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
-        <button className="absolute top-4 right-4 text-[#9b9890] hover:text-[#1a1916] cursor-pointer" onClick={onClose}><X size={20} /></button>
-        <h3 className="font-bold text-xl text-[#1a1916] mb-0.5">Reschedule Viewing</h3>
-        <p className="text-sm text-[#9b9890] mb-5">{unitLabel}{building ? ` · ${building}` : ''}</p>
+        <button className="absolute top-4 right-4 text-[#8a948d] hover:text-[#14201a] cursor-pointer" onClick={onClose}><X size={20} /></button>
+        <h3 className="font-bold text-xl text-[#14201a] mb-0.5">Reschedule Viewing</h3>
+        <p className="text-sm text-[#8a948d] mb-5">{unitLabel}{building ? ` · ${building}` : ''}</p>
         {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
-        <label className="block text-sm font-medium text-[#3d3b35] mb-2">
+        <label className="block text-sm font-medium text-[#46534c] mb-2">
           <Calendar size={14} className="inline mr-1.5" />Pick a new date
         </label>
         <div className="mb-4">
           <MiniCalendar value={date} onChange={setDate} />
           {date && (
-            <p className="mt-2 text-xs text-center font-medium text-[#2e9f82]">
+            <p className="mt-2 text-xs text-center font-medium text-[#047246]">
               {new Date(date + 'T00:00:00').toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           )}
         </div>
-        <label className="block text-sm font-medium text-[#3d3b35] mb-2">
-          Preferred time <span className="text-[#9b9890] font-normal">(optional)</span>
+        <label className="block text-sm font-medium text-[#46534c] mb-2">
+          Preferred time <span className="text-[#8a948d] font-normal">(optional)</span>
         </label>
         <div className="grid grid-cols-5 gap-2 mb-6">
           {TIME_SLOTS.filter(slot => {
@@ -200,14 +200,14 @@ function RescheduleModal({ viewing, onClose, onSuccess }: { viewing: Viewing; on
           }).map(slot => (
             <button key={slot} type="button" onClick={() => setTime(time === slot ? '' : slot)}
               className="py-2 rounded-xl text-xs font-medium border transition-all cursor-pointer"
-              style={{ borderColor: time === slot ? '#2e9f82' : '#e8e6e0', backgroundColor: time === slot ? '#edf7f3' : '#fff', color: time === slot ? '#2e9f82' : '#3d3b35' }}>
+              style={{ borderColor: time === slot ? '#047246' : '#e4e9e5', backgroundColor: time === slot ? '#edf7f3' : '#fff', color: time === slot ? '#047246' : '#46534c' }}>
               {fmtSlot(slot)}
             </button>
           ))}
         </div>
         <button disabled={!date || saving} onClick={handleSave}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity hover:opacity-90 cursor-pointer"
-          style={{ backgroundColor: '#2e9f82' }}>
+          style={{ backgroundColor: '#047246' }}>
           {saving ? 'Saving…' : 'Confirm New Time'}
         </button>
       </div>
@@ -243,24 +243,24 @@ function NotInterestedModal({ viewing, onClose, onSuccess }: { viewing: Viewing;
     <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-white rounded-2xl p-7 w-full max-w-sm shadow-xl">
-        <button className="absolute top-4 right-4 text-[#9b9890] hover:text-[#1a1916] cursor-pointer" onClick={onClose}><X size={20} /></button>
+        <button className="absolute top-4 right-4 text-[#8a948d] hover:text-[#14201a] cursor-pointer" onClick={onClose}><X size={20} /></button>
         <div className="w-11 h-11 rounded-full bg-[#fee2e2] flex items-center justify-center mb-4">
           <ThumbsDown size={18} className="text-[#b91c1c]" />
         </div>
-        <h3 className="font-bold text-lg text-[#1a1916] mb-1">Not interested?</h3>
-        <p className="text-sm text-[#6b6860] mb-4">
+        <h3 className="font-bold text-lg text-[#14201a] mb-1">Not interested?</h3>
+        <p className="text-sm text-[#5f6b63] mb-4">
           {unitLabel}{building ? ` · ${building}` : ''} will be removed from your active viewings.
         </p>
         {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
-        <label className="block text-sm font-medium text-[#3d3b35] mb-1.5">
-          Notes <span className="text-[#9b9890] font-normal">(optional)</span>
+        <label className="block text-sm font-medium text-[#46534c] mb-1.5">
+          Notes <span className="text-[#8a948d] font-normal">(optional)</span>
         </label>
         <textarea
           value={notes}
           onChange={e => setNotes(e.target.value)}
           rows={3}
           placeholder="e.g. Too far from work, price too high…"
-          className="w-full text-sm mb-5 border border-[#e8e6e0] rounded-xl px-3 py-2.5 text-[#1a1916] resize-none focus:outline-none focus:ring-2 focus:ring-[#e8e6e0]"
+          className="w-full text-sm mb-5 border border-[#e4e9e5] rounded-xl px-3 py-2.5 text-[#14201a] resize-none focus:outline-none focus:ring-2 focus:ring-[#e4e9e5]"
         />
         <button disabled={saving} onClick={handleSubmit}
           className="w-full py-3 rounded-xl text-sm font-semibold text-white bg-[#b91c1c] hover:bg-red-700 disabled:opacity-50 transition-colors cursor-pointer">
@@ -329,18 +329,18 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
         <NotInterestedModal viewing={viewing} onClose={() => setNotInterestedOpen(false)} onSuccess={() => { setNotInterestedOpen(false); onRefresh(); }} />
       )}
 
-      <div className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-[#e4e9e5] overflow-hidden">
         {/* Header */}
         <div className="px-5 pt-4 pb-3 flex items-start gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#f0faf6] flex items-center justify-center flex-shrink-0 mt-0.5">
-            <Home size={15} className="text-[#2e9f82]" />
+          <div className="w-9 h-9 rounded-xl bg-[#eef7f2] flex items-center justify-center flex-shrink-0 mt-0.5">
+            <Home size={15} className="text-[#047246]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-[#1a1916] leading-tight">{unitLabel}</p>
-            <p className="text-xs text-[#9b9890]">{building}</p>
+            <p className="font-semibold text-[#14201a] leading-tight">{unitLabel}</p>
+            <p className="text-xs text-[#8a948d]">{building}</p>
           </div>
           <span className={`flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full px-2.5 py-1 ${
-            viewing.status === 'confirmed' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+            viewing.status === 'confirmed' ? 'bg-[#d8efe3] text-[#1a7a5a]' :
             viewing.status === 'completed' ? 'bg-[#dbeafe] text-[#1e40af]' :
                                              'bg-[#fef3c7] text-[#92400e]'
           }`}>
@@ -350,14 +350,14 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
 
         {/* Date / time / address */}
         <div className="px-5 pb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="flex items-center gap-1.5 text-xs text-[#3d3b35]">
-            <Calendar size={12} className="text-[#2e9f82]" />{dateStr}
+          <span className="flex items-center gap-1.5 text-xs text-[#46534c]">
+            <Calendar size={12} className="text-[#047246]" />{dateStr}
           </span>
-          <span className="flex items-center gap-1.5 text-xs text-[#3d3b35]">
-            <Clock size={12} className="text-[#2e9f82]" />{timeStr}
+          <span className="flex items-center gap-1.5 text-xs text-[#46534c]">
+            <Clock size={12} className="text-[#047246]" />{timeStr}
           </span>
           {address && (
-            <span className="flex items-center gap-1 text-xs text-[#9b9890]">
+            <span className="flex items-center gap-1 text-xs text-[#8a948d]">
               <MapPin size={11} />{address}
             </span>
           )}
@@ -374,16 +374,16 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
                 <div key={step.key} className="flex items-center flex-1 last:flex-none">
                   <div className="flex flex-col items-center gap-1 min-w-0">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
-                      done ? 'bg-[#2e9f82] text-white' : 'bg-[#f4f3ef] text-[#c5c2bb]'
-                    } ${isActive ? 'ring-2 ring-[#2e9f82] ring-offset-1' : ''}`}>
+                      done ? 'bg-[#047246] text-white' : 'bg-[#eef1ef] text-[#c5c2bb]'
+                    } ${isActive ? 'ring-2 ring-[#047246] ring-offset-1' : ''}`}>
                       <Icon size={14} />
                     </div>
-                    <span className={`text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap ${done ? 'text-[#2e9f82]' : 'text-[#c5c2bb]'}`}>
+                    <span className={`text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap ${done ? 'text-[#047246]' : 'text-[#c5c2bb]'}`}>
                       {step.label}
                     </span>
                   </div>
                   {i < STEPS.length - 1 && (
-                    <div className={`flex-1 h-0.5 mb-4 mx-1 ${i < currentStep ? 'bg-[#2e9f82]' : 'bg-[#e8e6e0]'}`} />
+                    <div className={`flex-1 h-0.5 mb-4 mx-1 ${i < currentStep ? 'bg-[#047246]' : 'bg-[#e4e9e5]'}`} />
                   )}
                 </div>
               );
@@ -415,14 +415,14 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
                 disabled={reserving}
                 onClick={handleReserve}
                 className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl text-sm font-bold text-white disabled:opacity-60 transition-all active:scale-[0.98] cursor-pointer"
-                style={{ background: reserving ? '#9b9890' : 'linear-gradient(135deg, #2e9f82 0%, #1f6655 100%)', boxShadow: reserving ? 'none' : '0 4px 14px rgba(46,159,130,0.35)' }}
+                style={{ background: reserving ? '#8a948d' : 'linear-gradient(135deg, #047246 0%, #1f6655 100%)', boxShadow: reserving ? 'none' : '0 4px 14px rgba(4,114,70,0.35)' }}
               >
                 <CheckCircle2 size={16} />
                 {reserving ? 'Confirming…' : 'Book & Confirm My Reservation'}
               </button>
               <button
                 onClick={() => setNotInterestedOpen(true)}
-                className="w-full mt-2.5 text-xs text-[#9b9890] hover:text-[#b91c1c] transition-colors py-1.5 cursor-pointer"
+                className="w-full mt-2.5 text-xs text-[#8a948d] hover:text-[#b91c1c] transition-colors py-1.5 cursor-pointer"
               >
                 Not interested in this apartment
               </button>
@@ -432,7 +432,7 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
 
         {/* Reserved banner */}
         {hasReserved && (
-          <div className="mx-4 mb-4 rounded-xl bg-[#d8f2e8] border border-[#a7f3d0] px-4 py-2.5 flex items-center gap-2">
+          <div className="mx-4 mb-4 rounded-xl bg-[#d8efe3] border border-[#a7f3d0] px-4 py-2.5 flex items-center gap-2">
             <CheckCircle2 size={14} className="text-[#1a7a5a] flex-shrink-0" />
             <p className="text-xs font-medium text-[#1a7a5a]">
               {group.leadStage === 'approved' || group.leadStage === 'converted'
@@ -448,18 +448,18 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
 
         {/* Previous slots */}
         {group.others.length > 0 && (
-          <div className="mx-4 mb-3 rounded-xl bg-[#f9f8f6] border border-[#e8e6e0] px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-2">Previous slots</p>
+          <div className="mx-4 mb-3 rounded-xl bg-[#f9f8f6] border border-[#e4e9e5] px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8a948d] mb-2">Previous slots</p>
             <div className="space-y-1">
               {group.others.map(v => {
                 const d = new Date(v.scheduledAt);
                 const ds = d.toLocaleDateString('en-AE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: APP_TIME_ZONE });
                 const ts = d.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIME_ZONE });
                 return (
-                  <div key={v.id} className="flex items-center gap-3 text-xs text-[#9b9890]">
+                  <div key={v.id} className="flex items-center gap-3 text-xs text-[#8a948d]">
                     <span className="flex items-center gap-1"><Calendar size={10} />{ds} · {ts}</span>
                     <span className={`text-[9px] font-semibold uppercase rounded-full px-2 py-0.5 ${
-                      v.status === 'cancelled' ? 'bg-[#f4f3ef] text-[#9b9890]' :
+                      v.status === 'cancelled' ? 'bg-[#eef1ef] text-[#8a948d]' :
                       v.status === 'no_show'   ? 'bg-[#fee2e2] text-[#b91c1c]' :
                                                  'bg-[#fef3c7] text-[#92400e]'
                     }`}>{v.status === 'no_show' ? 'No show' : v.status}</span>
@@ -474,7 +474,7 @@ function JourneyCard({ group, onRefresh }: { group: LeadGroup; onRefresh: () => 
         {canModify && (
           <div className="border-t border-[#f0ede8] px-5 py-3 flex items-center gap-4">
             <button onClick={() => setRescheduleOpen(true)}
-              className="flex items-center gap-1.5 text-xs font-medium text-[#3d3b35] hover:text-[#1a1916] transition-colors cursor-pointer">
+              className="flex items-center gap-1.5 text-xs font-medium text-[#46534c] hover:text-[#14201a] transition-colors cursor-pointer">
               <Pencil size={12} /> Reschedule
             </button>
             <span className="text-[#e0ddd7]">|</span>
@@ -499,19 +499,19 @@ function InactiveCard({ viewing }: { viewing: Viewing }) {
   const isNotInterested = viewing.outcome === 'not_interested';
 
   return (
-    <div className="bg-white rounded-xl p-4 shadow-sm border border-[#e8e6e0] flex items-center gap-3 opacity-60">
-      <div className="w-8 h-8 rounded-full bg-[#f4f3ef] flex items-center justify-center flex-shrink-0">
-        <Ban size={14} className="text-[#9b9890]" />
+    <div className="bg-white rounded-xl p-4 shadow-sm border border-[#e4e9e5] flex items-center gap-3 opacity-60">
+      <div className="w-8 h-8 rounded-full bg-[#eef1ef] flex items-center justify-center flex-shrink-0">
+        <Ban size={14} className="text-[#8a948d]" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-[#3d3b35] truncate">{unitLabel}</p>
-        {building && <p className="text-xs text-[#9b9890]">{building}</p>}
-        <p className="text-xs text-[#9b9890]">{dateStr} · {isNotInterested ? 'Not interested' : viewing.status === 'no_show' ? 'No show' : 'Cancelled'}</p>
+        <p className="text-sm font-medium text-[#46534c] truncate">{unitLabel}</p>
+        {building && <p className="text-xs text-[#8a948d]">{building}</p>}
+        <p className="text-xs text-[#8a948d]">{dateStr} · {isNotInterested ? 'Not interested' : viewing.status === 'no_show' ? 'No show' : 'Cancelled'}</p>
         {viewing.notes && isNotInterested && (
-          <p className="text-xs text-[#9b9890] italic mt-0.5">&ldquo;{viewing.notes}&rdquo;</p>
+          <p className="text-xs text-[#8a948d] italic mt-0.5">&ldquo;{viewing.notes}&rdquo;</p>
         )}
       </div>
-      <a href="/listings" className="ml-auto flex-shrink-0 text-xs text-[#2e9f82] hover:underline font-medium">Find another →</a>
+      <a href="/listings" className="ml-auto flex-shrink-0 text-xs text-[#047246] hover:underline font-medium">Find another →</a>
     </div>
   );
 }
@@ -550,8 +550,8 @@ export default function MyViewingsPage() {
   return (
     <div className="p-6 max-w-2xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">My Viewings</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">Track your property visits and express interest.</p>
+        <h1 className="text-2xl font-bold text-[#14201a]">My Viewings</h1>
+        <p className="text-sm text-[#5f6b63] mt-0.5">Track your property visits and express interest.</p>
       </div>
 
       {error && (
@@ -566,12 +566,12 @@ export default function MyViewingsPage() {
 
       {!loading && viewings.length === 0 && (
         <div className="bg-white rounded-2xl p-16 shadow-sm flex flex-col items-center justify-center text-center">
-          <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-            <Home size={24} className="text-[#2e9f82]" />
+          <div className="w-14 h-14 rounded-full bg-[#d8efe3] flex items-center justify-center mb-4">
+            <Home size={24} className="text-[#047246]" />
           </div>
-          <h3 className="font-semibold text-[#1a1916] mb-1">No viewings yet</h3>
-          <p className="text-sm text-[#6b6860] max-w-xs">Browse listings and click &ldquo;Book a Viewing&rdquo; to get started.</p>
-          <a href="/listings" className="mt-4 text-sm font-medium text-[#2e9f82] hover:underline">Browse listings →</a>
+          <h3 className="font-semibold text-[#14201a] mb-1">No viewings yet</h3>
+          <p className="text-sm text-[#5f6b63] max-w-xs">Browse listings and click &ldquo;Book a Viewing&rdquo; to get started.</p>
+          <a href="/listings" className="mt-4 text-sm font-medium text-[#047246] hover:underline">Browse listings →</a>
         </div>
       )}
 
@@ -585,7 +585,7 @@ export default function MyViewingsPage() {
 
       {!loading && inactiveGroups.length > 0 && (
         <section>
-          <h2 className="text-sm font-semibold text-[#3d3b35] uppercase tracking-wide mb-3">Past</h2>
+          <h2 className="text-sm font-semibold text-[#46534c] uppercase tracking-wide mb-3">Past</h2>
           <div className="space-y-3">
             {inactiveGroups.map(g => <InactiveCard key={g.leadId} viewing={g.primary} />)}
           </div>

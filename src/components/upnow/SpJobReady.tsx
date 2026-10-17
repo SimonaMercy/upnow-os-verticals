@@ -347,18 +347,18 @@ export function SpJobReady() {
           (replaces the old collapsed rows + "Open card" indirection). Same
           construction as the RP/SP settings tab bars so tab bars read as one
           system across both portals. */}
-      <div className="mt-4 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e8e6e0]">
+      <div className="mt-4 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e4e9e5]">
         {CARD_TABS.map(({ key, label, icon: Icon }) => {
           const active = view === key;
           const st = states[key];
           return (
             <button key={key} onClick={() => selectCard(key)}
               className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                active ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+                active ? 'bg-[#047246] text-white' : 'text-[#5f6b63] hover:bg-[#eef1ef]'
               }`}>
               <Icon size={14} /> {label}
               {st === 'done'
-                ? <Check size={13} strokeWidth={3} className={active ? 'text-white' : 'text-[#2e9f82]'} />
+                ? <Check size={13} strokeWidth={3} className={active ? 'text-white' : 'text-[#047246]'} />
                 : <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full"
                     style={{ background: st === 'progress' ? '#C77D0A' : active ? 'rgba(255,255,255,.6)' : '#C7CFC8' }} />}
             </button>
@@ -487,7 +487,7 @@ export function CoverageCard({ status, absorb, back, embedded }: CardProps) {
 
       {/* City tabs — one per served emirate, with that city's selected count */}
       {cities.length > 1 && (
-        <div className="mb-3 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e8e6e0]">
+        <div className="mb-3 flex w-fit max-w-full flex-wrap gap-1 rounded-xl bg-white p-1 shadow-sm border border-[#e4e9e5]">
           {cities.map((c) => {
             const cityOpts = options.filter((o) => cityOf(o) === c);
             const selInCity = cityOpts.filter((o) => selected.has(o.communityId)).length;
@@ -499,11 +499,11 @@ export function CoverageCard({ status, absorb, back, embedded }: CardProps) {
                   setOpenGroups(new Set()); // divisions start closed
                 }}
                 className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
-                  active ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'
+                  active ? 'bg-[#047246] text-white' : 'text-[#5f6b63] hover:bg-[#eef1ef]'
                 }`}>
                 {c}
                 <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
-                  active ? 'bg-white/20 text-white' : selInCity ? 'bg-[#2e9f82]/10 text-[#2e9f82]' : 'bg-[#f4f3ef] text-[#9b9890]'
+                  active ? 'bg-white/20 text-white' : selInCity ? 'bg-[#047246]/10 text-[#047246]' : 'bg-[#eef1ef] text-[#8a948d]'
                 }`}>
                   {selInCity}/{cityOpts.length}
                 </span>

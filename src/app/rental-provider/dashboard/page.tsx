@@ -1,27 +1,106 @@
-/**
- * Rental Provider — Overview Dashboard (rental-provider/dashboard)
- *
- * Top-level RP dashboard. Hero with range tabs, KPI strip (hero receivables +
- * occupancy + active orders + renewals due), occupancy gauge, receivables vs
- * collected bars, quick actions, and dynamic activity / upcoming-renewals lists.
- *
- * Data sources (all re-fetch on range change where range-scoped):
- *   /properties/dashboard-stats        (range-scoped portfolio counts)
- *   /contracts/financial-summary       (range-scoped money + chart)
- *   /contracts/dashboard-extras        (renewals list + activity feed)
- *   /fee-rules/configured              (setup nudge)
- */
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
-
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Building2, DoorOpen, Percent, X, TrendingUp, TrendingDown, ArrowUpRight, AlertTriangle, Eye, RefreshCw, ShieldCheck, Users, UserCog, Clock, FileText, Scale, Receipt } from 'lucide-react';
-import { legalApi, type AlertItem, type OpenRecord } from '@/lib/legal';
-import { DirhamSign } from '@/components/ui/DirhamSign';
-import { contractHref, type ContractSurface } from '@/lib/contractHref';
-import { unitHref } from '@/lib/unitHref';
+/**
+ * Rental Provider — Overview (rental-provider/dashboard)
+ *
+ * Rebuilt to the Genspark Stage 2 "UpNow OS" Overview: greeting PageHead →
+ * ScopeStrip → Attention → KPI rows → two-column cards → tables → live manager
+ * activity. Composed from `@/components/os/kit`; nothing here restyles the kit.
+ *
+ * Parity with previous page ("Portfolio Overview", 2,518 lines):
+ *
+ *  API calls (unchanged endpoints, params and payload handling)
+ *   [x] GET /api/properties/dashboard-stats?from&to        (manager: /api/manager/dashboard-stats?rp=&from&to)
+ *   [x] GET /api/contracts/financial-summary?from&to       (manager: /api/manager/financial-summary?rp=…)
+ *   [x] GET /api/contracts/dashboard-extras?from&to&window (manager: /api/manager/dashboard-extras?rp=…)
+ *   [x] GET /api/reports/manager-activity?days=1&perDay=20 (manager: /api/manager/manager-activity?rp=…),
+ *       polled every 5s, paused while the tab is hidden, last good rows kept on a failed poll
+ *   [x] GET /api/fee-rules/configured (RP only) → fee-rules setup nudge, dismissible
+ *   [x] legalApi.alerts('/legal' | '/manager/legal', rp) → Breach & legal card (hidden when nothing open)
+ *   [x] All fetches abortable; range / renewal-window changes re-fire the range-scoped three
+ *  New (read-only, best-effort — a failure hides only its own card):
+ *   [+] GET /api/leads (manager: /api/manager/leads?rp=) → leads needing action, open leads,
+ *       new leads 30d, "Where your leads come from", "Today" viewings timeline
+ *   [+] GET /api/profiles/rental-provider/me (RP only) → ScopeStrip business name + verification
+ *
+ *  Figures, links and interactions
+ *   [x] Properties → portfolio · Units → units · Customers → tenants · Active leases → orders ·
+ *       Managers → settings?tab=team (no link in manager portal). All open in a new tab, as before.
+ *       Tiles read "…" until stats arrive.
+ *   [x] Rent vs Market (contracted of market, ±gap %, arrow + colour) → rent-vs-market report (new tab)
+ *   [x] Deposits held + "across N leases" → security-deposits report
+ *   [x] Arrears: Overdue / Bounced (with part-paid count) / Bounce fees (only when the API sends them),
+ *       each with its eye affordance opening its own drill-down (headline, split, note, rows → contractHref)
+ *   [x] Receivables card + period select + cheque drill + Cash Management link — kept behind
+ *       SHOW_RECEIVABLES=false exactly as before (SCRUM-737)
+ *   [x] Occupancy rate donut, "N of M units let · N start later", Occupied / Vacant openers
+ *       (occupied: soonest-ending first with lapsed/soon/incoming notes; vacant: vacancy bars,
+ *       foregone income, published vs not listed)
+ *   [x] Upcoming renewals: 30/60/90/180/365-day selector, bucket partition (Agreed / Notice Sent /
+ *       Notice due / Declined-when-present), each bucket drill grouped by renewal month, stacked
+ *       distribution, "View all N renewals" → Operations renewal tab; error → retry
+ *   [x] Breach & legal: Open breaches / Open cases tiles → list of records with stage + date,
+ *       breach → operations/{lease}#sec-breaches, case → legal/{id}; "Legal" link
+ *   [x] Manager activity (Live): one column per manager, day heading with action/page counts,
+ *       trimmed-day note, collapsed runs (×N, time range), category tag, "Open" → lease / lead
+ *       (new tab), row click → what-changed dialog; "Team page" link (RP only); empty/error states
+ *   [x] Refresh (all range-scoped fetches + fee rules), error banner naming what failed + Retry
+ *   [x] Every drill row opens in a new tab with rel=noopener (NEW_TAB)
+ *   [x] Manager variant: `RpDashboardHome({ manager: { rp } })` export kept with the same props and
+ *       ?rp= routing. (Nothing imports it today — /dashboard/manager/page.tsx is its own page — but
+ *       /prototype/os/rp re-exports this default.)
+ *
+ *  Today queue (research report "Marketplace provider OS best practices", Overview row of the
+ *  workspace blueprint + '"Today" screens'): the attention row is REPLACED by one queue ranked
+ *  by consequence (./_today.tsx). Every attention card it had is still an item, same figure and
+ *  same destination: leads needing follow-up → Leads · overdue / bounced cheques / bounce fees
+ *  → Receivables · renewal notices due / declined / lapsed terms → Operations renewal tab ·
+ *  open breaches / legal cases → Legal. The "nothing needs attention" callout is its empty state.
+ *  Items, worst first, each with ONE labelled action to the real page:
+ *   [+] 1 Gate 1 not compliant — /profiles/rental-provider/me profile.complianceStatus
+ *       (+ complianceNotes, compliancePausedAt) → Documents / Profile. Landlord portal only.
+ *   [+] 1 KYC documents expired / rejected / expiring ≤60·30·7 days — same GET, checklist[]
+ *       uploaded + status + expiryDate (what KycDocumentsPanel renders) → Documents.
+ *   [+] 2 Leads on the 15-min first-reply clock — GET /leads, rule in lib/os/sla.ts (stage 'new', or
+ *       an untouched marketplace 'portal' lead; clock from createdAt), live 30s countdown → lead.
+ *   [+] 3 Ejari not registered — NEW GET /contracts (manager: /manager/contracts?rp=):
+ *       status active|issued (issued only within 14 days of start) and ejariStatus ≠ registered.
+ *   [+] 3 90-day renewal notice (Law 33/2008 Art. 14) — NEW GET dashboard-extras window=180
+ *       (fixed horizon, independent of the card's selector): bucket noticeDue with
+ *       daysUntilEnd − 90 ≤ 30 days, "N days left · by <date>" or "window closed N days ago".
+ *   [+] 3 Cheques due in the next 7 days — NEW GET financial-summary from=today&to=today+7,
+ *       receivableCheques state 'due'. Overdue / bounced use the existing arrearsCheques.
+ *   [+] 4 Listings rejected / changes requested — dashboard-stats units[].listingStatus → Units.
+ *   [+] 6 Today's viewings (GET /leads viewings) and move-ins (units[].startsOn = today).
+ *   Max 8 shown, "Show all N". Sources that failed are named above the list with Retry.
+ *  [+] KPI "Leads waiting > 15 min" (row 1). "Response within 15 min (30 days)" is NOT shown: the
+ *      leads API has no first-response timestamp, so the rate cannot be computed honestly.
+ *  [~] The old "Today" viewings card is kept unchanged, retitled "Viewings today".
+ *  [+] Head summary also says how many leads need a first response.
+ *
+ *  Layout changes: the custom dialogs (drill-downs, legal list, what-changed) are now the kit's
+ *  Drawer / Modal; tiles are kit KPIs; the vacancy bars are a kit table. No capability was dropped.
+ *  Removed nothing user-visible except the unused KpiMini helper (it rendered nowhere).
+ */
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
+import {
+  ArrowUpRight, Ban, Banknote, CalendarClock, CalendarDays, DoorOpen, Eye, FileWarning, Gavel, ListX, MessageSquareReply,
+  RefreshCw, ShieldAlert, Stamp, TrendingDown, TrendingUp, UserRoundSearch, X,
+} from 'lucide-react';
+import { APP_TIME_ZONE } from '@/lib/datetime';
+import { apiGet } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { legalApi, type AlertItem, type OpenRecord } from '@/lib/legal';
+import { contractHref, surfaceOfLockedAt, type ContractSurface } from '@/lib/contractHref';
+import { unitHref } from '@/lib/unitHref';
+import { FIRST_RESPONSE_SLA_LABEL, FIRST_RESPONSE_SLA_MS, firstResponseSla, fmtSlaDuration } from '@/lib/os/sla';
+import { leadDisplayName, type ApiLead } from '@/lib/leadJourney';
+import { TodayQueue, type TodayItem } from './_today';
+import {
+  OsPage, PageHead, ScopeStrip, Card, Cols, Kpis, Pill, StatusTag, Btn, TableWrap,
+  Callout, KV, Bars, Timeline, Drawer, Modal, EmptyRow, SkeletonRows, humanize, type Tone,
+} from '@/components/os/kit';
+import { cn } from '@/lib/utils';
 
 interface DashboardStats {
   totalProperties: number;
@@ -458,8 +537,8 @@ function fmtDuration(days: number) {
  *  Neutral / amber / red, never the primary green: green is "Occupied" on the
  *  donut this list belongs to, and a green vacancy bar would read as the
  *  opposite of what it measures. */
-function vacancyFill(days: number): string {
-  return days >= 90 ? '#dc2626' : days >= 30 ? '#d97706' : 'var(--neutral-400)';
+function vacancyFill(days: number): '' | 'amber' | 'danger' {
+  return days >= 90 ? 'danger' : days >= 30 ? 'amber' : '';
 }
 
 function fmtDayMonthYear(ymd: string) {
@@ -473,80 +552,195 @@ function fmtDayMonthYear(ymd: string) {
  *  longest one and sorted worst-first, so the ranking is the point and reading
  *  an axis is not required; the duration, the date it went empty and the money
  *  it has cost sit on the row beside each bar. */
-function VacancyBars({ units, totals, manager }: {
-  units: UnitRow[];
-  totals?: VacancyTotals;
-  manager?: { rp: number };
-}) {
-  const longest = totals?.longestDaysVacant || Math.max(1, ...units.map(u => u.daysVacant ?? 0));
+
+/** Drill badge tone → kit pill tone. */
+const PILL_TONE: Record<BadgeTone, Tone> = {
+  green: 'primary', amber: 'amber', red: 'danger', indigo: 'info', gray: 'neutral',
+};
+
+/** A link that leaves the page in a new tab, styled as a kit button. Kept local
+ *  because the kit's Btn cannot carry `rel` with `target`. */
+function OpenLink({ href, children = 'Open', newTab = true }: { href: string; children?: ReactNode; newTab?: boolean }) {
   return (
-    <div className="px-2 pb-1">
-      <div className="flex items-baseline justify-between px-1 pt-1 pb-3">
-        <h4 className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)]">
-          How long they&apos;ve been empty
-        </h4>
-        {totals && totals.lostIncome > 0 && (
-          <span className="text-[11.5px] font-semibold text-[var(--neutral-700)] tabular-nums">
-            {fmtAed(totals.lostIncome)} foregone
-          </span>
-        )}
-      </div>
-      <div className="space-y-1">
-        {units.map(u => {
-          const days = u.daysVacant ?? 0;
-          const pct = Math.max(4, Math.round((days / longest) * 100));
-          const fill = vacancyFill(days);
-          const label = u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`);
-          const inner = (
-            <>
-              <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                <span className="font-semibold text-[var(--neutral-900)] truncate">
-                  {label}
-                  <span className="font-normal text-[var(--neutral-400)]"> · {u.building ?? '—'}</span>
-                </span>
-                <span className="flex-shrink-0 flex items-baseline gap-2">
-                  <span className="tabular-nums text-[var(--neutral-700)]">{fmtDuration(days)}</span>
-                  <span
-                    className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                    style={{
-                      background: DRILL_TONE[u.listingStatus === 'published' ? 'green' : 'amber'].bg,
-                      color: DRILL_TONE[u.listingStatus === 'published' ? 'green' : 'amber'].fg,
-                    }}
-                  >
-                    {u.listingStatus === 'published' ? 'Published' : `Not listed · ${u.listingStatus}`}
-                  </span>
-                </span>
-              </div>
-              <div className="mt-1.5 flex items-center gap-2.5">
-                <div className="flex-1 h-1.5 rounded-full bg-[var(--base-200)] overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: fill }} />
-                </div>
-                {/* Since-when and the cost, on the row the bar belongs to. A unit
-                    with no rent on file is not a free vacancy — it says so
-                    rather than showing AED 0. */}
-                <span className="flex-shrink-0 text-[11px] tabular-nums text-[var(--neutral-400)]">
-                  {u.basis === 'never-leased' ? 'never let' : `since ${u.vacantSince ? fmtDayMonthYear(u.vacantSince) : '—'}`}
-                  {' · '}
-                  {u.rentBasis == null ? 'no rent set' : `−${fmtAed(u.lostIncome ?? 0)}`}
-                </span>
-              </div>
-            </>
-          );
-          // Both portals navigate now. The row used to be dead in the manager
-          // portal because the old standalone unit page was an RP-only route;
-          // the destination is the Units workspace, which the manager portal
-          // renders too, so there is no RP-only surface left to dead-end on.
-          return <Link key={u.id} href={unitHref(u.id, manager)} {...NEW_TAB} className="block px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">{inner}</Link>;
-        })}
-      </div>
-    </div>
+    <Link href={href} className="gx-btn xs" {...(newTab ? NEW_TAB : {})}>
+      {children}{newTab && <ArrowUpRight size={11} aria-hidden />}
+    </Link>
   );
 }
 
-// The by-building unit grouping (unitGroups / unitDrillRow / AVAIL_TONE) went
-// with the two drills it served: Units now links to the Units page, and the
-// vacant drill renders VacancyBars, which carries each unit's building on its
-// own row. The Units page is where a grouped, filterable unit list belongs.
+/** "How long they've been empty" — the vacant units as a duration measure.
+ *  One series (days empty) scaled to the longest and sorted worst-first; the
+ *  duration, the date it went empty and the money it has cost sit on the row.
+ *  Bar tint is neutral / amber / red (never the primary green, which is
+ *  "Occupied" on the donut) and the duration is always written beside it. */
+function VacancyTable({ units, totals, manager, limit, onShowAll }: {
+  units: UnitRow[];
+  totals?: VacancyTotals;
+  manager?: { rp: number };
+  limit?: number;
+  onShowAll?: () => void;
+}) {
+  const longest = totals?.longestDaysVacant || Math.max(1, ...units.map(u => u.daysVacant ?? 0));
+  const rows = limit ? units.slice(0, limit) : units;
+  return (
+    <>
+      <table className="gx-tbl">
+        <thead>
+          <tr><th>Unit</th><th>Empty for</th><th>Listing</th><th className="num">Foregone</th><th className="act" aria-label="Actions" /></tr>
+        </thead>
+        {rows.length === 0 ? (
+          <EmptyRow cols={5} title="No vacant units" text=" — every unit in the portfolio is let." />
+        ) : (
+          <tbody>
+            {rows.map(u => {
+              const days = u.daysVacant ?? 0;
+              const pct = Math.max(4, Math.round((days / longest) * 100));
+              const tone = vacancyFill(days);
+              const label = u.number ? `Unit ${u.number}` : (u.name ?? `Unit ${u.id}`);
+              return (
+                <tr key={u.id}>
+                  <td className="strong">{label}<span className="sub">{u.building ?? '—'}</span></td>
+                  <td style={{ minWidth: 150 }}>
+                    <span className="nowrap" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtDuration(days)}</span>
+                    <span className={cn('gx-bar', tone)} style={{ display: 'block', marginTop: 4 }}>
+                      <i style={{ width: `${pct}%`, ...(tone ? {} : { background: 'var(--ms-border-strong)' }) }} />
+                    </span>
+                    {/* Since-when; a unit never let says so. */}
+                    <span className="sub">{u.basis === 'never-leased' ? 'never let' : `since ${u.vacantSince ? fmtDayMonthYear(u.vacantSince) : '—'}`}</span>
+                  </td>
+                  <td>
+                    <Pill tone={u.listingStatus === 'published' ? 'primary' : 'amber'}>
+                      {u.listingStatus === 'published' ? 'Published' : `Not listed · ${u.listingStatus}`}
+                    </Pill>
+                  </td>
+                  {/* A unit with no rent on file is not a free vacancy — it says so rather than AED 0. */}
+                  <td className="num">{u.rentBasis == null ? 'no rent set' : `−${fmtAed(u.lostIncome ?? 0)}`}</td>
+                  <td className="act"><OpenLink href={unitHref(u.id, manager)} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        )}
+      </table>
+      {limit != null && units.length > limit && onShowAll && (
+        <div className="gx-pad" style={{ borderTop: '1px solid var(--ms-surface-3)' }}>
+          <Btn size="sm" onClick={onShowAll}>Show all {units.length} vacant units</Btn>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ─── Leads (read-only slice for the Overview) ─────────────────────────────── */
+
+/** The fields of GET /leads this page reads. Same shape the Leads page uses. */
+interface OvLead {
+  id: number;
+  stage: string;
+  customerName: string;
+  source: string | null;
+  createdAt: string;
+  updatedAt: string;
+  viewings?: Array<{ id: number; scheduledAt: string; status: string; createdAt?: string; updatedAt?: string }>;
+  unit: { unitNumber: string; property?: { buildingName: string } } | null;
+  /** Read only to name the lead the way the Leads page does (company wins). */
+  convertedTenant?: ApiLead['convertedTenant'];
+}
+/** The lead's name as the Leads queue shows it (lib/leadJourney leadDisplayName). */
+const ovLeadName = (l: OvLead) => leadDisplayName({ customerName: l.customerName, convertedTenant: l.convertedTenant ?? null });
+
+/* ─── Today queue sources (read-only) ─────────────────────────────────────── */
+
+/** GET /profiles/rental-provider/me — Gate 1 status + the KYC checklist the
+ *  Documents page (KycDocumentsPanel) renders, with each document's expiry. */
+interface OvProfile {
+  companyName?: string | null;
+  complianceStatus?: string | null;
+  compliancePausedAt?: string | null;
+  complianceNotes?: string | null;
+}
+interface OvKycDoc {
+  key: string;
+  displayName: string;
+  required: boolean;
+  uploaded: boolean;
+  status: string | null;
+  expiryDate: string | null;
+}
+/** GET /contracts (manager: /manager/contracts?rp=) — the fields the Ejari check reads. */
+interface OvContract {
+  id: number;
+  status: string;
+  ejariStatus: string | null;
+  contractType: string | null;
+  startDate: string;
+  endDate: string;
+  lockedAt: string | null;
+  tenant: { name: string | null; companyName?: string | null; entityType?: string | null } | null;
+  unit: { number: string | null } | null;
+  property: { buildingName: string | null } | null;
+}
+
+/** Days from Dubai day `from` to Dubai day `to` (both 'YYYY-MM-DD'), signed. */
+function ymdDiff(from: string, to: string): number {
+  const p = (x: string) => { const [y, m, d] = x.slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((p(to) - p(from)) / OV_DAY_MS);
+}
+/** 'YYYY-MM-DD' ± n days, calendar arithmetic (no zone drift). */
+function ymdAdd(ymd: string, n: number): string {
+  const [y, m, d] = ymd.slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+const fmtShortDay = (ymd: string) =>
+  new Date(`${ymd.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const daysWord = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
+/** Art. 14, Law 33/2008: a party changing terms at renewal must notify 90 days before expiry. */
+const RENEWAL_NOTICE_DAYS = 90;
+
+const OV_DAY_MS = 86_400_000;
+
+/** The pending viewing the Leads page triages on (same rule as its getPendingViewing). */
+function pendingViewing(lead: OvLead) {
+  return lead.viewings
+    ?.filter(v => v.status === 'scheduled' || v.status === 'confirmed')
+    .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())[0] ?? null;
+}
+
+/** True when the Leads page would flag this lead as needing action — the same
+ *  thresholds as its getUrgency(): a viewing whose date passed without an
+ *  outcome, or a stage left idle past its follow-up window. */
+function leadNeedsAction(lead: OvLead, now: number): boolean {
+  if (lead.stage === 'viewing_scheduled') {
+    const v = pendingViewing(lead);
+    return !!v && new Date(v.scheduledAt).getTime() < now;
+  }
+  const idle = Math.floor((now - new Date(lead.updatedAt).getTime()) / OV_DAY_MS);
+  switch (lead.stage) {
+    case 'payment_plan_shared':
+    case 'documents_collection':
+    case 'interested':
+      return idle >= 3;
+    case 'cheques_submitted':
+      return idle >= 2;
+    default:
+      return false;
+  }
+}
+
+/** Dubai calendar day of an instant, 'YYYY-MM-DD'. */
+const dubaiDay = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+
+/** Activity category → kit pill tone (the same grouping the old tints used). */
+const CATEGORY_TONE: Record<string, Tone> = {
+  Leads: 'info', Customers: 'info', Signature: 'info',
+  Termination: 'danger', Settlement: 'danger',
+  Payments: 'amber', Registration: 'amber',
+  Properties: 'primary', Units: 'primary', Listings: 'primary',
+  Contracts: 'primary', Inspection: 'primary', Renewal: 'primary',
+  Documents: 'neutral', Viewing: 'neutral', Session: 'neutral',
+  Team: 'outline', Templates: 'outline', AMC: 'outline', Settings: 'outline',
+};
+const categoryTone = (c: string): Tone => CATEGORY_TONE[c] ?? 'neutral';
 
 /** Renewal horizons, same set as the Upcoming Renewals report (lease-expiry), so
  *  a landlord who checks the tile against the report is comparing like with like.
@@ -790,11 +984,12 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
       const d: { configured: boolean } = await r.json();
       setFeeRulesConfigured(d.configured);
     } catch { /* fee-rules nudge is best-effort, ignore */ }
-  }, []);
+  }, [manager]);
 
   // Re-fire range-scoped fetches whenever the user picks a different range.
   useEffect(() => {
     const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
     fetchStats(selectedRange, ac.signal);
     fetchFinancial(selectedRange, ac.signal);
     fetchExtras(selectedRange, renewalWindow, ac.signal);
@@ -803,6 +998,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
 
   useEffect(() => {
     const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
     fetchFeeRules(ac.signal);
     return () => ac.abort();
   }, [fetchFeeRules]);
@@ -827,6 +1023,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
       void fetchFeed(ac.signal);
       start();
     };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
     void fetchFeed(ac.signal);
     start();
     document.addEventListener('visibilitychange', onVisibility);
@@ -903,6 +1100,117 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
   // opens what is earning it, sorted by the term ending soonest — a 107-row list
   // is only worth having if the rows that need doing are at the top, and on an
   // occupied unit that is the lease about to expire (or already lapsed).
+
+  // ── Genspark Overview additions (read-only, best-effort) ──────────────────
+  // Leads feed the attention row, the lead-source bars and today's viewings.
+  // The Leads page is the record of truth; this only counts what it shows.
+  const leadsUrl = manager ? `/manager/leads?rp=${manager.rp}` : '/leads';
+  const leadHref = (id: number) => (manager ? `${leadsBase}/${id}?rp=${manager.rp}` : `${leadsBase}/${id}`);
+  const [leads, setLeads] = useState<OvLead[] | null>(null);
+  const [leadsErr, setLeadsErr] = useState<string | null>(null);
+  const fetchLeads = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const data = await apiGet<OvLead[]>(leadsUrl, { signal });
+      setLeads(Array.isArray(data) ? data : []);
+      setLeadsErr(null);
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return;
+      setLeadsErr((e as Error).message || 'Failed to load leads');
+    }
+  }, [leadsUrl]);
+  useEffect(() => {
+    const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
+    void fetchLeads(ac.signal);
+    return () => ac.abort();
+  }, [fetchLeads]);
+
+  // Business name + Gate 1 status for the scope strip — landlord portal only;
+  // a manager reads this landlord's book, not their own business profile.
+  // The same GET also feeds Today's gate blockers (Gate 1 status, KYC expiry).
+  const [profile, setProfile] = useState<OvProfile | null>(null);
+  const [kycDocs, setKycDocs] = useState<OvKycDoc[] | null>(null);
+  const [profileErr, setProfileErr] = useState(false);
+  const fetchProfile = useCallback(async (signal?: AbortSignal) => {
+    if (manager) return;
+    try {
+      const d = await apiGet<{ profile: OvProfile; checklist?: OvKycDoc[] }>('/profiles/rental-provider/me', { signal });
+      if (d?.profile) setProfile(d.profile);
+      setKycDocs(Array.isArray(d?.checklist) ? d.checklist : []);
+      setProfileErr(false);
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return;
+      setProfileErr(true); // the strip falls back to the signed-in name
+    }
+  }, [manager]);
+  useEffect(() => {
+    const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
+    void fetchProfile(ac.signal);
+    return () => ac.abort();
+  }, [fetchProfile]);
+
+  // ── Today queue: the three extra reads it needs (best-effort, read-only) ──
+  //  · leases → Ejari registration still pending
+  //  · renewals over a fixed 180-day horizon → the 90-day notice clock, so the
+  //    queue does not change when the Upcoming renewals card's selector does
+  //  · cheques falling due in the next 7 Dubai days
+  const [todayContracts, setTodayContracts] = useState<OvContract[] | null>(null);
+  const [todayRenewals, setTodayRenewals] = useState<UpcomingRenewal[] | null>(null);
+  const [dueSoon, setDueSoon] = useState<ReceivableCheque[] | null>(null);
+  const [todayErr, setTodayErr] = useState<{ leases?: boolean; renewals?: boolean; cheques?: boolean }>({});
+  const fetchToday = useCallback(async (signal?: AbortSignal) => {
+    const t0 = dubaiDay(new Date());
+    const month = presetToDates('this_month');
+    const [c, r, f] = await Promise.allSettled([
+      apiGet<OvContract[]>(manager ? `/manager/contracts?rp=${manager.rp}` : '/contracts', { signal }),
+      apiGet<DashboardExtras>(`/${manager ? 'manager/dashboard-extras' : 'contracts/dashboard-extras'}?${rpQ}from=${month.from}&to=${month.to}&window=180`, { signal }),
+      apiGet<FinancialSummary>(`/${manager ? 'manager/financial-summary' : 'contracts/financial-summary'}?${rpQ}from=${t0}&to=${ymdAdd(t0, 7)}`, { signal }),
+    ]);
+    if (signal?.aborted) return;
+    if (c.status === 'fulfilled' && Array.isArray(c.value)) setTodayContracts(c.value);
+    if (r.status === 'fulfilled' && Array.isArray(r.value?.upcomingRenewals)) setTodayRenewals(r.value.upcomingRenewals);
+    if (f.status === 'fulfilled' && Array.isArray(f.value?.receivableCheques)) setDueSoon(f.value.receivableCheques);
+    setTodayErr({
+      leases: !(c.status === 'fulfilled' && Array.isArray(c.value)),
+      renewals: !(r.status === 'fulfilled' && Array.isArray(r.value?.upcomingRenewals)),
+      cheques: !(f.status === 'fulfilled' && Array.isArray(f.value?.receivableCheques)),
+    });
+  }, [manager, rpQ]);
+  useEffect(() => {
+    const ac = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch: state is set after the awaited response, never synchronously
+    void fetchToday(ac.signal);
+    return () => ac.abort();
+  }, [fetchToday]);
+
+  // First-reply countdowns re-read every 30s — arithmetic on createdAt, no refetch.
+  const [tickMs, setTickMs] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setTickMs(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // "Now" is read once per mount (and on Refresh) — never in render.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const today = dubaiDay(new Date(nowMs));
+  const leadStats = useMemo(() => {
+    if (!leads) return null;
+    const open = leads.filter(l => l.stage !== 'converted' && l.stage !== 'rejected');
+    const needAction = open.filter(l => leadNeedsAction(l, nowMs)).length;
+    const new30 = leads.filter(l => nowMs - new Date(l.createdAt).getTime() <= 30 * OV_DAY_MS).length;
+    const bySource = new Map<string, number>();
+    for (const l of leads) {
+      const k = l.source ? humanize(l.source) : 'Not recorded';
+      bySource.set(k, (bySource.get(k) ?? 0) + 1);
+    }
+    const sources = [...bySource.entries()].sort((a, b) => b[1] - a[1]);
+    const viewingsToday = leads
+      .flatMap(l => (l.viewings ?? []).map(v => ({ lead: l, v })))
+      .filter(({ v }) => v.status !== 'cancelled' && dubaiDay(new Date(v.scheduledAt)) === today)
+      .sort((a, b) => a.v.scheduledAt.localeCompare(b.v.scheduledAt));
+    return { open: open.length, needAction, new30, sources, total: leads.length, viewingsToday };
+  }, [leads, nowMs, today]);
   const drillOccupied = () => {
     // Soonest-ending first, lapsed terms above everything. Building order would
     // put a lease that expired last month below one running for another year
@@ -980,7 +1288,7 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
       // is not read at all. The building each unit sits in is on its own row,
       // which is all the grouping was buying.
       groups: [],
-      panel: <VacancyBars units={vacantUnits} totals={vacancyTotals} manager={manager} />,
+      panel: <VacancyTable units={vacantUnits} totals={vacancyTotals} manager={manager} />,
     });
   };
   // No drillAllUnits: the Units tile links to the Units page now, which is that
@@ -1222,824 +1530,599 @@ export function RpDashboardHome({ manager }: { manager?: { rp: number } }) {
 
   const rangeLabel = RANGE_PRESETS.find(r => r.key === selectedRange)?.label ?? '';
 
-  const gaugePct = useMemo(() => Math.min(100, Math.max(0, occupancyRate)), [occupancyRate]);
+
+  const gaugePct = Math.min(100, Math.max(0, occupancyRate));
   const dashLen = 2 * Math.PI * 40;
 
+  const refreshEverything = useCallback(async () => {
+    setNowMs(Date.now());
+    setTickMs(Date.now());
+    await Promise.all([refreshAll(), fetchLeads(), fetchProfile(), fetchToday()]);
+  }, [refreshAll, fetchLeads, fetchProfile, fetchToday]);
+
+  // ── Head: greeting, Dubai date, one-line summary from real numbers ────────
+  const firstName = (user?.name ?? '').trim().split(/\s+/)[0] || 'there';
+  const dubaiHour = Number(new Date(nowMs).toLocaleString('en-GB', { timeZone: APP_TIME_ZONE, hour: '2-digit', hourCycle: 'h23' }));
+  const greeting = dubaiHour < 12 ? 'Good morning' : dubaiHour < 17 ? 'Good afternoon' : 'Good evening';
+  const dateLine = new Date(nowMs).toLocaleDateString('en-GB', { timeZone: APP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const renewalCounts = extras?.renewalBuckets ?? (extras ? renewalsList.reduce((acc, r) => {
+    const k = r.bucket ?? 'noticeDue';
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, { renewed: 0, noticeSent: 0, noticeDue: 0, newCustomer: 0, vacating: 0 } as Record<RenewalBucket, number>) : undefined);
+  const noticeDue = renewalCounts?.noticeDue ?? 0;
+  const declined = renewalCounts?.vacating ?? 0;
+  const lapsedTerms = units.filter(u => u.availability === 'occupied' && !((u.daysToStart ?? 0) > 0) && (u.daysToEnd ?? 1) < 0).length;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const awaitingReplyCount = leads ? leads.filter(l => firstResponseSla(l, tickMs) !== null).length : 0;
+  const summaryParts = [
+    awaitingReplyCount > 0 ? `${plural(awaitingReplyCount, 'lead needs', 'leads need')} a first response` : null,
+    leadStats && leadStats.needAction > 0 ? `${plural(leadStats.needAction, 'lead needs', 'leads need')} a follow-up` : null,
+    fin && fin.overdueCount > 0 ? `${plural(fin.overdueCount, 'cheque is', 'cheques are')} overdue (${fmtAed(fin.overdueAmount)})` : null,
+    fin && fin.bouncedCount > 0 ? `${plural(fin.bouncedCount, 'cheque has', 'cheques have')} bounced` : null,
+    noticeDue > 0 ? `${plural(noticeDue, 'renewal notice is', 'renewal notices are')} due` : null,
+  ].filter(Boolean) as string[];
+  const dataReady = stats != null && fin != null && extras != null;
+  const summary = summaryParts.length
+    ? `${summaryParts.slice(0, -1).join(', ')}${summaryParts.length > 1 ? ' and ' : ''}${summaryParts[summaryParts.length - 1]}.`
+    : dataReady ? 'Nothing is waiting on you right now.' : 'Loading your portfolio…';
+
+  const reportsHref = manager ? `/dashboard/manager/reports?rp=${manager.rp}` : '/rental-provider/dashboard/reports';
+  const createListingHref = manager ? `/dashboard/manager/units/add?rp=${manager.rp}` : '/rental-provider/dashboard/units/add';
+  const receivablesHref = manager ? `/dashboard/manager/payments?rp=${manager.rp}` : '/rental-provider/dashboard/receivables';
+  const legalBase = manager ? '/dashboard/manager/legal' : '/rental-provider/dashboard/legal';
+  const legalHref = manager ? `${legalBase}?rp=${manager.rp}` : legalBase;
+  const leadsHref = manager ? `${leadsBase}?rp=${manager.rp}` : leadsBase;
+
+  const verification = manager ? null : profile?.complianceStatus === 'compliant'
+    ? <Pill tone="primary">Verified</Pill>
+    : profile?.complianceStatus ? <StatusTag status={profile.complianceStatus} /> : <span>—</span>;
+
+  // ── Today: one queue ranked by consequence (research blueprint, Overview) ──
+  // Every item comes from a real field; nothing is inferred beyond what is
+  // written next to it. Bands: 1 gate blockers · 2 first-reply clock ·
+  // 3 legal + money clocks · 4 listings · 5 lead follow-ups · 6 today's diary.
+  const documentsHref = '/rental-provider/dashboard/documents';
+  const profileHref = '/rental-provider/dashboard/profile';
+  const unitsListingHref = (id: number) => unitHref(id, manager);
+  const leadAwaitingReply = leads ? leads.filter(l => firstResponseSla(l, tickMs) !== null) : []; // same set as awaitingReplyCount
+  const leadsWaitingOverSla = leadAwaitingReply.filter(l => tickMs - new Date(l.createdAt).getTime() > FIRST_RESPONSE_SLA_MS).length;
+  const todayItems: TodayItem[] = [];
+  const unitName = (n: string | null | undefined, b?: string | null) => [n ? `Unit ${n}` : null, b].filter(Boolean).join(' · ') || 'Unit';
+
+  // 1 · Gate 1 — business verification not compliant (landlord portal only;
+  //     a manager cannot act on the landlord's own verification).
+  const gate = profile?.complianceStatus;
+  if (!manager && gate && gate !== 'compliant') {
+    const fix = gate === 'action_required' || gate === 'expired';
+    todayItems.push({
+      key: 'gate', band: 1, dueAt: 0, tone: gate === 'pending_review' ? 'warn' : 'bad', icon: ShieldAlert,
+      title: `Business verification: ${humanize(gate)}`,
+      consequence: profile?.complianceNotes?.trim()
+        ? `Gate 1 — required to publish and stay live. UpNow: “${profile.complianceNotes.trim()}”`
+        : gate === 'pending_review' ? 'Gate 1 — UpNow is reviewing your documents; listings go live once verified.'
+          : 'Gate 1 — required to publish and stay live.',
+      due: profile?.compliancePausedAt ? `Paused since ${fmtShortDay(dubaiDay(new Date(profile.compliancePausedAt)))}` : gate === 'pending_review' ? 'In review' : 'Now',
+      action: fix ? { label: 'Fix documents', href: documentsHref } : { label: 'View verification', href: profileHref },
+    });
+  }
+  // 1 · KYC documents — expired, rejected, or expiring within 60 / 30 / 7 days.
+  if (!manager && kycDocs) {
+    for (const d of kycDocs) {
+      if (!d.uploaded) continue;
+      const left = d.expiryDate ? ymdDiff(today, d.expiryDate) : null;
+      const expired = d.status === 'expired' || (left != null && left < 0);
+      const rejected = d.status === 'rejected';
+      if (!expired && !rejected && (left == null || left > 60)) continue;
+      const tone = expired || rejected || (left != null && left <= 7) ? 'bad' : left != null && left <= 30 ? 'warn' : 'info';
+      todayItems.push({
+        key: `kyc-${d.key}`, band: 1, tone, icon: FileWarning,
+        title: `${d.displayName} ${rejected ? 'rejected' : expired ? 'expired' : 'expiring'}`,
+        consequence: d.required ? 'Required for business verification (Gate 1) — keep a current copy on file.' : 'Optional document on your verification file — replace it or remove it.',
+        due: rejected ? 'Upload a new copy'
+          : left == null ? 'Expired'
+          : left < 0 ? `Expired ${daysWord(-left)} ago`
+          : left === 0 ? 'Expires today' : `${daysWord(left)} left · ${fmtShortDay(d.expiryDate as string)}`,
+        dueAt: d.expiryDate ? new Date(d.expiryDate).getTime() : undefined,
+        action: { label: rejected || expired ? 'Upload new copy' : 'Renew document', href: documentsHref },
+      });
+    }
+  }
+
+  // 2 · First-reply clock — 15 min from arrival (lib/os/sla), live countdown.
+  for (const l of leadAwaitingReply) {
+    const sla = firstResponseSla(l, tickMs);
+    if (!sla) continue;
+    todayItems.push({
+      key: `sla-${l.id}`, band: 2, tone: sla.overdue ? 'bad' : sla.nearing ? 'warn' : 'info', icon: MessageSquareReply,
+      title: `Reply to ${ovLeadName(l)}`,
+      consequence: `${l.source ? humanize(l.source) : 'New'} enquiry${l.unit ? ` for ${unitName(l.unit.unitNumber, l.unit.property?.buildingName)}` : ''} · first reply due within ${FIRST_RESPONSE_SLA_LABEL} of arrival`,
+      due: sla.overdue ? `Overdue ${fmtSlaDuration(sla.remainingMs)}` : `${fmtSlaDuration(sla.remainingMs)} left`,
+      dueAt: sla.dueAt,
+      action: { label: 'Reply', href: leadHref(l.id) },
+    });
+  }
+
+  // 3 · Legal clocks — Ejari registration (Law 26/2007 Art. 4).
+  if (todayContracts) {
+    for (const c of todayContracts) {
+      if (c.status !== 'active' && c.status !== 'issued') continue;
+      if (c.ejariStatus === 'registered') continue;
+      const toStart = ymdDiff(today, c.startDate);
+      if (c.status === 'issued' && toStart > 14) continue; // not yet near its start
+      const who = c.tenant?.entityType === 'company' && c.tenant.companyName ? c.tenant.companyName : (c.tenant?.name ?? 'Customer');
+      todayItems.push({
+        key: `ejari-${c.id}`, band: 3, tone: toStart <= 0 ? 'bad' : 'warn', icon: Stamp,
+        title: `Register Ejari — ${unitName(c.unit?.number, c.property?.buildingName)} · ${who}`,
+        consequence: `Every ${c.contractType === 'renewal' ? 'renewal' : 'lease'} must be registered (Law 26/2007 Art. 4); DEWA needs the Ejari.`,
+        due: toStart < 0 ? `Started ${daysWord(-toStart)} ago` : toStart === 0 ? 'Starts today' : `Starts in ${daysWord(toStart)}`,
+        dueAt: new Date(c.startDate).getTime(),
+        action: { label: 'Open lease', href: contractHref(c.id, surfaceOfLockedAt(c.lockedAt), manager) },
+      });
+    }
+  }
+  // 3 · Legal clocks — 90-day renewal notice (Law 33/2008 Art. 14), leases
+  //     whose notice deadline is within 30 days or already passed.
+  const itemisedNotice = new Set<number>();
+  for (const r of todayRenewals ?? []) {
+    if ((r.bucket ?? 'noticeDue') !== 'noticeDue' || r.runningUnsigned) continue;
+    const left = r.daysUntilEnd - RENEWAL_NOTICE_DAYS;
+    if (left > 30) continue;
+    itemisedNotice.add(r.contractId);
+    todayItems.push({
+      key: `notice-${r.contractId}`, band: 3, tone: left < 0 || left <= 7 ? 'bad' : 'warn', icon: CalendarClock,
+      title: `Renewal notice — ${r.unitLabel}${r.tenantName ? ` · ${r.tenantName}` : ''}`,
+      consequence: left >= 0
+        ? `To change rent or terms, notify the customer at least 90 days before expiry (Law 33/2008 Art. 14). Lease ends ${fmtShortDay(r.endDate)}.`
+        : `The 90-day notice window has passed (Art. 14) — new terms now need the customer’s agreement. Lease ends in ${daysWord(Math.max(0, r.daysUntilEnd))}.`,
+      due: left > 0 ? `${daysWord(left)} left · by ${fmtShortDay(ymdAdd(r.endDate, -RENEWAL_NOTICE_DAYS))}` : left === 0 ? 'Notice due today' : `Window closed ${daysWord(-left)} ago`,
+      dueAt: new Date(ymdAdd(r.endDate, -RENEWAL_NOTICE_DAYS)).getTime(),
+      action: { label: 'Open renewal', href: contractHref(r.openContractId ?? r.contractId, r.openIn ?? 'lease', manager) },
+    });
+  }
+  // The rest of the renewal work the old attention row counted (same figures).
+  const noticeDueRest = (todayRenewals ? noticeDue - [...itemisedNotice].filter(id => renewalsList.some(x => x.contractId === id && (x.bucket ?? 'noticeDue') === 'noticeDue')).length : noticeDue);
+  if (noticeDueRest > 0) todayItems.push({ key: 'notice-rest', band: 3, tone: 'info', icon: CalendarClock, title: `${plural(noticeDueRest, 'more renewal notice', 'more renewal notices')} to plan`, consequence: `Within the next ${renewalWindow} days — nobody asked yet, your move.`, due: `Next ${renewalWindow} days`, action: { label: 'Open renewals', href: renewalsPipelineHref } });
+  if (declined > 0) todayItems.push({ key: 'declined', band: 3, tone: 'bad', icon: Ban, title: `${plural(declined, 'renewal', 'renewals')} declined`, consequence: 'The customer said no — start the termination so the move-out and deposit run on time.', due: 'Now', action: { label: 'Open renewals', href: renewalsPipelineHref } });
+  if (lapsedTerms > 0) todayItems.push({ key: 'lapsed', band: 3, tone: 'bad', icon: CalendarClock, title: `${plural(lapsedTerms, 'term has', 'terms have')} lapsed, still occupied`, consequence: 'The unit is occupied past its lease end — the renewal is overdue.', due: 'Overdue', action: { label: 'Open renewals', href: renewalsPipelineHref } });
+  if (legal && legal.counts.breaches > 0) todayItems.push({ key: 'breaches', band: 3, tone: 'warn', icon: Gavel, title: `${plural(legal.counts.breaches, 'open breach', 'open breaches')}`, consequence: 'Breach notices run on statutory deadlines — check what is due next.', due: 'Open', action: { label: 'Open legal', href: legalHref } });
+  if (legal && legal.counts.disputes > 0) todayItems.push({ key: 'cases', band: 3, tone: 'warn', icon: Gavel, title: `${plural(legal.counts.disputes, 'open legal case', 'open legal cases')}`, consequence: 'Hearings and filings have dates — check what is due next.', due: 'Open', action: { label: 'Open legal', href: legalHref } });
+
+  // 3 · Money clocks — bounced, overdue (whole book), bounce fees, due in 7 days.
+  if (fin) {
+    const oldest = (kind: 'bounced' | 'overdue') => fin.arrearsCheques.filter(a => a.kind === kind && a.dueDate).map(a => a.dueDate as string).sort()[0];
+    if (fin.bouncedCount > 0) {
+      const o = oldest('bounced');
+      todayItems.push({ key: 'bounced', band: 3, tone: 'bad', icon: Banknote, title: `${plural(fin.bouncedCount, 'bounced cheque', 'bounced cheques')} · ${fmtAed(fin.bouncedAmount)}`, consequence: 'The bank refused them — collect a replacement and record it.', due: o ? `Since ${fmtShortDay(o)}` : 'Bounced', dueAt: o ? new Date(o).getTime() : undefined, action: { label: 'Open receivables', href: receivablesHref } });
+    }
+    if (fin.overdueCount > 0) {
+      const o = oldest('overdue');
+      todayItems.push({ key: 'overdue', band: 3, tone: 'bad', icon: Banknote, title: `${plural(fin.overdueCount, 'overdue cheque', 'overdue cheques')} · ${fmtAed(fin.overdueAmount)}`, consequence: 'Past their date and not marked collected — deposit or chase them.', due: o ? `Overdue ${daysWord(Math.max(0, ymdDiff(o, today)))}` : 'Overdue', dueAt: o ? new Date(o).getTime() : undefined, action: { label: 'Open receivables', href: receivablesHref } });
+    }
+    if (fin.bounceFees && (fin.bounceFeesCount ?? 0) > 0) todayItems.push({ key: 'fees', band: 3, tone: 'warn', icon: Banknote, title: `${plural(fin.bounceFeesCount ?? 0, 'bounce fee', 'bounce fees')} unpaid · ${fmtAed(fin.bounceFeesAmount ?? 0)}`, consequence: 'Charged to the customer for a returned cheque and not yet paid.', due: 'Unpaid', action: { label: 'Open receivables', href: receivablesHref } });
+  }
+  const dueNext = (dueSoon ?? []).filter(c => c.state === 'due' && c.dueDate && c.dueDate.slice(0, 10) >= today);
+  if (dueNext.length > 0) {
+    const first = dueNext.map(c => (c.dueDate as string).slice(0, 10)).sort()[0];
+    const total = dueNext.reduce((a, c) => a + c.amount, 0);
+    const inDays = ymdDiff(today, first);
+    todayItems.push({ key: 'due7', band: 3, tone: 'info', icon: Banknote, title: `${plural(dueNext.length, 'cheque', 'cheques')} due in the next 7 days · ${fmtAed(total)}`, consequence: 'Deposit them on the day so nothing slips into overdue.', due: inDays === 0 ? 'First due today' : `First in ${daysWord(inDays)} · ${fmtShortDay(first)}`, dueAt: new Date(first).getTime(), action: { label: 'Open receivables', href: receivablesHref } });
+  }
+
+  // 4 · Listings sent back — rejected or changes requested (dashboard-stats units).
+  for (const u of units) {
+    if (u.listingStatus !== 'rejected' && u.listingStatus !== 'changes_requested') continue;
+    const rejected = u.listingStatus === 'rejected';
+    todayItems.push({
+      key: `listing-${u.id}`, band: 4, tone: rejected ? 'bad' : 'warn', icon: ListX,
+      title: `Listing ${rejected ? 'rejected' : 'needs changes'} — ${unitName(u.number, u.building)}`,
+      consequence: u.availability === 'available' ? 'Vacant and not visible to customers until it is fixed and resubmitted.' : 'Fix and resubmit so the listing is ready when the unit frees up.',
+      due: rejected ? 'Rejected' : 'Changes requested',
+      action: { label: 'Fix listing', href: unitsListingHref(u.id) },
+    });
+  }
+
+  // 5 · Lead follow-ups (the old attention card — same rule, Leads page getUrgency thresholds).
+  if (leadStats && leadStats.needAction > 0) todayItems.push({ key: 'leads', band: 5, tone: 'warn', icon: UserRoundSearch, title: `${plural(leadStats.needAction, 'lead needs', 'leads need')} a follow-up`, consequence: 'Viewing outcomes to record, stale payment plans, payment advice to collect.', due: 'Waiting on you', action: { label: 'Open leads', href: leadsHref } });
+
+  // 6 · Today's diary — viewings and move-ins on today's Dubai date.
+  for (const { lead, v } of leadStats?.viewingsToday ?? []) {
+    const at = new Date(v.scheduledAt).getTime();
+    const done = v.status === 'completed' || at < tickMs;
+    const needsOutcome = v.status !== 'completed' && at < tickMs;
+    todayItems.push({
+      key: `viewing-${v.id}`, band: 6, tone: 'info', icon: CalendarDays,
+      title: `Viewing — ${ovLeadName(lead)}`,
+      consequence: [lead.unit ? unitName(lead.unit.unitNumber, lead.unit.property?.buildingName) : null, humanize(v.status)].filter(Boolean).join(' · '),
+      due: `${done ? 'Was at' : 'At'} ${fmtClock(v.scheduledAt)}`, dueAt: at,
+      action: { label: needsOutcome ? 'Record outcome' : 'Open lead', href: leadHref(lead.id) },
+    });
+  }
+  for (const u of units) {
+    if (u.availability !== 'occupied' || !u.startsOn || u.startsOn.slice(0, 10) !== today) continue;
+    todayItems.push({
+      key: `movein-${u.id}`, band: 6, tone: 'info', icon: DoorOpen,
+      title: `Move-in — ${unitName(u.number, u.building)}${u.tenant ? ` · ${u.tenant}` : ''}`,
+      consequence: 'The lease starts today — hand over keys and complete the move-in inspection.',
+      due: 'Today',
+      action: u.contractId != null ? { label: 'Open lease', href: contractHref(u.contractId, 'lease', manager) } : { label: 'Open unit', href: unitsListingHref(u.id) },
+    });
+  }
+
+  const todayFailed = [
+    leadsErr && !leads ? 'leads' : null,
+    statsErr && !stats ? 'units & listings' : null,
+    finErr && !fin ? 'cheques' : null,
+    todayErr.leases ? 'Ejari status' : null,
+    todayErr.renewals ? 'renewal notices' : null,
+    todayErr.cheques ? 'cheques due this week' : null,
+    !manager && profileErr ? 'verification' : null,
+  ].filter(Boolean) as string[];
+  const todayLoading = leads == null || stats == null || fin == null || todayContracts == null || todayRenewals == null;
+
+  const eye = <Eye size={10} aria-hidden style={{ marginLeft: 4, verticalAlign: '-1px' }} />;
+  const arrow = <ArrowUpRight size={10} aria-hidden style={{ marginLeft: 4, verticalAlign: '-1px' }} />;
+
   return (
-    <div className="p-6 sm:p-8 max-w-[1320px] mx-auto space-y-6">
-      {/* Hero */}
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        {/* Eyebrow only. The greeting and the standfirst under it are gone: they
-            cost roughly 120px at the top of a monitoring page, every visit, to
-            say the landlord's own name and describe what a dashboard is. The
-            figures start higher up the screen now.
-            `name` is still resolved — the shell and other surfaces use it. */}
-        <div className="min-w-[260px] flex-1">
-          {/* An h1, not an eyebrow. When the "Welcome, <name>" heading went, this
-              11px uppercase label was all that remained at the top — and the page
-              was left with no h1 at all, which is a real problem for anyone
-              navigating by headings, not just a visual one.
-              Sized to the sibling pages (Reports is text-2xl) so the portal's
-              titles match, and title case rather than uppercase: letter-spaced
-              caps are for a label above a heading, not for the heading. */}
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--primary-dark)]">
-            Portfolio Overview
-          </h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={refreshAll}
-            disabled={refreshing}
-            title="Refresh all dashboard data"
-            className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold text-[var(--neutral-700)] bg-white border border-[var(--base-200)] hover:border-[var(--neutral-500)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors cursor-pointer"
-          >
-            <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">{refreshing ? 'Refreshing' : 'Refresh'}</span>
-          </button>
-          {/* No List Property / New Contract here. This page is a read of the
-              portfolio, and both actions start a flow that belongs to the page
-              that owns it — listing from Properties, a contract from Contracts —
-              which is one click away and where the landlord ends up anyway. */}
-        </div>
-      </header>
+    <OsPage>
+      <PageHead
+        eyebrow="Overview"
+        title={`${greeting}, ${firstName}`}
+        lede={<><span>{dateLine}</span> · {summary}</>}
+        actions={<>
+          <Btn onClick={() => { void refreshEverything(); }} disabled={refreshing} title="Refresh all dashboard data">
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} aria-hidden /> {refreshing ? 'Refreshing' : 'Refresh'}
+          </Btn>
+          <Btn href={reportsHref}>Reports</Btn>
+          <Btn href={createListingHref} variant="primary">Create listing</Btn>
+        </>}
+      />
 
-      {/* The range tab strip that used to run across the whole page is gone; the
-          period now lives INSIDE the Receivables card, which is the only thing on
-          this page it has ever changed.
-          A full-width filter above everything promises to scope everything. It
-          did not: occupancy, deposits, renewals and the activity feed are all
-          live figures, so five of the six things below a tab labelled "Last 3M"
-          simply ignored it. A control that visibly fails to filter most of what
-          sits under it reads as broken, and it cost this page a whole "Right now"
-          section explaining that the tabs did not apply. Put the period on the
-          card it belongs to and the question does not arise. */}
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Overview' },
+        { label: 'Business', value: manager ? 'Managed portfolio' : (profile?.companyName || user?.name || '—') },
+        ...(verification ? [{ label: 'Verification', value: verification }] : []),
+        { label: 'Vertical', value: 'Spaces' },
+        { label: 'Data', value: 'Live' },
+      ]} />
 
-      {/* Error banner — shows when any range-scoped fetch fails */}
+      {/* Error banner — names what failed, one Retry for all of it. */}
       {(statsErr || finErr || extrasErr) && (
-        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-          <AlertTriangle size={18} className="text-red-600 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-red-900">Some data didn&apos;t load</p>
-            <p className="text-[12px] text-red-700 mt-0.5">
-              {[statsErr && 'portfolio stats', finErr && 'financials', extrasErr && 'activity']
-                .filter(Boolean).join(', ')} failed to refresh.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={refreshAll}
-            disabled={refreshing}
-            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 cursor-pointer"
-          >
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Retry
-          </button>
+        <div style={{ marginBottom: 14 }}>
+          <Callout tone="bad" title="Some data didn't load.">
+            {[statsErr && 'portfolio stats', finErr && 'financials', extrasErr && 'activity'].filter(Boolean).join(', ')} failed to refresh.{' '}
+            <Btn size="xs" variant="danger" onClick={() => { void refreshAll(); }} disabled={refreshing}>Retry</Btn>
+          </Callout>
         </div>
       )}
 
-      {/* Fee rules setup nudge */}
+      {/* Fee rules setup nudge (landlord only) */}
       {feeRulesConfigured === false && !nudgeDismissed && (
-        <div className="flex items-center gap-4 bg-white border border-amber-200 border-l-4 border-l-amber-400 rounded-2xl px-5 py-4 shadow-sm">
-          <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
-            <Percent size={16} className="text-amber-600" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-[var(--neutral-900)]">Set up your fee rules</p>
-            <p className="text-[13px] text-[var(--neutral-500)] mt-0.5 leading-snug">
-              Configure admin fees, Contract Registration, commission, and security deposits so they auto-fill on every new contract.
-            </p>
-          </div>
-          <Link
-            href="/rental-provider/dashboard/settings"
-            {...NEW_TAB}
-            className="flex-shrink-0 inline-flex items-center px-4 py-2 rounded-lg text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
-          >
-            Configure
-          </Link>
-          <button
-            onClick={() => setNudgeDismissed(true)}
-            aria-label="Dismiss"
-            className="flex-shrink-0 w-8 h-8 grid place-items-center rounded-lg text-[var(--neutral-400)] hover:bg-[var(--base-100)] hover:text-[var(--neutral-900)] cursor-pointer"
-          >
-            <X size={16} />
-          </button>
+        <div style={{ marginBottom: 14 }}>
+          <Callout tone="warn" title="Set up your fee rules.">
+            Configure admin fees, Contract Registration, commission, and security deposits so they auto-fill on every new contract.
+            <span className="gx-btn-row" style={{ marginTop: 8 }}>
+              <OpenLink href="/rental-provider/dashboard/settings">Configure</OpenLink>
+              <Btn size="xs" variant="ghost" onClick={() => setNudgeDismissed(true)}><X size={11} aria-hidden /> Dismiss</Btn>
+            </span>
+          </Callout>
         </div>
       )}
 
-      {/* ── Section 1: THE PORTFOLIO ──────────────────────────────────────────
-          What the landlord HAS, first: buildings, units, customers and the
-          managers running them. Money follows underneath, then arrears.
-          This strip used to sit below the money row. Opening on Receivables put a
-          period-scoped figure above everything, which is the narrower question —
-          the size of the book does not change with a dropdown, and it is the
-          thing every other figure on the page is a fraction of.
-          Deposits Held was here too and has moved down to the money row. */}
-      <section className="space-y-4">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
-            Portfolio
-          </h2>
-          {/* "Right now · live — no period applies to these" was written to
-              contrast with the range tabs that used to run across the page. Those
-              are gone, and at the TOP of the page the caption now warns about a
-              period the reader has not met yet. Say what the row is instead. */}
-          <span className="text-[11px] text-[var(--neutral-400)]">what the portfolio is made of, and who runs it</span>
-        </div>
-        {/* All five on ONE row from `lg` up — the strip is a single statement of
-            what the portfolio is made of, and wrapping it split that in half.
-            Captions are gone with it: five labelled figures side by side read
-            faster without a sentence under each. */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          {/* Deposits is NOT here. It moved up to the Money row, beside
-              Receivables and Rent vs Market, so the portfolio's three money
-              figures sit together — it spent too long filed among Properties and
-              Units, which reads as "how big is the portfolio" rather than "what
-              are we holding". */}
-        {/* Both counts go to the page that owns the records rather than opening a
-            dialog listing them: a landlord who clicks "9 Properties" wants the
-            portfolio, where the buildings can actually be worked on, and the
-            same list in a read-only overlay was a dead end one step short of it.
-            The Units drill-down that used to open here listed all 113 with no
-            way to filter or act — the Units page is that list, done properly. */}
-        <KpiCard
-          icon={<Building2 size={12} />}
-          label="Properties"
-          value={shown(totalProperties)}
-          href={propertiesHref}
-        />
-        {/* No occupied/vacant split here — the Occupancy Rate donut below states
-            it three ways already (the percentage, "107 of 113 units let", and
-            the legend), and repeating it in the strip made the same number the
-            answer to two different questions. This card is the portfolio's SIZE;
-            how much of it is let is the donut's job. Maintenance and reserved
-            are named only when they exist, because those are the units the
-            occupied/vacant reading silently leaves out. */}
-        <KpiCard
-          icon={<DoorOpen size={12} />}
-          label="Units"
-          value={shown(totalUnits)}
-          href={unitsHref}
-        />
-        {/* Who the portfolio is run WITH, next to what it is made of. Both link
-            to the page that owns the records, like Properties and Units.
-            Overdue / Bounced used to close this row and has moved to its own
-            Arrears row below the money — it is not a fact about the portfolio's
-            size, it is work outstanding. */}
-        <KpiCard
-          icon={<Users size={12} />}
-          label="Customers"
-          value={shown(totalCustomers)}
-          href={customersHref}
-        />
-        {/* People and tenancies are DIFFERENT counts and are shown as two tiles
-            for that reason: a customer holding three units is one customer and
-            three leases. Reading one figure as the other is what made the
-            Customers page look like it disagreed with this dashboard. Both come
-            from LIVE_LEASE_TIPS_SQL, so they cannot drift from that page. */}
-        <KpiCard
-          icon={<FileText size={12} />}
-          label="Active Leases"
-          value={shown(activeLeases)}
-          href={leasesHref}
-        />
-        <KpiCard
-          icon={<UserCog size={12} />}
-          label="Managers"
-          value={shown(totalManagers)}
-          href={managersHref ?? undefined}
-        />
-        </div>
-      </section>
+      {/* Today — one queue ranked by consequence (replaces the attention row;
+          every card it had is an item here, same figures, same destination). */}
+      <TodayQueue
+        items={todayItems}
+        loading={todayLoading}
+        failed={todayFailed}
+        onRetry={() => { void refreshEverything(); }}
+        right={<Btn size="sm" href={leadsHref}>Leads queue</Btn>}
+      />
 
-      {/* ── Section 2: THE MONEY ─────────────────────────────────────────────
-          Everything the range tabs above actually change, and nothing else.
-          Receivables is the one figure that moves with the range. Rent vs Market
-          sits beside it because the two are the portfolio's money read two ways
-          — cash falling due now, and what the let stock earns against what it
-          asks — but only the first follows the tabs, so each card says which it
-          is on its own label.
-          The month-by-month Receivables vs Collected bars were here and were
-          removed: they replotted the same headline the card already states,
-          split the same two ways, and "This Month" left them a single pair of
-          bars with nothing to compare. They used to be separated by two rows of tiles that do
-          NOT move with the range (occupancy, deposits held, arrears), which put
-          "This Month" above a set of live snapshots and implied it filtered
-          them. It never did; the numbers simply did not change when the tab did,
-          which reads as a broken filter rather than a mislabelled section. */}
-      <section className="space-y-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
-            Money
-          </h2>
-          <span className="text-[11px] text-[var(--neutral-400)]">what the let stock earns against what it asks, and what is being held</span>
-        </div>
-        {/* Column count follows the flag: with Receivables hidden the row is two
-            cards, and a three-column grid would leave a hole where it stood. */}
-        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4${SHOW_RECEIVABLES ? ' lg:grid-cols-3' : ''}`}>
-        {/* Hero KPI — Receivables (dark). The headline is rent FALLING DUE in the
-            range, so money already banked is inside it; the split below says how
-            much, and clicking through lists the cheques on both sides of it.
-            Hidden by SHOW_RECEIVABLES — see the flag for why and how to restore. */}
-        {SHOW_RECEIVABLES && (
-        <div
-          {...clickableProps(fin ? drillReceivables : undefined)}
-          className={`relative overflow-hidden rounded-2xl p-5 text-white bg-gradient-to-br from-[#14201c] via-[#1d2c27] to-[#22332d] shadow-sm${fin ? ' cursor-pointer hover:shadow-md hover:brightness-110 transition-all' : ''}`}
-        >
-          {/* min-h matches the other two cards' header rows. The period select
-              is taller than a bare label, and without a shared floor it pushed
-              this card's figure a few pixels below the ones beside it — three
-              headline numbers in a row that do not sit on one line read as
-              sloppy long before anyone works out why. */}
-          <div className="flex items-center gap-2 min-h-[28px] text-[11px] font-bold tracking-[0.12em] uppercase text-white/70">
-            <DirhamSign size={12} className="text-[#7be1c2]" />
-            Receivables
-            {/* The whole card is a button into the cheques behind the figure, so
-                the select swallows its own clicks and keys — otherwise choosing a
-                period would also throw the drill-down open over the answer.
-                colorScheme dark keeps the native option list legible; without it
-                the menu renders light-on-light against this card. */}
-            <span
-              className="ml-auto flex items-center gap-2"
-              onClick={e => e.stopPropagation()}
-              onKeyDown={e => e.stopPropagation()}
-            >
-              <select
-                aria-label="Receivables period"
-                value={selectedRange}
-                onChange={e => setSelectedRange(e.target.value as RangePreset)}
-                style={{ colorScheme: 'dark' }}
-                className="bg-white/10 border border-white/25 text-white rounded-md pl-2 pr-1 py-1 text-[11px] font-bold uppercase tracking-[0.08em] cursor-pointer hover:bg-white/20 focus:outline-none focus:ring-1 focus:ring-white/40 transition-colors"
-              >
-                {RANGE_PRESETS.map(({ key, label }) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-              {/* No eye here. The card is plainly clickable and the period
-                  selector beside it already draws the pointer; a second affordance
-                  in the same corner just crowded the dropdown. */}
-            </span>
-          </div>
-          {/* Same 30px as the other two. At 42px this card shouted over the row
-              — and the three are peers now, not a hero and two footnotes. */}
-          <div className="mt-2 text-[30px] font-bold leading-none tracking-tight tabular-nums">
-            {fin ? fmtAed(fin.receivablesInRange) : (finErr ? '—' : '…')}
-          </div>
-          {/* Two figures, one word each, one per line — so the two amounts stack
-              and can be compared at a glance instead of being read along a
-              sentence. The line carried "of which … collected", "still
-              outstanding" and a "past due" clause; the qualifiers said nothing
-              the labels do not, and past due is now its own tile in the Arrears
-              row directly below, with both the money and the count. */}
-          {fin ? (
-            <div className="mt-2 space-y-1 text-[12.5px]">
-              <div className="flex items-baseline gap-2">
-                <span className="tabular-nums font-semibold text-white/85">{fmtAed(fin.receivablesSplit.collected.amount)}</span>
-                <span className="text-white/55">Collected</span>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="tabular-nums font-semibold text-white/85">
-                  {fmtAed(fin.receivablesSplit.overdue.amount + fin.receivablesSplit.due.amount)}
-                </span>
-                <span className="text-white/55">Outstanding</span>
-              </div>
-            </div>
-          ) : (
-            <p className="text-[12.5px] text-white/55 mt-2">{finErr ? 'Not available' : 'Loading…'}</p>
-          )}
-          {/* Straight into the report this figure IS. Receivables and Cash
-              Management are the same money on the same basis (cheque due date,
-              earning leases) — the card is the headline, the report is the
-              month-by-month working. Stops its own clicks so it opens the report
-              rather than the card's cheque drill-down underneath it. */}
-          <Link
-            href={cashManagementHref}
-            onClick={e => e.stopPropagation()}
-            className="relative z-10 mt-3 inline-flex items-center gap-1 text-[12px] font-semibold text-[#7be1c2] hover:text-white transition-colors"
-          >
-            Open report <ArrowUpRight size={13} />
-          </Link>
-          <ArrowUpRight size={56} className="absolute -right-3 -bottom-3 text-white/5" />
-        </div>
-        )}
+      {/* KPI row 1 — what the portfolio is made of, and who runs it. Each opens
+          the page that owns the records (new tab), and reads "…" until loaded. */}
+      <Kpis>
+        <KpiLink k="Properties" v={shown(totalProperties)} href={propertiesHref} icon={arrow} />
+        <KpiLink k="Units" v={shown(totalUnits)} href={unitsHref} icon={arrow} />
+        <KpiLink k="Customers" v={shown(totalCustomers)} href={customersHref} icon={arrow} />
+        <KpiLink k="Active leases" v={shown(activeLeases)} href={leasesHref} icon={arrow} />
+        <KpiLink k="Managers" v={shown(totalManagers)} href={managersHref ?? undefined} icon={managersHref ? arrow : null} />
+        {/* "Response within 15 min (30 days)" is not computable: the leads API has no
+            first-response timestamp. What IS known is how many open clocks have
+            run past the 15-min target (lib/os/sla) — the same number the Leads queue shows. */}
+        <KpiLink
+          k={`Leads waiting > ${FIRST_RESPONSE_SLA_LABEL}`}
+          v={leads ? String(leadsWaitingOverSla) : (leadsErr ? '—' : '…')}
+          d={leads ? `${leadAwaitingReply.length} awaiting a first reply` : 'first-reply clock'}
+          href={leadsHref}
+          icon={arrow}
+          newTab={false}
+        />
+      </Kpis>
 
-        {/* Rent vs Market — one card, because the two figures only mean anything
-            against each other.
-            The two sides are ASYMMETRIC, and deliberately so (landlord's call,
-            5 Aug): Market is `marketRent`, every unit's rental value with no
-            occupancy filter, while Annual rent is the earning leases only
-            (EARNING_LEASE_IDS_SQL) — the platform's one 7.1M. The difference is
-            therefore the whole opportunity, under-renting and unlet stock
-            together, and the sub-line says as much rather than letting it read as
-            under-renting alone.
-            This card used to run like-for-like (asking on the LET units only,
-            9.1M) and so disagreed with Rent vs Asking, which ran wide. One of the
-            two had to move; the wide reading won, and both now state 9.85M. */}
-        <Link
+      {/* KPI row 2 — money and arrears. Rent vs Market and Deposits are live
+          snapshots; Overdue / Bounced / Bounce fees open their own drill-downs. */}
+      <Kpis>
+        <KpiLink
+          dark
+          k="Rent vs market"
+          icon={arrow}
           href={rentVsMarketHref}
-          {...NEW_TAB}
-          className="block bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)] hover:border-[var(--neutral-400)] hover:shadow-md transition-all"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1.5 min-h-[28px]">
-                <span className="text-[var(--primary-dark)]"><TrendingUp size={12} /></span>
-                Rent vs Market
-                {/* Arrow, not an eye: this LEAVES the page for Rent vs Asking —
-                    the same convention the Properties and Units tiles use, so a
-                    card never looks like it will do the thing it will not. */}
-                <ArrowUpRight size={12} className="text-[var(--neutral-400)]" />
-              </div>
-              <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                <span className="text-[30px] font-bold tracking-tight leading-none tabular-nums text-[var(--neutral-900)]">
-                  {rentPos ? fmtAed(rentPos.contracted) : (statsErr ? '—' : '…')}
-                </span>
-                <span className="text-[13px] text-[var(--neutral-400)] tabular-nums">
-                  {marketRent != null ? `of ${fmtAed(marketRent)} market` : ''}
-                </span>
-              </div>
-              {/* No sub-line. The card carries the two figures, the gap and the
-                  link, and nothing else.
-                  Two lines have lived here and both are gone by choice. The first
-                  editorialised ("Studios are 63% below asking · 95 of 103 let
-                  units under their own price") — a verdict on the landlord's
-                  pricing with no room for the reasons a unit sits under asking on
-                  purpose. The second named the two populations, because Market
-                  price counts EVERY unit while Annual rent counts only earning
-                  leases, so part of the 27.92% is unlet stock rather than
-                  under-renting. That distinction is real and now lives only in
-                  Rent vs Asking, which the card links to — its "What the
-                  difference is made of" panel splits the gap into the two halves
-                  in full. */}
-            </div>
+          v={rentPos ? fmtAed(rentPos.contracted) : (statsErr ? '—' : '…')}
+          d={<>
+            {marketRent != null ? `of ${fmtAed(marketRent)} market` : ''}
             {marketGapPct != null && (
-              <div className="text-right flex-shrink-0">
-                {/* Smaller than the money beside it. At 22px in amber this read
-                    as the card's headline, competing with the AED figure that
-                    actually is one — the percentage is a derived annotation on
-                    those two numbers, and now looks like one.
-                    Direction is carried by an arrow AND the colour, never colour
-                    alone: red-vs-green is invisible to the commonest form of
-                    colour blindness, and this is the one figure on the card that
-                    says whether the news is good. */}
-                <div className={`flex items-center justify-end gap-1 text-[15px] font-bold tabular-nums leading-none ${marketGapPct > 0 ? 'text-[#dc2626]' : 'text-[var(--primary-dark)]'}`}>
-                  {marketGapPct > 0
-                    ? <TrendingDown size={14} className="shrink-0" />
-                    : <TrendingUp size={14} className="shrink-0" />}
-                  {marketGapPct > 0 ? '−' : '+'}{Math.abs(marketGapPct).toFixed(2)}%
-                </div>
-                <div className="text-[9.5px] text-[var(--neutral-400)] mt-0.5">
-                  {marketGapPct > 0 ? 'below market' : 'above market'}
-                </div>
-              </div>
+              <span style={{ marginLeft: 6, fontWeight: 700, color: marketGapPct > 0 ? '#fca5a5' : '#86efac', whiteSpace: 'nowrap' }}>
+                {marketGapPct > 0 ? <TrendingDown size={11} aria-hidden style={{ verticalAlign: '-1px' }} /> : <TrendingUp size={11} aria-hidden style={{ verticalAlign: '-1px' }} />}
+                {' '}{marketGapPct > 0 ? '−' : '+'}{Math.abs(marketGapPct).toFixed(2)}% {marketGapPct > 0 ? 'below market' : 'above market'}
+              </span>
             )}
-          </div>
-        </Link>
+          </>}
+        />
+        <KpiLink
+          k="Deposits held"
+          icon={arrow}
+          href={depositsHref}
+          newTab={false}
+          v={fin ? fmtAed(fin.depositsHeld) : (finErr ? '—' : '…')}
+          d={fin ? `across ${fin.depositsHeldCount} leases` : undefined}
+        />
+        <KpiButton
+          k={<>Overdue{eye}</>}
+          v={fin ? fmtAed(fin.overdueAmount) : (finErr ? '—' : '…')}
+          d={fin ? `${fin.overdueCount} cheque${fin.overdueCount === 1 ? '' : 's'} past their date` : 'past due cheques'}
+          warn={(fin?.overdueCount ?? 0) > 0}
+          onClick={drillOverdue}
+          label="Open overdue cheques"
+        />
+        <KpiButton
+          k={<>Bounced{eye}</>}
+          v={fin ? fmtAed(fin.bouncedAmount) : (finErr ? '—' : '…')}
+          d={fin ? `${fin.bouncedCount} cheque${fin.bouncedCount === 1 ? '' : 's'} the bank refused${bouncedPartPaid ? ` · ${bouncedPartPaid} part-paid` : ''}` : 'returned cheques'}
+          warn={(fin?.bouncedCount ?? 0) > 0}
+          onClick={drillBounced}
+          label="Open bounced cheques"
+        />
+        {fin?.bounceFees && (
+          <KpiButton
+            k={<>Bounce fees{eye}</>}
+            v={fmtAed(fin.bounceFeesAmount ?? 0)}
+            d={`${fin.bounceFeesCount ?? 0} fee${fin.bounceFeesCount === 1 ? '' : 's'} not yet paid`}
+            warn={(fin.bounceFeesCount ?? 0) > 0}
+            onClick={drillBounceFees}
+            label="Open unpaid bounce fees"
+          />
+        )}
+      </Kpis>
 
-        {/* Deposits — the third money card, and the only one that is not the
-            landlord's own money. It was a small tile two sections down among
-            Properties and Units, which filed cash held against a customer's
-            tenancy under "how big is the portfolio".
-            Live like Rent vs Market, not range-driven like Receivables — the
-            section caption says which is which, since all three now sit in one
-            row and nothing else distinguishes them.
-            The figure comes from HELD_DEPOSIT_SQL, the platform's one deposit
-            rule, so it agrees with the Deposit Register exactly — and the whole
-            card opens the Security Deposits report, where that same figure is
-            broken out property by property. */}
-        <Link href={depositsHref} className="bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)] cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-md transition-all">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1.5 min-h-[28px]">
-                <span className="text-[var(--primary-dark)]"><ShieldCheck size={12} /></span>
-                Deposits Held
-                <ArrowUpRight size={12} className="text-[var(--neutral-400)] ml-1" />
+      {/* Receivables — hidden by SHOW_RECEIVABLES (SCRUM-737). Restoring it is
+          the flag: period select, cheque drill-down and Cash Management link. */}
+      {SHOW_RECEIVABLES && (
+        <div style={{ marginBottom: 14 }}>
+          <Card
+            title="Receivables"
+            sub={fin ? `${fmtAed(fin.receivablesSplit.collected.amount)} collected · ${fmtAed(fin.receivablesSplit.overdue.amount + fin.receivablesSplit.due.amount)} outstanding` : (finErr ? 'Not available' : 'Loading…')}
+            right={<>
+              <select className="gx-sel" aria-label="Receivables period" value={selectedRange} onChange={e => setSelectedRange(e.target.value as RangePreset)}>
+                {RANGE_PRESETS.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+              </select>
+              <Btn size="sm" onClick={drillReceivables} disabled={!fin}>Open cheques</Btn>
+              <Btn size="sm" href={cashManagementHref}>Open report</Btn>
+            </>}
+            pad
+          >
+            <div style={{ fontSize: 22, fontWeight: 800 }}>{fin ? fmtAed(fin.receivablesInRange) : (finErr ? '—' : '…')}</div>
+          </Card>
+        </div>
+      )}
+
+      {/* Occupancy | Upcoming renewals */}
+      <Cols kind="2e">
+        <Card
+          title="Occupancy rate"
+          sub={totalUnits ? `${occupied} of ${totalUnits} units let${stats?.leasedAhead ? ` · ${stats.leasedAhead} ${stats.leasedAhead === 1 ? 'starts' : 'start'} later` : ''}` : 'Across all units in your portfolio'}
+          pad
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: 150, height: 150, flexShrink: 0 }}>
+              <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }} aria-hidden>
+                <circle cx="50" cy="50" r="40" fill="none" stroke="var(--ms-surface-3)" strokeWidth="12" />
+                <circle cx="50" cy="50" r="40" fill="none" stroke="var(--ms-primary)" strokeWidth="12" strokeLinecap="round"
+                  strokeDasharray={`${(gaugePct / 100) * dashLen} ${dashLen}`} style={{ transition: 'stroke-dasharray .6s ease' }} />
+              </svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums' }}>{statsReady ? `${occupancyRate}%` : '…'}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>Occupancy</div>
+                </div>
               </div>
-              <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                <span className="text-[30px] font-bold tracking-tight leading-none tabular-nums text-[var(--neutral-900)]">
-                  {fin ? fmtAed(fin.depositsHeld) : (finErr ? '—' : '…')}
+            </div>
+            <div style={{ display: 'grid', gap: 8, flex: 1, minWidth: 180 }}>
+              {/* Both halves open: vacant = what is costing money, occupied = what is earning it. */}
+              <Btn size="sm" onClick={drillOccupied}><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--ms-primary)', display: 'inline-block' }} /> Occupied {statsReady ? occupied : '…'} · Open list</Btn>
+              <Btn size="sm" onClick={drillAvailable}><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--ms-border-strong)', display: 'inline-block' }} /> Vacant {statsReady ? available : '…'} · Open list</Btn>
+              {vacancyTotals && vacancyTotals.units > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--ms-ink-3)' }}>
+                  Empty for {fmtDuration(vacancyTotals.avgDaysVacant)} on average · {fmtAed(vacancyTotals.lostIncome)} foregone
                 </span>
-              </div>
-              {/* The lease count sits UNDER the amount, on the caption line the
-                  other money cards use, rather than trailing it on the baseline. */}
-              {fin && (
-                <p className="text-[12.5px] text-[var(--neutral-500)] mt-1.5 tabular-nums">
-                  across {fin.depositsHeldCount} leases
-                </p>
               )}
             </div>
           </div>
-        </Link>
-        </div>
-      </section>
+        </Card>
+        <RenewalsCard
+          list={renewalsList}
+          buckets={extras?.renewalBuckets}
+          loading={!extras}
+          error={extrasErr}
+          onRetry={() => fetchExtras(selectedRange, renewalWindow)}
+          windowDays={renewalWindow}
+          onWindowChange={setRenewalWindow}
+          allHref={renewalsPipelineHref}
+          onDrillBucket={drillRenewalBucket}
+          manager={manager}
+        />
+      </Cols>
 
-      {/* ── Section 3: ARREARS ────────────────────────────────────────────────
-          The two halves of what used to be one "Overdue / Bounced 13" tile in the
-          portfolio row. They are different problems and are worked differently:
-          an overdue cheque is rent whose date has passed and may simply not have
-          been banked, while a bounce is a cheque the bank refused — a customer
-          conversation, often a penalty, sometimes a replacement already in hand.
-          A single count told the landlord neither, and filed both under "how big
-          is the portfolio". Money is on each now, because 6 cheques and 7 cheques
-          say nothing about which matters more. */}
-      <section className="space-y-4">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
-            Arrears
-          </h2>
-          <span className="text-[11px] text-[var(--neutral-400)]">still to chase &mdash; excludes anything paid in full or already on a settlement</span>
-        </div>
-        <div className={`grid grid-cols-1 gap-4 ${fin?.bounceFees ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-          <KpiCard
-            icon={<Clock size={12} />}
-            label="Overdue"
-            value={fin ? fmtAed(fin.overdueAmount) : (finErr ? '—' : '…')}
-            sub={fin ? `${fin.overdueCount} cheque${fin.overdueCount === 1 ? '' : 's'} past their date` : 'past due cheques'}
-            tone={(fin?.overdueCount ?? 0) > 0 ? 'warn' : 'default'}
-            onClick={drillOverdue}
-          />
-          <KpiCard
-            icon={<AlertTriangle size={12} />}
-            label="Bounced"
-            value={fin ? fmtAed(fin.bouncedAmount) : (finErr ? '—' : '…')}
-            sub={fin ? `${fin.bouncedCount} cheque${fin.bouncedCount === 1 ? '' : 's'} the bank refused${bouncedPartPaid ? ` · ${bouncedPartPaid} part-paid` : ''}` : 'returned cheques'}
-            tone={(fin?.bouncedCount ?? 0) > 0 ? 'warn' : 'default'}
-            onClick={drillBounced}
-          />
-          {/* The penalty raised on each bounce. Bounced is rent only, so these
-              fees showed on no tile; they get their own rather than being added
-              into a rent figure. */}
-          {fin?.bounceFees && (
-            <KpiCard
-              icon={<Receipt size={12} />}
-              label="Bounce fees"
-              value={fmtAed(fin.bounceFeesAmount ?? 0)}
-              sub={`${fin.bounceFeesCount ?? 0} fee${fin.bounceFeesCount === 1 ? '' : 's'} not yet paid`}
-              tone={(fin.bounceFeesCount ?? 0) > 0 ? 'warn' : 'default'}
-              onClick={drillBounceFees}
-            />
+      {/* Where leads come from | Today */}
+      <Cols kind="2e">
+        <Card
+          title="Where your leads come from"
+          sub={leadStats ? `${leadStats.total} leads on record · ${leadStats.open} open · ${leadStats.new30} new in 30 days` : leadsErr ? 'Not available' : 'Loading…'}
+          right={<Btn size="sm" href={leadsHref}>Open leads</Btn>}
+          pad
+        >
+          {leadsErr && !leads ? (
+            <Callout tone="bad" title="Couldn't load leads.">
+              <Btn size="xs" onClick={() => { void fetchLeads(); }}>Try again</Btn>
+            </Callout>
+          ) : !leadStats ? (
+            <div style={{ display: 'grid', gap: 9 }}>{[0, 1, 2].map(i => <div key={i} className="gx-skel" style={{ height: 10 }} />)}</div>
+          ) : leadStats.sources.length === 0 ? (
+            <div className="gx-empty"><b>No leads yet</b> Enquiries from your published listings appear here by channel.</div>
+          ) : (
+            <Bars rows={leadStats.sources.slice(0, 8).map(([l, n]) => ({ l, pct: (n / leadStats.sources[0][1]) * 100, v: n }))} />
           )}
-        </div>
-      </section>
+        </Card>
+        <Card title="Viewings today" sub={`Viewings on ${fmtDayHeadingDubai(today)}`} right={<Btn size="sm" href={leadsHref}>Leads</Btn>} pad>
+          {leadsErr && !leads ? (
+            <Callout tone="bad" title="Couldn't load today's viewings.">
+              <Btn size="xs" onClick={() => { void fetchLeads(); }}>Try again</Btn>
+            </Callout>
+          ) : !leadStats ? (
+            <div style={{ display: 'grid', gap: 9 }}>{[0, 1, 2].map(i => <div key={i} className="gx-skel" style={{ height: 10 }} />)}</div>
+          ) : leadStats.viewingsToday.length === 0 ? (
+            <div className="gx-empty"><b>No viewings today</b> Viewings scheduled from Leads show here on the day.</div>
+          ) : (
+            <Timeline items={leadStats.viewingsToday.map(({ lead, v }, i, all) => {
+              const isPast = (x: { scheduledAt: string; status: string }) => x.status === 'completed' || new Date(x.scheduledAt).getTime() < nowMs;
+              // The first viewing still ahead is "now"; earlier ones are done.
+              const firstAhead = all.findIndex(x => !isPast(x.v));
+              return {
+                state: isPast(v) ? 'done' as const : i === firstAhead ? 'now' as const : undefined,
+                t: <Link href={leadHref(lead.id)} style={{ textDecoration: 'underline' }}>{fmtClock(v.scheduledAt)} · Viewing — {lead.customerName}</Link>,
+                s: [lead.unit ? `Unit ${lead.unit.unitNumber}` : null, lead.unit?.property?.buildingName, humanize(v.status)].filter(Boolean).join(' · '),
+              };
+            })} />
+          )}
+        </Card>
+      </Cols>
 
-      {/* ── Section 3b: BREACH & LEGAL ────────────────────────────────────────
-          What the legal module is waiting on the landlord for: a correction
-          deadline that has passed, a hearing this week, a notice still to be
-          served. Absent entirely when nothing is open — most portfolios, most
-          days — so the page does not carry an empty legal panel. */}
+      {/* Unit performance — the vacant units, longest empty first. */}
+      <div style={{ marginBottom: 14 }}>
+        <TableWrap toolbar={<>
+          <strong style={{ fontSize: 13 }}>Vacant units</strong>
+          <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>longest empty first · what each has cost</span>
+          <span style={{ marginLeft: 'auto' }}><Btn size="sm" href={unitsHref}>All units</Btn></span>
+        </>}>
+          {!statsReady ? (
+            <table className="gx-tbl"><SkeletonRows rows={4} cols={5} /></table>
+          ) : (
+            <VacancyTable units={vacantUnits} totals={vacancyTotals} manager={manager} limit={8} onShowAll={drillAvailable} />
+          )}
+        </TableWrap>
+      </div>
+
+      {/* Breach & legal — absent entirely when nothing is open. */}
       {legal && (legal.counts.breaches > 0 || legal.counts.disputes > 0) && (
-        <section className="space-y-4">
+        <div style={{ marginBottom: 14 }}>
           <LegalCard
             counts={legal.counts}
             open={legal.open}
-            legalBase={manager ? `/dashboard/manager/legal` : '/rental-provider/dashboard/legal'}
+            legalBase={legalBase}
             opsBase={manager ? '/dashboard/manager/operations' : '/rental-provider/dashboard/operations'}
             rp={manager?.rp}
           />
-        </section>
+        </div>
       )}
 
-      {/* ── Section 4: OCCUPANCY & RENEWALS ───────────────────────────────
-          The same live state as the strip above, at the size these two need:
-          a donut and a four-bucket renewal board do not fit in a tile. Split
-          out of "Right now" when the strip moved to the top of the page — one
-          section cannot both open the page and sit under the money. */}
-      <section className="space-y-4">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
-        {/* Gauge */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)]">
-          <div className="flex items-start justify-between mb-1">
-            <div>
-              <h3 className="text-base font-bold text-[var(--neutral-900)]">Occupancy Rate</h3>
-              {/* The denominator, named. "Across all units in your portfolio"
-                  described the scope without ever saying what it was, so the
-                  percentage had no total to be read against. */}
-              <p className="text-xs text-[var(--neutral-400)] mt-0.5">
-                {totalUnits ? `${occupied} of ${totalUnits} units let${stats?.leasedAhead ? ` · ${stats.leasedAhead} ${stats.leasedAhead === 1 ? 'starts' : 'start'} later` : ''}` : 'Across all units in your portfolio'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center justify-center py-4">
-            <div className="relative w-[200px] h-[200px]">
-              <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                <circle cx="50" cy="50" r="40" fill="none" stroke="var(--base-200)" strokeWidth="12" />
-                <circle
-                  cx="50" cy="50" r="40" fill="none"
-                  stroke="var(--primary)" strokeWidth="12" strokeLinecap="round"
-                  strokeDasharray={`${(gaugePct / 100) * dashLen} ${dashLen}`}
-                  style={{ transition: 'stroke-dasharray .6s ease' }}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[36px] font-bold tracking-tight text-[var(--neutral-900)] tabular-nums leading-none">{statsReady ? `${occupancyRate}%` : '…'}</span>
-                <span className="text-xs text-[var(--neutral-400)] mt-1.5">Occupancy</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-center gap-6 text-[13px] text-[var(--neutral-700)] font-medium">
-{/* Occupied is the donut's other segment and has to be named, but it is a
-                label only — the vacant units are the ones worth opening. */}
-            <button type="button" onClick={drillOccupied} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--primary)]" />Occupied {statsReady ? occupied : '…'}</button>
-            <button type="button" onClick={drillAvailable} className="flex items-center gap-2 hover:underline cursor-pointer"><span className="w-2.5 h-2.5 rounded-sm bg-[var(--base-200)]" />Vacant {statsReady ? available : '…'}</button>
-          </div>
-          {/* How long each of those vacant units has been empty, and what it has
-              cost, lives one click away — the "Vacant N" legend and the Vacant
-              tile both open it. The card itself stays the rate. */}
-        </div>
-          <RenewalsCard
-            list={renewalsList}
-            buckets={extras?.renewalBuckets}
-            loading={!extras}
-            error={extrasErr}
-            onRetry={() => fetchExtras(selectedRange, renewalWindow)}
-            windowDays={renewalWindow}
-            onWindowChange={setRenewalWindow}
-            allHref={renewalsPipelineHref}
-            onDrillBucket={drillRenewalBucket}
-          />
-        </div>
-      </section>
-
-      {/* ── Section 5: MANAGERS ───────────────────────────────────────────────
-          The board already renders one column per manager; what it lacked was a
-          section heading, so it read as a loose panel at the foot of the page
-          rather than the last row of a structured dashboard. The count here is
-          the same `totalManagers` the Managers tile at the top states.
-
-          Live manager activity.
-          Recent Activity and Upcoming Renewals both stood here and are gone.
-          Recent Activity was a range-scoped digest of contracts and payments —
-          the same records the Receivables and Renewals figures above already
-          state, retold as a list. Upcoming Renewals repeated the Renewals KPI's
-          own rows one card lower, with the same horizon and the same five
-          leases; the tile opens them.
-          What replaces both is the thing no other panel on this page says: what
-          the people running the portfolio are doing right now. */}
-      <section className="space-y-4">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[11px] font-bold tracking-[0.14em] uppercase text-[var(--neutral-400)]">
-            Managers
-          </h2>
-          <span className="text-[11px] text-[var(--neutral-400)]">
-            {totalManagers === 0 ? 'nobody has access to this portfolio' : `${totalManagers} with access · what they are doing today`}
-          </span>
-          {/* The Team page is the full picture — status, trend, breakdown,
-              per-person figures over a period. Landlord-only, like this
-              section's data; the manager portal has no counterpart. */}
-          {!manager && (
-            <Link href="/rental-provider/dashboard/team" className="ml-auto text-[11px] font-semibold text-[var(--primary-dark)] hover:underline inline-flex items-center gap-1">
-              Team page <ArrowUpRight size={11} />
-            </Link>
-          )}
-        </div>
+      {/* Managers — live activity. */}
+      <Card
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>Manager activity <Pill tone="primary">Live</Pill></span>}
+        sub={totalManagers === 0 ? 'nobody has access to this portfolio' : `${totalManagers} with access · what they are doing today · refreshes every 5s · click a row to see what changed`}
+        right={!manager ? <Btn size="sm" href="/rental-provider/dashboard/team">Team page</Btn> : undefined}
+      >
         <LiveActivity feed={feed} error={feedErr} onRetry={fetchFeed} contractBase={contractBase} leadsBase={leadsBase} />
-      </section>
+      </Card>
 
       <DrillDown drill={drill} onClose={() => setDrill(null)} />
-    </div>
+    </OsPage>
   );
 }
 
-function clickableProps(onClick?: () => void) {
-  if (!onClick) return {};
-  return {
-    role: 'button' as const,
-    tabIndex: 0,
-    onClick,
-    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } },
-  };
-}
+/* ─── Local KPI variants (the kit Kpi has no onClick / no rel on new tab) ─── */
 
-/** A headline KPI tile. Give it `href` to navigate to the page that owns the
- *  records (Properties → the portfolio, Units → the units list) or `onClick` to
- *  open a drill-down over them — the arrow vs the eye in the corner is which one
- *  it is, so a tile never looks like it will do the thing it does not do. */
-function KpiCard({ icon, label, value, sub, tone = 'default', onClick, href }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  /** Optional — the portfolio strip runs without captions; the Arrears row keeps
-   *  them, because an arrears figure is meaningless without saying what it counts. */
-  sub?: string;
-  tone?: 'default' | 'warn';
-  onClick?: () => void;
-  href?: string;
+function KpiLink({ k, v, d, href, dark, icon, newTab = true }: {
+  k: string; v: ReactNode; d?: ReactNode; href?: string; dark?: boolean; icon?: ReactNode; newTab?: boolean;
 }) {
-  const interactive = !!(href || onClick);
-  const inner = (
-    <>
-      <div className="text-[11px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] inline-flex items-center gap-1.5">
-        <span className={tone === 'warn' ? 'text-amber-600' : 'text-[var(--primary-dark)]'}>{icon}</span>
-        {label}
-        {href
-          ? <ArrowUpRight size={12} className="text-[var(--neutral-400)] ml-auto" />
-          : onClick && <Eye size={11} className="text-[var(--neutral-400)] ml-auto" />}
-      </div>
-      <div className="text-[30px] font-bold tracking-tight leading-none tabular-nums text-[var(--neutral-900)]">{value}</div>
-      {sub && <div className="text-[12.5px] text-[var(--neutral-400)] font-medium">{sub}</div>}
-    </>
-  );
-  const cls = `bg-white rounded-2xl p-5 shadow-sm border border-[var(--base-200)] flex flex-col gap-2${interactive ? ' cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-md transition-all' : ''}`;
+  const body = <><div className="k">{k}{icon}</div><div className="v">{v}</div>{d && <div className="d">{d}</div>}</>;
   return href
-    ? <Link href={href} {...NEW_TAB} className={cls}>{inner}</Link>
-    : <div {...clickableProps(onClick)} className={cls}>{inner}</div>;
+    ? <Link href={href} className={cn('gx-kpi', dark && 'dark')} {...(newTab ? NEW_TAB : {})}>{body}</Link>
+    : <div className={cn('gx-kpi', dark && 'dark')}>{body}</div>;
 }
 
-function KpiMini({ label, value, sub, tone = 'default', onClick, control }: {
-  label: string;
-  value: string;
-  sub: string;
-  tone?: 'default' | 'danger';
-  onClick?: () => void;
-  /** A small input in the tile header (e.g. a horizon picker). Its clicks and
-   *  keystrokes are stopped here so using the control never also opens the
-   *  tile's drill-down — the whole tile is a button. */
-  control?: React.ReactNode;
+function KpiButton({ k, v, d, warn, onClick, label }: {
+  k: ReactNode; v: ReactNode; d?: ReactNode; warn?: boolean; onClick: () => void; label: string;
 }) {
   return (
-    <div
-      {...clickableProps(onClick)}
-      className={`bg-white rounded-xl p-4 shadow-sm border border-[var(--base-200)]${onClick ? ' cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-md transition-all' : ''}`}
-    >
-      <div className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-[var(--neutral-400)] flex items-center gap-1.5">
-        {label}
-        {control && (
-          <span className="ml-auto" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
-            {control}
-          </span>
-        )}
-        {onClick && <Eye size={10} className={`text-[var(--neutral-400)]${control ? '' : ' ml-auto'}`} />}
-      </div>
-      <div className={`text-[22px] font-bold tracking-tight mt-1.5 tabular-nums ${tone === 'danger' ? 'text-red-600' : 'text-[var(--neutral-900)]'}`}>{value}</div>
-      <div className="text-[11.5px] text-[var(--neutral-400)] mt-0.5">{sub}</div>
-    </div>
+    <button type="button" className="gx-kpi" onClick={onClick} aria-label={label} style={{ textAlign: 'left', cursor: 'pointer' }}>
+      <div className="k" style={warn ? { color: 'var(--ms-amber-text)' } : undefined}>{k}</div>
+      <div className="v">{v}</div>
+      {d && <div className="d">{d}</div>}
+    </button>
   );
 }
 
-const DRILL_TONE: Record<BadgeTone, { bg: string; fg: string }> = {
-  green:  { bg: '#dcfce7', fg: '#166534' },
-  amber:  { bg: '#fef3c7', fg: '#92400e' },
-  red:    { bg: '#fee2e2', fg: '#991b1b' },
-  indigo: { bg: '#e0e7ff', fg: '#3730a3' },
-  gray:   { bg: '#f3f4f6', fg: '#374151' },
+/* ─── Drill-down drawer ─────────────────────────────────────────────────── */
+
+const SUMMARY_COLOR: Record<'green' | 'amber' | 'red', string> = {
+  green: 'var(--ms-primary-dark)', amber: 'var(--ms-amber-text)', red: 'var(--ms-danger)',
 };
 
 function DrillDown({ drill, onClose }: { drill: DrillState | null; onClose: () => void }) {
-  if (!drill) return null;
-  const total = drill.groups.reduce((s, g) => s + g.rows.length, 0);
-  const renderRow = (r: DrillRow) => {
-    const inner = (
-      <>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-semibold text-[var(--neutral-900)] truncate">{r.title}</p>
-          {r.subtitle && <p className="text-[11.5px] text-[var(--neutral-400)] truncate">{r.subtitle}</p>}
-        </div>
-        {r.badges?.map((b, bi) => (
-          <span key={bi} className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: DRILL_TONE[b.tone].bg, color: DRILL_TONE[b.tone].fg }}>{b.label}</span>
-        ))}
-        {/* Its own column, tabular — so the amounts form a readable stack
-            instead of ending each name at a different place. */}
-        {r.amount && (
-          <span className="text-[13px] font-bold tabular-nums text-[var(--neutral-900)] shrink-0 text-right">{r.amount}</span>
-        )}
-      </>
-    );
-    return r.href
-      ? <Link key={r.key} href={r.href} {...NEW_TAB} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)]">{inner}</Link>
-      : <div key={r.key} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg">{inner}</div>;
-  };
+  const total = drill ? drill.groups.reduce((s, g) => s + g.rows.length, 0) : 0;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={onClose} role="dialog" aria-modal="true">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={e => e.stopPropagation()}>
-        <div className="p-5 border-b border-[var(--base-200)]">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-bold text-[var(--neutral-900)]">{drill.title}</h3>
-              {/* The headline sits on its own line at full size. It used to be
-                  welded to the title ("Receivables · This Month — AED 346,175"),
-                  where the figure the dialog is about read as part of a label. */}
-              {drill.headline && (
-                <p className="text-[28px] font-bold tracking-tight tabular-nums text-[var(--neutral-900)] leading-none mt-1.5">{drill.headline}</p>
-              )}
-            </div>
-            <button type="button" onClick={onClose} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
-          </div>
-          {/* The split, as figures. Three boxes with a label each beat one
-              sentence carrying three numbers — which is what this was. */}
+    <Drawer open={!!drill} onClose={onClose} title={drill?.title ?? ''}>
+      {drill && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {drill.headline && <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums' }}>{drill.headline}</div>}
           {drill.summary && drill.summary.length > 0 && (
-            <div className="grid grid-cols-3 gap-2 mt-4">
-              {drill.summary.map(sItem => (
-                <div key={sItem.label} className="rounded-xl border border-[var(--base-200)] bg-[var(--base-100)] px-3 py-2">
-                  <div className="text-[10px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-400)]">{sItem.label}</div>
-                  <div className={`text-[15px] font-bold tabular-nums mt-0.5 ${
-                    sItem.tone === 'green' ? 'text-[#15803d]'
-                    : sItem.tone === 'red' ? 'text-[#dc2626]'
-                    : sItem.tone === 'amber' ? 'text-[#b45309]'
-                    : 'text-[var(--neutral-900)]'}`}>{sItem.value}</div>
-                </div>
-              ))}
-            </div>
+            <KV items={drill.summary.map(s => ({ k: s.label, v: <span style={{ fontWeight: 700, color: s.tone ? SUMMARY_COLOR[s.tone] : undefined }}>{s.value}</span> }))} />
           )}
-          {/* Method, not money — small, last, and skippable. */}
-          {drill.note && <p className="text-[11px] text-[var(--neutral-400)] mt-3 leading-snug">{drill.note}</p>}
-        </div>
-        <div className="overflow-y-auto p-3">
+          {drill.note && <p style={{ fontSize: 11, color: 'var(--ms-ink-3)', lineHeight: 1.5 }}>{drill.note}</p>}
           {drill.loading ? (
-            <p className="text-sm text-[var(--neutral-400)] text-center py-8">Loading…</p>
+            <div style={{ display: 'grid', gap: 9 }}>{[0, 1, 2, 3].map(i => <div key={i} className="gx-skel" style={{ height: 12 }} />)}</div>
           ) : drill.panel ? (
-            drill.panel
+            <div className="gx-tbl-wrap"><div className="gx-tbl-scroll">{drill.panel}</div></div>
           ) : total === 0 ? (
-            <p className="text-sm text-[var(--neutral-400)] text-center py-8">Nothing to show.</p>
+            <div className="gx-empty"><b>Nothing to show.</b></div>
           ) : drill.groups.map((g, gi) => (
-            <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
-              {/* A real divider, not a faint caption. The sections ARE the
-                  division the reader is looking for. */}
-              {g.label && (
-                <p className="text-[11px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-700)] bg-[var(--base-100)] rounded-lg px-3 py-2 mb-1 mt-2 sticky top-0 z-10">{g.label}</p>
-              )}
-              {g.rows.map(renderRow)}
+            <div key={gi}>
+              {g.label && <div className="gx-eyebrow" style={{ margin: '4px 0 6px' }}>{g.label}</div>}
+              <div className="gx-tbl-wrap"><div className="gx-tbl-scroll">
+                <table className="gx-tbl">
+                  <tbody>
+                    {g.rows.map(r => (
+                      <tr key={r.key}>
+                        <td className="strong">{r.title}{r.subtitle && <span className="sub">{r.subtitle}</span>}</td>
+                        <td className="nowrap">{r.badges?.map((b, bi) => <span key={bi} style={{ marginRight: 4 }}><Pill tone={PILL_TONE[b.tone]}>{b.label}</Pill></span>)}</td>
+                        {r.amount != null && <td className="num strong">{r.amount}</td>}
+                        <td className="act">{r.href ? <OpenLink href={r.href} /> : null}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div></div>
             </div>
           ))}
         </div>
-      </div>
-    </div>
+      )}
+    </Drawer>
   );
 }
 
-function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="py-6 text-center">
-      <AlertTriangle size={20} className="text-red-500 mx-auto mb-2" />
-      <p className="text-sm text-[var(--neutral-700)] font-semibold">{message}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-[var(--neutral-700)] bg-white border border-[var(--base-200)] hover:border-[var(--neutral-500)] cursor-pointer"
-      >
-        <RefreshCw size={12} /> Try again
-      </button>
-    </div>
-  );
-}
+/* ─── Breach & legal ────────────────────────────────────────────────────── */
 
-function ActivitySkeleton({ rows = 5 }: { rows?: number }) {
-  return (
-    <div className="flex flex-col">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="grid grid-cols-[32px_1fr_60px] gap-3 items-center py-3 border-b border-[var(--base-200)] last:border-0">
-          <div className="w-8 h-8 rounded-full bg-[var(--base-100)] animate-pulse" />
-          <div className="space-y-1.5">
-            <div className="h-3 bg-[var(--base-100)] rounded animate-pulse w-3/4" />
-            <div className="h-2.5 bg-[var(--base-100)] rounded animate-pulse w-1/2" />
-          </div>
-          <div className="h-2.5 bg-[var(--base-100)] rounded animate-pulse" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** Activity category chip tint. Same palette and same grouping as the Manager
- *  Operations report's "Manager activity" section, because this
- *  panel is that section: a landlord who reads both should not have to learn
- *  two colour systems for one vocabulary. */
-const CATEGORY_TINT: Record<string, string> = {
-  Leads: 'bg-[#e0f2fe] text-[#0369a1]', Customers: 'bg-[#e0f2fe] text-[#0369a1]',
-  Signature: 'bg-[#ede9fe] text-[#5b21b6]',
-  Termination: 'bg-[#fee2e2] text-[#b91c1c]', Settlement: 'bg-[#fee2e2] text-[#b91c1c]',
-  Payments: 'bg-[#fef3c7] text-[#92400e]', Registration: 'bg-[#fef3c7] text-[#92400e]',
-  Properties: 'bg-[#d8f2e8] text-[#1a7a5a]', Units: 'bg-[#d8f2e8] text-[#1a7a5a]', Listings: 'bg-[#d8f2e8] text-[#1a7a5a]',
-  Contracts: 'bg-[#d1f0ea] text-[#0f766e]', Inspection: 'bg-[#d1f0ea] text-[#0f766e]', Renewal: 'bg-[#d1f0ea] text-[#0f766e]',
-  Documents: 'bg-[#eef2f7] text-[#475569]',
-  Team: 'bg-[#f3eefe] text-[#6d28d9]', Templates: 'bg-[#f3eefe] text-[#6d28d9]', AMC: 'bg-[#f3eefe] text-[#6d28d9]', Settings: 'bg-[#f3eefe] text-[#6d28d9]',
-  Viewing: 'bg-[#f4f3ef] text-[#9b9890]', Session: 'bg-[#eef2f7] text-[#475569]',
-};
-const categoryTint = (c: string) => CATEGORY_TINT[c] ?? 'bg-[#f4f3ef] text-[#6b6860]';
-const fmtClock = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-AE', { timeZone: APP_TIME_ZONE, hour: 'numeric', minute: '2-digit' });
-/** 'YYYY-MM-DD' → 'Tue, 4 Aug 2026'. The string is ALREADY a Dubai calendar day,
- *  so it is read back as UTC — re-interpreting it in the viewer's zone is what
- *  would shift the header off the day the rows were grouped under. */
-const fmtDayHeading = (day: string) =>
-  new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AE', {
-    timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  });
-
-/** Upcoming renewals, split into the four states a lease can be in.
- *
- *  The four are a PARTITION — they sum to the headline, which is what makes them
- *  readable as a breakdown of it rather than four overlapping filters. That is
- *  also why the headline changed meaning: it used to count renewals with work
- *  OUTSTANDING (accepted renewals and agreed terminations were filtered out of
- *  the list entirely), and under that rule "Renewed" and "Vacating" could only
- *  ever be zero — the rows that define them were the ones being excluded.
- *
- *  `noticeDue` is the only bucket that is the landlord's OWN next action, so it
- *  is the one that reads as work; Notice Sent is a wait on the customer, and the
- *  other two are settled. Every bucket renders even at 0 — a missing tile reads
- *  as "not measured", a 0 reads as "none", and those are different answers. */
-/** The Breach & legal card (owner, 15 Sep 2026: "only keep Open breaches and
- *  Open cases; on click show the units with their last state — nothing messy").
- *  Two tiles; clicking one lists that tile's open records, one line each: the
+/** Two tiles; clicking one lists that tile's open records, one line each: the
  *  unit, the customer, and the stage the record is at now. A breach opens on
  *  its lease, a case on its Legal page. Manager routes carry `?rp=`. */
 function LegalCard({ counts, open, legalBase, opsBase, rp }: {
@@ -2051,85 +2134,54 @@ function LegalCard({ counts, open, legalBase, opsBase, rp }: {
 }) {
   const q = rp != null ? `?rp=${rp}` : '';
   const [pick, setPick] = useState<'breaches' | 'cases' | null>(null);
-  useEffect(() => {
-    if (!pick) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPick(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [pick]);
   const rows = pick === 'breaches' ? (open?.breaches ?? []) : pick === 'cases' ? (open?.cases ?? []) : [];
   const fmt = (d: string | null) =>
     d ? new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short' }) : null;
   const hrefOf = (r: OpenRecord) => (pick === 'cases' ? `${legalBase}/${r.id}${q}` : `${opsBase}/${r.leaseId}${q}#sec-breaches`);
-  const tile = (key: 'breaches' | 'cases', label: string, n: number, bg: string, fg: string) => (
-    <button type="button" onClick={() => setPick(key)}
-      className="rounded-xl px-4 py-3 text-left transition hover:brightness-95"
-      style={{ background: bg }}>
-      <div className="text-[10px] font-bold tracking-[0.1em] uppercase" style={{ color: fg }}>{label}</div>
-      <div className="text-2xl font-bold tabular-nums leading-tight mt-0.5" style={{ color: fg }}>{n}</div>
-    </button>
-  );
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)] flex flex-col">
-      <div className="flex items-start justify-between gap-3 mb-1">
-        <div>
-          <h3 className="text-base font-bold text-[var(--neutral-900)] flex items-center gap-2"><Scale size={16} className="text-[#5b3fbf]" /> Breach &amp; legal</h3>
-          <p className="text-xs text-[var(--neutral-400)] mt-0.5">Click a figure to see the units and where each one stands.</p>
-        </div>
-        <Link href={`${legalBase}${q}`} className="text-[11px] font-semibold text-[var(--primary-dark)] hover:underline inline-flex items-center gap-1">
-          Legal <ArrowUpRight size={11} />
-        </Link>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mt-4">
-        {tile('breaches', 'Open breaches', counts.breaches, '#fff4e0', '#9a5b00')}
-        {tile('cases', 'Open cases', counts.disputes, '#ece9fd', '#5b3fbf')}
-      </div>
-      {/* The list opens as a popup over the page (owner, 15 Sep 2026: "in
-          the form of a popup instead of showing below"), the same dialog
-          shell as the money drill-downs. */}
-      {pick && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={() => setPick(null)} role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-[var(--base-200)] flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold text-[var(--neutral-900)] flex items-center gap-2">
-                  <Scale size={16} className="text-[#5b3fbf]" /> {pick === 'cases' ? 'Open cases' : 'Open breaches'}
-                </h3>
-                <p className="text-[12px] text-[var(--neutral-400)] mt-0.5">{rows.length} {pick === 'cases' ? (rows.length === 1 ? 'case' : 'cases') : (rows.length === 1 ? 'breach' : 'breaches')} · each with the stage it is at now</p>
-              </div>
-              <button type="button" onClick={() => setPick(null)} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
-            </div>
-            <div className="overflow-y-auto p-2">
-              {rows.length === 0 && <p className="text-[12px] text-[var(--neutral-400)] px-3 py-4">Nothing open.</p>}
-              {rows.map(r => {
-                const when = fmt(r.nextDate);
-                const tone = pick === 'cases' ? { bg: '#ece9fd', fg: '#5b3fbf' } : { bg: '#fff4e0', fg: '#9a5b00' };
-                return (
-                  <Link key={`${pick}-${r.id}`} href={hrefOf(r)}
-                    className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg hover:bg-[var(--base-100)] transition-colors">
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-[var(--neutral-900)] leading-tight truncate">
-                        {r.unitNumber ? `Unit ${r.unitNumber}` : 'Unit —'}{r.buildingName ? <span className="font-normal text-[var(--neutral-500)]"> · {r.buildingName}</span> : null}
-                      </div>
-                      <div className="text-[11px] text-[var(--neutral-400)] mt-0.5 truncate">{[r.customerName, r.label].filter(Boolean).join(' · ')}</div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10.5px] font-bold px-2 py-[3px] rounded-full whitespace-nowrap" style={{ background: tone.bg, color: tone.fg }}>{r.stageLabel}</span>
-                      {when && <span className="text-[11px] font-medium tabular-nums text-[var(--neutral-500)]">{when}</span>}
-                      <ArrowUpRight size={12} className="text-[var(--neutral-400)]" />
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    <Card title="Breach & legal" sub="Open a figure to see the units and where each one stands." right={<Btn size="sm" href={`${legalBase}${q}`}>Legal</Btn>} pad>
+      <Kpis>
+        <KpiButton k={<>Open breaches<Eye size={10} aria-hidden style={{ marginLeft: 4 }} /></>} v={counts.breaches} warn={counts.breaches > 0} onClick={() => setPick('breaches')} label="Open breaches list" />
+        <KpiButton k={<>Open cases<Eye size={10} aria-hidden style={{ marginLeft: 4 }} /></>} v={counts.disputes} warn={counts.disputes > 0} onClick={() => setPick('cases')} label="Open cases list" />
+      </Kpis>
+      <Drawer
+        open={pick != null}
+        onClose={() => setPick(null)}
+        title={pick === 'cases' ? 'Open cases' : 'Open breaches'}
+        sub={`${rows.length} ${pick === 'cases' ? (rows.length === 1 ? 'case' : 'cases') : (rows.length === 1 ? 'breach' : 'breaches')} · each with the stage it is at now`}
+      >
+        <div className="gx-tbl-wrap"><div className="gx-tbl-scroll">
+          <table className="gx-tbl">
+            <thead><tr><th>Unit</th><th>Stage</th><th>Next</th><th className="act" aria-label="Actions" /></tr></thead>
+            {rows.length === 0 ? <EmptyRow cols={4} title="Nothing open." /> : (
+              <tbody>
+                {rows.map(r => (
+                  <tr key={`${pick}-${r.id}`}>
+                    <td className="strong">
+                      {r.unitNumber ? `Unit ${r.unitNumber}` : 'Unit —'}{r.buildingName ? ` · ${r.buildingName}` : ''}
+                      <span className="sub">{[r.customerName, r.label].filter(Boolean).join(' · ')}</span>
+                    </td>
+                    <td><Pill tone={pick === 'cases' ? 'info' : 'amber'}>{r.stageLabel}</Pill></td>
+                    <td className="nowrap">{fmt(r.nextDate) ?? '—'}</td>
+                    <td className="act"><OpenLink href={hrefOf(r)} newTab={false} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            )}
+          </table>
+        </div></div>
+      </Drawer>
+    </Card>
   );
 }
 
-function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWindowChange, allHref, onDrillBucket }: {
+/* ─── Upcoming renewals ─────────────────────────────────────────────────── */
+
+/** Upcoming renewals split into the states a lease can be in — a PARTITION
+ *  that sums to the headline. `noticeDue` is the landlord's own next action;
+ *  Notice Sent waits on the customer; Agreed / Declined are settled. Every
+ *  bucket renders even at 0 (Declined only once there is one). */
+function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWindowChange, allHref, onDrillBucket, manager }: {
   list: UpcomingRenewal[];
   buckets?: Record<RenewalBucket, number>;
   loading: boolean;
@@ -2140,125 +2192,77 @@ function RenewalsCard({ list, buckets, loading, error, onRetry, windowDays, onWi
   /** Operations → Renewal tab, with the portal's own prefix already applied. */
   allHref: string;
   onDrillBucket: (b: RenewalBucket) => void;
+  manager?: { rp: number };
 }) {
-  // Fall back to counting the list when the API predates `renewalBuckets`, so
-  // the card degrades to the right numbers rather than to four zeroes.
+  // Fall back to counting the list when the API predates `renewalBuckets`.
   const counts = buckets ?? list.reduce((acc, r) => {
     const k = r.bucket ?? 'noticeDue';
     acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, { renewed: 0, noticeSent: 0, noticeDue: 0, newCustomer: 0, vacating: 0 } as Record<RenewalBucket, number>);
   const total = RENEWAL_BUCKETS.reduce((n, b) => n + (counts[b.key] ?? 0), 0);
-  // Declined is rare and has no tile until it happens; its units are still in the
-  // total, which is what keeps the card equal to the Renewal Plan.
   const tiles = RENEWAL_BUCKETS.filter(b => b.key !== 'vacating' || (counts.vacating ?? 0) > 0);
+  // The soonest terms coming to an end, as a timeline.
+  const next = list.filter(r => r.placedBy !== 'start').slice().sort((a, b) => a.daysUntilEnd - b.daysUntilEnd).slice(0, 5);
+  const termDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-[var(--base-200)] flex flex-col">
-      <div className="flex items-start justify-between gap-3 mb-1">
-        <div>
-          <h3 className="text-base font-bold text-[var(--neutral-900)]">Upcoming Renewals</h3>
-          <p className="text-xs text-[var(--neutral-400)] mt-0.5">
-            {loading
-              ? 'Loading…'
-              : `${total} renewal${total === 1 ? '' : 's'} this month and the next ${windowDays} days`}
-          </p>
-        </div>
-        <select
-          value={windowDays}
-          onChange={e => onWindowChange(Number(e.target.value) as RenewalWindow)}
-          aria-label="Renewal horizon"
-          className="text-[10.5px] font-bold tracking-normal uppercase text-[var(--neutral-500)] bg-[var(--base-100)] border border-[var(--base-200)] rounded-md pl-1.5 pr-0.5 py-1 cursor-pointer hover:border-[var(--neutral-400)] focus:outline-none focus:border-[var(--primary)]"
-        >
+    <Card
+      title="Upcoming renewals"
+      sub={loading ? 'Loading…' : `${total} renewal${total === 1 ? '' : 's'} this month and the next ${windowDays} days`}
+      right={
+        <select className="gx-sel" value={windowDays} onChange={e => onWindowChange(Number(e.target.value) as RenewalWindow)} aria-label="Renewal horizon" style={{ height: 28 }}>
           {RENEWAL_WINDOWS.map(w => <option key={w} value={w}>{w} days</option>)}
         </select>
-      </div>
-
+      }
+      pad
+    >
       {error && loading ? (
-        <SectionError message="Couldn't load renewals." onRetry={onRetry} />
+        <Callout tone="bad" title="Couldn't load renewals."><Btn size="xs" onClick={onRetry}>Try again</Btn></Callout>
       ) : (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+        <div style={{ display: 'grid', gap: 12 }}>
+          <Bars rows={tiles.map(b => ({
+            l: `${b.label} — ${b.hint}`,
+            pct: total ? ((counts[b.key] ?? 0) / total) * 100 : 0,
+            v: loading ? '…' : (counts[b.key] ?? 0),
+            tone: b.tone === 'amber' ? 'amber' as const : b.tone === 'red' ? 'danger' as const : undefined,
+          }))} />
+          <div className="gx-btn-row">
             {tiles.map(b => {
               const n = counts[b.key] ?? 0;
-              const t = DRILL_TONE[b.tone];
               return (
-                <button
-                  key={b.key}
-                  type="button"
-                  onClick={() => n > 0 && onDrillBucket(b.key)}
-                  disabled={n === 0}
-                  className={`text-left rounded-xl border border-[var(--base-200)] px-3 py-3 transition-all${n > 0 ? ' cursor-pointer hover:border-[var(--neutral-400)] hover:shadow-sm' : ' opacity-60 cursor-default'}`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: t.fg }} />
-                    <span className="text-[10.5px] font-bold tracking-[0.08em] uppercase text-[var(--neutral-400)] truncate">{b.label}</span>
-                  </div>
-                  <div className="text-[26px] font-bold tracking-tight tabular-nums leading-none mt-1.5 text-[var(--neutral-900)]">
-                    {loading ? '…' : n}
-                  </div>
-                  <div className="text-[11px] text-[var(--neutral-400)] mt-1 leading-snug">{b.hint}</div>
-                </button>
+                <Btn key={b.key} size="sm" onClick={() => onDrillBucket(b.key)} disabled={loading || n === 0}>
+                  Open {b.label} · {loading ? '…' : n}
+                </Btn>
               );
             })}
           </div>
-          {/* One stacked bar of the same four, so the shape of the pipeline is
-              readable without comparing four numbers. Segments carry a 2px gap
-              and the same colours as the tiles above them. */}
-          {total > 0 && (
-            <div className="flex gap-[2px] mt-4 h-2">
-              {tiles.map(b => {
-                const n = counts[b.key] ?? 0;
-                if (!n) return null;
-                return (
-                  <div
-                    key={b.key}
-                    className="rounded-full first:rounded-l-full last:rounded-r-full"
-                    style={{ width: `${(n / total) * 100}%`, background: DRILL_TONE[b.tone].fg }}
-                    title={`${b.label} ${n}`}
-                  />
-                );
-              })}
-            </div>
+          {next.length > 0 && (
+            <Timeline items={next.map(x => ({
+              state: x.daysUntilEnd <= 0 ? 'bad' as const : undefined,
+              mark: x.daysUntilEnd <= 0 ? '!' : undefined,
+              t: <Link href={contractHref(x.openContractId ?? x.contractId, x.openIn ?? 'lease', manager)} style={{ textDecoration: 'underline' }}>{x.unitLabel} · {x.tenantName ?? 'Customer'}</Link>,
+              s: <>{x.daysUntilEnd <= 0 ? `ended ${Math.abs(x.daysUntilEnd)}d ago` : `ends in ${x.daysUntilEnd}d`} · {termDay(x.endDate)} · <Pill tone={PILL_TONE[bucketBadge(x).tone]}>{bucketBadge(x).label}</Pill></>,
+            }))} />
           )}
-          {/* The renewals live in the Operations Renewal pipeline; that is where
-              they get worked, so the link goes there rather than to a read-only
-              list of the same leases. With none due there is nothing to open,
-              so the line stays plain text. */}
+          {/* Renewals are worked in the Operations Renewal pipeline. */}
           {total === 0 ? (
-            <span className="mt-4 text-xs font-semibold text-[var(--neutral-700)] opacity-50 self-start">
-              No renewals this month or in the next {windowDays} days
-            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>No renewals this month or in the next {windowDays} days</span>
           ) : (
-            <Link
-              href={allHref}
-              className="mt-4 text-xs font-semibold text-[var(--neutral-700)] hover:underline self-start cursor-pointer"
-            >
-              View all {total} renewals
-            </Link>
+            <span><Btn size="sm" href={allHref}>View all {total} renewals</Btn></span>
           )}
-        </>
+        </div>
       )}
-    </div>
+    </Card>
   );
 }
 
-/** Live manager activity — what the people running this portfolio are doing,
- *  re-read every 5 seconds.
- *
- *  Laid out as the Manager Operations report's "Manager activity" section:
- *  one block per manager, rows under the day they happened on,
- *  each row time · category · action · ×N · record, and clicking one opens what
- *  actually changed. The difference between the two is the window, not the
- *  shape — this one is always the last N actions and refreshes itself.
- *
- *  Ages are computed against the feed's OWN `generatedAt`, not the browser
- *  clock: the panel claims to be live, and a laptop a few minutes out of sync
- *  would quietly make every row lie about when it happened. `generatedAt` moves
- *  with each poll, so the ages advance on their own without a second timer.
- *
- *  A poll that fails leaves the last good rows on screen (see fetchFeed) — the
- *  error only takes the panel when there is nothing to show. */
+/* ─── Live manager activity ─────────────────────────────────────────────── */
+
+/** What the people running this portfolio are doing, re-read every 5 seconds.
+ *  One column per manager, rows under the day they happened on; clicking a row
+ *  opens what actually changed. Ages are computed against the feed's own
+ *  `generatedAt`, not the browser clock. A failed poll keeps the last rows. */
 function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
   feed: ManagerFeed | null;
   error: string | null;
@@ -2267,8 +2271,6 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
   leadsBase: string;
 }) {
   const [detail, setDetail] = useState<{ entry: FeedEntry; who: string } | null>(null);
-  // Never Date.now() here: it is impure in render, and there is no fallback to
-  // need — with no feed there are no rows whose age could be asked for.
   const now = feed ? new Date(feed.generatedAt).getTime() : 0;
   const ago = (iso: string) => {
     const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
@@ -2284,233 +2286,143 @@ function LiveActivity({ feed, error, onRetry, contractBase, leadsBase }: {
     e.contractId != null ? `${contractBase}/${e.contractId}/v2`
     : e.leadId != null ? `${leadsBase}/${e.leadId}`
     : null;
-  // Read through a fallback rather than off `feed` directly: this panel polls an
-  // endpoint of its own, so during a deploy it can be handed a payload from the
-  // previous build. An unguarded `feed.managers.length` turns that into a
-  // render crash that takes the whole dashboard down, not one quiet panel.
+  // Guarded: a payload from a previous build must not crash the dashboard.
   const lanes = feed?.managers ?? [];
-  // Named `feedWindow`, never `window`: a bare `window` in this scope shadows the
-  // browser global, and the shadowing is silent — it reads fine right up until
-  // someone adds a `window.` call below it.
   const feedWindow = feed?.window ?? [];
 
+  if (error && !feed) {
+    return <div className="gx-pad"><Callout tone="bad" title="Couldn't load manager activity."><Btn size="xs" onClick={onRetry}>Try again</Btn></Callout></div>;
+  }
+  if (!feed) return <table className="gx-tbl"><SkeletonRows rows={4} cols={3} /></table>;
+  if (lanes.length === 0) {
+    return <div className="gx-empty"><b>No managers on this portfolio yet</b> Invite one and their work appears here as they do it.</div>;
+  }
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-[var(--base-200)] overflow-hidden">
-      <div className="px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2.5">
-          <h3 className="text-[15px] font-bold text-[var(--neutral-900)]">Manager activity</h3>
-          {/* The dot is the only thing that says the panel is live, so it is
-              paired with the word — a pulsing dot alone is decoration. */}
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.1em] uppercase text-[var(--neutral-400)]">
-            <span className="relative flex w-2 h-2">
-              <span className="absolute inline-flex w-full h-full rounded-full bg-[var(--primary)] opacity-60 animate-ping" />
-              <span className="relative inline-flex w-2 h-2 rounded-full bg-[var(--primary)]" />
-            </span>
-            Live
-          </span>
-        </div>
-        <span className="text-xs text-[var(--neutral-400)]">Your managers, today — pages opened and changes made · refreshes every 5s · click a row to see what changed</span>
-      </div>
-      {error && !feed ? (
-        <div className="px-6 pb-6"><SectionError message="Couldn't load manager activity." onRetry={onRetry} /></div>
-      ) : !feed ? (
-        <div className="px-6 pb-6"><ActivitySkeleton /></div>
-      ) : lanes.length === 0 ? (
-        <p className="px-6 pb-8 text-sm text-[var(--neutral-400)] text-center">
-          No managers on this portfolio yet — invite one and their work appears here as they do it.
-        </p>
-      ) : (
-// Side by side, one column per manager, busiest on the left. Stacked,
-        // the second manager sat below the fold and the two were never in view
-        // together -- which is the only way a landlord can compare them. The
-        // columns drop to one under `lg`, where side-by-side would squeeze each
-        // row past the point its action text survives.
-        <div className={`grid ${lanes.length === 1 ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
-          {lanes.map((m, mi) => {
-            // The day comes from the window the API returns, not from the days
-            // the rows land on: grouping off the rows means a manager with
-            // nothing today has no day at all, and their column silently
-            // disappears instead of reading "no activity".
-            const byDay = new Map<string, FeedEntry[]>();
-            for (const e of m.entries) {
-              const arr = byDay.get(e.day) ?? [];
-              arr.push(e);
-              byDay.set(e.day, arr);
-            }
-            const totalFor = new Map(m.dayTotals?.map(d => [d.day, d.count]) ?? []);
-            const viewsFor = new Map(m.dayViews?.map(d => [d.day, d.count]) ?? []);
-            const days = feedWindow.map(day => ({
-              day,
-              rows: byDay.get(day) ?? [],
-              // The day's REAL total, not the number of rows shown: a day capped
-              // at 10 still says 34 happened.
-              total: totalFor.get(day) ?? 0,
-              // Pages opened that day, counted beside the actions and never
-              // inside them — opening a page is not work delivered.
-              views: viewsFor.get(day) ?? 0,
-            }));
-            const actions = m.dayTotals?.reduce((s, d) => s + d.count, 0) ?? 0;
-            const pages = m.dayViews?.reduce((s, d) => s + d.count, 0) ?? 0;
-            return (
-              // The divider between columns is a left border on all but the
-              // first, so it appears only where two columns actually meet.
-              <div key={m.userId} className={`border-t border-[var(--base-200)] min-w-0${mi > 0 ? ' lg:border-l' : ''}`}>
-                <div className="px-5 py-2.5 bg-[var(--base-100)]/60 flex items-baseline justify-between gap-2 flex-wrap">
-                  <h4 className="text-[13px] font-bold text-[var(--neutral-900)] truncate">{m.name ?? `Manager #${m.userId}`}</h4>
-                  {/* Today's count, and — when today is empty but they have
-                      acted before — when that was. "0 actions" alone cannot tell
-                      a manager who is idle today from one who has never worked
-                      here, and those are different problems. */}
-                  {/* Pages read sit beside the actions, never added to them: a
-                      manager can open forty pages and change nothing, and those
-                      are two different days. Reading alone still counts as
-                      present, so a day with only views says so rather than
-                      falling through to "nothing today". */}
-                  <span className="text-[11px] text-[var(--neutral-400)] tabular-nums shrink-0">
-                    {actions > 0
-                      ? `${actions} action${actions === 1 ? '' : 's'}${pages > 0 ? ` · ${pages} page${pages === 1 ? '' : 's'}` : ''} today · last ${ago(m.lastAt!)}`
-                      : pages > 0
-                      ? `${pages} page${pages === 1 ? '' : 's'} read today · no changes`
-                      : m.lastAt ? `nothing today · last seen ${ago(m.lastAt)}` : 'nothing yet'}
-                  </span>
-                </div>
-                {days.map(({ day, rows, total, views }) => (
+    <>
+      <div className={lanes.length === 1 ? '' : 'gx-cols gx-cols-2e'} style={{ gap: 0 }}>
+        {lanes.map((m, mi) => {
+          const byDay = new Map<string, FeedEntry[]>();
+          for (const e of m.entries) {
+            const arr = byDay.get(e.day) ?? [];
+            arr.push(e);
+            byDay.set(e.day, arr);
+          }
+          const totalFor = new Map(m.dayTotals?.map(d => [d.day, d.count]) ?? []);
+          const viewsFor = new Map(m.dayViews?.map(d => [d.day, d.count]) ?? []);
+          const days = feedWindow.map(day => ({ day, rows: byDay.get(day) ?? [], total: totalFor.get(day) ?? 0, views: viewsFor.get(day) ?? 0 }));
+          const actions = m.dayTotals?.reduce((s, d) => s + d.count, 0) ?? 0;
+          const pages = m.dayViews?.reduce((s, d) => s + d.count, 0) ?? 0;
+          const who = m.name ?? `Manager #${m.userId}`;
+          return (
+            <div key={m.userId} style={{ minWidth: 0, borderLeft: mi > 0 ? '1px solid var(--ms-surface-3)' : undefined }}>
+              <div className="gx-pad" style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', background: 'var(--ms-surface-2)' }}>
+                <strong style={{ fontSize: 12.5 }}>{who}</strong>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ms-ink-3)', fontVariantNumeric: 'tabular-nums' }}>
+                  {actions > 0
+                    ? `${actions} action${actions === 1 ? '' : 's'}${pages > 0 ? ` · ${pages} page${pages === 1 ? '' : 's'}` : ''} today · last ${ago(m.lastAt!)}`
+                    : pages > 0
+                    ? `${pages} page${pages === 1 ? '' : 's'} read today · no changes`
+                    : m.lastAt ? `nothing today · last seen ${ago(m.lastAt)}` : 'nothing yet'}
+                </span>
+              </div>
+              {days.map(({ day, rows, total, views }) => {
+                const shownActions = rows.filter(e => e.category !== 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
+                const shownViews = rows.filter(e => e.category === 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
+                const trimmed = [
+                  total > shownActions ? `${shownActions} of ${total} actions` : null,
+                  views > shownViews ? `${shownViews} of ${views} pages` : null,
+                ].filter(Boolean);
+                return (
                   <div key={day}>
-                    <div className="px-5 py-1.5 border-t border-[var(--base-200)] flex items-baseline justify-between gap-2">
-                      <span className={`text-[11.5px] font-bold ${total || views ? 'text-[var(--neutral-700)]' : 'text-[var(--neutral-400)]'}`}>{fmtDayHeading(day)}</span>
-                      <span className="text-[11px] text-[var(--neutral-400)] tabular-nums shrink-0">
-                        {[
-                          total ? `${total} action${total === 1 ? '' : 's'}` : null,
-                          views ? `${views} page${views === 1 ? '' : 's'}` : null,
-                        ].filter(Boolean).join(' · ') || 'no activity'}
+                    <div style={{ padding: '6px 16px', borderTop: '1px solid var(--ms-surface-3)', display: 'flex', gap: 8, fontSize: 11 }}>
+                      <strong>{fmtDayHeading(day)}</strong>
+                      <span style={{ marginLeft: 'auto', color: 'var(--ms-ink-3)' }}>
+                        {[total ? `${total} action${total === 1 ? '' : 's'}` : null, views ? `${views} page${views === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'no activity'}
                       </span>
                     </div>
-                    {/* A day with nothing on it still gets its heading and says
-                        so — a blank day is a fact about the manager, and hiding
-                        it makes the remaining dates look contiguous. */}
-                    {rows.length === 0 && (
-                      <p className="px-5 py-2 text-[11.5px] text-[var(--neutral-400)] border-t border-[var(--base-200)]/60">—</p>
-                    )}
-                    {/* When the cap trimmed the day, say what is not on screen
-                        rather than letting 10 of 34 read as the whole day. The
-                        two sides are capped separately, so they are reported
-                        separately — "10 of 34" against a merged list would be
-                        true of neither. */}
-                    {(() => {
-                      const shownActions = rows.filter(e => e.category !== 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
-                      const shownViews = rows.filter(e => e.category === 'Viewing').reduce((s, e) => s + (e.repeats ?? 1), 0);
-                      const trimmed = [
-                        total > shownActions ? `${shownActions} of ${total} actions` : null,
-                        views > shownViews ? `${shownViews} of ${views} pages` : null,
-                      ].filter(Boolean);
-                      return trimmed.length ? (
-                        <p className="px-5 pt-1.5 text-[11px] text-[var(--neutral-400)]">
-                          showing the latest {trimmed.join(' · ')}
-                        </p>
-                      ) : null;
-                    })()}
-                    {rows.map(e => {
-                      const to = openHref(e);
-                      const n = e.repeats ?? 1;
-                      return (
-                        <div key={e.id} className="px-5 py-2 flex items-start gap-2 border-t border-[var(--base-200)]/60 hover:bg-[var(--base-100)]/50">
-                          <button
-                            type="button"
-                            onClick={() => setDetail({ entry: e, who: m.name ?? `Manager #${m.userId}` })}
-                            title="See what changed"
-                            className="flex-1 min-w-0 text-left cursor-pointer"
-                          >
-                            {/* Two lines in a half-width column: what happened on
-                                the first, what it happened to on the second. On
-                                one line the record name is the part that gets
-                                truncated away, and it is the part that says
-                                WHICH lease this was. */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              {/* A collapsed run spans a range, so it says so — a
-                                  single stamp would put three saves at one instant. */}
-                              <span className="text-[11px] text-[var(--neutral-400)] tabular-nums shrink-0 whitespace-nowrap">
-                                {n > 1 ? `${fmtClock(e.firstAt)}–${fmtClock(e.at)}` : fmtClock(e.at)}
-                              </span>
-                              <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${categoryTint(e.category)}`}>{e.category}</span>
-                              <span className="text-[13px] text-[var(--neutral-900)] font-medium truncate">{e.label}</span>
-                              {n > 1 && (
-                                <span className="inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-bold tabular-nums bg-[var(--base-200)] text-[var(--neutral-700)] shrink-0" title={`${n} times`}>×{n}</span>
-                              )}
-                            </div>
-                            {(e.subject || e.why) && (
-                              <div className="mt-0.5 text-[11.5px] truncate">
-                                {e.subject && <span className="text-[var(--neutral-500)]">{e.subject}</span>}
-                                {e.why && <span className="text-[#b45309]">{e.subject ? ' — ' : ''}{e.why}</span>}
-                              </div>
-                            )}
-                          </button>
-                          {to && (
-                            <Link href={to} {...NEW_TAB} className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--primary-dark)] hover:underline shrink-0 mt-0.5">
-                              Open <ArrowUpRight size={11} />
-                            </Link>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {trimmed.length > 0 && <p style={{ padding: '0 16px 4px', fontSize: 10.5, color: 'var(--ms-ink-3)' }}>showing the latest {trimmed.join(' · ')}</p>}
+                    <table className="gx-tbl">
+                      {rows.length === 0 ? <EmptyRow cols={3} title="—" /> : (
+                        <tbody>
+                          {rows.map(e => {
+                            const to = openHref(e);
+                            const n = e.repeats ?? 1;
+                            return (
+                              <tr key={e.id} className="click" onClick={() => setDetail({ entry: e, who })}>
+                                <td className="nowrap mono">{n > 1 ? `${fmtClock(e.firstAt)}–${fmtClock(e.at)}` : fmtClock(e.at)}</td>
+                                <td style={{ width: '100%' }}>
+                                  <button type="button" onClick={(ev) => { ev.stopPropagation(); setDetail({ entry: e, who }); }} title="See what changed" style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer' }}>
+                                    <Pill tone={categoryTone(e.category)} dot={false}>{e.category}</Pill>{' '}
+                                    <span className="strong">{e.label}</span>
+                                    {n > 1 && <> <Pill tone="outline" dot={false} title={`${n} times`}>×{n}</Pill></>}
+                                  </button>
+                                  {(e.subject || e.why) && (
+                                    <span className="sub">
+                                      {e.subject}
+                                      {e.why && <span style={{ color: 'var(--ms-amber-text)' }}>{e.subject ? ' — ' : ''}{e.why}</span>}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="act" onClick={ev => ev.stopPropagation()}>{to && <OpenLink href={to} />}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      )}
+                    </table>
                   </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
 
       {/* What actually changed, for one row. */}
-      {detail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,18,14,0.5)' }} onClick={() => setDetail(null)} role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl border border-[var(--base-200)]" onClick={ev => ev.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3 p-5 border-b border-[var(--base-200)]">
-              <div className="min-w-0">
-                <h3 className="text-base font-bold text-[var(--neutral-900)]">{detail.entry.label}</h3>
-                <p className="text-xs text-[var(--neutral-500)] mt-1 leading-snug">
-                  {detail.who} · {fmtDayHeading(detail.entry.day)} at {fmtClock(detail.entry.at)}
-                  {(detail.entry.repeats ?? 1) > 1 && ` · ${detail.entry.repeats} times from ${fmtClock(detail.entry.firstAt)}`}
-                  {detail.entry.subject && ` · ${detail.entry.subject}`}
-                </p>
-              </div>
-              <button type="button" onClick={() => setDetail(null)} aria-label="Close" className="text-[var(--neutral-400)] hover:text-[var(--neutral-900)] shrink-0"><X size={18} /></button>
-            </div>
-            <div className="overflow-y-auto p-5">
-              {/* Most actions capture no diff. Saying so is the honest answer —
-                  an empty table would read as "nothing changed". A page view is
-                  the one row where that sentence would be misleading rather than
-                  merely thin: nothing was changed because nothing was meant to
-                  be, so it says what it actually was. */}
-              {detail.entry.category === 'Viewing' ? (
-                <p className="text-sm text-[var(--neutral-500)] text-center py-6">
-                  Opened this page{(detail.entry.repeats ?? 1) > 1 ? ` ${detail.entry.repeats} times` : ''} — nothing was changed.
-                </p>
-              ) : !detail.entry.changes?.length ? (
-                <p className="text-sm text-[var(--neutral-400)] text-center py-6">
-                  This action recorded no field-level changes.
-                </p>
-              ) : (
-                <div className="flex flex-col gap-2.5">
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={detail?.entry.label ?? ''} width={520}>
+        {detail && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <p style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>
+              {detail.who} · {fmtDayHeading(detail.entry.day)} at {fmtClock(detail.entry.at)}
+              {(detail.entry.repeats ?? 1) > 1 && ` · ${detail.entry.repeats} times from ${fmtClock(detail.entry.firstAt)}`}
+              {detail.entry.subject && ` · ${detail.entry.subject}`}
+            </p>
+            {detail.entry.category === 'Viewing' ? (
+              <div className="gx-empty">Opened this page{(detail.entry.repeats ?? 1) > 1 ? ` ${detail.entry.repeats} times` : ''} — nothing was changed.</div>
+            ) : !detail.entry.changes?.length ? (
+              <div className="gx-empty">This action recorded no field-level changes.</div>
+            ) : (
+              <table className="gx-tbl">
+                <thead><tr><th>Field</th><th>From</th><th>To</th></tr></thead>
+                <tbody>
                   {detail.entry.changes.map((c, i) => (
-                    <div key={i} className="grid grid-cols-[120px_1fr] gap-3 items-baseline">
-                      <span className="text-[12px] font-semibold text-[var(--neutral-500)] truncate">{c.field}</span>
-                      <span className="text-[13px] text-[var(--neutral-900)] break-words">
-                        <span className="text-[var(--neutral-400)] line-through">{c.from ?? '—'}</span>
-                        <span className="mx-1.5 text-[var(--neutral-400)]">→</span>
-                        <span className="font-semibold">{c.to ?? '—'}</span>
-                      </span>
-                    </div>
+                    <tr key={i}>
+                      <td className="strong">{c.field}</td>
+                      <td style={{ textDecoration: 'line-through', color: 'var(--ms-ink-3)' }}>{c.from ?? '—'}</td>
+                      <td className="strong">{c.to ?? '—'}</td>
+                    </tr>
                   ))}
-                </div>
-              )}
-            </div>
+                </tbody>
+              </table>
+            )}
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </Modal>
+    </>
   );
 }
 
+const fmtClock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-AE', { timeZone: APP_TIME_ZONE, hour: 'numeric', minute: '2-digit' });
+/** 'YYYY-MM-DD' → 'Tue, 4 Aug 2026'. The string is ALREADY a Dubai calendar day,
+ *  so it is read back as UTC — re-interpreting it in the viewer's zone is what
+ *  would shift the header off the day the rows were grouped under. */
+const fmtDayHeading = (day: string) =>
+  new Date(`${day}T00:00:00Z`).toLocaleDateString('en-AE', {
+    timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  });
+const fmtDayHeadingDubai = fmtDayHeading;
 
 /** RP route entry point — the landlord's own dashboard home. */
 export default function RentalProviderDashboard() {

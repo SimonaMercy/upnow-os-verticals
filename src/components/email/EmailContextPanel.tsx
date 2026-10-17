@@ -16,20 +16,20 @@ import { Avatar, FileCard, KIND_LABEL, KindChip } from './EmailBits';
 import { relationshipLabel } from '@/lib/customerContactsApi';
 
 const STATUS_TONE: Record<string, string> = {
-  active: 'text-[#1a7a5a] bg-[#eef9f4]', expired: 'text-[#6b6860] bg-[#f4f3ef]', terminated: 'text-[#b42318] bg-red-50',
+  active: 'text-[#1a7a5a] bg-[#eef9f4]', expired: 'text-[#5f6b63] bg-[#eef1ef]', terminated: 'text-[#b42318] bg-red-50',
 };
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const words = (s: string) => s.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 const SIDE_TITLE: Record<EmailSide, string> = { theirs: 'Their side', team: 'Your team', copied: 'Kept in copy' };
-const H3 = 'text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] mb-2';
+const H3 = 'text-[11px] font-semibold uppercase tracking-wide text-[#8a948d] mb-2';
 
 function PersonLine({ p, total }: { p: EmailPerson; total: number }) {
   return (
     <div className="flex items-center gap-2.5 min-w-0">
       <Avatar name={p.name} tone={p.side === 'theirs' ? 'record' : 'other'} size={30} />
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] text-[#1a1916] truncate">{p.name ?? p.email}</div>
-        <div className="text-[11px] text-[#9b9890] truncate">{p.name ? `${p.email} · ` : ''}{p.wrote > 0 ? `wrote ${p.wrote}` : `on ${p.emails} of ${total}`}</div>
+        <div className="text-[13px] text-[#14201a] truncate">{p.name ?? p.email}</div>
+        <div className="text-[11px] text-[#8a948d] truncate">{p.name ? `${p.email} · ` : ''}{p.wrote > 0 ? `wrote ${p.wrote}` : `on ${p.emails} of ${total}`}</div>
       </div>
     </div>
   );
@@ -70,17 +70,17 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
 
   return (
     <aside className="h-full flex flex-col bg-white w-full" aria-label="About this conversation">
-      <div className="flex items-center gap-2 px-4 py-3.5 border-b border-[#e8e6e0] shrink-0">
-        <span className="text-sm font-semibold text-[#1a1916] flex-1">About this conversation</span>
-        <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer"><X size={15} /></button>
+      <div className="flex items-center gap-2 px-4 py-3.5 border-b border-[#e4e9e5] shrink-0">
+        <span className="text-sm font-semibold text-[#14201a] flex-1">About this conversation</span>
+        <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-full text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer"><X size={15} /></button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-5 text-sm">
         <section>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-base font-semibold text-[#1a1916] break-words">{thread.recordName ?? thread.counterpartName ?? thread.counterpartEmail}</span>
+            <span className="text-base font-semibold text-[#14201a] break-words">{thread.recordName ?? thread.counterpartName ?? thread.counterpartEmail}</span>
             <KindChip kind={thread.kind} />
           </div>
-          <div className="text-xs text-[#6b6860] mt-1 break-all">{thread.counterpartEmail}</div>
+          <div className="text-xs text-[#5f6b63] mt-1 break-all">{thread.counterpartEmail}</div>
           {thread.contact && (
             <div className="mt-2 rounded-lg bg-[#eef9f4] px-3 py-2 text-xs text-[#1a5c45] leading-relaxed">
               <span className="font-semibold">{relationshipLabel(thread.contact.relationship)}</span>{thread.contact.name ? ` · ${thread.contact.name}` : ''} — not the customer’s primary email. Kept under the customer’s other contacts.
@@ -92,17 +92,17 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
         {recordKind === 'customer' && (
           <section>
             <h3 className={H3}>Units and leases</h3>
-            {thread.contracts.length === 0 && <p className="text-xs text-[#9b9890]">No lease on record.</p>}
+            {thread.contracts.length === 0 && <p className="text-xs text-[#8a948d]">No lease on record.</p>}
             <div className="space-y-2">
               {thread.contracts.map((k) => (
-                <Link key={k.id} href={`${base}/operations/${k.id}`} className="block rounded-xl border border-[#e8e6e0] hover:border-[#2e9f82] px-3 py-2.5">
+                <Link key={k.id} href={`${base}/operations/${k.id}`} className="block rounded-xl border border-[#e4e9e5] hover:border-[#047246] px-3 py-2.5">
                   <div className="flex items-center gap-2">
-                    <Building2 size={14} className="text-[#6b6860] shrink-0" />
-                    <span className="font-semibold text-[#1a1916] truncate flex-1">{k.unitNumber}</span>
+                    <Building2 size={14} className="text-[#5f6b63] shrink-0" />
+                    <span className="font-semibold text-[#14201a] truncate flex-1">{k.unitNumber}</span>
                     <span className={`text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-px ${STATUS_TONE[k.status] ?? 'text-[#8a6d1d] bg-[#fdf3e3]'}`}>{words(k.status)}</span>
                   </div>
-                  <div className="text-xs text-[#6b6860] mt-0.5 truncate">{k.buildingName}</div>
-                  <div className="text-xs text-[#6b6860] tabular-nums">{day(k.startDate)} → {day(k.endDate)}</div>
+                  <div className="text-xs text-[#5f6b63] mt-0.5 truncate">{k.buildingName}</div>
+                  <div className="text-xs text-[#5f6b63] tabular-nums">{day(k.startDate)} → {day(k.endDate)}</div>
                 </Link>
               ))}
             </div>
@@ -111,8 +111,8 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
         {thread.lead && (
           <section>
             <h3 className={H3}>Lead</h3>
-            <div className="rounded-xl border border-[#e8e6e0] px-3 py-2.5 text-xs text-[#6b6860]">
-              <div className="text-sm font-semibold text-[#1a1916]">{words(thread.lead.stage || 'new')}</div>
+            <div className="rounded-xl border border-[#e4e9e5] px-3 py-2.5 text-xs text-[#5f6b63]">
+              <div className="text-sm font-semibold text-[#14201a]">{words(thread.lead.stage || 'new')}</div>
               {thread.lead.unitNumber && <div className="mt-0.5">{thread.lead.unitNumber}{thread.lead.buildingName ? ` · ${thread.lead.buildingName}` : ''}</div>}
             </div>
           </section>
@@ -124,7 +124,7 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             <div className="space-y-3">
               {sides.map((g) => (
                 <div key={g.side}>
-                  <div className="text-[11px] font-medium text-[#6b6860] mb-1.5">{SIDE_TITLE[g.side]}</div>
+                  <div className="text-[11px] font-medium text-[#5f6b63] mb-1.5">{SIDE_TITLE[g.side]}</div>
                   <div className="space-y-2">{g.people.map((p) => <PersonLine key={p.email} p={p} total={thread.totalMessages} />)}</div>
                 </div>
               ))}
@@ -146,37 +146,37 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             <h3 className={H3}>Filed under</h3>
             {!linking ? (
               <div className="space-y-2">
-                <p className="text-xs text-[#6b6860]">
+                <p className="text-xs text-[#5f6b63]">
                   {recordKind === 'other'
                     ? 'Nobody yet — this address is on no customer, lead or vendor. File it under the right one and every email from this address follows.'
                     : `${thread.recordName ?? 'A record'}. If this address belongs to someone else, file it under them instead.`}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setLinking(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] cursor-pointer"><Link2 size={13} /> {recordKind === 'other' ? 'File under…' : 'File under someone else…'}</button>
-                  {recordKind !== 'other' && <button type="button" disabled={busy} onClick={() => void link({ kind: 'none' })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e8e6e0] text-[#6b6860] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer disabled:opacity-60"><Unlink size={13} /> Move to Other</button>}
+                  <button type="button" onClick={() => setLinking(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e4e9e5] text-[#14201a] hover:border-[#047246] cursor-pointer"><Link2 size={13} /> {recordKind === 'other' ? 'File under…' : 'File under someone else…'}</button>
+                  {recordKind !== 'other' && <button type="button" disabled={busy} onClick={() => void link({ kind: 'none' })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e4e9e5] text-[#5f6b63] hover:border-[#b42318] hover:text-[#b42318] cursor-pointer disabled:opacity-60"><Unlink size={13} /> Move to Other</button>}
                 </div>
               </div>
             ) : (
               <div>
                 <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                  <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a customer, lead or vendor" className="w-full border border-[#e8e6e0] rounded-lg pl-8 pr-8 py-2 text-xs focus:outline-none focus:border-[#2e9f82]" />
-                  <button type="button" aria-label="Cancel" onClick={() => { setLinking(false); setQ(''); }} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer"><X size={13} /></button>
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8a948d]" />
+                  <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a customer, lead or vendor" className="w-full border border-[#e4e9e5] rounded-lg pl-8 pr-8 py-2 text-xs focus:outline-none focus:border-[#047246]" />
+                  <button type="button" aria-label="Cancel" onClick={() => { setLinking(false); setQ(''); }} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer"><X size={13} /></button>
                 </div>
-                <div className="mt-1.5 border border-[#e8e6e0] rounded-lg divide-y divide-[#f0eee9] max-h-60 overflow-y-auto">
-                  {hits.length === 0 && <div className="px-3 py-3 text-xs text-[#9b9890]">Nobody matches.</div>}
+                <div className="mt-1.5 border border-[#e4e9e5] rounded-lg divide-y divide-[#f0eee9] max-h-60 overflow-y-auto">
+                  {hits.length === 0 && <div className="px-3 py-3 text-xs text-[#8a948d]">Nobody matches.</div>}
                   {hits.map((h) => (
                     <button key={`${h.kind}-${h.tenantId ?? h.leadId ?? h.vendorId}`} type="button" disabled={busy}
                       onClick={() => void link({ kind: h.kind, id: (h.tenantId ?? h.leadId ?? h.vendorId)! })}
-                      className="w-full text-left px-3 py-2 hover:bg-[#f4f3ef] cursor-pointer flex items-center gap-2 disabled:opacity-60">
-                      <span className="min-w-0 flex-1"><span className="block text-xs text-[#1a1916] truncate">{h.name}</span><span className="block text-[11px] text-[#9b9890] truncate">{h.email}</span></span>
+                      className="w-full text-left px-3 py-2 hover:bg-[#eef1ef] cursor-pointer flex items-center gap-2 disabled:opacity-60">
+                      <span className="min-w-0 flex-1"><span className="block text-xs text-[#14201a] truncate">{h.name}</span><span className="block text-[11px] text-[#8a948d] truncate">{h.email}</span></span>
                       <KindChip kind={h.kind} />
                     </button>
                   ))}
                 </div>
               </div>
             )}
-            {busy && <div className="mt-2 text-xs text-[#6b6860] inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Filing…</div>}
+            {busy && <div className="mt-2 text-xs text-[#5f6b63] inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Filing…</div>}
             {error && <div className="mt-2 text-xs text-[#b42318]">{error}</div>}
           </section>
         )}
@@ -184,7 +184,7 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
         {!isManager && (
           <section>
             <h3 className={H3}>Tab</h3>
-            <p className="text-xs text-[#6b6860] mb-2">
+            <p className="text-xs text-[#5f6b63] mb-2">
               {category
                 ? `In ${KIND_LABEL[category]}${recordKind !== 'other' ? `, still filed under ${thread.recordName ?? 'its record'}` : ''}. Only this conversation — new ones from this address follow the usual rules.`
                 : 'Your finance team’s emails, legal matters and promotions have tabs of their own. Moving it changes only this conversation.'}
@@ -192,13 +192,13 @@ export function EmailContextPanel({ rp, isManager, thread, onClose, onLinked }: 
             <div className="flex flex-wrap gap-2">
               {(['finance', 'legal', 'promotions'] as const).filter((c) => c !== category).map((c) => (
                 <button key={c} type="button" disabled={busy} onClick={() => void moveTo(c)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] text-[#1a1916] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e4e9e5] text-[#14201a] hover:border-[#047246] cursor-pointer disabled:opacity-60">
                   {c === 'finance' ? <Landmark size={13} /> : c === 'legal' ? <Scale size={13} /> : <Megaphone size={13} />} Move to {KIND_LABEL[c]}
                 </button>
               ))}
               {category && (
                 <button type="button" disabled={busy} onClick={() => void moveTo(null)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e8e6e0] text-[#6b6860] hover:border-[#9b9890] cursor-pointer disabled:opacity-60">
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[#e4e9e5] text-[#5f6b63] hover:border-[#8a948d] cursor-pointer disabled:opacity-60">
                   <Undo2 size={13} /> Take out of {KIND_LABEL[category]}
                 </button>
               )}

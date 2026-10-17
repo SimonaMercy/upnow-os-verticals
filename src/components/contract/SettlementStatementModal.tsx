@@ -112,7 +112,7 @@ export default function SettlementStatementModal({
       <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm overflow-y-auto" onClick={dismiss}>
         <div className="max-w-5xl mx-auto my-6 px-4" onClick={e => e.stopPropagation()}>
           {/* Toolbar — green header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-[#2e9f82] text-white rounded-t-2xl px-5 py-3 shadow-lg">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-[#047246] text-white rounded-t-2xl px-5 py-3 shadow-lg">
             <div className="min-w-0">
               <div className="text-sm font-bold truncate">{title || 'Final Settlement Statement'}</div>
               <div className="text-[11px] text-white/70">Contract #{contractId}</div>
@@ -141,10 +141,10 @@ export default function SettlementStatementModal({
             {error ? (
               <div className="bg-white p-10 flex flex-col items-center gap-2 text-center">
                 <AlertCircle size={22} className="text-[#b91c1c]" />
-                <p className="text-sm text-[#6b6860]">{error}</p>
+                <p className="text-sm text-[#5f6b63]">{error}</p>
               </div>
             ) : !data ? (
-              <div className="bg-white p-16 flex items-center justify-center"><Loader2 size={24} className="animate-spin text-[#2e9f82]" /></div>
+              <div className="bg-white p-16 flex items-center justify-center"><Loader2 size={24} className="animate-spin text-[#047246]" /></div>
             ) : (
               <RentalFinalSettlementDoc data={data} />
             )}

@@ -49,6 +49,7 @@ import { FEE_VAT_ROW_KEY, rentVatRowKey, unitChargeRowKey } from '@/lib/planRows
 import { unitHref as unitWorkspaceHref } from '@/lib/unitHref';
 import { deriveSpaceCategoryFromUnitType, isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
+import { leadJourneyNodes, spaceSubcategory } from '@/lib/spaceJourney';
 import {
   type ApiLead, type LeadStage, type PaymentPlanItem, type LeadChequeRecord,
   type PaymentMethodKind, type ApiViewing,
@@ -173,7 +174,10 @@ function installmentsFromStart(startDate: string, installments: number): string[
 }
 
 /* ─── Journey nodes (must match the mock) ─────────────────────────────────── */
-const NODES = ['Viewing', 'Interested', 'Documents', 'Payment plan', 'Payment confirmation', 'Converted'] as const;
+// Default (residential) names. The rendered names come from leadJourneyNodes()
+// — the lead's unit subcategory decides (Viewing vs Site visit, Documents vs
+// Due diligence, Offer & cheques vs Heads of terms…), the 6 positions never move.
+const DEFAULT_NODES: readonly string[] = leadJourneyNodes('residential');
 const NODE_ICON = [Eye, UserPlus, FolderOpen, Wallet, Receipt, BadgeCheck];
 
 type Tone = 'action' | 'waiting' | 'celebrate' | 'danger' | 'neutral';
@@ -196,7 +200,8 @@ function stageNode(stage: LeadStage): number {
 }
 
 /* ─── QuestMap — serpentine SVG journey (ported from the mock renderMap) ───── */
-function QuestMap({ current, selected, tone, rejected, onSelect }: { current: number; selected: number; tone: Tone; rejected: boolean; onSelect: (n: number) => void }) {
+function QuestMap({ current, selected, tone, rejected, onSelect, nodes = DEFAULT_NODES }: { current: number; selected: number; tone: Tone; rejected: boolean; onSelect: (n: number) => void; nodes?: readonly string[] }) {
+  const NODES = nodes;
   const W = 332, topPad = 56, gap = 108, innerH = topPad + 56 + (NODES.length - 1) * gap;
   const xs = NODES.map((_, i) => 166 + (i % 4 === 1 ? 70 : i % 4 === 3 ? -70 : 0));
   const ys = NODES.map((_, i) => topPad + i * gap);
@@ -288,7 +293,8 @@ const STEP_BLURB = [
   'The customer submits their payment advice; approving it converts the lead into a contract.',
   'The lead has been converted into a tenancy contract.',
 ];
-function StepPreview({ node, current, onBack }: { node: number; current: number; onBack: () => void }) {
+function StepPreview({ node, current, onBack, nodes = DEFAULT_NODES }: { node: number; current: number; onBack: () => void; nodes?: readonly string[] }) {
+  const NODES = nodes;
   const Icon = NODE_ICON[node];
   const done = node < current;
   return (
@@ -784,7 +790,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
   // Tone/hero/headline/eyebrow/body — derived from stage + urgency (the mock's
   // per-state map, collapsed to the single real branch).
-  const view = deriveView({ lead, urgency, primary, pendingViewing, docs });
+  // Long-term subcategory of the lead's unit → the journey's words.
+  const leadNodes = leadJourneyNodes(spaceSubcategory(lead.unit?.unitType ?? null));
+  const view = deriveView({ lead, urgency, primary, pendingViewing, docs, nodes: leadNodes });
 
   // "Open lease" deep-link: when we know the created contract, jump straight to
   // the New Lease tab in Operations with that lease highlighted; otherwise fall
@@ -907,7 +915,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
         {/* Journey + action card */}
         <div className="quest">
-          <QuestMap current={node} selected={effNode} onSelect={setSelNode}
+          <QuestMap current={node} selected={effNode} onSelect={setSelNode} nodes={leadNodes}
             tone={view.tone === 'declined' ? 'neutral' : view.tone} rejected={rejected} />
 
           {viewingCurrent ? (
@@ -965,7 +973,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
           ) : (
-            <StepPreview node={effNode} current={node} onBack={() => setSelNode(null)} />
+            <StepPreview node={effNode} current={node} onBack={() => setSelNode(null)} nodes={leadNodes} />
           )}
         </div>
 
@@ -1111,7 +1119,7 @@ function LandlordReviewLink({ leadId, answered }: { leadId: number; answered: 'a
     return (
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
         <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          style={{ width: 230, fontSize: 11, padding: '5px 8px', border: '1px solid var(--edge, #e3e0d9)', borderRadius: 8, background: 'var(--paper, #fafaf8)' }} />
+          style={{ width: 230, fontSize: 11, padding: '5px 8px', border: '1px solid var(--edge, #e3e0d9)', borderRadius: 8, background: 'var(--paper, #f6f8f6)' }} />
         <button className="btn btn-ghost btn-sm" onClick={copy}>{copied ? 'Copied ✓' : 'Copy'}</button>
         <a className="btn btn-ghost btn-sm" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>Open ↗</a>
       </span>
@@ -1125,6 +1133,18 @@ function LandlordReviewLink({ leadId, answered }: { leadId: number; answered: 'a
   );
 }
 
+/** Call outcomes (MarketSpace provider dashboard, demand.js "Call outcome").
+ *  Logged as a note on the lead's existing notes log (POST /leads/:id/notes) —
+ *  there is no call/activity endpoint, so the outcome is a structured note line
+ *  and never moves the lead's stage. "Not interested" stays a note too: closing
+ *  the lead is still the explicit Reject action in the header. */
+const CALL_OUTCOMES: { key: string; label: string; line: string }[] = [
+  { key: 'reached',        label: 'Reached',        line: 'Call outcome: Reached — spoke with the customer' },
+  { key: 'no_answer',      label: 'No answer',      line: 'Call outcome: No answer' },
+  { key: 'call_back',      label: 'Call back',      line: 'Call outcome: Asked to call back' },
+  { key: 'not_interested', label: 'Not interested', line: 'Call outcome: Not interested' },
+];
+
 function LeadNotesSection({ notes, onAdd }: { notes: LeadNote[]; onAdd: (body: string) => Promise<void> }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1137,12 +1157,30 @@ function LeadNotesSection({ notes, onAdd }: { notes: LeadNote[]; onAdd: (body: s
     catch (e) { setErr(e instanceof Error ? e.message : 'Failed to save note'); }
     finally { setBusy(false); }
   };
+  // One click logs the outcome; whatever is typed in the box rides along as detail.
+  const logOutcome = async (line: string) => {
+    const detail = draft.trim();
+    setBusy(true); setErr(null);
+    try { await onAdd(detail ? `${line}\n${detail}` : line); setDraft(''); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Failed to log the call'); }
+    finally { setBusy(false); }
+  };
   return (
     <div className="notes-sec">
       <div className="subhead"><MessageSquare size={13} /> Notes</div>
       <p className="note" style={{ margin: '0 0 12px' }}>
         An internal log for your team — record what’s going on with this lead so the next person to handle it is up to speed. Not visible to the customer.
       </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        <span className="note" style={{ margin: 0, fontWeight: 600 }}>Log call outcome:</span>
+        {CALL_OUTCOMES.map(o => (
+          <button key={o.key} type="button" className="btn btn-ghost btn-sm" disabled={busy}
+            title={`Adds “${o.line}” to the notes${draft.trim() ? ', with the text below as detail' : ''}`}
+            onClick={() => void logOutcome(o.line)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
       <div className="note-add">
         <textarea className="qinput" rows={2} value={draft} placeholder="Add a note about this lead…"
           onChange={e => setDraft(e.target.value)}
@@ -1186,7 +1224,8 @@ type View = {
   banner?: { tone: Tone; title: string; body: string; quote?: string };
 };
 
-function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
+function deriveView({ lead, urgency, primary, pendingViewing, docs, nodes = DEFAULT_NODES }: {
+  nodes?: readonly string[];
   lead: ApiLead;
   urgency: ReturnType<typeof getUrgency>;
   primary: ReturnType<typeof getPrimary>;
@@ -1214,7 +1253,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
         return {
           tone: urgency.level === 'red' ? 'danger' : 'waiting',
           pill: urgency.level === 'red' ? 'Overdue' : 'Your turn',
-          eyebrow: 'Step 1 · Viewing',
+          eyebrow: `Step 1 · ${nodes[0]}`,
           headline: urgency.label,
           body: 'The scheduled viewing has passed with no recorded outcome. Mark it visited (or reschedule) to keep the lead moving.',
           HeroIcon: urgency.level === 'red' ? TriangleAlert : Clock,
@@ -1223,8 +1262,8 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
       }
       return {
         tone: 'waiting', pill: 'Waiting on customer',
-        eyebrow: 'Step 1 · Viewing',
-        headline: pendingViewing?.status === 'confirmed' ? 'Viewing confirmed' : 'Viewing scheduled',
+        eyebrow: `Step 1 · ${nodes[0]}`,
+        headline: `${nodes[0]} ${pendingViewing?.status === 'confirmed' ? 'confirmed' : 'scheduled'}`,
         body: 'A viewing is booked. The customer is reviewing the payment summary you are offering — you see the same figures. Mark it visited once they have seen the unit.',
         HeroIcon: Calendar,
       };
@@ -1232,7 +1271,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'interested':
       return {
         tone: 'action', pill: urgency ? 'Needs action' : 'Your turn',
-        eyebrow: 'Step 2 · Interested',
+        eyebrow: `Step 2 · ${nodes[1]}`,
         headline: urgency ? 'Interested — no next step' : 'Interested — review documents',
         body: 'The customer expressed interest and an initial payment plan was auto-generated. They can now upload KYC documents; review them to advance.',
         HeroIcon: UserPlus,
@@ -1242,7 +1281,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
       if (hasRejectedDoc) {
         return {
           tone: 'danger', pill: 'Re-upload needed',
-          eyebrow: 'Step 3 · Documents',
+          eyebrow: `Step 3 · ${nodes[2]}`,
           headline: 'A document was rejected',
           body: 'You rejected a document; it is excluded from the received count and the customer sees a re-upload slot. Wait for the re-upload, or upload a replacement yourself.',
           HeroIcon: TriangleAlert,
@@ -1251,7 +1290,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
       if (hasAdditionalReq) {
         return {
           tone: 'waiting', pill: 'Waiting on customer',
-          eyebrow: 'Step 3 · Documents',
+          eyebrow: `Step 3 · ${nodes[2]}`,
           headline: 'Additional document requested',
           body: 'You requested an extra document beyond the standard checklist. The customer is held at this step until it arrives.',
           HeroIcon: FileText,
@@ -1260,7 +1299,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
       }
       return {
         tone: 'action', pill: urgency ? 'Needs action' : 'Your turn',
-        eyebrow: 'Step 3 · Documents',
+        eyebrow: `Step 3 · ${nodes[2]}`,
         headline: 'Review the customer’s documents',
         body: 'View each document, then approve, reject, or require more. Approving the required set unlocks the payment plan for the customer.',
         HeroIcon: FolderOpen,
@@ -1270,7 +1309,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'approved':
       return {
         tone: 'action', pill: 'Your turn',
-        eyebrow: 'Step 4 · Payment plan',
+        eyebrow: `Step 4 · ${nodes[3]}`,
         headline: 'Documents approved — review the plan',
         body: 'Review the payment plan below. Add an instalment, adjust a due date, or apply a discount if needed — then share it with the customer. They won’t see the plan until you share it.',
         HeroIcon: Wallet,
@@ -1279,7 +1318,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'payment_plan_shared':
       return {
         tone: 'waiting', pill: urgency ? 'Needs action' : 'Waiting on customer',
-        eyebrow: 'Step 4 · Payment plan',
+        eyebrow: `Step 4 · ${nodes[3]}`,
         headline: urgency ? 'Plan shared — follow up' : 'Plan shared — awaiting payment advice',
         body: 'The full plan (instalments, fees, VAT, deposit, payable-to) is shared with the customer, who now uploads a cheque attachment per instalment. You can still edit and re-share it.',
         HeroIcon: Wallet,
@@ -1288,7 +1327,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'cheques_submitted':
       return {
         tone: 'action', pill: urgency ? 'Needs action' : 'Your turn',
-        eyebrow: 'Step 5 · Payment confirmation',
+        eyebrow: `Step 5 · ${nodes[4]}`,
         headline: 'Payment confirmation — review & approve',
         body: 'The customer uploaded a cheque attachment for each instalment. Review each, then approve — which converts the lead into a contract.',
         HeroIcon: Receipt,
@@ -1316,7 +1355,7 @@ function deriveView({ lead, urgency, primary, pendingViewing, docs }: {
     case 'converted':
       return {
         tone: 'celebrate', pill: 'Complete',
-        eyebrow: 'Step 6 · Converted',
+        eyebrow: `Step 6 · ${nodes[5]}`,
         headline: 'Lead converted to a contract',
         body: 'Approval auto-created the contract and moved the customer to signing. The lead drops off the live pipeline. The lead cycle ends here.',
         HeroIcon: BadgeCheck,
@@ -1980,12 +2019,12 @@ function DocsSection({
               <span>Additional occupants{occupantCount > 1 ? ` — ${occupantCount - 1} more ${occupantCount - 1 === 1 ? 'person' : 'people'}` : ''} (optional)</span>
               {mgrCanRequest && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
-                  <span style={{ fontSize: 11, color: 'var(--muted, #9b9890)' }}>Occupants incl. the customer</span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--line, #e8e6e0)', borderRadius: 999, background: '#fff', overflow: 'hidden' }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted, #8a948d)' }}>Occupants incl. the customer</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--line, #e4e9e5)', borderRadius: 999, background: '#fff', overflow: 'hidden' }}>
                     <button type="button" aria-label="Remove an occupant" className="mini-btn view" style={{ border: 0, borderRadius: 0 }}
                       disabled={busy || occupantCount <= 1}
                       onClick={() => onSetOccupants(occupantCount - 1)}><X size={11} /></button>
-                    <span style={{ minWidth: 28, textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--ink, #1a1916)' }}>{occupantCount}</span>
+                    <span style={{ minWidth: 28, textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--ink, #14201a)' }}>{occupantCount}</span>
                     <button type="button" aria-label="Add an occupant" className="mini-btn view" style={{ border: 0, borderRadius: 0 }}
                       disabled={busy || occupantCount >= 12}
                       onClick={() => onSetOccupants(occupantCount + 1)}><Plus size={11} /></button>
@@ -2006,7 +2045,7 @@ function DocsSection({
             layout as the signing links on the contract's Signatures step. */}
         {hasCustomer && mgrCanRequest && lead.convertedTenant?.id && checklistDocs.length > 0 && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line, #eee)' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #1a1916)', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink, #14201a)', marginBottom: 6 }}>
               Customer document upload link
             </div>
             <DocsLinkButton
@@ -2689,9 +2728,9 @@ function PlanEditor({
           </p>
           {groups.map(g => (
             <div key={g.key} style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860', margin: '0 0 4px' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#5f6b63', margin: '0 0 4px' }}>
                 {g.title}
-                {g.rows.length > 1 && <span style={{ fontWeight: 600, color: 'var(--mute, #9b9890)' }}> · {aed(g.rows.reduce((s, r) => s + r.amountFils, 0))}</span>}
+                {g.rows.length > 1 && <span style={{ fontWeight: 600, color: 'var(--mute, #8a948d)' }}> · {aed(g.rows.reduce((s, r) => s + r.amountFils, 0))}</span>}
               </div>
               <div className="doclist">
                 {g.rows.map(row => (
@@ -3045,10 +3084,10 @@ function GlobalStyle() {
   return (
     <style jsx global>{`
       .quest-page {
-        --ink: #1a1916; --ink-2: #3d3b35; --ink-3: #54534c;
-        --mute: #9b9890; --mute-2: #bdbab2;
-        --paper: #ffffff; --surface: #f9f8f6; --mist: #f0ede8; --mist-strong: #e8e6e0;
-        --jade: #2e9f82; --jade-deep: #1f5a3f; --jade-soft: #d8f2e8; --jade-tint: #eef8f4;
+        --ink: #14201a; --ink-2: #46534c; --ink-3: #54534c;
+        --mute: #8a948d; --mute-2: #bdbab2;
+        --paper: #ffffff; --surface: #f9f8f6; --mist: #f0ede8; --mist-strong: #e4e9e5;
+        --jade: #047246; --jade-deep: #1f5a3f; --jade-soft: #d8efe3; --jade-tint: #eef8f4;
         --saffron: #f59e0b; --saffron-deep: #c2410c; --saffron-soft: #fff7ed; --saffron-edge: #f0d68f;
         --brick: #c8492c; --brick-deep: #9a3520; --brick-soft: #fdede7; --brick-edge: #f3cabb;
         --sky: #0369a1; --sky-bg: #e0f2fe;
@@ -3275,7 +3314,7 @@ function GlobalStyle() {
       .quest-page .addmenu button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 12px; padding: 8px 10px; background: none; border: 0; cursor: pointer; color: var(--ink); }
       .quest-page .addmenu button:hover { background: var(--jade-tint); }
       .quest-page .addmenu button.custom { color: var(--jade-deep); font-weight: 700; border-top: 1px solid var(--mist); }
-      .quest-page .addmenu-group { position: sticky; top: 0; margin: 0; padding: 6px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--slate-soft, #9b9890); background: var(--sand, #faf9f6); }
+      .quest-page .addmenu-group { position: sticky; top: 0; margin: 0; padding: 6px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--slate-soft, #8a948d); background: var(--sand, #faf9f6); }
 
       /* Small on-brand modal (doc reject reason) */
       .quest-page .qmodal-scrim { position: fixed; inset: 0; background: rgba(26,23,20,.32); display: grid; place-items: center; z-index: 60; padding: 20px; }

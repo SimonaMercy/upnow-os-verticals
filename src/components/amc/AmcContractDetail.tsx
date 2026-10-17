@@ -286,7 +286,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
               </select>
             </div>
             {propertyId && units.length > 0 && (
-              <div><span className={l}>Unit <span className="font-normal text-[#9b9890]">— only when this account is for one unit</span></span>
+              <div><span className={l}>Unit <span className="font-normal text-[#8a948d]">— only when this account is for one unit</span></span>
                 <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
                   <option value="">— whole building —</option>
                   {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
@@ -301,7 +301,7 @@ function EditAmcModal({ base, rp, c, onClose, onSaved }: { base: string; rp?: nu
             <div><span className={l}>Start date</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
             <div><span className={l}>End date</span>
               {ongoing && canBeOngoing
-                ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#5b615e] bg-[#fafaf8]">Ongoing — no end date</div>
+                ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#5b615e] bg-[#f6f8f6]">Ongoing — no end date</div>
                 : <input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} />}
               {canBeOngoing && (
                 <label className="flex items-center gap-1.5 text-[11px] text-[#5b615e] mt-1 cursor-pointer">

@@ -20,7 +20,7 @@ function Switch({ value, onChange, disabled }: { value: boolean; onChange: (v: b
       type="button"
       disabled={disabled}
       onClick={() => onChange(!value)}
-      className={`relative inline-flex rounded-full transition-colors flex-shrink-0 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${value ? 'bg-[#2e9f82]' : 'bg-[#c9c7c1]'}`}
+      className={`relative inline-flex rounded-full transition-colors flex-shrink-0 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${value ? 'bg-[#047246]' : 'bg-[#c9c7c1]'}`}
       style={{ height: 22, width: 40 }}
       aria-pressed={value}
     >
@@ -74,12 +74,12 @@ export function BrowserAlertsCard({ showWhatsapp = true, forManager = false }: {
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4 mb-1">
-        <h2 className="font-semibold text-base text-[#1a1916] flex items-center gap-2"><BellRing size={16} className="text-[#2e9f82]" /> Browser alerts</h2>
+        <h2 className="font-semibold text-base text-[#14201a] flex items-center gap-2"><BellRing size={16} className="text-[#047246]" /> Browser alerts</h2>
         {perm === 'granted' && anyOn && (
           <button type="button" onClick={test} className="text-xs font-semibold text-[#1a7a5a] hover:underline cursor-pointer">{tested ? 'Sent' : 'Send a test alert'}</button>
         )}
       </div>
-      <p className="text-xs text-[#9b9890] mb-4">
+      <p className="text-xs text-[#8a948d] mb-4">
         A notification from your browser the moment a message arrives — even while you are in another tab or another app, for as long as a portal tab is open.
         {forManager ? ' Only for the landlords who let you read that channel.' : ''} Alerts are per browser: switch them on where you work.
       </p>
@@ -90,16 +90,16 @@ export function BrowserAlertsCard({ showWhatsapp = true, forManager = false }: {
         {showWhatsapp && (
           <div className="flex items-center justify-between py-1">
             <div>
-              <p className="text-sm font-medium text-[#1a1916]">WhatsApp messages</p>
-              <p className="text-xs text-[#9b9890]">Who wrote and the first line. Clicking the alert opens the chat.</p>
+              <p className="text-sm font-medium text-[#14201a]">WhatsApp messages</p>
+              <p className="text-xs text-[#8a948d]">Who wrote and the first line. Clicking the alert opens the chat.</p>
             </div>
             <Switch value={prefs.whatsapp} onChange={(v) => void flip('whatsapp', v)} disabled={unsupported} />
           </div>
         )}
         <div className="flex items-center justify-between py-1">
           <div>
-            <p className="text-sm font-medium text-[#1a1916]">Emails</p>
-            <p className="text-xs text-[#9b9890]">Sender and subject, as the mailbox is read (every few minutes). Clicking the alert opens the conversation.</p>
+            <p className="text-sm font-medium text-[#14201a]">Emails</p>
+            <p className="text-xs text-[#8a948d]">Sender and subject, as the mailbox is read (every few minutes). Clicking the alert opens the conversation.</p>
           </div>
           <Switch value={prefs.email} onChange={(v) => void flip('email', v)} disabled={unsupported} />
         </div>

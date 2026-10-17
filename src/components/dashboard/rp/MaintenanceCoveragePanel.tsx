@@ -65,7 +65,7 @@ const STANDARD: Record<string, Rule['coverage']> = {
   'Leaking taps': 'chargeable',
 };
 
-const field = 'border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const field = 'border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-[#047246]';
 
 /** `manager={{ rp }}` swaps every call to the landlord-scoped
  *  /manager/maintenance/*?rp= mirror (gated by canManageMaintenance), and the
@@ -173,7 +173,7 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
     void act(() => apiPut(u('/policies'), { ...scopeBody, rules }));
   };
 
-  if (!data) return <div className="bg-white rounded-2xl p-6 shadow-sm text-sm text-[#9b9890]">{error ?? 'Loading coverage…'}</div>;
+  if (!data) return <div className="bg-white rounded-2xl p-6 shadow-sm text-sm text-[#8a948d]">{error ?? 'Loading coverage…'}</div>;
 
   const configured = new Set(rulesAtScope.map(r => r.serviceCategoryId));
   const addable = data.categories.filter(c => c.parentId != null && !configured.has(c.id));
@@ -193,13 +193,13 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-[15px] font-bold text-[#1a1916]">Maintenance coverage</h2>
-          <p className="text-xs text-[#6b6860] mt-1 max-w-[64ch]">
+          <h2 className="text-[15px] font-bold text-[#14201a]">Maintenance coverage</h2>
+          <p className="text-xs text-[#5f6b63] mt-1 max-w-[64ch]">
             Per property type: the items you pay for during a tenancy, and which provider handles each
             category. Anything not listed comes to you per request to decide.
           </p>
         </div>
-        <label className="text-[10px] font-bold uppercase tracking-wide text-[#9b9890]">
+        <label className="text-[10px] font-bold uppercase tracking-wide text-[#8a948d]">
           <span className="block mb-1">Override for one property</span>
           <select value={typeof scope === 'number' ? String(scope) : ''} disabled={busy}
             onChange={e => setScope(e.target.value ? Number(e.target.value) : (`type:${lastType}` as Scope))}
@@ -215,13 +215,13 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
       </div>
 
       {/* The primary axis: one list per property type. */}
-      <div className="inline-flex items-center gap-1 mt-3 p-1 rounded-xl bg-[#f4f3ef]">
+      <div className="inline-flex items-center gap-1 mt-3 p-1 rounded-xl bg-[#eef1ef]">
         {PROPERTY_TYPES.map(t => (
           <button key={t} type="button" disabled={busy}
             onClick={() => { setLastType(t); setScope(`type:${t}` as Scope); }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${scopeType === t ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-white'}`}>
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${scopeType === t ? 'bg-[#047246] text-white' : 'text-[#5f6b63] hover:bg-white'}`}>
             {TYPE_LABEL[t]}
-            <span className={scopeType === t ? ' opacity-80' : ' text-[#9b9890]'}> · {(data.byType ?? []).filter(r => r.propertyType === t && r.coverage === 'covered').length}</span>
+            <span className={scopeType === t ? ' opacity-80' : ' text-[#8a948d]'}> · {(data.byType ?? []).filter(r => r.propertyType === t && r.coverage === 'covered').length}</span>
           </button>
         ))}
         {typeof scope === 'number' && (() => {
@@ -238,7 +238,7 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
       </div>
 
       {/* who does the work — one default for everything, overridable per item below */}
-      <div className="text-xs text-[#6b6860] mt-2.5 flex items-center gap-2 flex-wrap">
+      <div className="text-xs text-[#5f6b63] mt-2.5 flex items-center gap-2 flex-wrap">
         <Wrench size={12} className="text-[#1a7a5a]" />
         {data.providers.length ? (
           <>
@@ -265,7 +265,7 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
 
       {error && <p className="text-xs text-red-600 bg-[#fef2f2] rounded-lg px-3 py-2 mt-3">{error}</p>}
 
-      <ul className="mt-4 divide-y divide-[#f4f3ef] border-t border-b border-[#f4f3ef]">
+      <ul className="mt-4 divide-y divide-[#eef1ef] border-t border-b border-[#eef1ef]">
         {groups.flatMap(g => {
           const groupRules = sortedRules.filter(r => catById.get(r.serviceCategoryId)?.parentId === g.id);
           if (!groupRules.length) return [];
@@ -273,10 +273,10 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
           const provs = new Set(groupRules.map(r => r.preferredServiceProviderId ?? 0));
           const common = provs.size === 1 ? [...provs][0] : null;
           return [
-            <li key={`g-${g.id}`} className="flex items-center gap-3 py-2 bg-[#fafaf8] -mx-6 px-6">
+            <li key={`g-${g.id}`} className="flex items-center gap-3 py-2 bg-[#f6f8f6] -mx-6 px-6">
               <span className="flex-1 text-[11px] font-bold uppercase tracking-wide text-[#1a7a5a]">{g.name}</span>
               {data.providers.length > 0 && (
-                <label className="flex items-center gap-1.5 text-[10px] text-[#9b9890] shrink-0">
+                <label className="flex items-center gap-1.5 text-[10px] text-[#8a948d] shrink-0">
                   provider
                   <select disabled={busy}
                     value={common == null ? '__mixed' : common === 0 ? '' : String(common)}
@@ -298,9 +298,9 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
           return (
             <li key={r.serviceCategoryId} className="flex items-center gap-3 py-2.5">
               <div className="flex-1 min-w-0 pl-2">
-                <span className="text-sm font-medium text-[#1a1916]">{cat?.name ?? `Item #${r.serviceCategoryId}`}</span>
+                <span className="text-sm font-medium text-[#14201a]">{cat?.name ?? `Item #${r.serviceCategoryId}`}</span>
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-wide text-[#1a7a5a] bg-[#d8f2e8] px-2 py-0.5 rounded-full shrink-0">Landlord pays</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-[#1a7a5a] bg-[#d8efe3] px-2 py-0.5 rounded-full shrink-0">Landlord pays</span>
               <button type="button" disabled={busy} onClick={() => removeRule(r)}
                 title="Remove — falls back to per-request review"
                 className="text-[#c5c2bc] hover:text-[#b91c1c] cursor-pointer shrink-0"><X size={14} /></button>
@@ -310,17 +310,17 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
           ];
         })}
         {sortedRules.length === 0 && (
-          <li className="py-4 text-sm text-[#9b9890]">
+          <li className="py-4 text-sm text-[#8a948d]">
             {scopeType ? TYPE_EMPTY[scopeType] : 'Nothing listed for this property — it follows its property type\u2019s list. Add items only to differ from it.'}
           </li>
         )}
       </ul>
 
       {otherRules.length > 0 && (
-        <div className="mt-3 text-[11px] text-[#6b6860]">
+        <div className="mt-3 text-[11px] text-[#5f6b63]">
           <span className="font-semibold">Decided per request and saved as rules:</span>{' '}
           {otherRules.map(r => (
-            <span key={r.serviceCategoryId} className="inline-flex items-center gap-1 border border-[#e8e6e0] rounded-full pl-2 pr-1 py-0.5 mr-1.5 mb-1">
+            <span key={r.serviceCategoryId} className="inline-flex items-center gap-1 border border-[#e4e9e5] rounded-full pl-2 pr-1 py-0.5 mr-1.5 mb-1">
               {catById.get(r.serviceCategoryId)?.name ?? `Item #${r.serviceCategoryId}`} · {r.coverage === 'chargeable' ? 'customer pays' : 'not offered'}
               <button type="button" disabled={busy} onClick={() => removeRule(r)} title="Remove — back to deciding per request" className="text-[#c5c2bc] hover:text-[#b91c1c] cursor-pointer"><X size={11} /></button>
             </span>
@@ -347,7 +347,7 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
         </select>
         <button type="button" onClick={prefill} disabled={busy}
           title="Fill this scope with what the standard tenancy contract puts on the landlord — leakage, drainage, mold, A/C system, pest control, the one-time appliances."
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#cfe7dc] text-[#1a7a5a] bg-[#f0faf6] hover:bg-[#d8f2e8] cursor-pointer disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border border-[#cfe7dc] text-[#1a7a5a] bg-[#eef7f2] hover:bg-[#d8efe3] cursor-pointer disabled:opacity-50">
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Prefill standard tenancy terms
         </button>
       </div>
@@ -355,19 +355,19 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
       {managingProviders && (
         <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={busy ? undefined : () => setManagingProviders(false)}>
           <div className="w-[min(460px,100%)] bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between bg-[#2e9f82] text-white px-5 py-3.5">
+            <div className="flex items-center justify-between bg-[#047246] text-white px-5 py-3.5">
               <div className="font-bold text-sm">Maintenance providers</div>
               <button onClick={() => setManagingProviders(false)} className="p-1 rounded-lg hover:bg-white/20" aria-label="Close"><X size={17} /></button>
             </div>
             <div className="p-5 space-y-2">
               {data.providers.map(pr => (
-                <div key={pr.serviceProviderId} className="flex items-center gap-3 border border-[#e8e6e0] rounded-xl px-3.5 py-2.5">
+                <div key={pr.serviceProviderId} className="flex items-center gap-3 border border-[#e4e9e5] rounded-xl px-3.5 py-2.5">
                   <button type="button" disabled={busy || pr.isDefault} title={pr.isDefault ? 'Default provider' : 'Make default'}
                     onClick={() => void setDefaultProvider(pr.serviceProviderId)}
                     className="cursor-pointer disabled:cursor-default">
                     <Star size={15} className={pr.isDefault ? 'text-[#d97706] fill-[#f59e0b]' : 'text-[#c5c2bc]'} />
                   </button>
-                  <span className="text-sm font-semibold text-[#1a1916] flex-1 min-w-0 truncate">{pr.name}</span>
+                  <span className="text-sm font-semibold text-[#14201a] flex-1 min-w-0 truncate">{pr.name}</span>
                   <select value={pr.relationship} disabled={busy} className={field + ' !py-1 !text-xs'}
                     onChange={e => void act(() => apiPost(u('/links'), { serviceProviderId: pr.serviceProviderId, relationship: e.target.value }))}>
                     <option value="contracted_vendor">Contracted vendor</option>
@@ -375,11 +375,11 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
                   </select>
                   <button type="button" disabled={busy} title="Unlink"
                     onClick={() => { if (window.confirm(`Stop routing maintenance to ${pr.name}?`)) void act(() => apiDelete(u(`/links/${pr.serviceProviderId}`))); }}
-                    className="text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"><Trash2 size={14} /></button>
+                    className="text-[#8a948d] hover:text-[#b91c1c] cursor-pointer"><Trash2 size={14} /></button>
                 </div>
               ))}
               {data.providers.length === 0 && (
-                <p className="text-sm text-[#9b9890]">No providers linked yet — requests will wait until one is.</p>
+                <p className="text-sm text-[#8a948d]">No providers linked yet — requests will wait until one is.</p>
               )}
               <div className="flex items-center gap-2 pt-1">
                 <select id="link-provider-pick" defaultValue="" disabled={busy} className={field + ' flex-1'}>
@@ -393,11 +393,11 @@ export function MaintenanceCoveragePanel({ manager }: { manager?: { rp: number }
                     const id = Number(sel?.value ?? 0);
                     if (id) { void act(() => apiPost(u('/links'), { serviceProviderId: id })); if (sel) sel.value = ''; }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
                   <Plus size={13} /> Link
                 </button>
               </div>
-              <p className="text-[11px] text-[#9b9890]">A provider is a service-provider account on the platform — your own team registered as one, or a contracted vendor. The star is the default for all covered work.</p>
+              <p className="text-[11px] text-[#8a948d]">A provider is a service-provider account on the platform — your own team registered as one, or a contracted vendor. The star is the default for all covered work.</p>
             </div>
           </div>
         </div>

@@ -9,9 +9,10 @@ import { getRequiredDocs, isDocKeySatisfied } from '@/lib/docRequirements';
 import { parseAdditionalDocs } from '@/lib/requestableDocs';
 import {
   deriveStateKey, resolveContractChain, readDocsSubmitted,
-  CUSTOMER_STATE_DEFS, journeyStepLabel, journeyTotalSteps,
+  CUSTOMER_STATE_DEFS,
   type CustomerStateKey, type JourneyContract,
 } from '@/lib/customerJourney';
+import { customerStepLabel, journeyOptionsFor, journeyPosition, presentCustomerState, type JourneyOptions } from '@/lib/spaceJourney';
 import {
   Ban, AlertCircle, CheckCircle2, Clock,
   BedDouble, ChevronRight, RotateCcw,
@@ -47,6 +48,9 @@ interface Lead {
 interface Viewing {
   id: number;
   scheduledAt: string;
+  /** Recorded at creation by Book Now / direct booking (see bookedViaOf). */
+  desiredMoveIn?: string | null;
+  preferredChequeCount?: number | null;
   status: 'scheduled' | 'confirmed' | 'completed' | 'no_show' | 'cancelled';
   notes: string | null;
   outcome: string | null;
@@ -84,7 +88,7 @@ interface TenantContract extends JourneyContract {
   tenantSignedAt: string | null;
   renewalAccepted?: 'pending' | 'accepted' | 'rejected' | null;
   unit: { id: number | null; number?: string | null; name?: string | null; unitType?: string | null; bedrooms?: number | null } | null;
-  property?: { id: number | null; buildingName?: string | null; fullAddress?: string | null } | null;
+  property?: { id: number | null; buildingName?: string | null; fullAddress?: string | null; spaceCategory?: string | null; emirate?: string | null } | null;
 }
 
 interface ViewingGroup {
@@ -174,15 +178,33 @@ function rowJourney(row: SpaceRow, docs: TenantDoc[], entityType: 'individual' |
   });
 }
 
+/** The per-subcategory naming options for a row — same rule as the detail
+ *  page (lib/spaceJourney), so the card and the page name the same stop. */
+function rowJourneyOptions(row: SpaceRow, key: CustomerStateKey): JourneyOptions {
+  const unitType = row.kind === 'viewing'
+    ? row.group.unit?.unitType
+    : row.kind === 'direct'
+      ? row.lead.unit?.unitType
+      : row.contract.unit?.unitType;
+  const c = row.contract ?? row.renewalContract;
+  return journeyOptionsFor(key, {
+    unitType: unitType ?? c?.unit?.unitType ?? null,
+    spaceCategory: c?.property?.spaceCategory ?? null,
+    emirate: c?.property?.emirate ?? (row.kind === 'viewing' ? row.group.unit?.property?.emirate?.name : row.kind === 'direct' ? row.lead.unit?.property?.emirate?.name : null) ?? null,
+    viewing: row.kind === 'viewing' ? row.group.primary : null,
+    direct: row.kind === 'direct',
+  });
+}
+
 /** Pill + tone for a resolved journey state. */
-function journeyStatusConfig(key: CustomerStateKey): { label: string; step: string; bg: string; text: string; isAction: boolean } {
-  const def = CUSTOMER_STATE_DEFS[key];
-  const step = journeyStepLabel(key);
+function journeyStatusConfig(key: CustomerStateKey, opts: JourneyOptions): { label: string; step: string; bg: string; text: string; isAction: boolean } {
+  const def = presentCustomerState(CUSTOMER_STATE_DEFS[key], key, opts);
+  const step = customerStepLabel(key, opts);
   const palette = {
     action:    { bg: 'bg-[#fbe5dc]', text: 'text-[#c8492c]' },
     waiting:   { bg: 'bg-[#fbebcc]', text: 'text-[#a0641b]' },
-    celebrate: { bg: 'bg-[#d8f2e8]', text: 'text-[#1a7a5a]' },
-    declined:  { bg: 'bg-[#f4f3ef]', text: 'text-[#6b6860]' },
+    celebrate: { bg: 'bg-[#d8efe3]', text: 'text-[#1a7a5a]' },
+    declined:  { bg: 'bg-[#eef1ef]', text: 'text-[#5f6b63]' },
   }[def.tone];
   return { label: def.label, step, ...palette, isAction: def.tone === 'action' };
 }
@@ -191,16 +213,16 @@ function journeyStatusConfig(key: CustomerStateKey): { label: string; step: stri
 
 function InactiveCard({ label, subLabel, dateStr, reason }: { label: string; subLabel?: string; dateStr: string; reason: string }) {
   return (
-    <div className="bg-white rounded-xl p-4 border border-[#e8e6e0] flex items-center gap-3 opacity-60">
-      <div className="w-8 h-8 rounded-full bg-[#f4f3ef] flex items-center justify-center flex-shrink-0">
-        <Ban size={14} className="text-[#9b9890]" />
+    <div className="bg-white rounded-xl p-4 border border-[#e4e9e5] flex items-center gap-3 opacity-60">
+      <div className="w-8 h-8 rounded-full bg-[#eef1ef] flex items-center justify-center flex-shrink-0">
+        <Ban size={14} className="text-[#8a948d]" />
       </div>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-[#3d3b35] truncate">{label}</p>
-        {subLabel && <p className="text-xs text-[#9b9890]">{subLabel}</p>}
-        <p className="text-xs text-[#9b9890]">{dateStr} · {reason}</p>
+        <p className="text-sm font-medium text-[#46534c] truncate">{label}</p>
+        {subLabel && <p className="text-xs text-[#8a948d]">{subLabel}</p>}
+        <p className="text-xs text-[#8a948d]">{dateStr} · {reason}</p>
       </div>
-      <a href="/listings" className="ml-auto flex-shrink-0 text-xs text-[#2e9f82] hover:underline font-medium">Find another →</a>
+      <a href="/listings" className="ml-auto flex-shrink-0 text-xs text-[#047246] hover:underline font-medium">Find another →</a>
     </div>
   );
 }
@@ -376,13 +398,13 @@ export default function MySpacesPage() {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9b9890]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8a948d]">
             Hello {firstName}
           </p>
-          <h1 className="text-3xl font-bold text-[#1a1916] mt-1.5 leading-[1.1] tracking-tight">
+          <h1 className="text-3xl font-bold text-[#14201a] mt-1.5 leading-[1.1] tracking-tight">
             Your <span className="text-[#1f5a3f]">spaces</span>
           </h1>
-          <p className="text-sm text-[#6b6860] mt-2 max-w-md">
+          <p className="text-sm text-[#5f6b63] mt-2 max-w-md">
             Everything in motion — current leases, applications, viewings on the calendar. Tap any card to drill in.
           </p>
         </div>
@@ -426,9 +448,10 @@ export default function MySpacesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
           {activeRows.map((row, idx) => {
             const stateKey = rowStates[idx];
-            const def = CUSTOMER_STATE_DEFS[stateKey];
-            const sc = journeyStatusConfig(stateKey);
-            const totalSteps = journeyTotalSteps(stateKey);
+            const jOpts = rowJourneyOptions(row, stateKey);
+            const def = presentCustomerState(CUSTOMER_STATE_DEFS[stateKey], stateKey, jOpts);
+            const sc = journeyStatusConfig(stateKey, jOpts);
+            const totalSteps = journeyPosition(stateKey, jOpts).total;
             // For contract-only rows, map the contract's unit/property payload
             // into the SpaceUnit shape the card expects.
             const unit: SpaceUnit | null = row.kind === 'viewing'
@@ -487,35 +510,35 @@ export default function MySpacesPage() {
               action:  { bg: 'bg-[#fbe5dc]', border: 'border-[#f3c4b3]', dot: 'bg-[#c8492c]', label: 'text-[#c8492c]', icon: <AlertCircle size={14} className="text-white" />, eyebrow: 'Your turn' },
               waiting: { bg: 'bg-[#fbebcc]', border: 'border-[#f0d68f]', dot: 'bg-[#a0641b]',  label: 'text-[#a0641b]',  icon: <Clock size={14} className="text-white" />,        eyebrow: 'With your rental provider' },
               settled: { bg: 'bg-[#e0ede0]', border: 'border-[#bdd9b8]', dot: 'bg-[#1f5a3f]',  label: 'text-[#1f5a3f]',  icon: <CheckCircle2 size={14} className="text-white" />, eyebrow: 'Active' },
-              closed:  { bg: 'bg-[#f4f3ef]', border: 'border-[#e8e6e0]', dot: 'bg-[#9b9890]',  label: 'text-[#6b6860]',  icon: <Ban size={14} className="text-white" />,          eyebrow: 'Closed' },
+              closed:  { bg: 'bg-[#eef1ef]', border: 'border-[#e4e9e5]', dot: 'bg-[#8a948d]',  label: 'text-[#5f6b63]',  icon: <Ban size={14} className="text-white" />,          eyebrow: 'Closed' },
             }[tone];
 
             return (
               <Link
                 key={row.key}
                 href={`/dashboard/customer/spaces/v2/${row.key}`}
-                className="text-left bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-lg hover:border-[#1a1916]/30 flex flex-col"
+                className="text-left bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-lg hover:border-[#14201a]/30 flex flex-col"
               >
                 {/* Hero photo */}
-                <div className="relative h-44 overflow-hidden bg-[#f4f3ef]">
+                <div className="relative h-44 overflow-hidden bg-[#eef1ef]">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={photo} alt={buildingName || unitLabel} className="w-full h-full object-cover" loading="lazy" />
                   <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(180deg,rgba(0,0,0,.18) 0%,rgba(0,0,0,0) 45%,rgba(0,0,0,0) 60%,rgba(26,23,20,.55) 100%)' }} />
                   {c?.renewalAccepted === 'pending' && (
-                    <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[#1a1916] text-white inline-flex items-center gap-1">
+                    <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[#14201a] text-white inline-flex items-center gap-1">
                       <RotateCcw size={10} /> Renewal — Action
                     </span>
                   )}
                   {/* The pill now names the actual journey step ("Documents
                       required", "Awaiting your signature") rather than a coarse
-                      bucket, and carries its position in the 8-stop journey. */}
+                      bucket, and carries its position on the subcategory rail (8 stops, 7 for land). */}
                   <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
                     <span className={`text-[11px] font-semibold rounded-full px-3 py-1.5 ${sc.bg} ${sc.text} shadow-sm ${sc.isAction ? 'upnow-action-pill' : ''}`}>
                       {sc.isAction && <span className="inline-block w-1.5 h-1.5 rounded-full bg-current mr-1.5 align-middle" />}
                       {sc.label}
                     </span>
                     {sc.step && (
-                      <span className="text-[10px] font-semibold rounded-full px-2.5 py-1 bg-[#1a1916]/75 text-white shadow-sm whitespace-nowrap tabular-nums">
+                      <span className="text-[10px] font-semibold rounded-full px-2.5 py-1 bg-[#14201a]/75 text-white shadow-sm whitespace-nowrap tabular-nums">
                         {sc.step}
                       </span>
                     )}
@@ -526,9 +549,9 @@ export default function MySpacesPage() {
                 <div className="p-5 flex flex-col gap-4 flex-1">
                   <div>
                     {location && (
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9b9890] mb-1">{location}</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#8a948d] mb-1">{location}</p>
                     )}
-                    <h3 className="text-lg font-bold text-[#1a1916] leading-tight tracking-tight">
+                    <h3 className="text-lg font-bold text-[#14201a] leading-tight tracking-tight">
                       {buildingName || unitLabel}
                       {buildingName && unitLabel && (
                         <>, <span className="font-semibold text-[#1f5a3f]">{unitLabel}</span></>
@@ -540,31 +563,31 @@ export default function MySpacesPage() {
                       said only "In progress", which is the one thing the customer
                       can already tell from the space being on this list. */}
                   {totalSteps > 0 && (
-                    <p className="text-xs text-[#6b6860] leading-snug">
-                      <span className="font-semibold text-[#1a1916]">{def.headline}</span>
-                      {def.timing && <span className="text-[#9b9890]"> · {def.timing}</span>}
+                    <p className="text-xs text-[#5f6b63] leading-snug">
+                      <span className="font-semibold text-[#14201a]">{def.headline}</span>
+                      {def.timing && <span className="text-[#8a948d]"> · {def.timing}</span>}
                     </p>
                   )}
 
                   {/* Stats strip */}
                   <div className="grid grid-cols-3 gap-3 py-3 border-y border-[#f0ede8]">
                     <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">Beds</p>
-                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#8a948d]">Beds</p>
+                      <p className="text-sm font-semibold text-[#14201a] mt-0.5">
                         {bedrooms != null ? (bedrooms === 0 ? 'Studio' : `${bedrooms} BR`) : '—'}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#8a948d]">
                         {annualIsAsking ? 'Asking' : 'Annual'}
                       </p>
-                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5 tabular-nums">
+                      <p className="text-sm font-semibold text-[#14201a] mt-0.5 tabular-nums">
                         {annual != null ? `AED ${(annual / 1000).toFixed(0)}K` : '—'}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#9b9890]">{periodLabel.label}</p>
-                      <p className="text-sm font-semibold text-[#1a1916] mt-0.5">{periodLabel.value}</p>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#8a948d]">{periodLabel.label}</p>
+                      <p className="text-sm font-semibold text-[#14201a] mt-0.5">{periodLabel.value}</p>
                     </div>
                   </div>
 
@@ -576,7 +599,7 @@ export default function MySpacesPage() {
                       </span>
                       <p className={`text-xs font-semibold ${toneCfg.label}`}>{toneCfg.eyebrow}</p>
                     </div>
-                    <span className="text-xs font-semibold text-[#1a1916] inline-flex items-center gap-1">
+                    <span className="text-xs font-semibold text-[#14201a] inline-flex items-center gap-1">
                       Open <ChevronRight size={14} className={sc.isAction ? 'upnow-action-arrow' : ''} />
                     </span>
                   </div>
@@ -597,19 +620,19 @@ export default function MySpacesPage() {
       {/* Empty state */}
       {isEmpty && (
         <div className="bg-white rounded-2xl p-16 flex flex-col items-center justify-center text-center">
-          <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-            <BedDouble size={24} className="text-[#2e9f82]" />
+          <div className="w-14 h-14 rounded-full bg-[#d8efe3] flex items-center justify-center mb-4">
+            <BedDouble size={24} className="text-[#047246]" />
           </div>
-          <h3 className="font-semibold text-[#1a1916] mb-1">No spaces yet</h3>
-          <p className="text-sm text-[#6b6860] max-w-xs">Browse listings and book a viewing or apply directly to get started.</p>
-          <a href="/listings" className="mt-4 text-sm font-medium text-[#2e9f82] hover:underline">Browse listings →</a>
+          <h3 className="font-semibold text-[#14201a] mb-1">No spaces yet</h3>
+          <p className="text-sm text-[#5f6b63] max-w-xs">Browse listings and book a viewing or apply directly to get started.</p>
+          <a href="/listings" className="mt-4 text-sm font-medium text-[#047246] hover:underline">Browse listings →</a>
         </div>
       )}
 
       {/* Past / inactive */}
       {!loading && (inactiveGroups.length > 0 || inactiveDirectLeads.length > 0 || pastContractRows.length > 0) && (
         <section>
-          <h2 className="text-sm font-semibold text-[#3d3b35] uppercase tracking-wide mb-3">Past</h2>
+          <h2 className="text-sm font-semibold text-[#46534c] uppercase tracking-wide mb-3">Past</h2>
           <div className="space-y-3">
             {pastContractRows.map(c => (
               <InactiveCard

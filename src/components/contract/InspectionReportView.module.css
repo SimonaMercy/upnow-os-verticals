@@ -2,10 +2,10 @@
    Ported from the approved Mockups/customer-rental-journey/inspection-report-template.html */
 
 .report{
-  --green:#2e9f82; --ink:#1a1916; --muted:#6b6860; --faint:#9b9890;
+  --green:#047246; --ink:#14201a; --muted:#5f6b63; --faint:#8a948d;
   --line:#e5e3dc; --line-soft:#f1efe9; --gutter:#fafcfb;
-  --good:#2e9f82; --fair:#e0912f; --poor:#dc2626;
-  --t-cat:#2e9f82; --t-items:#4f6ef7; --t-replace:#e0912f; --t-cost:#dc2626;
+  --good:#047246; --fair:#e0912f; --poor:#dc2626;
+  --t-cat:#047246; --t-items:#4f6ef7; --t-replace:#e0912f; --t-cost:#dc2626;
   color:var(--ink);
   font-size:14px; line-height:1.45;
   /* Clean white card so the form reads crisp on any page background. */

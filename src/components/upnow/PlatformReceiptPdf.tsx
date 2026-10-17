@@ -48,9 +48,9 @@ export interface PlatformReceiptDoc {
 // UpNow's VAT registration number — wire to config once issued by the FTA.
 const UPNOW_TRN = '';
 
-const GREEN = '#2e9f82';
-const INK = '#1a1916';
-const MUTE = '#6b6860';
+const GREEN = '#047246';
+const INK = '#14201a';
+const MUTE = '#5f6b63';
 const LINE = '#e2ded7';
 
 const aed = (n: number) =>

@@ -41,22 +41,22 @@ export function PayoutScheduleCard({ onConfirm }: { onConfirm?: (message: string
 
   return (
     <div className="rounded-2xl border border-[#ececea] bg-white p-4">
-      <div className="flex items-center gap-2 mb-1"><Wallet size={15} className="text-[#2e9f82]" /><h3 className="text-[13.5px] font-bold text-[#1a1916]">Payout schedule</h3><span className="text-[10.5px] text-[#9b9890]">SP-221</span></div>
-      <p className="text-[11.5px] text-[#6b6860] mb-3">Applied at payout time — a released job&apos;s net becomes payable after the hold; escrow release (Gate 6) is unchanged. Every change is audited.</p>
-      {!draft ? <p className="text-[11px] text-[#9b9890]">{err ?? 'Loading…'}</p> : (
+      <div className="flex items-center gap-2 mb-1"><Wallet size={15} className="text-[#047246]" /><h3 className="text-[13.5px] font-bold text-[#14201a]">Payout schedule</h3><span className="text-[10.5px] text-[#8a948d]">SP-221</span></div>
+      <p className="text-[11.5px] text-[#5f6b63] mb-3">Applied at payout time — a released job&apos;s net becomes payable after the hold; escrow release (Gate 6) is unchanged. Every change is audited.</p>
+      {!draft ? <p className="text-[11px] text-[#8a948d]">{err ?? 'Loading…'}</p> : (
         <div className="grid grid-cols-2 gap-3">
-          <label className="text-[11px] text-[#6b6860]">Hold after release (hours)
+          <label className="text-[11px] text-[#5f6b63]">Hold after release (hours)
             <input type="number" min={0} max={720} value={draft.holdHoursAfterRelease} onChange={(e) => set('holdHoursAfterRelease', Math.max(0, Math.min(720, Math.round(Number(e.target.value) || 0))))} className="mt-1 w-full rounded-lg border border-[#ececea] px-2 py-1.5 text-[12.5px]" />
           </label>
-          <label className="text-[11px] text-[#6b6860]">Minimum payout (AED)
+          <label className="text-[11px] text-[#5f6b63]">Minimum payout (AED)
             <input type="number" min={0} max={100000} value={draft.minPayoutAed} onChange={(e) => set('minPayoutAed', Math.max(0, Number(e.target.value) || 0))} className="mt-1 w-full rounded-lg border border-[#ececea] px-2 py-1.5 text-[12.5px]" />
           </label>
-          <label className="text-[11px] text-[#6b6860]">Cadence
+          <label className="text-[11px] text-[#5f6b63]">Cadence
             <select value={draft.cadence} onChange={(e) => set('cadence', e.target.value as Policy['cadence'])} className="mt-1 w-full rounded-lg border border-[#ececea] px-2 py-1.5 text-[12.5px] bg-white">
               <option value="weekly">Weekly</option><option value="daily">Daily</option><option value="manual">Manual (ops decides)</option>
             </select>
           </label>
-          <label className="text-[11px] text-[#6b6860]">Payout day (weekly)
+          <label className="text-[11px] text-[#5f6b63]">Payout day (weekly)
             <select value={draft.payoutWeekday} disabled={draft.cadence !== 'weekly'} onChange={(e) => set('payoutWeekday', Number(e.target.value))} className="mt-1 w-full rounded-lg border border-[#ececea] px-2 py-1.5 text-[12.5px] bg-white disabled:opacity-50">
               {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
             </select>
@@ -64,7 +64,7 @@ export function PayoutScheduleCard({ onConfirm }: { onConfirm?: (message: string
         </div>
       )}
       {err && draft && <p className="text-[11px] text-[#b42318] mt-2">{err}</p>}
-      <button onClick={save} disabled={!dirty || busy} className="mt-3 w-full rounded-lg bg-[#2e9f82] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center gap-2">
+      <button onClick={save} disabled={!dirty || busy} className="mt-3 w-full rounded-lg bg-[#047246] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center gap-2">
         {busy && <Loader2 size={12} className="animate-spin" />} Save payout schedule
       </button>
     </div>

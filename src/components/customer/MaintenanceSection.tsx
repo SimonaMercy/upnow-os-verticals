@@ -44,14 +44,14 @@ interface MyReq {
 }
 
 const STAGE_WORDS: Record<string, { label: string; bg: string; fg: string }> = {
-  requested:         { label: 'Requested',              bg: '#f4f3ef', fg: '#6b6860' },
+  requested:         { label: 'Requested',              bg: '#eef1ef', fg: '#5f6b63' },
   awaiting_approval: { label: 'Quote pending',          bg: '#fef3c7', fg: '#92400e' },
   in_progress:       { label: 'In progress',            bg: '#e0f2fe', fg: '#0369a1' },
   sign_off:          { label: 'Done — please confirm',  bg: '#ede9fe', fg: '#6d28d9' },
   close_out:         { label: 'Completed',              bg: '#dcfce7', fg: '#15803d' },
   closed:            { label: 'Completed',              bg: '#dcfce7', fg: '#15803d' },
   declined:          { label: 'Not covered',            bg: '#fee2e2', fg: '#b91c1c' },
-  cancelled:         { label: 'Cancelled',              bg: '#f4f3ef', fg: '#9b9890' },
+  cancelled:         { label: 'Cancelled',              bg: '#eef1ef', fg: '#8a948d' },
 };
 const fmt = (d: string) => new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: '2-digit', month: 'short' });
 
@@ -162,12 +162,12 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
     [r.unit?.unitNumber ? `Unit ${r.unit.unitNumber}` : r.unit?.unitName ?? null, r.property?.buildingName ?? null].filter(Boolean).join(' · ');
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2"><Wrench size={14} /> {variant === 'track' && contractId == null ? 'Maintenance requests' : 'Maintenance'}</h2>
+        <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2"><Wrench size={14} /> {variant === 'track' && contractId == null ? 'Maintenance requests' : 'Maintenance'}</h2>
         {contractId != null ? (
           <button type="button" onClick={() => { setSent(null); setOpen(true); }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white cursor-pointer" style={{ background: '#2e9f82' }}>
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white cursor-pointer" style={{ background: '#047246' }}>
             <Plus size={13} /> Request maintenance
           </button>
         ) : (
@@ -177,7 +177,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
 
       {variant === 'raise' ? (
         sent ? (
-          <p className="text-xs font-medium text-[#1a7a5a] bg-[#f0faf6] rounded-lg px-3 py-2 mt-3 flex items-center gap-2 flex-wrap">
+          <p className="text-xs font-medium text-[#1a7a5a] bg-[#eef7f2] rounded-lg px-3 py-2 mt-3 flex items-center gap-2 flex-wrap">
             <CheckCircle2 size={13} /> Sent — {sent.ref}.{' '}
             {sent.coverage === 'covered' ? 'Covered by your landlord; their team takes it from here.'
               : sent.coverage === 'chargeable' ? 'Yours to confirm — the price or quote comes to you under My Services → Maintenance.'
@@ -186,13 +186,13 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
             {uploadNote && <span className="basis-full text-[#b45309]">{uploadNote}</span>}
           </p>
         ) : (
-          <p className="text-xs text-[#9b9890] mt-3">
+          <p className="text-xs text-[#8a948d] mt-3">
             Something broken or not working? Send a request — we tell you straight away whether it&apos;s your landlord&apos;s scope.
             Progress, prices and sign-off live under <Link href={TRACK_HREF} className="underline font-medium text-[#1a7a5a]">My Services → Maintenance</Link>.
           </p>
         )
       ) : reqs.length === 0 ? (
-        <p className="text-xs text-[#9b9890] mt-3">{contractId != null
+        <p className="text-xs text-[#8a948d] mt-3">{contractId != null
           ? "Something broken or not working? Send a request and your landlord's team takes it from there."
           : 'No maintenance requests yet — raise one from your space and it shows up here.'}</p>
       ) : (
@@ -207,11 +207,11 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
             return (
               <li key={r.id} className="border border-[#f0eeea] rounded-xl px-3.5 py-2.5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-[10px] text-[#9b9890]">{r.ref}</span>
-                  <span className="text-sm font-semibold text-[#1a1916] flex-1 min-w-0 truncate">{r.title}</span>
+                  <span className="font-mono text-[10px] text-[#8a948d]">{r.ref}</span>
+                  <span className="text-sm font-semibold text-[#14201a] flex-1 min-w-0 truncate">{r.title}</span>
                   <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ background: w.bg, color: w.fg }}>{w.label}</span>
                 </div>
-                <p className="text-[11px] text-[#6b6860] mt-1">
+                <p className="text-[11px] text-[#5f6b63] mt-1">
                   {contractId == null && unitLabel(r) ? <>{unitLabel(r)} · </> : null}
                   {r.category?.name ?? 'Maintenance'} · {fmt(r.createdAt)}
                   {r.provider ? <> · {r.provider.name}</> : null}
@@ -223,7 +223,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 </p>
                 {fixed && r.coverage === 'chargeable' && r.booking && (
                   <div className="mt-1.5">
-                    <p className="text-[11px] text-[#6b6860]">Priced from the provider's catalog — no quote needed. Nothing is charged until you pay, and the provider starts once you do.</p>
+                    <p className="text-[11px] text-[#5f6b63]">Priced from the provider's catalog — no quote needed. Nothing is charged until you pay, and the provider starts once you do.</p>
                     <button type="button" disabled={paying === r.id} onClick={() => payNow(r)}
                       className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#0369a1' }}>
                       {paying === r.id ? 'Paying…' : `Pay AED ${Number(r.booking.totalAed).toLocaleString('en-AE')} to confirm`}
@@ -243,7 +243,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 )}
                 {r.stage === 'sign_off' && (
                   <button type="button" disabled={confirming === r.id} onClick={() => confirmDone(r.id)}
-                    className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+                    className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
                     <CheckCircle2 size={12} /> {confirming === r.id ? 'Confirming…' : 'Confirm the work is done'}
                   </button>
                 )}
@@ -257,11 +257,11 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => !busy && setOpen(false)}>
           <div className="bg-white rounded-2xl p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[#1a1916]">Request maintenance</h3>
-              <button type="button" onClick={() => setOpen(false)} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer"><X size={16} /></button>
+              <h3 className="text-sm font-bold text-[#14201a]">Request maintenance</h3>
+              <button type="button" onClick={() => setOpen(false)} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer"><X size={16} /></button>
             </div>
             <div className="space-y-3 mt-4">
-              <select value={catId} onChange={e => setCatId(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]">
+              <select value={catId} onChange={e => setCatId(e.target.value)} className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]">
                 <option value="">What kind of work?</option>
                 {/* Grouped the way the marketplace offers services — pick the specific item. */}
                 {cats.filter(g => g.parentId == null).map(g => {
@@ -284,26 +284,26 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 // customer who picked "A/C system maintenance" has found what they need.
                 if (catId && !picked) return null;
                 return (
-                  <div className="rounded-xl border border-[#e8e6e0] bg-[#fafaf8] px-3.5 py-3">
-                    <p className="text-xs font-bold text-[#1a1916]">Can&apos;t find what you need?</p>
+                  <div className="rounded-xl border border-[#e4e9e5] bg-[#f6f8f6] px-3.5 py-3">
+                    <p className="text-xs font-bold text-[#14201a]">Can&apos;t find what you need?</p>
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       {other && (
                         <button type="button" onClick={() => setCatId(String(other.id))} disabled={busy || picked}
-                          className={`text-left rounded-xl border px-3 py-2.5 cursor-pointer disabled:cursor-default transition-colors ${picked ? 'border-[#2e9f82] bg-[#d8f2e8]' : 'border-[#e8e6e0] bg-white hover:border-[#2e9f82] hover:bg-[#f0faf6]'}`}>
+                          className={`text-left rounded-xl border px-3 py-2.5 cursor-pointer disabled:cursor-default transition-colors ${picked ? 'border-[#047246] bg-[#d8efe3]' : 'border-[#e4e9e5] bg-white hover:border-[#047246] hover:bg-[#eef7f2]'}`}>
                           <span className="flex items-center gap-1.5 text-xs font-bold text-[#1a7a5a]">
                             {picked ? <CheckCircle2 size={13} /> : <Wrench size={13} />} Something else
                           </span>
-                          <span className="block text-[11px] text-[#6b6860] mt-0.5 leading-snug">
+                          <span className="block text-[11px] text-[#5f6b63] mt-0.5 leading-snug">
                             {picked ? 'Selected — describe it below.' : 'Describe it — your landlord decides who does it and who pays.'}
                           </span>
                         </button>
                       )}
                       <Link href="/services"
-                        className="text-left rounded-xl border border-[#e8e6e0] bg-white px-3 py-2.5 hover:border-[#0369a1] hover:bg-[#f0f7fc] transition-colors">
+                        className="text-left rounded-xl border border-[#e4e9e5] bg-white px-3 py-2.5 hover:border-[#0369a1] hover:bg-[#f0f7fc] transition-colors">
                         <span className="flex items-center gap-1.5 text-xs font-bold text-[#0369a1]">
                           <ShoppingBag size={13} /> Book it yourself
                         </span>
-                        <span className="block text-[11px] text-[#6b6860] mt-0.5 leading-snug">
+                        <span className="block text-[11px] text-[#5f6b63] mt-0.5 leading-snug">
                           Outside your tenancy — any marketplace provider, at your cost.
                         </span>
                       </Link>
@@ -312,29 +312,29 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 );
               })()}
               <input placeholder="Describe the issue in a few words" value={title} maxLength={255} onChange={e => setTitle(e.target.value)}
-                className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
               <textarea placeholder="Any detail that helps — where, since when…" value={desc} rows={3} onChange={e => setDesc(e.target.value)}
-                className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
               {/* When suits you — becomes the provider's scheduled visit. */}
-              <div className="border border-[#e8e6e0] rounded-lg px-3 py-2">
-                <p className="text-[11px] font-semibold text-[#6b6860]">Preferred visit</p>
-                <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-[#1a1916]">
+              <div className="border border-[#e4e9e5] rounded-lg px-3 py-2">
+                <p className="text-[11px] font-semibold text-[#5f6b63]">Preferred visit</p>
+                <div className="flex items-center gap-3 mt-1.5 flex-wrap text-xs text-[#14201a]">
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" name="maint-when" checked={whenMode === 'asap'} onChange={() => setWhenMode('asap')} className="accent-[#2e9f82]" /> As soon as possible
+                    <input type="radio" name="maint-when" checked={whenMode === 'asap'} onChange={() => setWhenMode('asap')} className="accent-[#047246]" /> As soon as possible
                   </label>
                   <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" name="maint-when" checked={whenMode === 'pick'} onChange={() => setWhenMode('pick')} className="accent-[#2e9f82]" /> Choose a time
+                    <input type="radio" name="maint-when" checked={whenMode === 'pick'} onChange={() => setWhenMode('pick')} className="accent-[#047246]" /> Choose a time
                   </label>
                   {whenMode === 'pick' && (
                     <input type="datetime-local" value={whenAt} min={new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16)}
                       onChange={e => setWhenAt(e.target.value)}
-                      className="border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#2e9f82]" />
+                      className="border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#047246]" />
                   )}
                 </div>
-                <p className="text-[10px] text-[#9b9890] mt-1">The provider schedules the visit around this and confirms the exact slot with you.</p>
+                <p className="text-[10px] text-[#8a948d] mt-1">The provider schedules the visit around this and confirms the exact slot with you.</p>
               </div>
               {/* Photos or short videos — the provider's crew is briefed with these on the job page. */}
-              <div className="border border-dashed border-[#e8e6e0] rounded-lg px-3 py-2">
+              <div className="border border-dashed border-[#e4e9e5] rounded-lg px-3 py-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1a7a5a] cursor-pointer">
                     <Camera size={13} /> {files.length ? 'Add more photos or videos' : 'Add photos or videos'}
@@ -345,17 +345,17 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                         e.target.value = '';
                       }} />
                   </label>
-                  <span className="text-[11px] text-[#9b9890]">{files.length}/{MAX_REQUEST_PHOTOS} · JPG, PNG, HEIC up to {MAX_PHOTO_MB} MB · MP4, MOV up to {MAX_VIDEO_MB} MB</span>
+                  <span className="text-[11px] text-[#8a948d]">{files.length}/{MAX_REQUEST_PHOTOS} · JPG, PNG, HEIC up to {MAX_PHOTO_MB} MB · MP4, MOV up to {MAX_VIDEO_MB} MB</span>
                 </div>
                 {files.length > 0 && (
                   <ul className="flex gap-2 flex-wrap mt-2">
                     {files.map((f, i) => (
                       <li key={`${f.name}-${i}`} className="relative">
                         {isVideoFile(f)
-                          ? <video src={URL.createObjectURL(f)} muted playsInline preload="metadata" title={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e8e6e0] bg-black" />
-                          : <img src={URL.createObjectURL(f)} alt={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e8e6e0]" />}
+                          ? <video src={URL.createObjectURL(f)} muted playsInline preload="metadata" title={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e4e9e5] bg-black" />
+                          : <img src={URL.createObjectURL(f)} alt={f.name} className="w-14 h-14 object-cover rounded-lg border border-[#e4e9e5]" />}
                         <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} disabled={busy}
-                          className="absolute -top-1.5 -right-1.5 bg-white border border-[#e8e6e0] rounded-full p-0.5 text-[#6b6860] hover:text-[#b91c1c] cursor-pointer" aria-label={`Remove ${f.name}`}>
+                          className="absolute -top-1.5 -right-1.5 bg-white border border-[#e4e9e5] rounded-full p-0.5 text-[#5f6b63] hover:text-[#b91c1c] cursor-pointer" aria-label={`Remove ${f.name}`}>
                           <X size={10} />
                         </button>
                       </li>
@@ -367,7 +367,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                 const sel = cats.find(c => String(c.id) === catId);
                 if (!sel) return null;
                 if (sel.coverage === 'covered') return (
-                  <p className="text-[11px] font-medium text-[#1a7a5a] bg-[#f0faf6] rounded-lg px-3 py-2">
+                  <p className="text-[11px] font-medium text-[#1a7a5a] bg-[#eef7f2] rounded-lg px-3 py-2">
                     Covered by your landlord — their team will handle it.{sel.note ? ` ${sel.note}` : ''}
                   </p>
                 );
@@ -375,12 +375,12 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                   <div className="text-[11px] font-medium text-[#0369a1] bg-[#e0f2fe] rounded-lg px-3 py-2 space-y-2">
                     <p>This one's on you — so it's yours to place. Keep your landlord's provider or pick any from the marketplace.{sel.note ? ` ${sel.note}` : ''}</p>
                     {providers == null ? (
-                      <p className="text-[#6b6860]">Finding providers…</p>
+                      <p className="text-[#5f6b63]">Finding providers…</p>
                     ) : providers.options.length === 0 ? (
-                      <p className="text-[#6b6860]">No provider is listed for this yet — send the request and your landlord will place it.</p>
+                      <p className="text-[#5f6b63]">No provider is listed for this yet — send the request and your landlord will place it.</p>
                     ) : (
                       <select value={providerId} onChange={e => setProviderId(e.target.value)}
-                        className="w-full border border-[#bae6fd] rounded-lg px-2.5 py-1.5 text-xs bg-white text-[#1a1916] focus:outline-none focus:border-[#0369a1]">
+                        className="w-full border border-[#bae6fd] rounded-lg px-2.5 py-1.5 text-xs bg-white text-[#14201a] focus:outline-none focus:border-[#0369a1]">
                         {providers.options.some(o => o.source === 'linked') && (
                           <optgroup label="Your landlord's providers">
                             {providers.options.filter(o => o.source === 'linked').map(o => (
@@ -402,7 +402,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                       </select>
                     )}
                     {chosenProvider && (
-                      <p className="text-[#6b6860]">
+                      <p className="text-[#5f6b63]">
                         {chosenProvider.fixedPriceAed != null
                           ? `Fixed price AED ${chosenProvider.fixedPriceAed.toLocaleString('en-AE')} (${chosenProvider.catalogName}) — you pay to confirm after sending; nothing is charged before that.`
                           : 'They visit and assess first — you approve their quote before any work or payment.'}
@@ -417,7 +417,7 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
                   </div>
                 );
                 return (
-                  <p className="text-[11px] font-medium text-[#6b6860] bg-[#f4f3ef] rounded-lg px-3 py-2">
+                  <p className="text-[11px] font-medium text-[#5f6b63] bg-[#eef1ef] rounded-lg px-3 py-2">
                     Your landlord will review this request and decide.
                   </p>
                 );
@@ -426,16 +426,16 @@ export function MaintenanceSection({ contractId, variant = 'track' }: {
               {cats.find(c => String(c.id) === catId)?.coverage === 'not_offered' ? (
                 <Link href="/services"
                   className="block w-full py-2.5 rounded-xl text-sm font-semibold text-center text-white"
-                  style={{ background: '#2e9f82' }}>
+                  style={{ background: '#047246' }}>
                   Browse the services marketplace
                 </Link>
               ) : (
               <button type="button" disabled={busy} onClick={submit}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
                 {busy ? (files.length ? 'Sending + uploading files…' : 'Sending…') : 'Send request'}
               </button>
               )}
-              <p className="text-[11px] text-[#9b9890]">Pick the item and we'll tell you straight away whether it's your landlord's scope or a marketplace booking.</p>
+              <p className="text-[11px] text-[#8a948d]">Pick the item and we'll tell you straight away whether it's your landlord's scope or a marketplace booking.</p>
             </div>
           </div>
         </div>

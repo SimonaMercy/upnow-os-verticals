@@ -42,7 +42,7 @@ function GuideTopbar({
       height: 56,
       flexShrink: 0,
       backgroundColor: '#ffffff',
-      borderBottom: '1px solid #e8e6e0',
+      borderBottom: '1px solid #e4e9e5',
       display: 'flex',
       alignItems: 'center',
       paddingInline: 20,
@@ -51,17 +51,17 @@ function GuideTopbar({
     }}>
       {/* Brand */}
       <Link href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
-        <span style={{ fontSize: 18, fontWeight: 800, color: '#2e9f82' }}>UpNow</span>
-        <span style={{ fontSize: 12, color: '#9b9890', fontWeight: 500 }}>Platform Guide</span>
+        <span style={{ fontSize: 18, fontWeight: 800, color: '#047246' }}>UpNow</span>
+        <span style={{ fontSize: 12, color: '#8a948d', fontWeight: 500 }}>Platform Guide</span>
       </Link>
 
-      <div style={{ width: 1, height: 20, backgroundColor: '#e8e6e0', flexShrink: 0 }} />
+      <div style={{ width: 1, height: 20, backgroundColor: '#e4e9e5', flexShrink: 0 }} />
 
       {/* Search */}
       <div style={{ flex: 1, maxWidth: 520, position: 'relative' }}>
         <span style={{
           position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)',
-          fontSize: 13, color: '#9b9890', pointerEvents: 'none',
+          fontSize: 13, color: '#8a948d', pointerEvents: 'none',
         }}>⌕</span>
         <input
           ref={inputRef}
@@ -75,11 +75,11 @@ function GuideTopbar({
             paddingInlineStart: 30,
             paddingInlineEnd: isFiltered ? 88 : 56,
             borderRadius: 8,
-            border: `1.5px solid ${isFiltered ? '#2e9f82' : '#e8e6e0'}`,
+            border: `1.5px solid ${isFiltered ? '#047246' : '#e4e9e5'}`,
             fontSize: 13,
             outline: 'none',
-            backgroundColor: isFiltered ? '#f0faf6' : '#fafaf8',
-            color: '#1a1916',
+            backgroundColor: isFiltered ? '#eef7f2' : '#f6f8f6',
+            color: '#14201a',
             boxSizing: 'border-box',
             transition: 'border-color 0.15s, background-color 0.15s',
           }}
@@ -91,17 +91,17 @@ function GuideTopbar({
               position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
               background: 'none', border: 'none', cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 11, color: '#6b6860', padding: '2px 4px',
+              fontSize: 11, color: '#5f6b63', padding: '2px 4px',
             }}
           >
-            <span style={{ color: '#2e9f82', fontWeight: 700 }}>{filteredCount}/{totalSections}</span>
-            <span style={{ color: '#9b9890' }}>✕</span>
+            <span style={{ color: '#047246', fontWeight: 700 }}>{filteredCount}/{totalSections}</span>
+            <span style={{ color: '#8a948d' }}>✕</span>
           </button>
         ) : (
           <kbd style={{
             position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-            fontSize: 10, color: '#9b9890', backgroundColor: '#f6f8fa',
-            border: '1px solid #e8e6e0', borderRadius: 4, padding: '2px 6px',
+            fontSize: 10, color: '#8a948d', backgroundColor: '#f6f8fa',
+            border: '1px solid #e4e9e5', borderRadius: 4, padding: '2px 6px',
             fontFamily: 'monospace', pointerEvents: 'none',
           }}>⌘K</kbd>
         )}
@@ -113,8 +113,8 @@ function GuideTopbar({
       <Link
         href="/docs"
         style={{
-          fontSize: 12, color: '#6b6860', textDecoration: 'none',
-          padding: '5px 10px', border: '1px solid #e8e6e0', borderRadius: 6,
+          fontSize: 12, color: '#5f6b63', textDecoration: 'none',
+          padding: '5px 10px', border: '1px solid #e4e9e5', borderRadius: 6,
           fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0,
         }}
       >

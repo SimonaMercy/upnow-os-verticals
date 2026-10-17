@@ -3,16 +3,36 @@
  * Full parity with the RP unit view: photos, specs, leasing configuration +
  * pricing, plan agreement/addendum, unit documents, and the current tenancy's
  * contract addendums. Documents/addendums open inline (view-only) per policy.
+ *
+ * Parity with previous page (Genspark kit rebuild):
+ *  - API: GET /admin/units/:id. Error → "Unit not found — <message>" with Back; loading state.
+ *  - Header: unit no., building link → /dashboard/admin/properties/:propertyId, location + plan
+ *    label, availability pill. Back button (router.back()).
+ *  - Specs: type, tier, bedrooms (residential types only), bathrooms, parking, furnishing, size
+ *    (sqm → sqft fallback), floor, view, premise no., rent/yr, listing, owner (RP) link →
+ *    /dashboard/admin/users/:userId.
+ *  - Photos: images open in a new tab; non-images (floor plans) → openDocViewer.
+ *  - Leasing configuration via leaseTermsFromUnit(): lease terms, pricing & fees (Contract
+ *    Registration Fee = ejariFeeFils which is WHOLE AED — not fils), amenities, special conditions.
+ *  - Plan agreement & addendum (version, file → openDocViewer, special conditions).
+ *  - Unit documents → openDocViewer. Last move-out condition (priced vs "Not priced", flagged items
+ *    with "showing n of m"). Price history table (lease / reprice events).
+ *  - Current tenancy: customer link → /dashboard/admin/users/:tenantUserId (plain text when none),
+ *    ref + period, annual rent, contract addendums (signed / partially / unsigned) → openDocViewer;
+ *    "No active tenancy" empty state.
  */
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, Home, Building2, ExternalLink, FileText, ImageIcon, Settings2, ScrollText, Paperclip, History, ClipboardCheck } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { openDocViewer } from '@/lib/docViewer';
 import { leaseTermsFromUnit } from '@/lib/unitForm';
+import { isResidentialUnitType } from '@/lib/unitTaxonomy';
+import {
+  Btn, Callout, Card, KV, OsPage, PageHead, Pill, ScopeStrip, StatusTag, fmtAed, fmtDate, humanize,
+} from '@/components/os/kit';
 
 interface UnitFull {
   id: number; unitNumber: string | null; unitName: string | null; unitType: string | null;
@@ -76,31 +96,12 @@ interface UnitDetail {
   contractAddendums: Addendum[];
 }
 
-const availCls: Record<string, string> = {
-  available: 'bg-[#d8f2e8] text-[#1a7a5a]', occupied: 'bg-[#e8f0fb] text-[#1a5fb4]',
-  maintenance: 'bg-[#fef9eb] text-[#b45309]', reserved: 'bg-[#f3effb] text-[#7c3aed]',
-};
-const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString('en-AE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
 const titleCase = (s: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
-const aed = (v: number | null | undefined) => (v == null ? '—' : `AED ${Number(v).toLocaleString('en-AE')}`);
+/** Unit money is WHOLE AED. */
+const aed = (v: number | null | undefined) => (v == null ? '—' : fmtAed(v));
 const isImg = (u: string) => /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(u);
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{label}</div>
-      <div className="text-sm font-semibold text-[#3f3d39] mt-0.5">{value}</div>
-    </div>
-  );
-}
-function Card({ icon: Icon, title, children }: { icon: React.ElementType; title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-5 mb-5">
-      <div className="flex items-center gap-2 mb-4"><Icon size={15} className="text-[#9b9890]" /><span className="text-sm font-semibold text-[#3f3d39]">{title}</span></div>
-      {children}
-    </div>
-  );
-}
+const subLabel: React.CSSProperties = { fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ms-ink-3)', marginBottom: 6 };
+const divider: React.CSSProperties = { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--ms-surface-3)' };
 
 export default function AdminUnitDetailPage() {
   const params = useParams<{ id: string }>();
@@ -113,13 +114,20 @@ export default function AdminUnitDetailPage() {
     apiGet<UnitDetail>(`/admin/units/${params.id}`).then(setD).catch((e) => setErr(e?.message || 'Failed to load'));
   }, [params?.id]);
 
+  const back = <Btn onClick={() => router.back()}>Back</Btn>;
+
   if (err) return (
-    <div className="p-8">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
-      <div className="rounded-xl border border-[#e8e6e0] bg-white p-10 text-center text-[#6b6860]">Unit not found — {err}</div>
-    </div>
+    <OsPage>
+      <PageHead eyebrow="Admin › Inventory" title="Unit" actions={back} />
+      <Callout tone="bad" title="Unit not found.">{err}</Callout>
+    </OsPage>
   );
-  if (!d) return <div className="p-8 text-[#6b6860]">Loading…</div>;
+  if (!d) return (
+    <OsPage>
+      <PageHead eyebrow="Admin › Inventory" title="Loading unit…" actions={back} />
+      <div className="gx-card gx-pad" aria-busy="true"><div className="gx-skel" style={{ height: 140 }} /></div>
+    </OsPage>
+  );
 
   const u = d.unit;
   const prop = u.property;
@@ -148,259 +156,271 @@ export default function AdminUnitDetailPage() {
     ['Commission', u.commission != null ? aed(u.commission) : ''],
     ['Service charges', u.serviceCharges != null ? aed(u.serviceCharges) : ''],
   ].filter(([, v]) => v) as [string, string][];
+  const residential = isResidentialUnitType(u.unitType);
+  const ownerNode = d.owner
+    ? (d.owner.userId ? <Btn size="xs" href={`/dashboard/admin/users/${d.owner.userId}`}>{d.owner.name ?? 'RP'}</Btn> : (d.owner.name ?? '—'))
+    : '—';
+  const mo = d.lastMoveOut;
+  const ph = d.priceHistory;
+  const ct = d.currentTenancy;
+  const plan = d.planAddendum && (d.planAddendum.addendumFileUrl || d.planAddendum.specialConditions) ? d.planAddendum : null;
+  const hasPlan = plan != null;
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Inventory"
+        title={u.unitNumber ? `Unit ${u.unitNumber}` : `Unit #${u.id}`}
+        lede={<>{prop?.buildingName ?? 'Property'} · {loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</>}
+        actions={<>
+          {back}
+          <Btn href={`/dashboard/admin/properties/${u.propertyId}`}>Open property</Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Availability', value: u.availability ? <StatusTag status={u.availability} /> : '—' },
+        { label: 'Listing', value: titleCase(u.listingStatus) },
+        { label: 'Owner (RP)', value: ownerNode },
+        { label: 'Rent / yr', value: aed(u.rentalPrice) },
+      ]} />
 
-      {/* Header + specs */}
-      <div className="rounded-2xl border border-[#e8e6e0] bg-white p-6 mb-5">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-3 min-w-0">
-            <span className="w-11 h-11 rounded-xl bg-[#f0faf6] text-[#1a7a5a] grid place-items-center shrink-0"><Home size={20} /></span>
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold text-[#1a1916] leading-tight">{u.unitNumber ? `Unit ${u.unitNumber}` : `Unit #${u.id}`}</h1>
-              <Link href={`/dashboard/admin/properties/${u.propertyId}`} className="text-sm text-[#1a7a5a] hover:underline inline-flex items-center gap-1.5 mt-1"><Building2 size={13} /> {prop?.buildingName ?? 'Property'} <ExternalLink size={11} /></Link>
-              <p className="text-xs text-[#9b9890] mt-0.5">{loc}{u.planLabel ? ` · Plan: ${u.planLabel}` : ''}</p>
-            </div>
-          </div>
-          {u.availability && <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${availCls[u.availability] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>{u.availability}</span>}
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-5 border-t border-[#f0ede8]">
-          <Stat label="Type" value={titleCase(u.unitType)} />
-          <Stat label="Tier" value={titleCase(u.unitTier)} />
-          <Stat label="Bedrooms" value={u.bedrooms != null ? String(u.bedrooms) : '—'} />
-          <Stat label="Bathrooms" value={u.bathrooms != null ? String(u.bathrooms) : '—'} />
-          <Stat label="Parking" value={u.parkingSpaces != null ? String(u.parkingSpaces) : '—'} />
-          <Stat label="Furnishing" value={titleCase(u.furnishing)} />
-          <Stat label="Size" value={u.unitSizeSqm != null ? `${u.unitSizeSqm} sqm` : (u.unitSizeSqft != null ? `${u.unitSizeSqft} sqft` : '—')} />
-          <Stat label="Floor" value={u.floor ?? '—'} />
-          <Stat label="View" value={u.view ?? '—'} />
-          <Stat label="Premise no." value={u.premiseNumber ?? '—'} />
-          <Stat label="Rent / yr" value={aed(u.rentalPrice)} />
-          <Stat label="Listing" value={titleCase(u.listingStatus)} />
-          {d.owner && <div><div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Owner (RP)</div>{d.owner.userId ? <Link href={`/dashboard/admin/users/${d.owner.userId}`} className="text-sm font-semibold text-[#1a7a5a] hover:underline mt-0.5 inline-block">{d.owner.name ?? 'RP'}</Link> : <div className="text-sm font-semibold text-[#3f3d39] mt-0.5">{d.owner.name ?? '—'}</div>}</div>}
-        </div>
+      <div style={{ marginBottom: 14 }}>
+        <Card title="Specs" pad>
+          <KV items={[
+            { k: 'Type', v: titleCase(u.unitType) },
+            { k: 'Tier', v: titleCase(u.unitTier) },
+            ...(residential ? [{ k: 'Bedrooms', v: u.bedrooms != null ? (u.bedrooms === 0 ? 'Studio' : String(u.bedrooms)) : '—' }] : []),
+            { k: 'Bathrooms', v: u.bathrooms != null ? String(u.bathrooms) : '—' },
+            { k: 'Parking', v: u.parkingSpaces != null ? String(u.parkingSpaces) : '—' },
+            { k: 'Furnishing', v: titleCase(u.furnishing) },
+            { k: 'Size', v: u.unitSizeSqm != null ? `${u.unitSizeSqm} sqm` : (u.unitSizeSqft != null ? `${u.unitSizeSqft} sqft` : '—') },
+            { k: 'Floor', v: u.floor ?? '—' },
+            { k: 'View', v: u.view ?? '—' },
+            { k: 'Premise no.', v: u.premiseNumber ?? '—' },
+            { k: 'Rent / yr', v: aed(u.rentalPrice) },
+            { k: 'Listing', v: titleCase(u.listingStatus) },
+            { k: 'Building', v: <Btn size="xs" href={`/dashboard/admin/properties/${u.propertyId}`}>{prop?.buildingName ?? 'Property'}</Btn> },
+            ...(d.owner ? [{ k: 'Owner (RP)', v: ownerNode }] : []),
+          ]} />
+        </Card>
       </div>
 
       {/* Photos */}
       {d.media.length > 0 && (
-        <Card icon={ImageIcon} title={`Photos (${d.media.length})`}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {d.media.map((m) => (
-              isImg(m.url) ? (
-                <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-[#e8e6e0] group">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={m.url} alt={m.caption ?? 'Unit photo'} className="w-full h-32 object-cover group-hover:opacity-90 transition" />
-                  {m.caption && <p className="text-[11px] text-[#6b6860] px-2 py-1 truncate">{m.caption}</p>}
-                </a>
-              ) : (
-                <button key={m.id} onClick={() => openDocViewer({ fileUrl: m.url, caption: m.caption ?? 'Floor plan' })} className="rounded-xl border border-[#e8e6e0] h-32 grid place-items-center text-[#9b9890] hover:bg-[#faf9f7]">
-                  <span className="flex flex-col items-center gap-1 text-xs"><FileText size={20} /> {m.mediaType === 'floor_plan' ? 'Floor plan' : 'View'}</span>
-                </button>
-              )
-            ))}
-          </div>
-        </Card>
+        <div style={{ marginBottom: 14 }}>
+          <Card title={`Photos (${d.media.length})`} pad>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+              {d.media.map((m) => (
+                isImg(m.url) ? (
+                  <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="gx-card" style={{ display: 'block', overflow: 'hidden' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={m.url} alt={m.caption ?? 'Unit photo'} style={{ width: '100%', height: 120, objectFit: 'cover', display: 'block' }} />
+                    {m.caption && <p style={{ fontSize: 11, color: 'var(--ms-ink-3)', padding: '4px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.caption}</p>}
+                  </a>
+                ) : (
+                  <button key={m.id} type="button" onClick={() => openDocViewer({ fileUrl: m.url, caption: m.caption ?? 'Floor plan' })}
+                    className="gx-card" style={{ height: 120, display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--ms-ink-3)', fontSize: 11.5 }}>
+                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}><FileText size={20} aria-hidden /> {m.mediaType === 'floor_plan' ? 'View floor plan' : 'View'}</span>
+                  </button>
+                )
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* Leasing configuration + pricing + amenities */}
       {(leaseRows.length > 0 || pricingRows.length > 0 || amenities.length > 0) && (
-        <Card icon={Settings2} title="Leasing configuration">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Lease terms</p>
-              {leaseRows.length ? (
-                <div className="grid grid-cols-2 gap-3">{leaseRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
-              ) : <p className="text-sm text-[#9b9890]">No lease terms configured.</p>}
+        <div style={{ marginBottom: 14 }}>
+          <Card title="Leasing configuration" pad>
+            <div className="gx-two">
+              <div>
+                <div style={subLabel}>Lease terms</div>
+                {leaseRows.length ? <KV items={leaseRows.map(([k, v]) => ({ k, v }))} /> : <p className="gx-hint">No lease terms configured.</p>}
+              </div>
+              <div>
+                <div style={subLabel}>Pricing &amp; fees</div>
+                {pricingRows.length ? <KV items={pricingRows.map(([k, v]) => ({ k, v }))} /> : <p className="gx-hint">No fees configured.</p>}
+              </div>
             </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Pricing & fees</p>
-              {pricingRows.length ? (
-                <div className="grid grid-cols-2 gap-3">{pricingRows.map(([k, v]) => <Stat key={k} label={k} value={v} />)}</div>
-              ) : <p className="text-sm text-[#9b9890]">No fees configured.</p>}
-            </div>
-          </div>
-          {amenities.length > 0 && (
-            <div className="mt-5 pt-4 border-t border-[#f0ede8]">
-              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Amenities</p>
-              <div className="flex flex-wrap gap-1.5">{amenities.map((a) => <span key={a} className="text-xs px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]">{titleCase(a)}</span>)}</div>
-            </div>
-          )}
-          {lt.specialConditions && (
-            <div className="mt-5 pt-4 border-t border-[#f0ede8]">
-              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-1">Special conditions</p>
-              <p className="text-sm text-[#3f3d39] whitespace-pre-wrap">{lt.specialConditions}</p>
-            </div>
-          )}
-        </Card>
+            {amenities.length > 0 && (
+              <div style={divider}>
+                <div style={subLabel}>Amenities</div>
+                <div className="gx-btn-row">{amenities.map((a) => <Pill key={a} tone="outline" dot={false}>{titleCase(a)}</Pill>)}</div>
+              </div>
+            )}
+            {lt.specialConditions && (
+              <div style={divider}>
+                <div style={subLabel}>Special conditions</div>
+                <p style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{lt.specialConditions}</p>
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
-      {/* Plan agreement / addendum */}
-      {d.planAddendum && (d.planAddendum.addendumFileUrl || d.planAddendum.specialConditions) && (
-        <Card icon={ScrollText} title={`Plan agreement & addendum${d.planAddendum.versionNo ? ` · v${d.planAddendum.versionNo}` : ''}`}>
-          {d.planAddendum.addendumFileUrl && (
-            <button onClick={() => openDocViewer({ fileUrl: d.planAddendum!.addendumFileUrl!, caption: d.planAddendum!.addendumFileName ?? 'Agreement addendum' })}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#e8e6e0] text-sm text-[#3f3d39] hover:bg-[#faf9f7]">
-              <Paperclip size={14} /> {d.planAddendum.addendumFileName ?? 'Agreement addendum'}
-            </button>
-          )}
-          {d.planAddendum.specialConditions && <p className="text-sm text-[#3f3d39] whitespace-pre-wrap mt-3">{d.planAddendum.specialConditions}</p>}
-        </Card>
-      )}
+      <div className={hasPlan ? 'gx-cols gx-cols-2e' : 'gx-cols'} style={{ marginBottom: 14 }}>
+        {/* Plan agreement / addendum */}
+        {plan ? (
+          <Card title={`Plan agreement & addendum${plan.versionNo ? ` · v${plan.versionNo}` : ''}`} pad>
+            {plan.addendumFileUrl && (
+              <Btn size="sm" onClick={() => openDocViewer({ fileUrl: plan.addendumFileUrl!, caption: plan.addendumFileName ?? 'Agreement addendum' })}>
+                View {plan.addendumFileName ?? 'agreement addendum'}
+              </Btn>
+            )}
+            {plan.specialConditions && <p style={{ fontSize: 12, whiteSpace: 'pre-wrap', marginTop: 10 }}>{plan.specialConditions}</p>}
+          </Card>
+        ) : null}
 
-      {/* Unit documents */}
-      <Card icon={FileText} title={`Unit documents (${d.documents.length})`}>
-        {d.documents.length ? (
-          <div className="space-y-2">
-            {d.documents.map((doc) => (
-              <button key={doc.id} onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: (doc.displayName ?? doc.documentKey).replace(/_/g, ' ') })}
-                className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] hover:bg-[#faf9f7] text-left">
-                <FileText size={15} className="text-[#9b9890] shrink-0" />
-                <span className="text-sm text-[#3f3d39] flex-1 truncate">{(doc.displayName ?? doc.documentKey).replace(/_/g, ' ')}</span>
-                <span className="text-[11px] text-[#9b9890]">{titleCase(doc.status)}</span>
-              </button>
-            ))}
-          </div>
-        ) : <p className="text-sm text-[#9b9890]">No documents uploaded for this unit.</p>}
-      </Card>
+        {/* Unit documents */}
+        <Card title={`Unit documents (${d.documents.length})`}>
+          {d.documents.length ? (
+            <div className="gx-tbl-scroll">
+              <table className="gx-tbl">
+                <thead><tr><th>Document</th><th>Status</th><th className="act"><span className="sr-only">Actions</span></th></tr></thead>
+                <tbody>
+                  {d.documents.map((doc) => {
+                    const caption = (doc.displayName ?? doc.documentKey).replace(/_/g, ' ');
+                    return (
+                      <tr key={doc.id}>
+                        <td className="strong" style={{ textTransform: 'capitalize' }}>{caption}</td>
+                        <td><StatusTag status={doc.status} label={titleCase(doc.status)} /></td>
+                        <td className="act"><Btn size="xs" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption })}>View</Btn></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : <div className="gx-empty">No documents uploaded for this unit.</div>}
+        </Card>
+      </div>
 
       {/* Last recorded move-out condition — the unit's last known state and what
           was chargeable against the outgoing customer's deposit. */}
-      {d.lastMoveOut && (
-        <Card icon={ClipboardCheck} title="Last move-out condition">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-            <Stat label="Recorded" value={fmtDate(d.lastMoveOut.recordedAt)} />
-            <Stat label="Areas inspected" value={String(d.lastMoveOut.categories)} />
-            <Stat
-              label={d.lastMoveOut.priced ? 'Items charged' : 'Items inspected'}
-              value={d.lastMoveOut.priced
-                ? `${d.lastMoveOut.itemsChargeable} of ${d.lastMoveOut.itemsTotal}`
-                : String(d.lastMoveOut.itemsTotal)}
-            />
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">Chargeable</div>
-              {/* A legacy inspection carries no price book — showing "AED 0"
-                  would read as "nothing chargeable" when it means "not priced". */}
-              <div className={`text-sm font-semibold mt-0.5 ${d.lastMoveOut.priced && d.lastMoveOut.totalCostAed > 0 ? 'text-[#b45309]' : 'text-[#3f3d39]'}`}>
-                {d.lastMoveOut.priced ? aed(d.lastMoveOut.totalCostAed) : <span className="text-[#9b9890] font-normal">Not priced</span>}
-              </div>
+      {mo && (
+        <div style={{ marginBottom: 14 }}>
+          <Card title="Last move-out condition">
+            <div className="gx-pad">
+              <KV items={[
+                { k: 'Recorded', v: fmtDate(mo.recordedAt) },
+                { k: 'Areas inspected', v: String(mo.categories) },
+                { k: mo.priced ? 'Items charged' : 'Items inspected', v: mo.priced ? `${mo.itemsChargeable} of ${mo.itemsTotal}` : String(mo.itemsTotal) },
+                // A legacy inspection carries no price book — showing "AED 0" would read
+                // as "nothing chargeable" when it means "not priced".
+                { k: 'Chargeable', v: mo.priced ? <span style={{ color: mo.totalCostAed > 0 ? 'var(--ms-amber-text)' : undefined }}>{aed(mo.totalCostAed)}</span> : <Pill tone="neutral" dot={false}>Not priced</Pill> },
+              ]} />
             </div>
-          </div>
-
-          {d.lastMoveOut.flagged.length > 0 ? (
-            <>
-              <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">
-                Flagged items{d.lastMoveOut.flaggedTotal > d.lastMoveOut.flagged.length
-                  ? ` · showing ${d.lastMoveOut.flagged.length} of ${d.lastMoveOut.flaggedTotal}`
-                  : ''}
-              </p>
-              <div className="space-y-1.5">
-                {d.lastMoveOut.flagged.map((f, i) => (
-                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-[#e8e6e0]">
-                    <span className="text-sm text-[#3f3d39] flex-1 truncate">
-                      {f.component}
-                      <span className="text-[#9b9890]"> · {f.category}</span>
-                    </span>
-                    {f.outCondition && (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860] capitalize shrink-0">
-                        {f.outCondition.replace(/_/g, ' ')}
-                      </span>
-                    )}
-                    {f.costAed > 0 && (
-                      <span className="text-sm font-medium text-[#b45309] tabular-nums shrink-0">{aed(f.costAed)}</span>
-                    )}
-                  </div>
-                ))}
+            {mo.flagged.length > 0 ? (
+              <div className="gx-tbl-scroll">
+                <table className="gx-tbl">
+                  <thead>
+                    <tr>
+                      <th>Flagged item{mo.flaggedTotal > mo.flagged.length ? ` · showing ${mo.flagged.length} of ${mo.flaggedTotal}` : ''}</th>
+                      <th>Area</th><th>Condition</th><th className="num">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mo.flagged.map((f, i) => (
+                      <tr key={i}>
+                        <td className="strong">{f.component}</td>
+                        <td>{f.category}</td>
+                        <td>{f.outCondition ? <Pill tone="amber">{humanize(f.outCondition)}</Pill> : '—'}</td>
+                        <td className="num">{f.costAed > 0 ? aed(f.costAed) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </>
-          ) : (
-            <p className="text-sm text-[#9b9890]">Inspection recorded with nothing flagged and nothing chargeable.</p>
-          )}
-        </Card>
+            ) : (
+              <div className="gx-empty">Inspection recorded with nothing flagged and nothing chargeable.</div>
+            )}
+          </Card>
+        </div>
       )}
 
       {/* Price history — lease rents + between-tenancy repricing. Rendered only
           when there is something to show, per the data-not-configuration rule. */}
-      {(d.priceHistory?.timeline?.length ?? 0) > 0 && (
-        <Card icon={History} title={`Price history (${d.priceHistory!.leaseCount} lease${d.priceHistory!.leaseCount === 1 ? '' : 's'} · ${d.priceHistory!.repriceCount} repricing${d.priceHistory!.repriceCount === 1 ? '' : 's'})`}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[#e8e6e0] text-left text-xs font-semibold uppercase tracking-wide text-[#9b9890]">
-                  <th className="py-2 pr-4">Date</th>
-                  <th className="py-2 pr-4">Event</th>
-                  <th className="py-2 text-right">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.priceHistory!.timeline.map((ev, i) => (
-                  <tr key={i} className="border-b border-[#f4f3ef] last:border-b-0">
-                    <td className="py-2.5 pr-4 whitespace-nowrap text-[#1a1916]">{fmtDate(ev.date)}</td>
-                    <td className="py-2.5 pr-4 text-[#6b6860]">
-                      {ev.kind === 'lease' ? (
-                        <>
-                          <span className="font-medium text-[#1a1916]">Lease</span>
-                          {ev.contractType ? ` · ${titleCase(ev.contractType)}` : ''}
-                          {ev.effectiveTo ? ` · to ${fmtDate(ev.effectiveTo)}` : ''}
-                          {(ev.discountAmount ?? 0) > 0 && ev.listedPrice != null && (
-                            <span className="text-[#b45309]"> · {aed(ev.discountAmount)} off {aed(ev.listedPrice)}</span>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-medium text-[#1a1916]">Repriced</span>
-                          {ev.field ? ` · ${titleCase(ev.field)}` : ''}
-                          {ev.source ? ` · ${titleCase(ev.source)}` : ''}
-                          {ev.reason ? ` · ${ev.reason}` : ''}
-                        </>
-                      )}
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums text-[#1a1916] whitespace-nowrap">
-                      {ev.kind === 'lease'
-                        ? aed(ev.annualRent)
-                        : <>{ev.oldPrice != null && <span className="text-[#9b9890] line-through mr-1.5">{aed(ev.oldPrice)}</span>}{aed(ev.newPrice)}</>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      {(ph?.timeline?.length ?? 0) > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <Card title="Price history" sub={`${ph!.leaseCount} lease${ph!.leaseCount === 1 ? '' : 's'} · ${ph!.repriceCount} repricing${ph!.repriceCount === 1 ? '' : 's'}`}>
+            <div className="gx-tbl-scroll">
+              <table className="gx-tbl">
+                <thead><tr><th>Date</th><th>Event</th><th className="num">Price</th></tr></thead>
+                <tbody>
+                  {ph!.timeline.map((ev, i) => (
+                    <tr key={i}>
+                      <td className="nowrap">{fmtDate(ev.date)}</td>
+                      <td>
+                        {ev.kind === 'lease' ? (
+                          <>
+                            <Pill tone="primary">Lease</Pill>
+                            {ev.contractType ? ` · ${titleCase(ev.contractType)}` : ''}
+                            {ev.effectiveTo ? ` · to ${fmtDate(ev.effectiveTo)}` : ''}
+                            {(ev.discountAmount ?? 0) > 0 && ev.listedPrice != null && (
+                              <span style={{ color: 'var(--ms-amber-text)' }}> · {aed(ev.discountAmount)} off {aed(ev.listedPrice)}</span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <Pill tone="info">Repriced</Pill>
+                            {ev.field ? ` · ${titleCase(ev.field)}` : ''}
+                            {ev.source ? ` · ${titleCase(ev.source)}` : ''}
+                            {ev.reason ? ` · ${ev.reason}` : ''}
+                          </>
+                        )}
+                      </td>
+                      <td className="num strong">
+                        {ev.kind === 'lease'
+                          ? aed(ev.annualRent)
+                          : <>{ev.oldPrice != null && <span style={{ color: 'var(--ms-ink-3)', textDecoration: 'line-through', marginRight: 6, fontWeight: 400 }}>{aed(ev.oldPrice)}</span>}{aed(ev.newPrice)}</>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* Current tenancy + its contract addendums */}
-      <Card icon={FileText} title="Current tenancy">
-        {d.currentTenancy ? (
+      <Card title="Current tenancy" right={ct ? <StatusTag status={ct.status} /> : undefined}>
+        {ct ? (
           <>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <Link href={`/dashboard/admin/users/${d.currentTenancy.tenantUserId ?? ''}`} className={`text-sm font-semibold ${d.currentTenancy.tenantUserId ? 'text-[#1a7a5a] hover:underline' : 'text-[#3f3d39] pointer-events-none'}`}>{d.currentTenancy.tenantName ?? 'Tenant'}</Link>
-                <div className="text-xs text-[#6b6860] mt-0.5">{d.currentTenancy.ref} · {fmtDate(d.currentTenancy.startDate)} – {fmtDate(d.currentTenancy.endDate)}</div>
-              </div>
-              {d.currentTenancy.annualRent != null && <span className="text-sm font-medium text-[#3f3d39] tabular-nums">{aed(d.currentTenancy.annualRent)}/yr</span>}
+            <div className="gx-pad">
+              <KV items={[
+                { k: 'Customer', v: ct.tenantUserId ? <Btn size="xs" href={`/dashboard/admin/users/${ct.tenantUserId}`}>{ct.tenantName ?? 'Customer'}</Btn> : (ct.tenantName ?? 'Customer') },
+                { k: 'Contract', v: ct.ref },
+                { k: 'Period', v: `${fmtDate(ct.startDate)} – ${fmtDate(ct.endDate)}` },
+                { k: 'Annual rent', v: ct.annualRent != null ? `${aed(ct.annualRent)}/yr` : '—' },
+              ]} />
             </div>
             {d.contractAddendums.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-[#f0ede8]">
-                <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold mb-2">Contract addendums</p>
-                <div className="space-y-2">
-                  {d.contractAddendums.map((a) => (
-                    <button key={a.id} onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name })}
-                      className="w-full flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] hover:bg-[#faf9f7] text-left">
-                      <Paperclip size={14} className="text-[#9b9890] shrink-0" />
-                      <span className="text-sm text-[#3f3d39] flex-1 truncate">{a.name}</span>
-                      <span className="text-[11px] text-[#9b9890]">{a.tenantSigned && a.landlordSigned ? 'Signed' : a.tenantSigned || a.landlordSigned ? 'Partially signed' : 'Unsigned'}</span>
-                    </button>
-                  ))}
-                </div>
+              <div className="gx-tbl-scroll">
+                <table className="gx-tbl">
+                  <thead><tr><th>Contract addendum</th><th>Signatures</th><th className="act"><span className="sr-only">Actions</span></th></tr></thead>
+                  <tbody>
+                    {d.contractAddendums.map((a) => {
+                      const both = a.tenantSigned && a.landlordSigned;
+                      const one = a.tenantSigned || a.landlordSigned;
+                      return (
+                        <tr key={a.id}>
+                          <td className="strong">{a.name}</td>
+                          <td><Pill tone={both ? 'primary' : one ? 'amber' : 'neutral'}>{both ? 'Signed' : one ? 'Partially signed' : 'Unsigned'}</Pill></td>
+                          <td className="act"><Btn size="xs" onClick={() => openDocViewer({ fileUrl: a.fileUrl, caption: a.name })}>View</Btn></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
         ) : (
-          <div className="text-sm text-[#9b9890]">No active tenancy — unit is {u.availability ?? 'unoccupied'}.</div>
+          <div className="gx-empty">No active tenancy — unit is {u.availability ?? 'unoccupied'}.</div>
         )}
       </Card>
-    </div>
+    </OsPage>
   );
 }

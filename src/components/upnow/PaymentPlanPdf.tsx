@@ -36,10 +36,10 @@ Font.register({
 });
 Font.registerHyphenationCallback((w) => [w]);
 
-const GREEN = '#1a5a4a';
+const GREEN = '#0f4f36';
 const INK = '#1c1b17';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
+const MUTE = '#5f6b63';
+const FAINT = '#8a948d';
 const HAIR = '#e7e2d9';
 const HAIR_SOFT = '#f0ece4';
 const fmtD = (d?: string | null) =>

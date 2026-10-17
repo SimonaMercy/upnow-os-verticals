@@ -24,7 +24,7 @@ import EjariCanvas from '@/components/contract/EjariCanvas';
 import { useReactPdfDoc } from '@/components/contract/useReactPdfDoc';
 import { InlineDownloadRow } from '@/components/contract/InlineDownloadRow';
 
-const GREEN = '#1a5a4a';
+const GREEN = '#0f4f36';
 
 export interface CertificateSignature {
   id: number;
@@ -145,30 +145,30 @@ export function deviceSummary(ua?: string | null): string | null {
 }
 
 const s = StyleSheet.create({
-  page: { paddingTop: 36, paddingBottom: 44, paddingHorizontal: 40, fontSize: 9.5, color: '#1a1916', fontFamily: 'Helvetica' },
+  page: { paddingTop: 36, paddingBottom: 44, paddingHorizontal: 40, fontSize: 9.5, color: '#14201a', fontFamily: 'Helvetica' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: `2px solid ${GREEN}`, paddingBottom: 8 },
   h1: { fontSize: 16, fontFamily: 'Helvetica-Bold', color: GREEN },
-  sub: { fontSize: 9, color: '#6b6860', marginTop: 2 },
+  sub: { fontSize: 9, color: '#5f6b63', marginTop: 2 },
   badge: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#1f6f54', backgroundColor: '#e6f5ee', paddingVertical: 3, paddingHorizontal: 9, borderRadius: 10 },
   metaRow: { flexDirection: 'row', marginTop: 12, gap: 22, flexWrap: 'wrap' },
-  metaLabel: { fontSize: 8, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.5 },
+  metaLabel: { fontSize: 8, color: '#8a948d', textTransform: 'uppercase', letterSpacing: 0.5 },
   metaVal: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 1 },
   sectionTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: GREEN, marginTop: 18, marginBottom: 6, borderBottom: '1px solid #e3e0d9', paddingBottom: 3 },
   sigCard: { border: '1px solid #e3e0d9', borderRadius: 8, padding: 10, marginBottom: 8 },
   sigHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   sigRole: { fontSize: 10.5, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase', letterSpacing: 0.5 },
   kvRow: { flexDirection: 'row', paddingVertical: 1.5 },
-  kvK: { width: '26%', fontSize: 8.5, color: '#6b6860' },
+  kvK: { width: '26%', fontSize: 8.5, color: '#5f6b63' },
   kvV: { width: '74%', fontSize: 9 },
   mono: { fontFamily: 'Courier', fontSize: 7.5 },
-  thead: { flexDirection: 'row', backgroundColor: '#f4f3ef', paddingVertical: 4, paddingHorizontal: 4, marginTop: 4 },
-  th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6b6860', textTransform: 'uppercase' },
+  thead: { flexDirection: 'row', backgroundColor: '#eef1ef', paddingVertical: 4, paddingHorizontal: 4, marginTop: 4 },
+  th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#5f6b63', textTransform: 'uppercase' },
   trow: { flexDirection: 'row', paddingVertical: 3, paddingHorizontal: 4, borderBottom: '0.5px solid #f0ede7' },
-  cTime: { width: '28%', color: '#6b6860' },
+  cTime: { width: '28%', color: '#5f6b63' },
   cEvent: { width: '30%' },
   cParty: { width: '14%' },
   cIp: { width: '28%' },
-  muted: { fontSize: 8, color: '#9b9890', marginTop: 16, lineHeight: 1.5 },
+  muted: { fontSize: 8, color: '#8a948d', marginTop: 16, lineHeight: 1.5 },
 });
 
 function KV({ k, v, mono }: { k: string; v?: string | null; mono?: boolean }) {
@@ -215,7 +215,7 @@ export function SignatureCertificateDoc({ data, refLabel }: { data: SignatureCer
         </View>
 
         <Text style={s.sectionTitle}>Signatures &amp; signing evidence</Text>
-        {data.signatures.length === 0 && <Text style={{ color: '#6b6860' }}>No signatures recorded yet.</Text>}
+        {data.signatures.length === 0 && <Text style={{ color: '#5f6b63' }}>No signatures recorded yet.</Text>}
         {data.signatures.map(sig => {
           const meta = sig.clientMeta ?? {};
           const device = [deviceSummary(sig.userAgent), meta.platform, meta.screen ? `screen ${meta.screen}` : null]
@@ -224,7 +224,7 @@ export function SignatureCertificateDoc({ data, refLabel }: { data: SignatureCer
             <View key={sig.id} style={s.sigCard} wrap={false}>
               <View style={s.sigHead}>
                 <Text style={s.sigRole}>{sig.role === 'landlord' ? 'Landlord' : sig.role === 'tenant' ? 'Tenant' : sig.role}</Text>
-                <Text style={{ fontSize: 8.5, color: '#6b6860' }}>{fmtDT(sig.signedAt)}</Text>
+                <Text style={{ fontSize: 8.5, color: '#5f6b63' }}>{fmtDT(sig.signedAt)}</Text>
               </View>
               <KV k="Signatory" v={sig.signatoryName} />
               <KV k="Email" v={sig.signerEmail ?? sig.actorEmail} />
@@ -244,7 +244,7 @@ export function SignatureCertificateDoc({ data, refLabel }: { data: SignatureCer
 
         <Text style={s.sectionTitle}>Envelope history</Text>
         {data.events.length === 0 ? (
-          <Text style={{ color: '#6b6860' }}>No envelope events recorded (signatures may predate evidence capture).</Text>
+          <Text style={{ color: '#5f6b63' }}>No envelope events recorded (signatures may predate evidence capture).</Text>
         ) : (
           <>
             <View style={s.thead}>

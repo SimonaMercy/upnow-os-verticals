@@ -1,29 +1,63 @@
 /**
- * Rental Provider — Units by layout / Pricing.
+ * Rental Provider — Catalogue › Units & listings (Genspark OS layout).
+ * Also rendered by the Manager portal (`/dashboard/manager/units` imports
+ * `UnitsWorkspace` and passes `manager={{ rp }}`) — the export and its props are unchanged.
  *
- * Three jobs (see product spec):
- *   1. Set pricing per plan  — edit the asking rent once for a whole layout;
- *      it writes through to every unit on that plan.
- *   2. Surface pricing gaps  — per-plan flags (unpriced, inconsistent within a
- *      plan, doesn't scale with size, below market, AED/sqft outlier) + a
- *      health summary, so the RP can see where pricing can improve.
- *   3. Manage the floor-plan drawing — replace the image (applies to all units
- *      on the plan) and view it full-screen.
+ * Parity with previous page (units/page.tsx, "My Units" — By unit / By layout, rows / grid):
+ *  Data / API (RP path · manager path)
+ *   [x] GET   /properties/floor-plans?propertyId=&bedrooms=   · /manager/units?rp=&…
+ *   [x] GET   /properties/:pid/units                          · /manager/properties/:pid/units (lazy per property, eager in unit mode)
+ *   [x] GET   /contracts (RP only; customer name via tenantDisplayName) → customer + lease range per unit, preview contracts
+ *   [x] legalApi.leaseFlags('/legal' | '/manager/legal', rp, ids — chunked by 200) → Breach / Legal pills (→ lease v2#sec-breaches, legal case)
+ *   [x] GET   /maintenance/restoration/units, /maintenance/categories (or /manager/maintenance…; gated canManageMaintenance)
+ *   [x] PATCH /properties/:pid/units/:id/submit-listing | withdraw-listing  (· /manager/…?rp=) — Submit / Relist / Resubmit / Withdraw
+ *   [x] DELETE /properties/:pid/units/:id (· /manager/…?rp=) with inline Delete / No confirm
+ *   [x] POST  /api/properties/floor-plans/image (· /api/manager/units/image?rp=) — replace floor plan for a layout
+ *   [x] saveUnit (edit unit) · saveLayoutDetails (layout-bulk edit / set price) — via UnitFormModal
+ *  Controls
+ *   [x] Mode: By unit / By layout → Seg "Units · Layouts & pricing"
+ *   [x] View: Grid / Rows → Seg "Table · Cards" (cards = the previous grid cards)
+ *   [x] Search (units: number, name, type, building · layouts: name, label, beds, building); seeded from ?q=
+ *   [x] Property filter (reloads the floor-plans call) · ?propertyId= preselect
+ *   [x] Unit-type filter · Plan filter (scoped to type) · Sort (size / asking rent, asc/desc)
+ *   [x] Status tabs All / Occupied / Published / Draft → listing Seg (All · Published · In review ·
+ *       Changes requested* · Draft · Rejected, real counts) + Occupancy select (All · Occupied · Vacant)
+ *   [x] "N drafts to publish" indicator → Gate 3 callout + Draft count
+ *   [x] Pricing-health summary (unpriced / inconsistent / doesn't scale) + per-layout flag pills
+ *  Actions / navigation
+ *   [x] Add units → /rental-provider/dashboard/units/add (manager: /dashboard/manager/units/add?rp=)
+ *   [x] Open unit → UnitPreviewModal (row click or labelled "Open"); ?unit=<id> deep link (one-shot)
+ *   [x] Edit unit → UnitFormModal · Delete unit · Submit/Relist/Resubmit/Withdraw listing (canPublish)
+ *   [x] Start restoration → StartRestorationDialog → maintenance job route; restoration pills → job; history line
+ *   [x] Layout: Open (LayoutPreviewModal) · Edit / Set price (UnitFormModal layoutBulk) · View plan (full-screen viewer) · Replace plan
+ *   [x] MarketRateReviewNote · permission gates canEdit / canPublish / canMaintain (manager) unchanged
+ *  States: skeleton rows while loading · error Callout (dismissable) · empty rows with the reason
  *
- * Data:   GET   /properties/floor-plans?propertyId=&bedrooms=
- * Price:  PATCH /properties/floor-plans/price   { propertyId, planLabel, rentalPrice }
- * Image:  POST  /properties/floor-plans/image   (multipart: file, propertyId, planLabel)
+ *  Listing quality (added — reports/Marketplace provider OS best practices.md, "Listing quality is a scored checklist"):
+ *   [+] GET /properties (RP only) → which properties are standalone (no per-unit floor plan check, as in the wizard)
+ *   [+] GET /properties/:pid/units/:id/media (· /manager/properties/:pid/units/:id/media?rp=) per loaded unit,
+ *       6 at a time, cached — the photo count the scorer needs (the units list carries no photo count)
+ *   [+] "Quality" column (score + coloured bar, green ≥85 / amber 60–84 / red <60) and a line on each card,
+ *       from the shared scorer src/lib/os/listingQuality.ts — the same one the Add-units wizard uses
+ *   [+] Quality Seg (All · Needs work · Good, real counts) after the listing-state Seg
+ *   [+] Low-quality / needs-work attention callout with counts → "Show listings needing work"
+ *   [+] Unit preview (Open / row click / ?unit=) shows the missing-items checklist + labelled "Fix" →
+ *       the existing edit unit modal (UnitFormModal, which also manages photos); photo count re-read on close
+ *   Rejection reason: the units payload has no rejection-reason / review-note field, so a rejected listing shows
+ *   its "Listing rejected" pill only (no reason is invented).
+ * Not on the previous page, so not added: bulk actions and exports (none existed).
+ * *"Changes requested" has no listing status in UnitRecord today; its Seg option appears only if the
+ *  API ever returns `changes_requested` (count > 0) — no dead filter.
+ * Reused unchanged: UnitFormModal, UnitPreviewModal, LayoutPreviewModal, StartRestorationDialog, MarketRateReviewNote.
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  BedDouble, Bath, Maximize2, ChevronDown, Loader2, Layers, Image as ImageIcon,
-  ArrowUp, Pencil, Check, X, Upload, Maximize, Download, AlertTriangle, Info,
-  LayoutGrid, Rows3, Search, Plus, Trash2,
+  BedDouble, Bath, Maximize2, Loader2, Image as ImageIcon,
+  Pencil, X, Upload, Maximize, Download, Plus,
 } from 'lucide-react';
 import { apiGet, apiPatch, apiDelete } from '@/lib/api';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
@@ -36,7 +70,14 @@ import { LayoutPreviewModal } from '@/components/upnow/LayoutPreviewModal';
 import { saveUnit, saveLayoutDetails, unitToFormInitial, type UnitRecord } from '@/lib/unitForm';
 import { type FeeRuleLite } from '@/lib/feeRules';
 import { tenantDisplayName } from '@/lib/tenantName';
+import { isResidentialUnitType, unitHasRooms } from '@/lib/unitTaxonomy';
+import {
+  OsPage, PageHead, ScopeStrip, Kpis, Kpi, Pill, Btn, TableWrap, SearchField, Seg, Thumb,
+  SkeletonRows, EmptyRow, Callout, fmtAed, type Tone,
+} from '@/components/os/kit';
 import { legalApi, breachStageTone, disputeStageTone, type LeaseFlag, type LeaseFlags } from '@/lib/legal';
+import { scoreUnit, QUALITY_GOOD, QUALITY_OK, type ListingQuality } from '@/lib/os/listingQuality';
+import { QualityMeter, QualityPanel } from './_quality';
 
 interface PropOpt { id: number; buildingName: string; leasingType?: 'direct' | 'sub' | 'management' | null; emirate?: string | null }
 interface Resp {
@@ -73,19 +114,20 @@ const RESTORATION_STAGE: Record<string, string> = {
   requested: 'Requested', awaiting_approval: 'Quote awaiting approval', in_progress: 'Work in progress',
   sign_off: 'Awaiting sign-off', close_out: 'Invoice & close-out',
 };
+type ListingBucket = 'published' | 'review' | 'changes' | 'draft' | 'rejected';
+type QualityFilter = 'all' | 'needs' | 'good';
 const planKey = (p: { propertyId: number; planLabel: string }) => `${p.propertyId}::${p.planLabel}`;
 const aed = (n: number) => new Intl.NumberFormat('en-AE', { maximumFractionDigits: 0 }).format(n);
 const bedLabel = (b: number | null) => (b == null ? 'Unit' : b === 0 ? 'Studio' : `${b} Bed`);
 const typeLabel = (t: string | null) => (t == null ? 'Other' : t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
 
 // ── "Units & Pricing" redesign tokens (Claude-Design handoff). Mock structure
-// + neutrals, but the brand green is the app green (#2e9f82) so this page stays
+// + neutrals, but the brand green is the app green (#047246) so this page stays
 // consistent with its neighbours (Add Units, portfolio, the edit modals). ──────
-const GREEN = '#2e9f82', GREEN_D = '#1a7a5a', GREEN_T = '#e6f7f1', GREEN_T2 = '#d8f2e8';
+const GREEN_D = '#1a7a5a', GREEN_T = '#e6f7f1', GREEN_T2 = '#d8efe3';
 const INK = '#1d2823', MUTE = '#8a938c', MUTE2 = '#9aa39c', LINE = '#e7ebe6', THUMB_BG = '#f4f6f3';
 const ICON_MUTE = '#a0a8a1';
 // Small reusable inline-style fragments shared by the redesigned rows/cards.
-const CHIP_COUNT = { fontSize: 11.5, fontWeight: 600, color: '#7d8780', background: '#eef1ec', padding: '4px 10px', borderRadius: 7 } as const;
 const UNITS_CHIP = { fontSize: 10.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '3px 9px', borderRadius: 6 } as const;
 
 const sizeLabel = (a: number | null | undefined, b: number | null | undefined) => {
@@ -183,8 +225,12 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // Primary axis: 'unit' = a flat list of every individual unit grouped by
   // building (default), 'type' = layout cards grouped by unit type (pricing).
   const [mode, setMode] = useState<'type' | 'unit'>('unit');
-  // By-unit status tab filter (All / Occupied / Published / Draft).
-  const [statusFilter, setStatusFilter] = useState<'All' | 'Occupied' | 'Published' | 'Draft'>('All');
+  // By-unit filters: the listing's Gate 3 state (Seg) and occupancy (select).
+  // Together they cover the previous All / Occupied / Published / Draft tabs.
+  const [listingFilter, setListingFilter] = useState<ListingBucket | 'all'>('all');
+  const [occFilter, setOccFilter] = useState<'all' | 'occupied' | 'vacant'>('all');
+  // Listing-quality filter (shared scorer, src/lib/os/listingQuality.ts): Needs work < 85 ≤ Good.
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>('all');
   const [loading, setLoading] = useState(true);
 
   // shared error surface (image upload, etc.)
@@ -226,6 +272,8 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   useEffect(() => {
     const pid = typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('propertyId') : null;
+    // Initial fetch on mount (the loader sets its loading flag synchronously).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load(pid ? Number(pid) : undefined);
   }, [load]);
 
@@ -369,6 +417,59 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Listing quality needs each unit's photo count, which the units list does not
+  // carry — read it from the unit's media (the same call the unit preview makes),
+  // 6 requests at a time, once per unit. `photoTick` re-runs the loader after a
+  // count is invalidated (the edit modal adds / removes photos in place).
+  const [photoCounts, setPhotoCounts] = useState<Record<number, number | 'error'>>({});
+  const photoRequested = useRef<Set<number>>(new Set());
+  const [photoTick, setPhotoTick] = useState(0);
+  useEffect(() => {
+    const todo = Object.values(unitsByProperty).flat().filter(u => !photoRequested.current.has(u.id));
+    if (!todo.length) return;
+    todo.forEach(u => photoRequested.current.add(u.id));
+    let next = 0;
+    const worker = async () => {
+      while (next < todo.length) {
+        const u = todo[next++];
+        try {
+          const m = await apiGet<{ mediaType?: string | null }[]>(manager
+            ? `/manager/properties/${u.propertyId}/units/${u.id}/media?${rpQ}`
+            : `/properties/${u.propertyId}/units/${u.id}/media`);
+          const n = (Array.isArray(m) ? m : []).filter(x => !x.mediaType || x.mediaType === 'photo').length;
+          setPhotoCounts(c => ({ ...c, [u.id]: n }));
+        } catch {
+          setPhotoCounts(c => ({ ...c, [u.id]: 'error' }));
+        }
+      }
+    };
+    for (let k = 0; k < Math.min(6, todo.length); k++) void worker();
+  }, [unitsByProperty, photoTick, manager, rpQ]);
+  // Standalone properties have no separate per-unit floor plan (the Add-units wizard hides
+  // it), so the floor-plan check does not apply there — read from GET /properties (RP only;
+  // the manager payloads carry no standalone flag, so the check applies to every manager row).
+  const [standaloneProps, setStandaloneProps] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    if (manager) return;
+    apiGet<{ id: number; isStandaloneUnit?: boolean }[]>('/properties')
+      .then(rows => setStandaloneProps(new Set((Array.isArray(rows) ? rows : []).filter(r => r.isStandaloneUnit).map(r => r.id))))
+      .catch(() => {});
+  }, [manager]);
+  const refreshPhotoCount = (unitId: number) => {
+    photoRequested.current.delete(unitId);
+    setPhotoCounts(c => { const n = { ...c }; delete n[unitId]; return n; });
+    setPhotoTick(t => t + 1);
+  };
+  // null while the photo count loads; a failed media read scores without the photo checks.
+  const qualityOf = (u: UnitRecord, pl: Plan): ListingQuality | null => {
+    const pc = photoCounts[u.id];
+    if (pc === undefined) return null;
+    return scoreUnit(u, {
+      photoCount: pc === 'error' ? null : pc, layoutFloorPlanUrl: pl.floorPlanUrl,
+      floorPlanApplicable: !standaloneProps.has(u.propertyId),
+    });
+  };
+
   // In the per-unit view, eagerly load units for every in-scope property — the
   // by-type view loads them lazily on expand, but the flat list needs them all.
   useEffect(() => {
@@ -437,7 +538,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     if (restoration[u.id]?.open.length) return { label: 'Under restoration', bg: '#ffedd5', fg: '#9a3412' };
     if (u.availability === 'maintenance') return { label: 'Maintenance', bg: '#fef3c7', fg: '#92400e' };
     if (u.availability === 'reserved')    return { label: 'Reserved',   bg: '#fef3c7', fg: '#92400e' };
-    return { label: 'Ready to lease', bg: '#d8f2e8', fg: '#1a7a5a' };
+    return { label: 'Ready to lease', bg: '#d8efe3', fg: '#1a7a5a' };
   };
   // Listing status only describes a unit that is on the market — so it shows only on one that is
   // ready to lease, and never as the raw 'expired' (which means "taken off because it was let").
@@ -448,7 +549,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       case 'pending':   return { label: 'Listing pending',   bg: '#fef3c7', fg: '#92400e' };
       case 'in_review': return { label: 'Listing in review', bg: '#dbeafe', fg: '#1e40af' };
       case 'rejected':  return { label: 'Listing rejected',  bg: '#fee2e2', fg: '#b91c1c' };
-      default:          return { label: 'Not listed',        bg: '#f1efe9', fg: '#6b6860' };
+      default:          return { label: 'Not listed',        bg: '#f1efe9', fg: '#5f6b63' };
     }
   };
 
@@ -603,20 +704,46 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
       return true;
     });
 
-  // Status buckets for the By-unit status tabs (mock's three buckets): occupied
-  // wins, then a live "published" listing, else "Draft" (anything not yet live).
-  const unitBucket = (u: UnitRecord): 'Occupied' | 'Published' | 'Draft' =>
-    isOccupied(u) || !!u.moveOutPending ? 'Occupied'
-    : u.listingStatus === 'published' ? 'Published'
-    : 'Draft';
-  const statusCounts = scopedUnitRows.reduce(
-    (m, { u }) => { m[unitBucket(u)] += 1; return m; },
-    { Occupied: 0, Published: 0, Draft: 0 } as Record<'Occupied' | 'Published' | 'Draft', number>,
+  // Occupancy bucket (the previous "Occupied" tab): a current lease or a held
+  // move-out counts as occupied.
+  const occBucket = (u: UnitRecord): 'occupied' | 'vacant' => (isOccupied(u) || !!u.moveOutPending ? 'occupied' : 'vacant');
+  // Listing (Gate 3) bucket. A let unit's listing is taken off ('expired') — it
+  // is not a draft waiting to publish, so it sits in no listing bucket.
+  const listingBucket = (u: UnitRecord): ListingBucket | null => {
+    const st = u.listingStatus as string;
+    if (st === 'published') return 'published';
+    if (st === 'pending' || st === 'in_review') return 'review';
+    if (st === 'changes_requested') return 'changes';
+    if (st === 'rejected') return 'rejected';
+    return occBucket(u) === 'occupied' ? null : 'draft';
+  };
+  const occScopedRows = occFilter === 'all' ? scopedUnitRows : scopedUnitRows.filter(({ u }) => occBucket(u) === occFilter);
+  const listingCounts = occScopedRows.reduce(
+    (m, { u }) => { const b = listingBucket(u); if (b) m[b] += 1; return m; },
+    { published: 0, review: 0, changes: 0, draft: 0, rejected: 0 } as Record<ListingBucket, number>,
   );
-  const statusTotal = scopedUnitRows.length;
-  const statusVisibleRows = statusFilter === 'All'
-    ? scopedUnitRows
-    : scopedUnitRows.filter(({ u }) => unitBucket(u) === statusFilter);
+  const occCounts = scopedUnitRows.reduce(
+    (m, { u }) => { m[occBucket(u)] += 1; return m; },
+    { occupied: 0, vacant: 0 } as Record<'occupied' | 'vacant', number>,
+  );
+  const statusVisibleRows = listingFilter === 'all'
+    ? occScopedRows
+    : occScopedRows.filter(({ u }) => listingBucket(u) === listingFilter);
+  // Quality buckets over the listing-state-visible rows (rows still loading their photo count sit in neither).
+  const qualityCounts = statusVisibleRows.reduce(
+    (m, { u, pl }) => {
+      const qq = qualityOf(u, pl);
+      if (!qq) return m;
+      if (qq.score >= QUALITY_GOOD) m.good += 1; else m.needs += 1;
+      if (qq.score < QUALITY_OK) m.low += 1;
+      return m;
+    },
+    { good: 0, needs: 0, low: 0 },
+  );
+  const visibleRows = qualityFilter === 'all' ? statusVisibleRows : statusVisibleRows.filter(({ u, pl }) => {
+    const qq = qualityOf(u, pl);
+    return !!qq && (qualityFilter === 'good' ? qq.score >= QUALITY_GOOD : qq.score < QUALITY_GOOD);
+  });
 
   const sortUnitItems = (items: { u: UnitRecord; pl: Plan }[]) => sortField
     ? [...items].sort((a, b) => {
@@ -631,7 +758,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   // Group the status-visible units under their BUILDING (largest group first);
   // each group is ordered by the active Sort, falling back to unit number.
   const unitGroups = Object.entries(
-    statusVisibleRows.reduce<Record<string, { u: UnitRecord; pl: Plan }[]>>((m, r) => {
+    visibleRows.reduce<Record<string, { u: UnitRecord; pl: Plan }[]>>((m, r) => {
       const b = r.pl.buildingName || 'Other'; (m[b] ??= []).push(r); return m;
     }, {}),
   ).map(([building, items]) => ({ building, items: sortUnitItems(items) }))
@@ -742,40 +869,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     );
   };
 
-  const rowCard = (p: Plan) => {
-    const isUploading = uploadingPlan === planKey(p);
-    return (
-      <div key={planKey(p)} onClick={() => openLayoutPreview(p)} title="View layout details" className="flex items-center gap-4"
-        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)', cursor: 'pointer' }}>
-        {/* Floor-plan thumbnail */}
-        <div className="relative shrink-0 overflow-hidden" style={{ width: 84, height: 66, borderRadius: 11, background: THUMB_BG, border: '1px dashed #d6ddd6' }}>
-          <PlanThumb url={p.floorPlanUrl} alt={p.displayName} />
-          <div className="absolute bottom-1 right-1">{imageActions(p, isUploading)}</div>
-        </div>
-
-        {/* Identity + stats + flags */}
-        <div className="flex flex-col justify-center min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>
-              {bedLabel(p.bedrooms)}{p.bathrooms != null ? ` · ${p.bathrooms} Bath` : ''}
-            </span>
-            <span className="shrink-0" style={UNITS_CHIP}>{p.unitCount} {p.unitCount === 1 ? 'unit' : 'units'}</span>
-          </div>
-          <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{p.buildingName} · {p.planLabel}</div>
-          <div className="flex items-center gap-4" style={{ marginTop: 9, fontSize: 12.5, color: '#6b756f', fontWeight: 600 }}>
-            {p.bedrooms != null && (<span className="inline-flex items-center gap-1.5"><BedDouble size={14} style={{ color: ICON_MUTE }} />{p.bedrooms === 0 ? 'Studio' : `${p.bedrooms} BR`}</span>)}
-            {p.bathrooms != null && (<span className="inline-flex items-center gap-1.5"><Bath size={14} style={{ color: ICON_MUTE }} />{p.bathrooms} Bath</span>)}
-            <span className="inline-flex items-center gap-1.5"><Maximize2 size={14} style={{ color: ICON_MUTE }} />{sizeLabel(p.sqftMin, p.sqftMax)} sqft</span>
-          </div>
-          {p.flags.length > 0 && <div style={{ marginTop: 9 }}>{flagBadges(p)}</div>}
-        </div>
-
-        {/* Pricing */}
-        <div className="shrink-0" style={{ width: 300, maxWidth: '42%' }}>{priceBlock(p)}</div>
-      </div>
-    );
-  };
-
   // Per-unit display bits shared by the row and the grid card.
   const unitMeta = (u: UnitRecord) => {
     const contract = contracts.find(c => c.unit?.id === u.id && c.contractActive) ?? null;
@@ -803,53 +896,33 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     return { tenant, leaseRange, pill: statusPill(u), size, price: u.rentalPrice, annual, busy: busyUnit === u.id, leaseId, flag: leaseId ? leaseFlags[String(leaseId)] : null };
   };
 
-  // Listing / edit / delete actions — shared by the unit row and card. (The row
-  // and unit number already open the read-only preview, so there's no separate
-  // "View" button; the mock leads with the "Edit" pill.)
+  // Listing / restoration / edit / delete actions — shared by the table row and
+  // the card. Every action is a labelled button; the wrapper swallows the click
+  // so the row's own "open preview" does not fire.
   const unitActions = (p: Plan, u: UnitRecord, busy: boolean) => (
-    <>
+    <span className="gx-btn-row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+      <Btn size="xs" variant="primary" onClick={() => setUnitPreview({ plan: p, unit: u })}>Open</Btn>
       {canPublish && u.availability === 'available' && !letNotStarted(u) && !restoration[u.id]?.open.length && (u.listingStatus === 'draft' || u.listingStatus === 'expired' || u.listingStatus === 'rejected') && (
-        <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'submit-listing'); }}
-          className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: GREEN_D, background: GREEN_T2, padding: '7px 11px', borderRadius: 9 }}>
-          {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit'}
-        </button>
+        <Btn size="xs" disabled={busy} title="Submit this listing for UpNow review (Gate 3)" onClick={() => onListingAction(p.propertyId, u.id, 'submit-listing')}>
+          {u.listingStatus === 'expired' ? 'Relist' : u.listingStatus === 'rejected' ? 'Resubmit' : 'Submit listing'}
+        </Btn>
       )}
       {canPublish && u.availability === 'available' && !letNotStarted(u) && (u.listingStatus === 'pending' || u.listingStatus === 'in_review') && (
-        <button disabled={busy} onClick={(e) => { e.stopPropagation(); onListingAction(p.propertyId, u.id, 'withdraw-listing'); }}
-          className="shrink-0 disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 11px', borderRadius: 9 }}>
-          Withdraw
-        </button>
+        <Btn size="xs" disabled={busy} title="Withdraw the listing from review" onClick={() => onListingAction(p.propertyId, u.id, 'withdraw-listing')}>Withdraw</Btn>
       )}
       {canMaintain && !someoneInIt(u) && !restoration[u.id]?.open.length && restorationTypes.length > 0 && (
-        <button onClick={(e) => { e.stopPropagation(); setStartRestoration({ plan: p, unit: u }); }}
-          title="Raise a restoration job on this vacant unit" className="shrink-0"
-          style={{ fontSize: 11.5, fontWeight: 700, color: '#9a3412', background: '#ffedd5', padding: '7px 11px', borderRadius: 9 }}>
-          Start restoration
-        </button>
+        <Btn size="xs" variant="amber" title="Raise a restoration job on this vacant unit" onClick={() => setStartRestoration({ plan: p, unit: u })}>Start restoration</Btn>
       )}
-      {canEdit && (
-        <button onClick={(e) => { e.stopPropagation(); setUnitModal({ plan: p, editingUnit: u }); }} title="Edit unit"
-          className="flex items-center gap-1.5 shrink-0"
-          style={{ fontSize: 13, fontWeight: 700, color: GREEN_D, background: GREEN_T, border: '1px solid #cce6d8', padding: '9px 14px', borderRadius: 10 }}>
-          <Pencil size={13} /> Edit
-        </button>
-      )}
+      {canEdit && <Btn size="xs" title="Edit unit" onClick={() => setUnitModal({ plan: p, editingUnit: u })}>Edit</Btn>}
       {canEdit && (confirmDelete === u.id ? (
-        <span className="flex items-center gap-1 shrink-0">
-          <button disabled={busy} onClick={(e) => { e.stopPropagation(); onDeleteUnit(p.propertyId, u.id); }}
-            className="disabled:opacity-50" style={{ fontSize: 11.5, fontWeight: 700, color: '#b91c1c', background: '#fdecec', padding: '7px 10px', borderRadius: 9 }}>
-            {busy ? '…' : 'Delete'}
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(null); }}
-            style={{ fontSize: 11.5, fontWeight: 700, color: '#6b756f', background: '#eef1ec', padding: '7px 10px', borderRadius: 9 }}>No</button>
-        </span>
+        <>
+          <Btn size="xs" variant="danger" disabled={busy} onClick={() => onDeleteUnit(p.propertyId, u.id)}>{busy ? 'Deleting…' : 'Confirm delete'}</Btn>
+          <Btn size="xs" onClick={() => setConfirmDelete(null)}>Cancel</Btn>
+        </>
       ) : (
-        <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(u.id); }} title="Delete unit"
-          className="flex items-center justify-center shrink-0" style={{ width: 34, height: 34, borderRadius: 9, color: '#b91c1c', background: '#fff', border: '1px solid #f1d5d5' }}>
-          <Trash2 size={14} />
-        </button>
+        <Btn size="xs" variant="danger" title="Delete unit" onClick={() => setConfirmDelete(u.id)}>Delete</Btn>
       ))}
-    </>
+    </span>
   );
 
   // Sub-line for a unit row/card: building (when rows span properties) · name ·
@@ -857,55 +930,6 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
   const unitSub = (p: Plan, u: UnitRecord, showBuilding: boolean) =>
     [showBuilding && p.buildingName ? p.buildingName : null, u.unitName || null,
       u.unitType.replace(/_/g, ' '), u.planLabel || null].filter(Boolean).join(' · ');
-
-  // One unit row — used in the per-unit row view (`showBuilding` adds the
-  // building name, since rows can span properties).
-  const unitRow = (p: Plan, u: UnitRecord, showBuilding = false) => {
-    const { tenant, leaseRange, pill, size, price, annual, busy, leaseId, flag } = unitMeta(u);
-    return (
-      <div key={u.id} onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details"
-        className="flex items-center gap-4 cursor-pointer transition-colors hover:border-[#cfe7da]"
-        style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 15, padding: '16px 18px', boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
-        {/* Photo / floor-plan thumbnail */}
-        <div className="relative shrink-0 overflow-hidden" style={{ width: 84, height: 66, borderRadius: 11, background: THUMB_BG, border: '1px dashed #d6ddd6' }}>
-          <PlanThumb url={u.floorPlanUrl ?? p.floorPlanUrl} alt={u.unitNumber} emptyLabel="No photo" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>Unit {u.unitNumber}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '5px 11px', borderRadius: 8 }}>{pill.label}</span>
-            {listingChip(u) && <span style={{ fontSize: 10.5, fontWeight: 700, color: listingChip(u)!.fg, background: listingChip(u)!.bg, padding: '4px 9px', borderRadius: 7 }}>{listingChip(u)!.label}</span>}
-            {restorationPills(u)}
-            {legalPills(leaseId, flag)}
-          </div>
-          <div className="truncate" style={{ fontSize: 12.5, color: MUTE, marginTop: 5 }}>{unitSub(p, u, showBuilding)}</div>
-          <div className="flex items-center gap-4" style={{ marginTop: 9, fontSize: 12.5, color: '#6b756f', fontWeight: 600 }}>
-            {u.bedrooms != null && <span className="inline-flex items-center gap-1.5"><BedDouble size={14} style={{ color: ICON_MUTE }} />{u.bedrooms === 0 ? 'Studio' : `${u.bedrooms} BR`}</span>}
-            {u.bathrooms != null && <span className="inline-flex items-center gap-1.5"><Bath size={14} style={{ color: ICON_MUTE }} />{u.bathrooms} Bath</span>}
-            {size && <span className="inline-flex items-center gap-1.5"><Maximize2 size={14} style={{ color: ICON_MUTE }} />{size}</span>}
-          </div>
-          {tenant && <div className="truncate" style={{ fontSize: 11.5, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
-          {restorationHistory(u)}
-        </div>
-        {/* Market Rent (asking) + contracted Annual Rent (latest lease) —
-            mirrors the portfolio's per-property pairing. */}
-        <div className="text-right shrink-0">
-          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>MARKET RENT</div>
-          {price != null
-            ? <div style={{ fontSize: 18, fontWeight: 800, color: GREEN_D, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>AED {aed(Number(price))} <span style={{ fontSize: 12, fontWeight: 600, color: MUTE2 }}>/yr</span></div>
-            : <div style={{ fontSize: 14, fontWeight: 700, color: '#aab2ab' }}>No price set</div>}
-          <div style={{ fontSize: 11.5, color: MUTE, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
-            {annual != null
-              ? <>Annual rent <span style={{ fontWeight: 700, color: '#3a443d' }}>AED {aed(Number(annual))}</span></>
-              : <span style={{ color: '#aab2ab' }}>No lease yet</span>}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {unitActions(p, u, busy)}
-        </div>
-      </div>
-    );
-  };
 
   // One unit as a card — used in the per-unit grid view.
   const unitCard = (p: Plan, u: UnitRecord, showBuilding = false) => {
@@ -936,6 +960,10 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           </div>
           {tenant && <div className="truncate" style={{ fontSize: 11, color: MUTE2, marginTop: 6 }}>{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</div>}
           {restorationHistory(u)}
+          <div className="gx" style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.06em', color: '#a0a8a1' }}>QUALITY</span>
+            <QualityMeter q={qualityOf(u, p)} compact />
+          </div>
           <div className="mt-auto flex items-end justify-between gap-2" style={{ paddingTop: 13, marginTop: 14, borderTop: '1px solid #f1f3f0' }}>
             {/* Market Rent (asking) + contracted Annual Rent (latest lease). */}
             <div>
@@ -956,221 +984,341 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
     );
   };
 
-  const loadingRow = (text: string, small = false) => (
-    <div className="flex items-center justify-center gap-2" style={{ padding: small ? '8px 0' : '80px 0', fontSize: 13.5, color: MUTE2 }}>
-      <Loader2 size={16} className="animate-spin" /> {text}
-    </div>
+  // ── Genspark table cells ───────────────────────────────────────────────
+  const imgOnly = (url: string | null | undefined) => (url && !isPdf(url) ? url : null);
+  // Bedrooms only mean something on residential types (isResidentialUnitType);
+  // staff accommodation counts rooms instead (unitHasRooms).
+  const bedsOf = (unitType: string | null | undefined, bedrooms: number | null | undefined, rooms?: number | null) => {
+    if (!isResidentialUnitType(unitType)) return '—';
+    if (unitHasRooms(unitType)) return rooms != null ? `${rooms} rooms` : '—';
+    if (bedrooms == null) return '—';
+    return bedrooms === 0 ? 'Studio' : String(bedrooms);
+  };
+  const statusTone = (label: string): Tone =>
+    label === 'Ready to lease' ? 'primary' : label === 'Occupied' || label.startsWith('Leased') ? 'info' : 'amber';
+  const LISTING_TONE: Record<string, Tone> = {
+    'Listed': 'primary', 'Listing pending': 'amber', 'Listing in review': 'info', 'Listing rejected': 'danger', 'Not listed': 'neutral',
+  };
+  const typePill = (t: string | null | undefined) => <Pill tone="outline" dot={false}>{typeLabel(t ?? null)}</Pill>;
+
+  const unitTableRow = (p: Plan, u: UnitRecord) => {
+    const { tenant, leaseRange, pill, price, annual, busy, leaseId, flag } = unitMeta(u);
+    const lc = listingChip(u);
+    const sqft = u.unitSizeSqft ? Number(u.unitSizeSqft).toLocaleString() : u.unitSizeSqm ? `${Number(u.unitSizeSqm).toLocaleString()} sqm` : '—';
+    return (
+      <tr key={u.id} className="click" onClick={() => setUnitPreview({ plan: p, unit: u })} title="View full unit details">
+        <td>
+          <div className="gx-cell">
+            <Thumb text={u.unitNumber} src={imgOnly(u.floorPlanUrl ?? p.floorPlanUrl)} />
+            <span>
+              <span className="strong">Unit {u.unitNumber}</span>
+              <span className="sub">{unitSub(p, u, false) || '—'}</span>
+              {tenant && <span className="sub">{tenant}{leaseRange ? ` · ${leaseRange}` : ''}</span>}
+              {restorationHistory(u)}
+            </span>
+          </div>
+        </td>
+        <td>{p.buildingName || '—'}</td>
+        <td>{typePill(u.unitType)}</td>
+        <td className="nowrap">{bedsOf(u.unitType, u.bedrooms, u.rooms)}</td>
+        <td className="num">{sqft}</td>
+        <td className="num">
+          <span className="strong">{price != null ? `${fmtAed(Number(price))} /yr` : 'No price set'}</span>
+          <span className="sub">{annual != null ? `Annual ${fmtAed(Number(annual))}` : 'No lease yet'}</span>
+        </td>
+        <td><QualityMeter q={qualityOf(u, p)} /></td>
+        <td>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            <Pill tone={statusTone(pill.label)}>{pill.label}</Pill>
+            {lc && <Pill tone={LISTING_TONE[lc.label] ?? 'neutral'} dot={false} title="Listing state — Gate 3, reviewed per listing">{lc.label}</Pill>}
+            {restorationPills(u, true)}
+            {legalPills(leaseId, flag, true)}
+          </div>
+        </td>
+        <td className="act">{unitActions(p, u, busy)}</td>
+      </tr>
+    );
+  };
+
+  const layoutTableRow = (p: Plan) => {
+    const isUploading = uploadingPlan === planKey(p);
+    return (
+      <tr key={planKey(p)} className="click" onClick={() => openLayoutPreview(p)} title="View layout details">
+        <td>
+          <div className="gx-cell">
+            <Thumb text={p.displayName} src={imgOnly(p.floorPlanUrl)} />
+            <span>
+              <span className="strong">{p.displayName}</span>
+              <span className="sub">{p.planLabel || '—'}{p.bathrooms != null ? ` · ${p.bathrooms} Bath` : ''}</span>
+            </span>
+          </div>
+        </td>
+        <td>{p.buildingName || '—'}</td>
+        <td>{typePill(p.unitType)}</td>
+        <td className="nowrap">{bedsOf(p.unitType, p.bedrooms)}</td>
+        <td className="num">{sizeLabel(p.sqftMin, p.sqftMax)}</td>
+        <td className="num">{p.unitCount}</td>
+        <td className="num">
+          {p.rentSum != null && p.rentSum > 0
+            ? <span className="strong">{fmtAed(p.rentSum)} /yr</span>
+            : <span className="strong" style={{ color: 'var(--ms-danger)' }}>No price set</span>}
+          <span className="sub">{p.annualRentSum != null ? `Annual ${fmtAed(p.annualRentSum)}` : 'No lease yet'}</span>
+        </td>
+        <td>
+          {p.flags.length === 0 ? <Pill tone="primary">OK</Pill> : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {FLAG_ORDER.filter(f => p.flags.includes(f)).map(f => (
+                <Pill key={f} tone={f === 'unpriced' ? 'danger' : 'amber'} title={FLAG_META[f].tip(p)}>{FLAG_META[f].label}</Pill>
+              ))}
+            </div>
+          )}
+        </td>
+        <td className="act">
+          <span className="gx-btn-row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
+            <Btn size="xs" variant="primary" onClick={() => openLayoutPreview(p)}>Open</Btn>
+            {p.floorPlanUrl && <Btn size="xs" title="View full floor plan" onClick={() => setViewer({ url: p.floorPlanUrl!, name: `${p.buildingName} ${p.displayName}` })}>View plan</Btn>}
+            {canEdit && <Btn size="xs" disabled={isUploading} title="Replace floor plan (applies to all units on this plan)" onClick={() => pickImage(p)}>{isUploading ? 'Uploading…' : 'Replace plan'}</Btn>}
+            {canEdit && <Btn size="xs" onClick={() => openLayoutEdit(p)}>{p.rentFrom != null ? 'Edit' : 'Set price'}</Btn>}
+          </span>
+        </td>
+      </tr>
+    );
+  };
+
+  const unitRows = unitGroups.flatMap(g => g.items);
+  const showUnitSkeleton = loading || (mode === 'unit' && scopedUnitRows.length === 0 && perUnitLoading);
+  const loadFailed = !loading && !data;
+  const UNIT_COLS = 9;
+  const LAYOUT_COLS = 9;
+  const typeName = (t: string) => typeLabel(t === 'other' ? null : t);
+  const listingOptions: { v: ListingBucket | 'all'; l: string; n: number }[] = [
+    { v: 'all', l: 'All', n: occScopedRows.length },
+    { v: 'published', l: 'Published', n: listingCounts.published },
+    { v: 'review', l: 'In review', n: listingCounts.review },
+    ...(listingCounts.changes > 0 || listingFilter === 'changes' ? [{ v: 'changes' as const, l: 'Changes requested', n: listingCounts.changes }] : []),
+    { v: 'draft', l: 'Draft', n: listingCounts.draft },
+    { v: 'rejected', l: 'Rejected', n: listingCounts.rejected },
+  ];
+  const unpricedLayouts = plans.filter(p => p.flags.includes('unpriced')).length;
+  const unitsOnLayouts = plans.reduce((n, p) => n + p.unitCount, 0);
+
+  const toolbar = (
+    <>
+      <SearchField value={query} onChange={setQuery} placeholder={mode === 'unit' ? 'Search units…' : 'Search layouts…'} />
+      {data && data.properties.length > 0 && (
+        <select className="gx-sel" aria-label="Property" value={propertyId == null ? 'all' : String(propertyId)} onChange={e => onProperty(e.target.value)}>
+          <option value="all">All properties</option>
+          {data.properties.map(p => <option key={p.id} value={String(p.id)}>{p.buildingName.trim()}</option>)}
+        </select>
+      )}
+      {typeOptions.length > 1 && (
+        <select className="gx-sel" aria-label="Unit type" value={typeFilter} onChange={e => onType(e.target.value)}>
+          <option value="all">All types</option>
+          {typeOptions.map(t => <option key={t} value={t}>{typeName(t)}</option>)}
+        </select>
+      )}
+      {typePlans.length > 1 && (
+        <select className="gx-sel" aria-label="Plan" value={planFilter} onChange={e => setPlanFilter(e.target.value)}>
+          {planOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      )}
+      {mode === 'unit' && (
+        <select className="gx-sel" aria-label="Occupancy" value={occFilter} onChange={e => setOccFilter(e.target.value as typeof occFilter)}>
+          <option value="all">All occupancy ({scopedUnitRows.length})</option>
+          <option value="occupied">Occupied ({occCounts.occupied})</option>
+          <option value="vacant">Vacant ({occCounts.vacant})</option>
+        </select>
+      )}
+      <select className="gx-sel" aria-label="Sort" value={sort} onChange={e => setSort(e.target.value)}>
+        {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      <span style={{ flex: 1 }} />
+      <Seg<'row' | 'grid'> label="View" value={view} onChange={setView} options={[{ v: 'row', l: 'Table' }, { v: 'grid', l: 'Cards' }]} />
+    </>
   );
 
+  const emptyUnitsText = q ? `No units match “${query.trim()}”.`
+    : typeFilter !== 'all' ? `No ${typeName(typeFilter)} units in this scope.`
+    : 'No units found for this scope.';
+  const emptyLayoutsText = q ? `No layouts match “${query.trim()}”.`
+    : typeFilter !== 'all' ? `No ${typeName(typeFilter)} layouts in this scope.`
+    : 'No layout plans found for this scope.';
+
   return (
-    <div className="min-h-screen" style={{ background: '#f2f4f1', color: INK }}>
+    <OsPage>
       <input ref={fileRef} type="file" accept="application/pdf,image/png,image/jpeg,image/webp" hidden onChange={onFile} />
 
-      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '26px 28px' }}>
-        {/* HEADER */}
-        <div className="flex items-start gap-4 flex-wrap" style={{ marginBottom: 20 }}>
-          <div className="flex-1" style={{ minWidth: 200 }}>
-            <div className="flex items-center gap-1.5" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', color: GREEN_D }}>
-              <Layers size={13} /> UNITS &amp; PRICING
-            </div>
-            <h1 style={{ margin: '6px 0 0', fontSize: 30, fontWeight: 800, letterSpacing: '-.025em', color: INK }}>My Units</h1>
-            {/* This period's market rate review — the rates in the unit mix are reviewed on the landlord's schedule before renewal offers go out (owner, 7 Oct 2026). */}
-            <MarketRateReviewNote rpQ={rpQ || undefined} />
-          </div>
-          {/* Bulk add-units wizard. Managers land on the same wizard scoped to the
-              acting landlord (?rp) via the manager route re-export. Gated by the
-              manager's edit permission on this landlord. */}
-          {canEdit && (
-            <Link
-              href={manager ? `/dashboard/manager/units/add?rp=${manager.rp}` : '/rental-provider/dashboard/units/add'}
-              className="flex items-center gap-2 shrink-0"
-              style={{ fontSize: 14, fontWeight: 700, color: '#fff', background: GREEN, padding: '11px 18px', borderRadius: 11, boxShadow: '0 6px 16px rgba(46,159,100,.26)' }}>
-              <Plus size={16} /> Add units
-            </Link>
-          )}
-        </div>
+      <PageHead
+        eyebrow="Catalogue › Units & listings"
+        title="Units & listings"
+        lede="Every unit with its type, size, asking rent and where its listing stands. Price a whole layout at once from Layouts & pricing."
+        actions={canEdit ? (
+          <Btn variant="primary" href={manager ? `/dashboard/manager/units/add?rp=${manager.rp}` : '/rental-provider/dashboard/units/add'}>
+            <Plus size={14} aria-hidden /> Add units
+          </Btn>
+        ) : undefined}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Catalogue' },
+        { label: 'Vertical', value: 'Long-term rentals' },
+        { label: 'Scope', value: propertyId == null ? 'All properties' : (data?.properties.find(p => p.id === propertyId)?.buildingName.trim() ?? 'One property') },
+      ]} />
+      {/* This period's market rate review (owner, 7 Oct 2026). */}
+      <MarketRateReviewNote rpQ={rpQ || undefined} />
 
-        {/* CONTROLS — By unit / By layout · sort · grid/list */}
-        <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 14 }}>
-          <div className="inline-flex" style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, padding: 4, gap: 3 }}>
-            {([['unit', 'By unit'], ['type', 'By layout']] as const).map(([m, label]) => (
-              <button key={m} onClick={() => setMode(m)} aria-pressed={mode === m}
-                style={{ fontSize: 13.5, fontWeight: 700, padding: '8px 16px', borderRadius: 8,
-                  ...(mode === m ? { color: INK, background: '#f2f4f1' } : { color: '#7d8780', background: 'transparent' }) }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex-1" />
-          <Select label="Sort" value={sort} onChange={setSort} options={SORT_OPTIONS} />
-          <div className="inline-flex" style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, padding: 4, gap: 3 }}>
-            {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
-              <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={view === v}
-                className="flex items-center justify-center"
-                style={{ width: 34, height: 34, borderRadius: 8, ...(view === v ? { background: GREEN, color: '#fff' } : { color: MUTE2 }) }}>
-                <Icon size={17} />
-              </button>
-            ))}
-          </div>
-        </div>
+      <Callout tone="info" title="Gate 3 per listing.">
+        A verified business still cannot publish directly — each unit&apos;s listing is submitted for UpNow review and goes live only once approved.
+        {mode === 'unit' && listingCounts.draft > 0 && <> <b>{listingCounts.draft} draft{listingCounts.draft === 1 ? '' : 's'} to publish.</b></>}
+      </Callout>
 
-        {/* FILTERS — search · property · type · plan */}
-        <div className="flex items-center gap-3 flex-wrap" style={{ marginBottom: 16 }}>
-          <div className="relative" style={{ flex: '1 1 240px', minWidth: 200 }}>
-            <Search size={16} className="absolute pointer-events-none" style={{ left: 13, top: '50%', transform: 'translateY(-50%)', color: MUTE2 }} />
-            <input type="text" value={query} onChange={e => setQuery(e.target.value)}
-              placeholder={mode === 'unit' ? 'Search units…' : 'Search layouts…'}
-              aria-label={mode === 'unit' ? 'Search units' : 'Search layouts'}
-              className="w-full outline-none"
-              style={{ fontSize: 14, color: INK, background: '#fff', border: '1px solid #e2e7e1', borderRadius: 11, padding: '11px 14px 11px 38px' }} />
-          </div>
-          {data && data.properties.length > 0 && (
-            <Select label="Property" value={propertyId == null ? 'all' : String(propertyId)} onChange={onProperty}
-              options={[{ value: 'all', label: 'All properties' }, ...data.properties.map(p => ({ value: String(p.id), label: p.buildingName.trim() }))]} />
-          )}
-          {typeOptions.length > 1 && (
-            <Select label="Unit type" value={typeFilter} onChange={onType}
-              options={[{ value: 'all', label: 'All types' }, ...typeOptions.map(t => ({ value: t, label: typeLabel(t === 'other' ? null : t) }))]} />
-          )}
-          {typePlans.length > 1 && (
-            <Select label="Plan" value={planFilter} onChange={setPlanFilter} options={planOptions} />
-          )}
-        </div>
+      {mode === 'unit' ? (
+        <Kpis>
+          <Kpi k="Units" v={showUnitSkeleton ? '—' : scopedUnitRows.length} d={propertyId == null ? 'Across all properties' : 'In this property'} />
+          <Kpi k="Occupied" v={showUnitSkeleton ? '—' : occCounts.occupied} d={scopedUnitRows.length ? `${Math.round((occCounts.occupied / scopedUnitRows.length) * 100)}% occupancy` : undefined} />
+          <Kpi k="Vacant" v={showUnitSkeleton ? '—' : occCounts.vacant} d="Not let today" />
+          <Kpi k="Published" v={showUnitSkeleton ? '—' : listingCounts.published} d="Live on the marketplace" />
+          <Kpi dark k="In review" v={showUnitSkeleton ? '—' : listingCounts.review} d="Awaiting Gate 3 approval" />
+        </Kpis>
+      ) : (
+        <Kpis>
+          <Kpi k="Layouts" v={loading ? '—' : plans.length} d="Shown with the active filters" />
+          <Kpi k="Units on layouts" v={loading ? '—' : unitsOnLayouts} />
+          <Kpi k="Need a pricing look" v={loading ? '—' : flagged} d={plans.length ? `of ${plans.length} layouts` : undefined} />
+          <Kpi dark k="Unpriced layouts" v={loading ? '—' : unpricedLayouts} d="No asking rent set" />
+        </Kpis>
+      )}
 
-        {/* STATUS BAR (By unit) — status filter tabs + a visual draft indicator. */}
-        {!loading && mode === 'unit' && scopedUnitRows.length > 0 && (
-          <div className="flex items-center gap-2.5 flex-wrap" style={{ marginBottom: 18 }}>
-            {([
-              { key: 'All', label: 'All units', count: statusTotal, dot: '#cdd5cf' },
-              { key: 'Occupied', label: 'Occupied', count: statusCounts.Occupied, dot: '#4a5a8f' },
-              { key: 'Published', label: 'Published', count: statusCounts.Published, dot: GREEN },
-              { key: 'Draft', label: 'Draft', count: statusCounts.Draft, dot: '#b0b8b1' },
-            ] as const).map(s => {
-              const on = statusFilter === s.key;
-              return (
-                <button key={s.key} onClick={() => setStatusFilter(s.key)} className="inline-flex items-center gap-2"
-                  style={{ fontSize: 13, fontWeight: 700, padding: '9px 15px', borderRadius: 11,
-                    border: `1px solid ${on ? GREEN : LINE}`, background: on ? GREEN_T : '#fff', color: on ? GREEN_D : '#3a443d' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.dot, flex: '0 0 8px' }} />
-                  <span>{s.label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: on ? GREEN_D : INK, fontVariantNumeric: 'tabular-nums' }}>{s.count}</span>
-                </button>
-              );
-            })}
-            <div className="flex-1" />
-            {statusCounts.Draft > 0 && (
-              <span className="inline-flex items-center gap-2" title="Draft units are not yet listed"
-                style={{ fontSize: 13, fontWeight: 700, color: '#fff', background: GREEN, padding: '9px 16px', borderRadius: 10, boxShadow: '0 4px 12px rgba(46,159,100,.22)' }}>
-                <ArrowUp size={15} /> {statusCounts.Draft} draft{statusCounts.Draft === 1 ? '' : 's'} to publish
-              </span>
-            )}
-          </div>
+      <div className="gx-btn-row" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+        <Seg<'unit' | 'type'> label="Mode" value={mode} onChange={setMode}
+          options={[{ v: 'unit', l: 'Units' }, { v: 'type', l: 'Layouts & pricing' }]} />
+        {mode === 'unit' && !loading && scopedUnitRows.length > 0 && (
+          <Seg<ListingBucket | 'all'> label="Listing state" value={listingFilter} onChange={setListingFilter} options={listingOptions} />
         )}
-
-        {/* PRICING HEALTH (By layout) — summary band kept; flags also badge each row. */}
-        {!loading && mode === 'type' && plans.length > 0 && (
-          <div style={{ background: '#fff', border: `1px solid ${LINE}`, borderRadius: 14, padding: '14px 16px', marginBottom: 16, boxShadow: '0 1px 2px rgba(20,40,30,.03)' }}>
-            {flagged === 0 ? (
-              <div className="flex items-center gap-2" style={{ fontSize: 13.5, fontWeight: 600, color: GREEN_D }}>
-                <Check size={16} /> No pricing gaps on the shown layouts.
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="flex items-center gap-1.5" style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>
-                  <AlertTriangle size={15} style={{ color: '#d97706' }} />
-                  {flagged} of {plans.length} layouts need a pricing look
-                </span>
-                <span style={{ color: '#d8d6d0' }}>·</span>
-                {counts.map(c => (
-                  <span key={c.f} style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 7,
-                    ...(c.f === 'unpriced' ? { color: '#b91c1c', background: '#fdecec' } : { color: '#b07415', background: '#fbf0dd' }) }}>
-                    {c.n} {FLAG_META[c.f].label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {err && (
-          <div className="flex items-center gap-2" style={{ background: '#fdecec', color: '#b91c1c', borderRadius: 11, padding: '10px 16px', fontSize: 13.5, marginBottom: 16 }}>
-            <Info size={15} /> {err}
-          </div>
-        )}
-
-        {/* GROUPS — By unit (grouped by building) / By layout (grouped by type) */}
-        {loading ? (
-          loadingRow('Loading layouts…')
-        ) : mode === 'unit' ? (
-          // ── Per-unit (flat) view — units grouped under their building ──
-          scopedUnitRows.length === 0 ? (
-            perUnitLoading ? loadingRow('Loading units…') : (
-              <div className="text-center" style={{ padding: '80px 0' }}>
-                <Layers size={32} className="mx-auto" style={{ color: '#c5c3bc', marginBottom: 12 }} />
-                <p style={{ fontSize: 13.5, color: MUTE2 }}>
-                  {q ? `No units match “${query.trim()}”.`
-                    : typeFilter !== 'all' ? `No ${typeLabel(typeFilter === 'other' ? null : typeFilter)} units in this scope.`
-                    : 'No units found for this scope.'}
-                </p>
-              </div>
-            )
-          ) : statusVisibleRows.length === 0 ? (
-            <div className="text-center" style={{ padding: '56px 0', fontSize: 13.5, color: MUTE2 }}>
-              No {statusFilter.toLowerCase()} units in this scope.
-            </div>
-          ) : (
-            <>
-              {unitGroups.map(g => (
-                <section key={g.building} style={{ marginBottom: 26 }}>
-                  <div className="flex items-center gap-3" style={{ margin: '6px 0 12px' }}>
-                    <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>{g.building}</div>
-                    <span style={CHIP_COUNT}>{g.items.length} {g.items.length === 1 ? 'unit' : 'units'}</span>
-                    {/* Adding units happens from the single header action only — the
-                        per-building buttons repeated the same call to action. */}
-                  </div>
-                  {view === 'grid' ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
-                      {g.items.map(({ u, pl }) => unitCard(pl, u, propertyId == null))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col" style={{ gap: 12 }}>
-                      {g.items.map(({ u, pl }) => unitRow(pl, u, propertyId == null))}
-                    </div>
-                  )}
-                </section>
-              ))}
-              {perUnitLoading && loadingRow('Loading more units…', true)}
-            </>
-          )
-        ) : plans.length === 0 ? (
-          <div className="text-center" style={{ padding: '80px 0' }}>
-            <Layers size={32} className="mx-auto" style={{ color: '#c5c3bc', marginBottom: 12 }} />
-            <p style={{ fontSize: 13.5, color: MUTE2 }}>
-              {q ? `No layouts match “${query.trim()}”.`
-                : typeFilter !== 'all' ? `No ${typeLabel(typeFilter === 'other' ? null : typeFilter)} layouts in this scope.`
-                : 'No layout plans found for this scope.'}
-            </p>
-          </div>
-        ) : (
-          groups.map(g => (
-            <section key={g.unitType} style={{ marginBottom: 26 }}>
-              <div className="flex items-center gap-3" style={{ margin: '6px 0 12px' }}>
-                <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-.01em', color: INK }}>{typeLabel(g.unitType === 'other' ? null : g.unitType)}</div>
-                <span style={CHIP_COUNT}>{g.count} {g.count === 1 ? 'unit' : 'units'}</span>
-              </div>
-              {view === 'grid' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 14 }}>
-                  {g.plans.map(p => gridCard(p))}
-                </div>
-              ) : (
-                <div className="flex flex-col" style={{ gap: 12 }}>
-                  {g.plans.map(p => rowCard(p))}
-                </div>
-              )}
-            </section>
-          ))
+        {mode === 'unit' && !loading && scopedUnitRows.length > 0 && (
+          <Seg<QualityFilter> label="Listing quality" value={qualityFilter} onChange={setQualityFilter} options={[
+            { v: 'all', l: 'All quality', n: statusVisibleRows.length },
+            { v: 'needs', l: 'Needs work', n: qualityCounts.needs },
+            { v: 'good', l: 'Good', n: qualityCounts.good },
+          ]} />
         )}
       </div>
+
+      {/* Listing quality attention — red band (< 60) first, then amber (60–84). */}
+      {mode === 'unit' && !showUnitSkeleton && qualityCounts.needs > 0 && (
+        <Callout tone={qualityCounts.low > 0 ? 'bad' : 'warn'}
+          title={qualityCounts.low > 0
+            ? `Low quality: ${qualityCounts.low} listing${qualityCounts.low === 1 ? '' : 's'} score under ${QUALITY_OK}.`
+            : `${qualityCounts.needs} listing${qualityCounts.needs === 1 ? '' : 's'} need work.`}>
+          {qualityCounts.low > 0 && qualityCounts.needs > qualityCounts.low && <>{qualityCounts.needs - qualityCounts.low} more score {QUALITY_OK}–{QUALITY_GOOD - 1}. </>}
+          Good listings score {QUALITY_GOOD}+: a title, a 300+ character description, 5–10 photos, a floor plan, rent, size and amenities.{' '}
+          {qualityFilter !== 'needs'
+            ? <Btn size="xs" onClick={() => setQualityFilter('needs')}>Show listings needing work</Btn>
+            : <Btn size="xs" onClick={() => setQualityFilter('all')}>Show all listings</Btn>}
+        </Callout>
+      )}
+
+      {/* Pricing health (layouts) — summary; flags also pill each row. */}
+      {!loading && mode === 'type' && plans.length > 0 && (
+        flagged === 0
+          ? <Callout title="Pricing looks consistent.">No pricing gaps on the shown layouts.</Callout>
+          : (
+            <Callout tone="warn" title={`${flagged} of ${plans.length} layouts need a pricing look.`}>
+              {counts.map((c, i) => <span key={c.f}>{i > 0 ? ' · ' : ''}{c.n} {FLAG_META[c.f].label}</span>)}
+            </Callout>
+          )
+      )}
+
+      {err && (
+        <Callout tone="bad" title="Something went wrong.">
+          {err} <Btn size="xs" onClick={() => setErr(null)}>Dismiss</Btn>
+        </Callout>
+      )}
+
+      {loadFailed ? (
+        <TableWrap toolbar={toolbar}>
+          <table className="gx-tbl"><tbody><tr><td>
+            <div className="gx-empty"><b>Couldn&apos;t load your units</b>
+              <div style={{ marginTop: 8 }}><Btn size="sm" onClick={reload}>Try again</Btn></div>
+            </div>
+          </td></tr></tbody></table>
+        </TableWrap>
+      ) : view === 'row' ? (
+        <TableWrap toolbar={toolbar}>
+          {mode === 'unit' ? (
+            <table className="gx-tbl">
+              <thead><tr>
+                <th>Unit</th><th>Property</th><th>Type</th><th>Beds</th><th className="num">Sqft</th>
+                <th className="num">Rent</th><th>Quality</th><th>Status</th><th className="act">Actions</th>
+              </tr></thead>
+              {showUnitSkeleton ? <SkeletonRows cols={UNIT_COLS} />
+                : scopedUnitRows.length === 0 ? <EmptyRow cols={UNIT_COLS} title={emptyUnitsText} text={canEdit ? ' Add units to a property to see them here.' : undefined} />
+                : statusVisibleRows.length === 0 ? <EmptyRow cols={UNIT_COLS} title="No units in this listing state" text=" Pick another state or clear the occupancy filter." />
+                : visibleRows.length === 0 ? <EmptyRow cols={UNIT_COLS} title={qualityFilter === 'good' ? 'No listings score Good yet' : 'No listings need work'} text=" Pick another quality filter." />
+                : (
+                  <tbody>
+                    {unitRows.map(({ u, pl }) => unitTableRow(pl, u))}
+                    {perUnitLoading && <tr><td colSpan={UNIT_COLS}><span className="sub"><Loader2 size={12} className="animate-spin" style={{ display: 'inline' }} /> Loading more units…</span></td></tr>}
+                  </tbody>
+                )}
+            </table>
+          ) : (
+            <table className="gx-tbl">
+              <thead><tr>
+                <th>Layout</th><th>Property</th><th>Type</th><th>Beds</th><th className="num">Sqft</th><th className="num">Units</th>
+                <th className="num">Market rent / Annual rent</th><th>Pricing</th><th className="act">Actions</th>
+              </tr></thead>
+              {loading ? <SkeletonRows cols={LAYOUT_COLS} />
+                : plans.length === 0 ? <EmptyRow cols={LAYOUT_COLS} title={emptyLayoutsText} />
+                : groups.map(g => (
+                  <tbody key={g.unitType}>
+                    <tr><td colSpan={LAYOUT_COLS} style={{ background: 'var(--ms-surface-2)' }}>
+                      <span className="strong">{typeName(g.unitType)}</span>{' '}
+                      <span style={{ color: 'var(--ms-ink-3)' }}>· {g.count} {g.count === 1 ? 'unit' : 'units'}</span>
+                    </td></tr>
+                    {g.plans.map(p => layoutTableRow(p))}
+                  </tbody>
+                ))}
+            </table>
+          )}
+        </TableWrap>
+      ) : (
+        <TableWrap toolbar={toolbar}>
+          <div className="gx-pad">
+            {mode === 'unit' ? (
+              showUnitSkeleton ? <div className="gx-empty"><b>Loading units…</b></div>
+              : scopedUnitRows.length === 0 ? <div className="gx-empty"><b>{emptyUnitsText}</b></div>
+              : statusVisibleRows.length === 0 ? <div className="gx-empty"><b>No units in this listing state</b>Pick another state or clear the occupancy filter.</div>
+              : visibleRows.length === 0 ? <div className="gx-empty"><b>{qualityFilter === 'good' ? 'No listings score Good yet' : 'No listings need work'}</b>Pick another quality filter.</div>
+              : (
+                <>
+                  {unitGroups.map(g => (
+                    <section key={g.building} style={{ marginBottom: 18 }}>
+                      <div style={{ margin: '2px 0 10px', fontSize: 12.5 }}>
+                        <b>{g.building}</b> <span style={{ color: 'var(--ms-ink-3)' }}>· {g.items.length} {g.items.length === 1 ? 'unit' : 'units'}</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
+                        {g.items.map(({ u, pl }) => unitCard(pl, u, propertyId == null))}
+                      </div>
+                    </section>
+                  ))}
+                  {perUnitLoading && <div className="gx-empty">Loading more units…</div>}
+                </>
+              )
+            ) : loading ? <div className="gx-empty"><b>Loading layouts…</b></div>
+              : plans.length === 0 ? <div className="gx-empty"><b>{emptyLayoutsText}</b></div>
+              : groups.map(g => (
+                <section key={g.unitType} style={{ marginBottom: 18 }}>
+                  <div style={{ margin: '2px 0 10px', fontSize: 12.5 }}>
+                    <b>{typeName(g.unitType)}</b> <span style={{ color: 'var(--ms-ink-3)' }}>· {g.count} {g.count === 1 ? 'unit' : 'units'}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: 12 }}>
+                    {g.plans.map(p => gridCard(p))}
+                  </div>
+                </section>
+              ))}
+          </div>
+        </TableWrap>
+      )}
 
       {/* Plan-wide financial-details editor */}
       {/* By-layout Edit — the full editor, identical to the portfolio Unit Mix → Edit. */}
@@ -1276,7 +1424,7 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
           seedAddendumTerms={unitModal.plan.termsVersion?.addendumTerms ?? null}
           hasAddendumFile={!!unitModal.plan.termsVersion?.addendumUrl}
           onAddendumApplied={reload}
-          onClose={() => setUnitModal(null)}
+          onClose={() => { if (unitModal.editingUnit) refreshPhotoCount(unitModal.editingUnit.id); setUnitModal(null); }}
           onSave={(data, floorPlan, titleDeed, addendums) =>
             onSaveUnit(unitModal.plan, unitModal.editingUnit, data, floorPlan, titleDeed, addendums)}
         />
@@ -1306,24 +1454,24 @@ export function UnitsWorkspace({ manager }: { manager?: { rp: number } }) {
             .map(c => ({ id: c.id, tenantName: c.tenant?.name ?? null, startDate: c.startDate, endDate: c.endDate, status: c.status, active: c.contractActive }))}
           onEdit={canEdit ? () => { setUnitModal({ plan: activePreview.plan, editingUnit: activePreview.unit }); closePreview(); } : undefined}
           onClose={closePreview}
+          topSlot={(() => {
+            const qq = qualityOf(activePreview.unit, activePreview.plan);
+            if (!qq) return <span className="sub">Checking listing quality…</span>;
+            return (
+              <div style={{ border: '1px solid var(--ms-surface-3)', borderRadius: 12, padding: 14 }}>
+                <QualityPanel q={qq} showPassing={false}
+                  action={canEdit && qq.missing.length > 0 ? (
+                    <Btn size="sm" variant="primary" title="Open the unit editor to fix the missing items"
+                      onClick={() => { setUnitModal({ plan: activePreview.plan, editingUnit: activePreview.unit }); closePreview(); }}>
+                      Fix
+                    </Btn>
+                  ) : undefined} />
+              </div>
+            );
+          })()}
         />
       )}
-    </div>
-  );
-}
-
-function Select({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[];
-}) {
-  return (
-    <div className="relative">
-      <select value={value} onChange={e => onChange(e.target.value)} aria-label={label}
-        className="appearance-none bg-white focus:outline-none cursor-pointer"
-        style={{ padding: '11px 34px 11px 14px', fontSize: 13.5, fontWeight: 500, border: '1px solid #e2e7e1', borderRadius: 11, color: '#5a635c' }}>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: '#8d978f' }} />
-    </div>
+    </OsPage>
   );
 }
 

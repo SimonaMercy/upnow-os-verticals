@@ -8,6 +8,8 @@ import { apiGet, apiPost, apiPatch } from '@/lib/api';
 import { ReschedulePanel } from '@/components/upnow/ReschedulePanel';
 import { DisputeThreadPanel } from '@/components/upnow/DisputeThreadPanel';
 import { uploadBookingPhoto, EMPTY_EVIDENCE, type EvidenceGroups, type EvidenceKind, type EvidencePhoto } from '@/lib/bookingEvidence';
+import { ServiceStatusStepper } from '@/components/upnow/ServiceStatusStepper';
+import { serviceStatusView, isQuoteMode, TONE_COLORS } from '@/lib/homeServices/statusView';
 
 /* Tokens shared with the SP dashboard (design 2a). */
 const GREEN = '#0B7A4E';
@@ -33,6 +35,7 @@ interface Booking {
   source?: 'marketplace' | 'rp_maintenance' | null;
   payer?: 'customer' | 'rental_provider' | null;
   maintenanceRequestId?: number | null;
+  customerSignedOff?: boolean;
 }
 interface Technician { id: number; name: string; jobStatus: string }
 interface TeamMember { id: number; name: string; isLeadCapable: boolean }
@@ -45,16 +48,8 @@ interface Dispute {
 }
 const DISPUTE_OPEN = ['open', 'under_review', 'awaiting_evidence'];
 
-const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
-  booked: { label: 'Awaiting quote approval', bg: TINT_AMBER, fg: AMBER },
-  confirmed: { label: 'Confirmed', bg: TINT_GREEN, fg: GREEN },
-  assigned: { label: 'Assigned', bg: '#E0F2FE', fg: '#0369A1' },
-  en_route: { label: 'On the way', bg: '#E0F2FE', fg: '#0369A1' },
-  in_progress: { label: 'In progress', bg: '#E0E7FF', fg: '#4338CA' },
-  completed: { label: 'Completed', bg: TINT_GREEN, fg: GREEN },
-  cancelled: { label: 'Cancelled', bg: '#FEE2E2', fg: '#991B1B' },
-  dispute: { label: 'In dispute', bg: '#FEF2F2', fg: '#B42318' },
-};
+/* Status labels: serviceStatusView (src/lib/homeServices/statusView.ts) —
+   status × pricing mode × quote state, shared with the customer's page. */
 const NEXT: Record<string, { label: string; to: string }> = {
   assigned: { label: "I'm on my way", to: 'en_route' },
   en_route: { label: 'Start the job', to: 'in_progress' },
@@ -118,6 +113,8 @@ export default function ProviderJobPage() {
   const [media, setMedia] = useState<EvidenceGroups>(EMPTY_EVIDENCE);
   const [mediaBusy, setMediaBusy] = useState<EvidenceKind | null>(null);
   const [mediaErr, setMediaErr] = useState<string | null>(null);
+  /** Quote jobs: the provider confirms the inspection happened before pricing (UI gate only). */
+  const [inspected, setInspected] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -221,10 +218,23 @@ export default function ProviderJobPage() {
   const isMaint = b.source === 'rp_maintenance';
   const landlordPays = isMaint && b.payer === 'rental_provider';
   const approver = landlordPays ? 'landlord' : 'customer';
-  const st = b.status === 'booked' && landlordPays
+  const isQuote = isQuoteMode(b.pricingMode);
+  const view = serviceStatusView({
+    status: b.status,
+    pricingMode: b.pricingMode,
+    quoteStatus: quote?.status ?? null,
+    customerSignedOff: b.customerSignedOff,
+    providerAttached: true, // this provider holds the job
+    approver,
+  });
+  const st = b.status === 'booked' && landlordPays && !isQuote
     ? { label: 'Awaiting landlord approval', bg: TINT_AMBER, fg: AMBER }
-    : (STATUS[b.status] ?? STATUS.booked);
-  const isQuote = b.pricingMode === 'quote';
+    : { label: view.spLabel, ...TONE_COLORS[view.tone] };
+  // A quote booking with no quote yet is an INSPECTION callout: the backend
+  // keeps it `booked` with no technician and no visit statuses (the callout
+  // attaches the provider only), so the visit is a checklist here and the
+  // quote builder opens once the provider says the inspection is done.
+  const isInspection = isQuote && b.status === 'booked' && !quote;
   const next = NEXT[b.status];
   const lineAmt = (r: { quantity: string; unitPrice: string }) => (Number(r.quantity) || 0) * (Number(r.unitPrice) || 0);
   const draftTotal = rows.reduce((s, r) => s + lineAmt(r), 0);
@@ -341,10 +351,44 @@ export default function ProviderJobPage() {
         {mediaErr && <p style={{ fontSize: 12.5, color: '#B42318', marginTop: 8 }}>{mediaErr}</p>}
       </div>
 
-      {/* Quote entry / status (quote services only) */}
-      {isQuote && (
+      {/* Inspection visit (quote services, before any quote) */}
+      {isInspection && (
         <div style={card({ marginTop: 14, padding: '16px 18px' })}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>Quote</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>Inspection visit</div>
+          <p style={{ fontSize: 13, color: MUTE, marginTop: 4 }}>
+            This is a quote job: inspect first, then send an itemised quote. The {approver} approves{landlordPays ? '' : ' and pays'} before any work starts.
+          </p>
+          <ol style={{ margin: '12px 0 0', paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              { t: `Visit the ${landlordPays ? 'property' : 'customer'} at the booked slot`, d: `${fmtWhen(b.scheduledAt)}${b.addressText ? ` · ${b.addressText}` : ''}`, done: inspected },
+              { t: 'Inspect the job and photograph what you find', d: 'Add supplier quotations to the quote below if parts are needed.', done: inspected },
+              { t: 'Send the itemised quote', d: 'Labour and materials, line by line.', done: false },
+            ].map((x, i) => (
+              <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, marginTop: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, border: `2px solid ${x.done ? GREEN : '#DDE2DD'}`, background: x.done ? GREEN : '#fff', color: x.done ? '#fff' : FAINT }}>{x.done ? '✓' : i + 1}</span>
+                <span>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: INK }}>{x.t}</span>
+                  <span style={{ display: 'block', fontSize: 12.5, color: FAINT }}>{x.d}</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          {!inspected && (
+            <button onClick={() => setInspected(true)}
+              style={{ marginTop: 14, background: GREEN, color: '#fff', border: 'none', borderRadius: 10, padding: '10px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+              I&apos;ve done the inspection — write the quote
+            </button>
+          )}
+          <p style={{ fontSize: 12, color: FAINT, marginTop: 8 }}>
+            Visit check-ins (on my way / arrived) aren&apos;t tracked for inspection visits yet — they start once the quote is approved.
+          </p>
+        </div>
+      )}
+
+      {/* Quote entry / status (quote services only) */}
+      {isQuote && (!isInspection || inspected) && (
+        <div style={card({ marginTop: 14, padding: '16px 18px' })}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>{isInspection ? 'Send quote after your inspection' : 'Quote'}</div>
           {!quote || ['draft', 'rejected', 'expired'].includes(quote.status) ? (
             <>
               {quote?.status === 'rejected' && (
@@ -476,9 +520,13 @@ export default function ProviderJobPage() {
         <div style={lbl}>Job progress</div>
         {b.status === 'booked' && isQuote ? (
           <p style={{ fontSize: 14, color: MUTE, marginTop: 8 }}>
-            {landlordPays
-              ? 'Waiting for the landlord to approve. You\u2019ll be able to start once they do.'
-              : 'Waiting for the customer to approve your quote. You\u2019ll be able to start once they pay.'}
+            {!quote || quote.status === 'draft'
+              ? `Inspect at ${fmtWhen(b.scheduledAt)}, then send your quote. The job starts once the ${approver} approves${landlordPays ? '' : ' and pays'}.`
+              : quote.status === 'submitted'
+                ? (landlordPays
+                  ? 'Waiting for the landlord to approve. You\u2019ll be able to start once they do.'
+                  : 'Waiting for the customer to approve your quote. You\u2019ll be able to start once they pay.')
+                : `The ${approver} didn\u2019t take this quote${quote.status === 'expired' ? ' before it expired' : ''} — send a revised one above.`}
           </p>
         ) : b.status === 'assigned' ? (
           <div style={{ marginTop: 10 }}>
@@ -518,6 +566,9 @@ export default function ProviderJobPage() {
         ) : (
           <p style={{ fontSize: 14, color: GREEN, marginTop: 8, fontWeight: 600 }}>✓ Job {b.status}.</p>
         )}
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: HAIRLINE }}>
+          <ServiceStatusStepper view={view} audience="provider" />
+        </div>
         {b.timeline && (
           <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {b.timeline.map((s) => (

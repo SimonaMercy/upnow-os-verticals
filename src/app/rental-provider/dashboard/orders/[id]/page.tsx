@@ -124,18 +124,18 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; i
   expired:    { label: 'Expired',    bg: '#e5e7eb', text: '#374151', icon: <Clock size={14} /> },
   terminated: { label: 'Terminated', bg: '#fee2e2', text: '#b91c1c', icon: <XCircle size={14} /> },
   pending:    { label: 'Pending',    bg: '#fef3c7', text: '#92400e', icon: <AlertTriangle size={14} /> },
-  issued:     { label: 'Issued',     bg: '#d8f2e8', text: '#1a7a5a', icon: <FileCheck size={14} /> },
+  issued:     { label: 'Issued',     bg: '#d8efe3', text: '#1a7a5a', icon: <FileCheck size={14} /> },
 };
 
 const EJARI_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  registered:     { label: 'Registered',     bg: '#d8f2e8', text: '#1a7a5a' },
+  registered:     { label: 'Registered',     bg: '#d8efe3', text: '#1a7a5a' },
   pending:        { label: 'Pending',         bg: '#fef3c7', text: '#92400e' },
   not_registered: { label: 'Not Registered', bg: '#fee2e2', text: '#b91c1c' },
   expired:        { label: 'Expired',         bg: '#e5e7eb', text: '#374151' },
 };
 
 const RENEWAL_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
-  accepted: { label: 'Accepted', bg: '#d8f2e8', text: '#1a7a5a' },
+  accepted: { label: 'Accepted', bg: '#d8efe3', text: '#1a7a5a' },
   rejected: { label: 'Rejected', bg: '#fee2e2', text: '#b91c1c' },
   pending:  { label: 'Pending',  bg: '#fef3c7', text: '#92400e' },
 };
@@ -144,9 +144,9 @@ const RENEWAL_CONFIG: Record<string, { label: string; bg: string; text: string }
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-5">
-      <div className="flex items-center gap-2.5 px-6 py-4 border-b border-[#e8e6e0]">
-        <span style={{ color: '#2e9f82' }}>{icon}</span>
-        <h2 className="font-semibold text-[#1a1916] text-base">{title}</h2>
+      <div className="flex items-center gap-2.5 px-6 py-4 border-b border-[#e4e9e5]">
+        <span style={{ color: '#047246' }}>{icon}</span>
+        <h2 className="font-semibold text-[#14201a] text-base">{title}</h2>
       </div>
       <div className="px-6 py-5">{children}</div>
     </div>
@@ -155,9 +155,9 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex justify-between items-start py-2.5 border-b border-[#f4f3ef] last:border-0">
-      <span className="text-sm text-[#6b6860] flex-shrink-0 mr-6">{label}</span>
-      <span className={`text-sm font-medium text-[#1a1916] text-right ${mono ? 'font-mono' : ''}`}>{value ?? '—'}</span>
+    <div className="flex justify-between items-start py-2.5 border-b border-[#eef1ef] last:border-0">
+      <span className="text-sm text-[#5f6b63] flex-shrink-0 mr-6">{label}</span>
+      <span className={`text-sm font-medium text-[#14201a] text-right ${mono ? 'font-mono' : ''}`}>{value ?? '—'}</span>
     </div>
   );
 }
@@ -180,8 +180,8 @@ export default function ContractDetailPage() {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <RefreshCw size={28} className="text-[#2e9f82] animate-spin mb-3" />
-        <p className="text-sm text-[#6b6860]">Loading contract…</p>
+        <RefreshCw size={28} className="text-[#047246] animate-spin mb-3" />
+        <p className="text-sm text-[#5f6b63]">Loading contract…</p>
       </div>
     );
   }
@@ -190,16 +190,16 @@ export default function ContractDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <XCircle size={32} className="text-red-400 mb-3" />
-        <p className="text-sm text-[#6b6860]">Contract not found.</p>
-        <Link href="/rental-provider/dashboard/orders" className="mt-4 text-sm text-[#2e9f82] hover:underline">
+        <p className="text-sm text-[#5f6b63]">Contract not found.</p>
+        <Link href="/rental-provider/dashboard/orders" className="mt-4 text-sm text-[#047246] hover:underline">
           ← Back to orders
         </Link>
       </div>
     );
   }
 
-  const statusCfg = STATUS_CONFIG[contract.status] ?? { label: humanize(contract.status), bg: '#f4f3ef', text: '#6b6860', icon: null };
-  const ejariCfg = EJARI_CONFIG[contract.ejariStatus] ?? { label: humanize(contract.ejariStatus), bg: '#f4f3ef', text: '#6b6860' };
+  const statusCfg = STATUS_CONFIG[contract.status] ?? { label: humanize(contract.status), bg: '#eef1ef', text: '#5f6b63', icon: null };
+  const ejariCfg = EJARI_CONFIG[contract.ejariStatus] ?? { label: humanize(contract.ejariStatus), bg: '#eef1ef', text: '#5f6b63' };
   // This section reports the renewal OF this lease, so it reads the row's own
   // markers. The top-level ones are mirrored from the parent on a renewal child,
   // which made every renewed lease report "Accepted / renewal complete" for a
@@ -218,7 +218,7 @@ export default function ContractDetailPage() {
       {/* Back */}
       <Link
         href="/rental-provider/dashboard/orders"
-        className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-6 transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-6 transition-colors"
       >
         <ArrowLeft size={15} /> Back to Rental Orders
       </Link>
@@ -227,7 +227,7 @@ export default function ContractDetailPage() {
       <div className="flex flex-wrap gap-4 items-start justify-between mb-6">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold text-[#1a1916]">{contract.ref}</h1>
+            <h1 className="text-2xl font-bold text-[#14201a]">{contract.ref}</h1>
             <span
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
               style={{ backgroundColor: statusCfg.bg, color: statusCfg.text }}
@@ -235,18 +235,18 @@ export default function ContractDetailPage() {
               {statusCfg.icon} {statusCfg.label}
             </span>
             {contract.contractType && (
-              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#e8e6e0] text-[#3d3b35]">
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#e4e9e5] text-[#46534c]">
                 {humanize(contract.contractType)}
               </span>
             )}
           </div>
-          <p className="text-sm text-[#6b6860]">
+          <p className="text-sm text-[#5f6b63]">
             Created {fmt(contract.createdAt)} · Last updated {fmt(contract.updatedAt)}
           </p>
         </div>
         <div className="flex gap-2">
           {contract.renderedContent && (
-            <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e8e6e0] text-sm text-[#3d3b35] hover:bg-[#f4f3ef] transition-colors">
+            <button className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e9e5] text-sm text-[#46534c] hover:bg-[#eef1ef] transition-colors">
               <Download size={14} /> Download PDF
             </button>
           )}
@@ -272,8 +272,8 @@ export default function ContractDetailPage() {
           { label: 'Duration', value: contract.durationYears ? `${contract.durationYears} year${contract.durationYears > 1 ? 's' : ''}` : '—' },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-2xl p-4 shadow-sm">
-            <p className="text-xs text-[#6b6860] mb-1">{s.label}</p>
-            <p className="font-bold text-[#1a1916] text-base leading-tight">{s.value}</p>
+            <p className="text-xs text-[#5f6b63] mb-1">{s.label}</p>
+            <p className="font-bold text-[#14201a] text-base leading-tight">{s.value}</p>
           </div>
         ))}
       </div>
@@ -307,7 +307,7 @@ export default function ContractDetailPage() {
         {contract.refundRules && <Row label="Refund Rules" value={contract.refundRules} />}
         {contract.partiesInvolved && <Row label="Parties Involved" value={contract.partiesInvolved} />}
         <Row label="Contract Sent" value={
-          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${contract.contractSent ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
+          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${contract.contractSent ? 'bg-[#d8efe3] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
             {contract.contractSent ? <><CheckCircle2 size={11} /> Sent</> : <><Clock size={11} /> Not sent</>}
           </span>
         } />
@@ -322,7 +322,7 @@ export default function ContractDetailPage() {
           </span>
         } />
         <Row label="Contract Active" value={
-          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${contract.contractActive ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#e5e7eb] text-[#374151]'}`}>
+          <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${contract.contractActive ? 'bg-[#d8efe3] text-[#1a7a5a]' : 'bg-[#e5e7eb] text-[#374151]'}`}>
             {contract.contractActive ? <><CheckCircle2 size={11} /> Active</> : <>Inactive</>}
           </span>
         } />
@@ -332,8 +332,8 @@ export default function ContractDetailPage() {
       <Section title="Renewal Process" icon={<RotateCcw size={18} />}>
         <Row label="Renewal Status" value={
           ownRenewalStatus
-            ? <span className="text-sm text-[#1a1916]">{humanize(ownRenewalStatus)}</span>
-            : <span className="text-sm text-[#9b9890]">No renewal initiated</span>
+            ? <span className="text-sm text-[#14201a]">{humanize(ownRenewalStatus)}</span>
+            : <span className="text-sm text-[#8a948d]">No renewal initiated</span>
         } />
         <Row label="Customer Decision" value={
           renewalCfg
@@ -347,14 +347,14 @@ export default function ContractDetailPage() {
         {contract.renewalNoticeId && <Row label="Renewal Notice ID" value={contract.renewalNoticeId} mono />}
 
         {contract.status === 'active' && !ownRenewalStatus && (
-          <div className="mt-4 pt-4 border-t border-[#f4f3ef]">
+          <div className="mt-4 pt-4 border-t border-[#eef1ef]">
             <button
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ backgroundColor: '#2e9f82' }}
+              style={{ backgroundColor: '#047246' }}
             >
               Initiate Renewal Process
             </button>
-            <p className="text-xs text-center text-[#9b9890] mt-2">
+            <p className="text-xs text-center text-[#8a948d] mt-2">
               A renewal notice will be sent to the customer via email & SMS.
             </p>
           </div>
@@ -363,32 +363,32 @@ export default function ContractDetailPage() {
 
       {/* Tenant */}
       <Section title="Customer Information" icon={<User size={18} />}>
-        <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#f4f3ef]">
+        <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#eef1ef]">
           <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
-            style={{ background: 'linear-gradient(135deg, #2e9f82, #1f6655)' }}>
+            style={{ background: 'linear-gradient(135deg, #047246, #1f6655)' }}>
             {(tenantDisplayName(contract.tenant) ?? 'T').charAt(0).toUpperCase()}
           </div>
           <div>
-            <p className="font-semibold text-[#1a1916]">{tenantDisplayName(contract.tenant) ?? '—'}</p>
-            <p className="text-sm text-[#6b6860]">Customer ID #{contract.tenant.id}</p>
+            <p className="font-semibold text-[#14201a]">{tenantDisplayName(contract.tenant) ?? '—'}</p>
+            <p className="text-sm text-[#5f6b63]">Customer ID #{contract.tenant.id}</p>
           </div>
         </div>
         {contract.tenant.email && (
           <Row label="Email" value={
-            <a href={`mailto:${contract.tenant.email}`} className="text-[#2e9f82] hover:underline inline-flex items-center gap-1">
+            <a href={`mailto:${contract.tenant.email}`} className="text-[#047246] hover:underline inline-flex items-center gap-1">
               <Mail size={12} /> {contract.tenant.email}
             </a>
           } />
         )}
         {contract.tenant.phone && (
           <Row label="Phone" value={
-            <a href={`tel:${contract.tenant.phone}`} className="text-[#2e9f82] hover:underline inline-flex items-center gap-1">
+            <a href={`tel:${contract.tenant.phone}`} className="text-[#047246] hover:underline inline-flex items-center gap-1">
               <Phone size={12} /> {contract.tenant.phone}
             </a>
           } />
         )}
         {!contract.tenant.email && !contract.tenant.phone && (
-          <p className="text-sm text-[#9b9890]">No contact details available.</p>
+          <p className="text-sm text-[#8a948d]">No contact details available.</p>
         )}
       </Section>
 
@@ -397,7 +397,7 @@ export default function ContractDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {/* Unit */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#9b9890] mb-3">Unit</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#8a948d] mb-3">Unit</p>
             <Row label="Unit No." value={contract.unit.number} />
             {contract.unit.name && <Row label="Name" value={contract.unit.name} />}
             {contract.unit.type && <Row label="Type" value={humanize(contract.unit.type)} />}
@@ -409,7 +409,7 @@ export default function ContractDetailPage() {
           </div>
           {/* Property */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#9b9890] mb-3">Property</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#8a948d] mb-3">Property</p>
             <Row label="Building" value={contract.property.buildingName} />
             {contract.property.fullAddress && <Row label="Address" value={contract.property.fullAddress} />}
             {contract.property.community && <Row label="Community" value={contract.property.community} />}
@@ -424,12 +424,12 @@ export default function ContractDetailPage() {
       {/* Contract Content */}
       {contract.renderedContent && (
         <Section title="Contract Document" icon={<FileText size={18} />}>
-          <div className="bg-[#f9f8f5] border border-[#e8e6e0] rounded-xl p-5 max-h-[400px] overflow-y-auto">
-            <pre className="text-xs text-[#3d3b35] whitespace-pre-wrap font-mono leading-relaxed">
+          <div className="bg-[#f9f8f5] border border-[#e4e9e5] rounded-xl p-5 max-h-[400px] overflow-y-auto">
+            <pre className="text-xs text-[#46534c] whitespace-pre-wrap font-mono leading-relaxed">
               {contract.renderedContent}
             </pre>
           </div>
-          <button className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e8e6e0] text-sm text-[#3d3b35] hover:bg-[#f4f3ef] transition-colors">
+          <button className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e9e5] text-sm text-[#46534c] hover:bg-[#eef1ef] transition-colors">
             <Download size={14} /> Download PDF
           </button>
         </Section>
@@ -441,12 +441,12 @@ export default function ContractDetailPage() {
           {contract.securityDeposits.map((dep) => (
             <div key={dep.id} className="mb-4 last:mb-0">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-[#9b9890] uppercase tracking-wide">{dep.referenceNumber ?? `Deposit #${dep.id}`}</span>
+                <span className="text-xs font-semibold text-[#8a948d] uppercase tracking-wide">{dep.referenceNumber ?? `Deposit #${dep.id}`}</span>
                 <div className="flex gap-2">
-                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${dep.depositStatus === 'held' ? 'bg-[#dbeafe] text-[#1e40af]' : dep.depositStatus === 'returned' ? 'bg-[#d8f2e8] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
+                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${dep.depositStatus === 'held' ? 'bg-[#dbeafe] text-[#1e40af]' : dep.depositStatus === 'returned' ? 'bg-[#d8efe3] text-[#1a7a5a]' : 'bg-[#fef3c7] text-[#92400e]'}`}>
                     {dep.depositStatus.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                   </span>
-                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#f4f3ef] text-[#6b6860]`}>
+                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#eef1ef] text-[#5f6b63]`}>
                     {dep.documentStatus.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                   </span>
                 </div>
@@ -471,7 +471,7 @@ export default function ContractDetailPage() {
           <div className="overflow-x-auto -mx-2">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
-                <tr className="text-left text-xs text-[#9b9890] uppercase border-b border-[#f4f3ef]">
+                <tr className="text-left text-xs text-[#8a948d] uppercase border-b border-[#eef1ef]">
                   <th className="px-2 py-2 font-medium">Description</th>
                   <th className="px-2 py-2 font-medium">Amount</th>
                   <th className="px-2 py-2 font-medium">Method</th>
@@ -482,12 +482,12 @@ export default function ContractDetailPage() {
               </thead>
               <tbody>
                 {contract.payments.map((p) => (
-                  <tr key={p.id} className="border-b border-[#f4f3ef] last:border-0 hover:bg-[#f9f8f5]">
-                    <td className="px-2 py-3 text-[#1a1916]">{p.description ?? '—'}</td>
-                    <td className="px-2 py-3 font-medium text-[#1a1916]">AED {p.amount.toLocaleString('en-AE')}</td>
-                    <td className="px-2 py-3 text-[#6b6860] capitalize">{p.paymentMethod?.replace(/_/g, ' ') ?? '—'}</td>
-                    <td className="px-2 py-3 font-mono text-xs text-[#6b6860]">{p.chequeNumber ?? '—'}</td>
-                    <td className="px-2 py-3 text-[#6b6860] whitespace-nowrap">{fmt(p.transactionDate)}</td>
+                  <tr key={p.id} className="border-b border-[#eef1ef] last:border-0 hover:bg-[#f9f8f5]">
+                    <td className="px-2 py-3 text-[#14201a]">{p.description ?? '—'}</td>
+                    <td className="px-2 py-3 font-medium text-[#14201a]">AED {p.amount.toLocaleString('en-AE')}</td>
+                    <td className="px-2 py-3 text-[#5f6b63] capitalize">{p.paymentMethod?.replace(/_/g, ' ') ?? '—'}</td>
+                    <td className="px-2 py-3 font-mono text-xs text-[#5f6b63]">{p.chequeNumber ?? '—'}</td>
+                    <td className="px-2 py-3 text-[#5f6b63] whitespace-nowrap">{fmt(p.transactionDate)}</td>
                     <td className="px-2 py-3">
                       <div className="flex items-center gap-2">
                       {/* A bounce already made good stays red and stays named a
@@ -495,7 +495,7 @@ export default function ContractDetailPage() {
                           for money, but it did happen, and reading it as
                           Cleared made it look like a cheque that never failed. */}
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        chequeStatusDisplay(p).tone === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                        chequeStatusDisplay(p).tone === 'cleared' ? 'bg-[#d8efe3] text-[#1a7a5a]' :
                         chequeStatusDisplay(p).tone === 'bounced' ? 'bg-[#fee2e2] text-[#b91c1c]' :
                         chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                         'bg-[#fef3c7] text-[#92400e]'
@@ -505,7 +505,7 @@ export default function ContractDetailPage() {
                       {(p.chequeStatus === 'cleared' || p.paymentMethod === 'cash') && (
                         <button
                           title="Issue Receipt"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-[#2e9f82] text-[#2e9f82] text-xs font-semibold hover:bg-[#f4f3ef] transition-colors"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-[#047246] text-[#047246] text-xs font-semibold hover:bg-[#eef1ef] transition-colors"
                         >
                           <Receipt size={11} /> Receipt
                         </button>
@@ -517,9 +517,9 @@ export default function ContractDetailPage() {
               </tbody>
             </table>
           </div>
-          <div className="mt-4 pt-4 border-t border-[#f4f3ef] flex justify-between text-sm">
-            <span className="text-[#6b6860]">Total Paid</span>
-            <span className="font-bold text-[#1a1916]">
+          <div className="mt-4 pt-4 border-t border-[#eef1ef] flex justify-between text-sm">
+            <span className="text-[#5f6b63]">Total Paid</span>
+            <span className="font-bold text-[#14201a]">
               AED {contract.payments.filter(p => p.chequeStatus === 'cleared').reduce((s, p) => s + p.amount, 0).toLocaleString('en-AE')}
             </span>
           </div>
@@ -531,27 +531,27 @@ export default function ContractDetailPage() {
         {contract.documents.length > 0 ? (
           <div className="space-y-2">
             {contract.documents.map(doc => (
-              <div key={doc.id} className="flex items-center justify-between p-3 rounded-xl bg-[#f9f8f5] border border-[#e8e6e0]">
+              <div key={doc.id} className="flex items-center justify-between p-3 rounded-xl bg-[#f9f8f5] border border-[#e4e9e5]">
                 <div className="flex items-center gap-3">
-                  <FileText size={16} className="text-[#2e9f82] flex-shrink-0" />
+                  <FileText size={16} className="text-[#047246] flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-medium text-[#1a1916]">{doc.displayName ?? doc.documentKey}</p>
-                    <p className="text-xs text-[#9b9890] capitalize">{doc.category.replace(/_/g, ' ')} &middot; {doc.ownerType.replace(/_/g, ' ')}</p>
+                    <p className="text-sm font-medium text-[#14201a]">{doc.displayName ?? doc.documentKey}</p>
+                    <p className="text-xs text-[#8a948d] capitalize">{doc.category.replace(/_/g, ' ')} &middot; {doc.ownerType.replace(/_/g, ' ')}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    doc.status === 'complete' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                    doc.status === 'complete' ? 'bg-[#d8efe3] text-[#1a7a5a]' :
                     doc.status === 'pending' ? 'bg-[#fef3c7] text-[#92400e]' :
                     doc.status === 'missing' ? 'bg-[#fee2e2] text-[#b91c1c]' :
-                    'bg-[#f4f3ef] text-[#6b6860]'
+                    'bg-[#eef1ef] text-[#5f6b63]'
                   }`}>
                     {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
                   </span>
                   {doc.fileUrl && (
                     <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName ?? doc.documentKey })}
-                      className="p-1.5 rounded-lg hover:bg-[#e8e6e0] transition-colors cursor-pointer">
-                      <Download size={13} className="text-[#6b6860]" />
+                      className="p-1.5 rounded-lg hover:bg-[#e4e9e5] transition-colors cursor-pointer">
+                      <Download size={13} className="text-[#5f6b63]" />
                     </button>
                   )}
                 </div>
@@ -560,11 +560,11 @@ export default function ContractDetailPage() {
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="w-12 h-12 rounded-full bg-[#f4f3ef] flex items-center justify-center mb-3">
-              <FileText size={20} className="text-[#9b9890]" />
+            <div className="w-12 h-12 rounded-full bg-[#eef1ef] flex items-center justify-center mb-3">
+              <FileText size={20} className="text-[#8a948d]" />
             </div>
-            <p className="text-sm text-[#6b6860] mb-1">No documents available</p>
-            <p className="text-xs text-[#9b9890]">Documents will appear here once they are uploaded.</p>
+            <p className="text-sm text-[#5f6b63] mb-1">No documents available</p>
+            <p className="text-xs text-[#8a948d]">Documents will appear here once they are uploaded.</p>
           </div>
         )}
       </Section>

@@ -28,22 +28,22 @@ import { InspectionPhotosCard } from '@/components/contract/InspectionPhotosCard
 
 const EjariInline = dynamic(() => import('@/components/contract/EjariInline'), {
   ssr: false,
-  loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
+  loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#8a948d]"><Loader2 className="animate-spin" size={16} /> Rendering your contract…</div>,
 });
 
 const InspectionInline = dynamic(() => import('@/components/contract/InspectionInline'), {
   ssr: false,
-  loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={16} /> Rendering the inspection report…</div>,
+  loading: () => <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#8a948d]"><Loader2 className="animate-spin" size={16} /> Rendering the inspection report…</div>,
 });
 
 const ReceiptButtons = dynamic(() => import('@/components/upnow/PaymentReceiptPdf').then(m => ({ default: m.ReceiptButtons })), {
   ssr: false,
-  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing receipts…</div>,
+  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#8a948d]"><Loader2 className="animate-spin" size={14} /> Preparing receipts…</div>,
 });
 
 const ContractButtons = dynamic(() => import('@/components/contract/ContractButtons'), {
   ssr: false,
-  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#9b9890]"><Loader2 className="animate-spin" size={14} /> Preparing contract…</div>,
+  loading: () => <div className="flex items-center gap-2 py-1 text-sm text-[#8a948d]"><Loader2 className="animate-spin" size={14} /> Preparing contract…</div>,
 });
 
 interface Doc { id?: number; documentKey: string; displayName: string | null; fileUrl: string; category?: string | null; ownerType?: string; section?: string | null; portalHidden?: boolean | null }
@@ -157,8 +157,8 @@ export default function ContractReviewPage() {
     <Centered>
       <div className="text-center">
         <AlertTriangle className="mx-auto mb-2 text-[#b45309]" />
-        <p className="font-semibold text-[#1a1916]">{error ?? 'Contract not available'}</p>
-        <Link href={`/portal/${token}`} className="text-sm text-[#2e9f82] mt-2 inline-block">← Back</Link>
+        <p className="font-semibold text-[#14201a]">{error ?? 'Contract not available'}</p>
+        <Link href={`/portal/${token}`} className="text-sm text-[#047246] mt-2 inline-block">← Back</Link>
       </div>
     </Centered>
   );
@@ -231,12 +231,12 @@ export default function ContractReviewPage() {
   return (
     <div className="min-h-screen bg-[#f7f6f2]">
       <div className="max-w-3xl mx-auto px-4 py-8">
-        <Link href={`/portal/${token}`} className="text-xs text-[#6b6860] flex items-center gap-1 mb-3"><ArrowLeft size={13} /> Back to documents</Link>
-        <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#2e9f82]" /><span className="font-bold text-[#1a1916]">UpNow</span></div>
-        <h1 className="text-2xl font-bold text-[#1a1916] mt-3">
+        <Link href={`/portal/${token}`} className="text-xs text-[#5f6b63] flex items-center gap-1 mb-3"><ArrowLeft size={13} /> Back to documents</Link>
+        <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#047246]" /><span className="font-bold text-[#14201a]">UpNow</span></div>
+        <h1 className="text-2xl font-bold text-[#14201a] mt-3">
           {inspType === 'move_out' ? 'Move-out inspection' : inspType === 'move_in' ? 'Move-in inspection' : 'Your tenancy contract'} — CID-{d.contract.id}
         </h1>
-        <p className="text-sm text-[#6b6860] mt-1">
+        <p className="text-sm text-[#5f6b63] mt-1">
           {inspType
             ? 'Review the condition your rental provider recorded, then sign at the bottom to confirm.'
             : d.tenantSigned
@@ -267,7 +267,7 @@ export default function ContractReviewPage() {
                 moveOutDate={d.contract.endDate ?? null}
               />
             ) : (
-              <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
+              <div className="bg-white rounded-2xl border border-[#e4e9e5] p-8 text-center text-sm text-[#8a948d]">
                 {isInspector
                   ? 'No inspection recorded yet — fill the inspection form below to get started.'
                   : 'Your rental provider hasn’t completed this inspection yet. Please check back once they share it.'}
@@ -354,17 +354,17 @@ export default function ContractReviewPage() {
              on-site inspection manager records the condition, then the customer
              signs, then the inspector counter-signs below. */}
         {isInspector && (showMoveIn || showMoveOut) && !insp?.rpCounterSig && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-4 px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-4 px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
             <div className="min-w-0">
-              <p className="text-sm font-bold text-[#1a1916]">{insp?.rpSubmittedAt ? 'Inspection recorded' : 'Start with the inspection form'}</p>
-              <p className="text-xs text-[#6b6860] mt-0.5">
+              <p className="text-sm font-bold text-[#14201a]">{insp?.rpSubmittedAt ? 'Inspection recorded' : 'Start with the inspection form'}</p>
+              <p className="text-xs text-[#5f6b63] mt-0.5">
                 {insp?.rpSubmittedAt
                   ? 'The form is submitted. You can still review it before counter-signing.'
                   : 'Walk the unit and record the condition room by room — photos included.'}
               </p>
             </div>
             <Link href={`/portal/${token}/contract/${id}/inspection?type=${showMoveOut ? 'move_out' : 'move_in'}`}
-              className="text-xs font-semibold px-4 py-2 rounded-xl text-white bg-[#2e9f82] inline-flex items-center gap-1.5 shrink-0">
+              className="text-xs font-semibold px-4 py-2 rounded-xl text-white bg-[#047246] inline-flex items-center gap-1.5 shrink-0">
               <PenLine size={13} /> {insp?.rpSubmittedAt ? 'Open inspection form' : 'Fill the inspection'}
             </Link>
           </div>
@@ -373,15 +373,15 @@ export default function ContractReviewPage() {
         {showMoveIn && (
           <Card title={isInspector ? 'Counter-sign the move-in inspection' : 'Sign the move-in inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the inspection.'}</p>
+              <p className="text-sm text-[#8a948d]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the inspection.'}</p>
             ) : isInspector ? (
               insp.rpCounterSig ? (
                 <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>
               ) : !insp.tenantSig ? (
-                <p className="text-sm text-[#9b9890]">Waiting for the customer to sign first — you counter-sign after them.</p>
+                <p className="text-sm text-[#8a948d]">Waiting for the customer to sign first — you counter-sign after them.</p>
               ) : (
                 <>
-                  <p className="text-xs text-[#6b6860] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the condition recorded above, then sign — this completes the move-in.</p>
+                  <p className="text-xs text-[#5f6b63] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the condition recorded above, then sign — this completes the move-in.</p>
                   <SignBox token={token} contractId={id} kind="move_in" asInspector defaultName="" onSigned={() => { load(); loadInsp(); }} />
                 </>
               )
@@ -389,7 +389,7 @@ export default function ContractReviewPage() {
               <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-in inspection.</p>
             ) : (
               <>
-                <p className="text-xs text-[#6b6860] mb-2">Confirm the condition recorded above, then sign.</p>
+                <p className="text-xs text-[#5f6b63] mb-2">Confirm the condition recorded above, then sign.</p>
                 <SignBox token={token} contractId={id} kind="move_in" defaultName={d.contract.tenant?.name ?? ''} onSigned={() => { load(); loadInsp(); }} />
               </>
             )}
@@ -399,15 +399,15 @@ export default function ContractReviewPage() {
         {showMoveOut && (
           <Card title={isInspector ? 'Counter-sign the move-out inspection' : 'Sign the move-out inspection'} icon={CheckCircle2}>
             {!insp || !insp.rpSubmittedAt ? (
-              <p className="text-sm text-[#9b9890]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the move-out inspection.'}</p>
+              <p className="text-sm text-[#8a948d]">{isInspector ? 'Fill and submit the inspection form above first.' : 'Not ready to sign yet — your rental provider is still completing the move-out inspection.'}</p>
             ) : isInspector ? (
               insp.rpCounterSig ? (
                 <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> This inspection has been counter-signed.</p>
               ) : !insp.tenantSig ? (
-                <p className="text-sm text-[#9b9890]">Waiting for the customer to sign first — you counter-sign after them.</p>
+                <p className="text-sm text-[#8a948d]">Waiting for the customer to sign first — you counter-sign after them.</p>
               ) : (
                 <>
-                  <p className="text-xs text-[#6b6860] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the move-out condition recorded above, then sign.</p>
+                  <p className="text-xs text-[#5f6b63] mb-2">You are signing as the inspection manager, on behalf of the rental provider. Confirm the move-out condition recorded above, then sign.</p>
                   <SignBox token={token} contractId={id} kind="move_out" asInspector defaultName="" onSigned={() => { load(); loadInsp(); }} />
                 </>
               )
@@ -415,27 +415,27 @@ export default function ContractReviewPage() {
               <p className="text-sm text-[#16a34a] flex items-center gap-1.5"><CheckCircle2 size={16} /> You have signed this move-out inspection.</p>
             ) : (
               <>
-                <p className="text-xs text-[#6b6860] mb-2">Confirm the move-out condition recorded above, then sign.</p>
+                <p className="text-xs text-[#5f6b63] mb-2">Confirm the move-out condition recorded above, then sign.</p>
                 <SignBox token={token} contractId={id} kind="move_out" defaultName={d.contract.tenant?.name ?? ''} onSigned={() => { load(); loadInsp(); }} />
               </>
             )}
           </Card>
         )}
 
-        <p className="text-xs text-[#9b9890] text-center mt-6 mb-4">Powered by UpNow.</p>
+        <p className="text-xs text-[#8a948d] text-center mt-6 mb-4">Powered by UpNow.</p>
       </div>
     </div>
   );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen flex items-center justify-center gap-2 text-[#6b6860] text-sm bg-[#f7f6f2] p-6">{children}</div>;
+  return <div className="min-h-screen flex items-center justify-center gap-2 text-[#5f6b63] text-sm bg-[#f7f6f2] p-6">{children}</div>;
 }
 function Card({ title, icon: Icon, children }: { title: string; icon: React.ComponentType<{ size?: number; className?: string }>; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-4 overflow-hidden">
-      <div className="px-5 py-3 border-b border-[#f4f3ef] bg-[#fafaf8] flex items-center gap-2">
-        <Icon size={15} className="text-[#2e9f82]" /><span className="text-sm font-bold text-[#1a1916]">{title}</span>
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-4 overflow-hidden">
+      <div className="px-5 py-3 border-b border-[#eef1ef] bg-[#f6f8f6] flex items-center gap-2">
+        <Icon size={15} className="text-[#047246]" /><span className="text-sm font-bold text-[#14201a]">{title}</span>
       </div>
       <div className="px-5 py-4">{children}</div>
     </div>
@@ -462,20 +462,20 @@ function DocRow({ title, icon: Icon, href, download }: {
   return (
     // Stacks on phones — side by side, a wrapped title pushes the "opens in a new
     // tab" arrow straight into the Download button.
-    <div className="rounded-2xl border border-[#2e9f82] bg-[#fbfaf8] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
+    <div className="rounded-2xl border border-[#047246] bg-[#fbfaf8] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3">
       {/* Read: opens in a new tab. */}
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer"
           className="flex items-center gap-3 min-w-0 sm:flex-1 no-underline cursor-pointer">
-          <span className="w-9 h-9 rounded-xl bg-[#2e9f82] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
-          <span className="text-sm font-bold text-[#1a1916] min-w-0">{title}</span>
+          <span className="w-9 h-9 rounded-xl bg-[#047246] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
+          <span className="text-sm font-bold text-[#14201a] min-w-0">{title}</span>
           <ExternalLink size={14} className="text-[#1f6f54] shrink-0" />
         </a>
       ) : (
         <span className="flex items-center gap-3 min-w-0 sm:flex-1 opacity-70">
-          <span className="w-9 h-9 rounded-xl bg-[#2e9f82] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
-          <span className="text-sm font-bold text-[#1a1916] min-w-0">{title}</span>
-          <span className="text-xs text-[#9b9890] whitespace-nowrap">⏳ Preparing…</span>
+          <span className="w-9 h-9 rounded-xl bg-[#047246] text-white grid place-items-center shrink-0"><Icon size={18} /></span>
+          <span className="text-sm font-bold text-[#14201a] min-w-0">{title}</span>
+          <span className="text-xs text-[#8a948d] whitespace-nowrap">⏳ Preparing…</span>
         </span>
       )}
       {/* Save: straight to disk, correctly named, no preview step. */}
@@ -611,17 +611,17 @@ function LandlordReview({ token, id, d, ejari, addendums, onSigned }: {
 }
 
 function condMeta(v?: string): { label: string; cls: string } {
-  if (v === 'G') return { label: 'Good', cls: 'bg-[#2e9f82] text-white' };
+  if (v === 'G') return { label: 'Good', cls: 'bg-[#047246] text-white' };
   if (v === 'F') return { label: 'Fair', cls: 'bg-[#f59e0b] text-white' };
   if (v === 'D') return { label: 'Damaged', cls: 'bg-[#ef4444] text-white' };
-  return { label: '—', cls: 'bg-[#f0efe9] text-[#9b9890]' };
+  return { label: '—', cls: 'bg-[#f0efe9] text-[#8a948d]' };
 }
 
 function PhotoGrid({ photos }: { photos: InspPhoto[] }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
       {photos.map(p => (
-        <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })} className="block w-full rounded-lg overflow-hidden border border-[#e8e6e0] cursor-pointer">
+        <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: p.url, caption: p.caption })} className="block w-full rounded-lg overflow-hidden border border-[#e4e9e5] cursor-pointer">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={p.url} alt={p.caption || 'photo'} className="w-full h-20 object-cover" />
         </button>
@@ -644,51 +644,51 @@ function InspectionPreview({ insp, type }: { insp: Inspection; type: 'move_in' |
     <div className="space-y-4">
       {/* Condition legend */}
       <div className="flex items-center gap-3 bg-[#f9f8f6] rounded-xl px-4 py-2.5 text-xs">
-        <span className="font-semibold text-[#6b6860] uppercase tracking-wide">Condition</span>
+        <span className="font-semibold text-[#5f6b63] uppercase tracking-wide">Condition</span>
         <span className="inline-flex items-center gap-1.5"><Pill v="G" /></span>
         <span className="inline-flex items-center gap-1.5"><Pill v="F" /></span>
         <span className="inline-flex items-center gap-1.5"><Pill v="D" /></span>
       </div>
 
       {(insp.areas ?? []).map((area, ai) => (
-        <div key={ai} className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-          <div className="px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
-            <span className="text-sm font-bold text-[#1a1916]">{area.name || `Area ${ai + 1}`}</span>
+        <div key={ai} className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden">
+          <div className="px-5 py-3 bg-[#f6f8f6] border-b border-[#eef1ef]">
+            <span className="text-sm font-bold text-[#14201a]">{area.name || `Area ${ai + 1}`}</span>
           </div>
           <div className="px-5 py-3">
-            <div className={`grid ${cols} gap-3 pb-1.5 border-b border-[#f4f3ef] text-[10px] font-semibold uppercase tracking-wide text-[#9b9890]`}>
+            <div className={`grid ${cols} gap-3 pb-1.5 border-b border-[#eef1ef] text-[10px] font-semibold uppercase tracking-wide text-[#8a948d]`}>
               <span>Item</span>
               <span className="text-center">{isOut ? 'Move-out' : 'Condition'}</span>
             </div>
             {(area.items ?? []).map((it, ii) => (
               <div key={ii} className={`grid ${cols} gap-3 items-center py-1.5 border-b border-[#f9f8f6] last:border-0`}>
-                <span className="text-sm text-[#1a1916]">{it.name}</span>
+                <span className="text-sm text-[#14201a]">{it.name}</span>
                 <span className="text-center"><Pill v={isOut ? it.outCondition : it.inCondition} /></span>
               </div>
             ))}
-            {area.remarks && <p className="text-xs text-[#6b6860] mt-2"><span className="font-semibold">Remarks:</span> {area.remarks}</p>}
+            {area.remarks && <p className="text-xs text-[#5f6b63] mt-2"><span className="font-semibold">Remarks:</span> {area.remarks}</p>}
           </div>
         </div>
       ))}
 
       {insp.generalNotes && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-          <p className="text-xs font-semibold text-[#1a1916] mb-1">General notes</p>
-          <p className="text-sm text-[#6b6860] whitespace-pre-wrap">{insp.generalNotes}</p>
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4">
+          <p className="text-xs font-semibold text-[#14201a] mb-1">General notes</p>
+          <p className="text-sm text-[#5f6b63] whitespace-pre-wrap">{insp.generalNotes}</p>
         </div>
       )}
 
       {(isOut && (insp.moveInPhotos ?? []).length > 0) || (insp.photos ?? []).length > 0 ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-3">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4 space-y-3">
           {isOut && (insp.moveInPhotos ?? []).length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-[#9b9890] mb-1.5">Move-in photos (reference)</p>
+              <p className="text-xs font-semibold text-[#8a948d] mb-1.5">Move-in photos (reference)</p>
               <PhotoGrid photos={insp.moveInPhotos!} />
             </div>
           )}
           {(insp.photos ?? []).length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-[#1a1916] mb-1.5">{isOut ? 'Move-out photos' : 'Move-in photos'}</p>
+              <p className="text-xs font-semibold text-[#14201a] mb-1.5">{isOut ? 'Move-out photos' : 'Move-in photos'}</p>
               <PhotoGrid photos={insp.photos!} />
             </div>
           )}

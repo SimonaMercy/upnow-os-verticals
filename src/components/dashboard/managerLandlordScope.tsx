@@ -66,12 +66,12 @@ export function useManagerLandlordScope(flag: Flag | Flag[]): ManagerLandlordSco
 export function SelectLandlordNotice({ resource }: { resource: string }) {
   return (
     <div className="p-6">
-      <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
+      <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-2xl px-7 py-10 mt-12">
         <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#eef3f1] text-[#2e6f5e]">
           <Building2 size={20} />
         </div>
-        <p className="text-base font-bold text-[#1a1916]">Select a landlord</p>
-        <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">
+        <p className="text-base font-bold text-[#14201a]">Select a landlord</p>
+        <p className="text-sm text-[#5f6b63] mt-1.5 leading-relaxed">
           {resource} are managed per landlord. Choose a landlord from the switcher
           at the top to view them.
         </p>

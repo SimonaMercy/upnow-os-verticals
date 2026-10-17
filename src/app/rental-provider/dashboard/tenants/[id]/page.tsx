@@ -136,12 +136,12 @@ function leaseBadge(l: Lease, currentOfUnit?: Lease, isLatestHistory = false): {
     // Only the MOST RECENT lease in the chain is the live one when a renewal is
     // pending signature — older renewed leases are plain history.
     if (isLatestHistory && l.contractActive && currentOfUnit && (currentOfUnit.status ?? '').toLowerCase() === 'pending')
-      return { label: 'Active · renewal pending', cls: 'bg-[#d8f2e8] text-[#1a7a5a]' };
-    return { label: 'Renewed', cls: 'bg-[#f4f3ef] text-[#6b6860]' };
+      return { label: 'Active · renewal pending', cls: 'bg-[#d8efe3] text-[#1a7a5a]' };
+    return { label: 'Renewed', cls: 'bg-[#eef1ef] text-[#5f6b63]' };
   }
   if ((l.status ?? '').toLowerCase() === 'terminated') return { label: 'Terminated', cls: 'bg-[#fee2e2] text-[#b91c1c]' };
-  if (l.contractActive) return { label: 'Active', cls: 'bg-[#d8f2e8] text-[#1a7a5a]' };
-  return { label: (l.status ?? 'Inactive').replace(/^./, c => c.toUpperCase()), cls: 'bg-[#f4f3ef] text-[#6b6860]' };
+  if (l.contractActive) return { label: 'Active', cls: 'bg-[#d8efe3] text-[#1a7a5a]' };
+  return { label: (l.status ?? 'Inactive').replace(/^./, c => c.toUpperCase()), cls: 'bg-[#eef1ef] text-[#5f6b63]' };
 }
 const prettyKey = (k: string) => k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 // KYC = the customer's own identity / licensing rows. Everything else (payment
@@ -322,7 +322,7 @@ export default function CustomerDetailPage() {
     }
   };
 
-  if (loading) return <div className="p-6 text-sm text-[#9b9890]">Loading customer…</div>;
+  if (loading) return <div className="p-6 text-sm text-[#8a948d]">Loading customer…</div>;
   // `?kyc=<requirement>` (the manager dashboard's "Missing KYC documents" rows)
   // opens that requirement's upload popup as soon as the customer has loaded, so
   // the link lands on the control that fills the gap instead of on the page. The
@@ -332,7 +332,7 @@ export default function CustomerDetailPage() {
   if (error || !data) {
     return (
       <div className="p-6">
-        <button onClick={() => router.push(listHref)} className="text-sm text-[#2e9f82] font-medium flex items-center gap-1 mb-4"><ArrowLeft size={14} /> Back to Customers</button>
+        <button onClick={() => router.push(listHref)} className="text-sm text-[#047246] font-medium flex items-center gap-1 mb-4"><ArrowLeft size={14} /> Back to Customers</button>
         <p className="text-sm text-[#b91c1c]">{error ?? 'Customer not found'}</p>
       </div>
     );
@@ -632,14 +632,14 @@ export default function CustomerDetailPage() {
     const renewalRed = d !== null && d <= 30;
     const badge = leaseBadge(l, data.leases.find(o => o.isCurrent && (o.unit.id ?? -o.id) === (l.unit.id ?? -l.id)), latestHistoryIds.has(l.id));
     return (
-      <tr key={l.id} className={`border-b border-[#e8e6e0] hover:bg-[#f4f3ef] ${l.isCurrent ? 'text-[#1a1916]' : 'text-[#9b9890]'}`}>
+      <tr key={l.id} className={`border-b border-[#e4e9e5] hover:bg-[#eef1ef] ${l.isCurrent ? 'text-[#14201a]' : 'text-[#8a948d]'}`}>
         <td className="px-4 py-3.5 font-medium">{l.ref}</td>
         <td className="px-4 py-3.5">{l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}</td>
-        <td className="px-4 py-3.5 text-[#6b6860]">{l.property.buildingName ?? '—'}</td>
-        <td className="px-4 py-3.5 text-[#6b6860]">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
+        <td className="px-4 py-3.5 text-[#5f6b63]">{l.property.buildingName ?? '—'}</td>
+        <td className="px-4 py-3.5 text-[#5f6b63]">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
         <td className="px-4 py-3.5 font-medium">
           {(l.discountAmount ?? 0) > 0 && l.listedRent != null && (
-            <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(l.listedRent)}</span>
+            <span className="text-xs font-normal text-[#8a948d] line-through mr-1.5">{fmtAed(l.listedRent)}</span>
           )}
           {fmtAed(l.annualRent)}
           {(l.discountAmount ?? 0) > 0 && (
@@ -647,13 +647,13 @@ export default function CustomerDetailPage() {
           )}
         </td>
         <td className="px-4 py-3.5">
-          {!l.isCurrent ? <span className="text-[#9b9890]">—</span>
-            : d === null ? <span className="text-[#9b9890]">—</span>
-            : <span className={`text-xs font-medium ${renewalRed ? 'text-[#b91c1c]' : d <= 90 ? 'text-amber-600' : 'text-[#6b6860]'}`}>{d > 0 ? `${d}d` : `expired ${Math.abs(d)}d`}</span>}
+          {!l.isCurrent ? <span className="text-[#8a948d]">—</span>
+            : d === null ? <span className="text-[#8a948d]">—</span>
+            : <span className={`text-xs font-medium ${renewalRed ? 'text-[#b91c1c]' : d <= 90 ? 'text-amber-600' : 'text-[#5f6b63]'}`}>{d > 0 ? `${d}d` : `expired ${Math.abs(d)}d`}</span>}
         </td>
         <td className="px-4 py-3.5"><span className={`inline-flex rounded-full text-xs font-medium px-2.5 py-0.5 ${badge.cls}`}>{badge.label}</span></td>
         <td className="px-4 py-3.5">
-          <Link href={contractHref(l.id)} className="text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">View <ExternalLink size={12} /></Link>
+          <Link href={contractHref(l.id)} className="text-[#047246] font-medium hover:underline inline-flex items-center gap-1">View <ExternalLink size={12} /></Link>
         </td>
       </tr>
     );
@@ -679,29 +679,29 @@ export default function CustomerDetailPage() {
       <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
         <div className="flex items-start gap-3.5 flex-wrap">
           <button onClick={() => router.push(listHref)} aria-label="Back to Customers"
-            className="w-9 h-9 mt-0.5 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] shrink-0 cursor-pointer">
+            className="w-9 h-9 mt-0.5 rounded-full border border-[#e4e9e5] flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] shrink-0 cursor-pointer">
             <ArrowLeft size={16} />
           </button>
-          <div className="w-12 h-12 rounded-2xl bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] font-semibold text-sm shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-[#d8efe3] flex items-center justify-center text-[#047246] font-semibold text-sm shrink-0">
             {isCompany ? <Building2 size={22} /> : initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-[#9b9890] flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs text-[#8a948d] flex items-center gap-1.5 flex-wrap">
               <Link href={listHref} className="hover:underline">Customers</Link>
               <span className="text-[#c4c1b8]">›</span>
               <span className="truncate max-w-[200px]">{displayName}</span>
             </p>
-            <h1 className="text-[22px] leading-tight font-bold text-[#1a1916] mt-0.5">{displayName}</h1>
+            <h1 className="text-[22px] leading-tight font-bold text-[#14201a] mt-0.5">{displayName}</h1>
             <div className="flex items-center gap-2 flex-wrap mt-1.5">
               <span className={`inline-flex rounded-full text-[10px] font-bold uppercase tracking-wide px-2.5 py-0.5 ${isCompany ? 'bg-[#f3ecdd] text-[#7a5a2e]' : 'bg-[#eef2fb] text-[#3b5bb5]'}`}>
                 {isCompany ? 'Company' : 'Individual'}
               </span>
-              {customerSince && <span className="text-xs text-[#9b9890]">Customer since {customerSince}</span>}
+              {customerSince && <span className="text-xs text-[#8a948d]">Customer since {customerSince}</span>}
             </div>
           </div>
           {!editing && (
             <button onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] shrink-0 cursor-pointer">
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] shrink-0 cursor-pointer">
               <Pencil size={14} /> Edit
             </button>
           )}
@@ -711,8 +711,8 @@ export default function CustomerDetailPage() {
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4 pt-4 border-t border-[#eeece6]">
           {profile.map((f, i) => (
             <div key={i} className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{f.label}</div>
-              <div className={`text-sm break-words mt-1 ${f.value ? 'text-[#1a1916] font-medium' : 'text-[#b91c1c] font-semibold'}`}>{f.value ?? 'Missing'}</div>
+              <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{f.label}</div>
+              <div className={`text-sm break-words mt-1 ${f.value ? 'text-[#14201a] font-medium' : 'text-[#b91c1c] font-semibold'}`}>{f.value ?? 'Missing'}</div>
             </div>
           ))}
         </div>
@@ -723,8 +723,8 @@ export default function CustomerDetailPage() {
       </div>
 
       {editing && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 mb-6">
-          <h2 className="text-base font-bold text-[#1a1916] mb-3">Edit customer</h2>
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-5 mb-6">
+          <h2 className="text-base font-bold text-[#14201a] mb-3">Edit customer</h2>
           <CustomerForm
             mode="edit"
             method="PATCH"
@@ -753,13 +753,13 @@ export default function CustomerDetailPage() {
               role={s.onClick ? 'button' : undefined}
               title={s.onClick ? 'View deposit breakdown' : undefined}
             >
-              <div className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1 ${s.danger ? 'text-[#b45309]' : 'text-[#9b9890]'}`}>
+              <div className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1 ${s.danger ? 'text-[#b45309]' : 'text-[#8a948d]'}`}>
                 {s.label}
-                {s.onClick && <ExternalLink size={11} className="text-[#2e9f82]" />}
+                {s.onClick && <ExternalLink size={11} className="text-[#047246]" />}
               </div>
               <div className="mt-1.5 flex items-baseline gap-2 flex-wrap">
-                <span className={`font-bold text-xl ${s.danger ? 'text-[#b45309]' : 'text-[#1a1916]'}`}>{s.value}</span>
-                <span className="text-xs text-[#9b9890]">{s.sub}</span>
+                <span className={`font-bold text-xl ${s.danger ? 'text-[#b45309]' : 'text-[#14201a]'}`}>{s.value}</span>
+                <span className="text-xs text-[#8a948d]">{s.sub}</span>
               </div>
             </div>
           ))}
@@ -771,14 +771,14 @@ export default function CustomerDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowDeposits(false)} />
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e8e6e0]">
-              <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
-                <ShieldCheck size={16} className="text-[#2e9f82]" /> Security deposits held — {fmtAed(fin.securityDepositHeld)}
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e4e9e5]">
+              <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2">
+                <ShieldCheck size={16} className="text-[#047246]" /> Security deposits held — {fmtAed(fin.securityDepositHeld)}
               </h3>
-              <button type="button" onClick={() => setShowDeposits(false)} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+              <button type="button" onClick={() => setShowDeposits(false)} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
             </div>
             <div className="overflow-y-auto px-5 py-4">
-              <p className="text-xs text-[#9b9890] mb-3">You hold these on the customer&apos;s behalf — refundable at move-out after the settlement.</p>
+              <p className="text-xs text-[#8a948d] mb-3">You hold these on the customer&apos;s behalf — refundable at move-out after the settlement.</p>
               <div className="space-y-2">
                 {depositHolders.map(l => {
                   // Carried deposit: the cheque/receipt and the editable record live
@@ -787,24 +787,24 @@ export default function CustomerDetailPage() {
                   const proofs = data.documents.filter(d => d.leaseId === srcId && d.fileUrl &&
                     (d.ownerType === 'security_deposit' || /deposit|cheque/i.test(`${d.documentKey} ${d.displayName ?? ''}`)));
                   return (
-                    <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[#e8e6e0] rounded-xl px-4 py-2.5">
-                      <span className="text-sm font-semibold text-[#1a1916]">{fmtAed(l.depositHeld)}</span>
+                    <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[#e4e9e5] rounded-xl px-4 py-2.5">
+                      <span className="text-sm font-semibold text-[#14201a]">{fmtAed(l.depositHeld)}</span>
                       <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#fff7e0] text-[#9a6b00]">Owed back to customer</span>
                       {l.depositSourceId && (
                         <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#eef2fb] text-[#3b5bb5]">Carried from CID-{l.depositSourceId}</span>
                       )}
-                      <span className="text-xs text-[#6b6860]">
+                      <span className="text-xs text-[#5f6b63]">
                         {l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? '—')}{l.property.buildingName ? ` · ${l.property.buildingName}` : ''} · {l.ref} · {fmtDate(l.startDate)} → {fmtDate(l.endDate)}
                       </span>
                       {proofs.length > 0 ? proofs.map(d => (
                         <button key={d.id} type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName || prettyKey(d.documentKey), mimeType: d.mimeType })}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline cursor-pointer">
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#047246] bg-[#eef9f4] border border-[#cfe9df] rounded-full px-2 py-0.5 hover:underline cursor-pointer">
                           <FileText size={11} /> {d.displayName || prettyKey(d.documentKey)}
                         </button>
                       )) : (
                         <span className="text-[11px] font-medium text-[#9a6b00]">No cheque / transfer receipt on file</span>
                       )}
-                      <Link href={contractHref(l.id)} className="ml-auto text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+                      <Link href={contractHref(l.id)} className="ml-auto text-xs text-[#047246] font-medium hover:underline inline-flex items-center gap-1">
                         View lease <ExternalLink size={11} />
                       </Link>
                     </div>
@@ -819,28 +819,28 @@ export default function CustomerDetailPage() {
       {/* Active leases — History opens in a popup from this header */}
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-6">
         <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
-          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
-            <FileText size={16} className="text-[#2e9f82]" /> Active Leases ({data.summary.activeLeases})
-            <span className="text-xs font-normal text-[#9b9890]">· {plural(data.summary.totalLeases, 'lease')} total</span>
+          <h2 className="text-sm font-semibold text-[#14201a] flex items-center gap-2">
+            <FileText size={16} className="text-[#047246]" /> Active Leases ({data.summary.activeLeases})
+            <span className="text-xs font-normal text-[#8a948d]">· {plural(data.summary.totalLeases, 'lease')} total</span>
           </h2>
           {pastLeases.length > 0 && (
             <button type="button" onClick={() => setShowHistoryModal(true)}
-              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef] cursor-pointer">
               <History size={14} /> History ({pastLeases.length})
             </button>
           )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left min-w-[920px] text-sm">
-            <thead><tr className="bg-[#f4f3ef]">
+            <thead><tr className="bg-[#eef1ef]">
               {LEASE_COLS.map(h => (
-                <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>
+                <th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#5f6b63]">{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {currentLeases.map(leaseRow)}
               {currentLeases.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-[#9b9890]">No active lease for this customer.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-[#8a948d]">No active lease for this customer.</td></tr>
               )}
             </tbody>
           </table>
@@ -853,9 +853,9 @@ export default function CustomerDetailPage() {
         {/* Hidden picker for single-doc requirements (Passport, Visa, …) */}
         <input ref={directFileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" className="hidden" onChange={onDirectFile} />
         <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-4 py-3.5 border-b border-[#eeece6]">
-          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><FileText size={15} /></span>
-          <h2 className="text-sm font-bold text-[#1a1916]">
-            {isCompany ? 'Company KYC' : 'KYC documents'} <span className="font-normal text-[#9b9890]">({kycUploadedCount}/{KYC_REQS.length})</span>
+          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#047246] flex items-center justify-center shrink-0"><FileText size={15} /></span>
+          <h2 className="text-sm font-bold text-[#14201a]">
+            {isCompany ? 'Company KYC' : 'KYC documents'} <span className="font-normal text-[#8a948d]">({kycUploadedCount}/{KYC_REQS.length})</span>
           </h2>
           <div className="flex-1 min-w-[12px]" />
           {otherDocsCount > 0 && (
@@ -863,7 +863,7 @@ export default function CustomerDetailPage() {
               type="button"
               onClick={openHistoryReader}
               title="Contract-wise history of all lease documents (contracts, Contract Registration, cheques, receipts), grouped per lease"
-              className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer"
+              className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef] cursor-pointer"
             >
               <History size={13} /> History Documents ({otherDocsCount})
             </button>
@@ -873,7 +873,7 @@ export default function CustomerDetailPage() {
               type="button"
               onClick={() => openKycReader()}
               title="Preview every KYC document on file together in one viewer"
-              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:underline cursor-pointer"
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-[#047246] hover:underline cursor-pointer"
             >
               <Eye size={14} /> View All
             </button>
@@ -914,11 +914,11 @@ export default function CustomerDetailPage() {
               : () => pickDirect(slotsFor(req, docs)[0]);
             return (
               <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${expired ? 'bg-[#fee2e2] text-[#b91c1c]' : needsReview ? 'bg-[#fdf3e7] text-[#b07415]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${expired ? 'bg-[#fee2e2] text-[#b91c1c]' : needsReview ? 'bg-[#fdf3e7] text-[#b07415]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : partial ? 'bg-[#fdf3e7] text-[#b07415]' : 'bg-[#eef1ef] text-[#8a948d]'}`}>
                   {expired ? <AlertTriangle size={16} /> : needsReview ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : partial ? <AlertTriangle size={16} /> : <FileText size={16} />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
+                  <div className="text-[13px] font-bold text-[#14201a] truncate">{req.label}</div>
                   <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                     {uploaded ? (
                       <>
@@ -926,7 +926,7 @@ export default function CustomerDetailPage() {
                         {shownExpiry && (expired
                           ? <span className="text-[#b91c1c]">Expired {fmtDate(shownExpiry)}</span>
                           : <span className="text-[#1a7a5a]">exp {fmtDate(shownExpiry)}</span>)}
-                        <span className={expired ? 'text-[#9b9890]' : 'text-[#1a7a5a]'}>{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
+                        <span className={expired ? 'text-[#8a948d]' : 'text-[#1a7a5a]'}>{filed.length} file{filed.length !== 1 ? 's' : ''} on record</span>
                         {needsReview && (
                           <span className="text-[#b07415] inline-flex items-center gap-1">
                             <AlertTriangle size={11} /> one may be an occupant&apos;s — review
@@ -937,7 +937,7 @@ export default function CustomerDetailPage() {
                       <>
                         {shownExpiry && expired && <span className="text-[#b91c1c]">Expired {fmtDate(shownExpiry)}</span>}
                         <span className="text-[#b07415]">{partialHint}{req.required ? ' · required' : ''}</span>
-                        <span className="text-[#9b9890]">{filed.length} of 2 sides on file</span>
+                        <span className="text-[#8a948d]">{filed.length} of 2 sides on file</span>
                       </>
                     ) : (
                       <span className="text-[#b07415]">Not uploaded{req.required ? ' · required' : ' · optional'}</span>
@@ -947,7 +947,7 @@ export default function CustomerDetailPage() {
                 </div>
                 {hasFile && (
                   <button type="button" onClick={() => openKycReader(req.key)}
-                    className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                    className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
                     <Eye size={13} /> View
                   </button>
                 )}
@@ -961,7 +961,7 @@ export default function CustomerDetailPage() {
                   <DeleteDocumentButton docId={filed[0].id} label={req.label} onDeleted={() => load({ silent: true })} />
                 )}
                 <button type="button" onClick={onUpload} disabled={busy}
-                  className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                  className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e4e9e5] bg-white text-[#14201a] hover:bg-[#eef1ef]' : 'border border-[#047246] bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                   {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                   {uploaded ? 'Replace' : partial ? 'Add side' : 'Upload'}
                 </button>
@@ -988,11 +988,11 @@ export default function CustomerDetailPage() {
             <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
               {/* No file = nothing has been sent. A tick and "Pending review"
                   would both claim a document that never arrived. */}
-              <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${docExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : d.fileUrl ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+              <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${docExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : d.fileUrl ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#eef1ef] text-[#8a948d]'}`}>
                 {docExpired ? <AlertTriangle size={16} /> : d.fileUrl ? <Check size={16} /> : <FileText size={16} />}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold text-[#1a1916] truncate">{docLabel(d, data.documents)}</div>
+                <div className="text-[13px] font-bold text-[#14201a] truncate">{docLabel(d, data.documents)}</div>
                 <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                   {!d.fileUrl && <span className="text-[#b07415]">Not uploaded</span>}
                   {d.fileUrl && d.status === 'pending' && <span className="text-[#b91c1c]">Pending review</span>}
@@ -1005,7 +1005,7 @@ export default function CustomerDetailPage() {
               </div>
               {d.fileUrl && (
                 <button type="button" onClick={() => openKycReader(`extra-${d.id}`)}
-                  className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                  className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
                   <Eye size={13} /> View
                 </button>
               )}
@@ -1013,7 +1013,7 @@ export default function CustomerDetailPage() {
                 <DeleteDocumentButton docId={d.id} label={extraLabel} onDeleted={() => load({ silent: true })} />
               )}
               <button type="button" onClick={onUpload} disabled={busy}
-                className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${d.fileUrl ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${d.fileUrl ? 'border border-[#e4e9e5] bg-white text-[#14201a] hover:bg-[#eef1ef]' : 'border border-[#047246] bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                 {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 {d.fileUrl ? 'Replace' : 'Upload'}
               </button>
@@ -1026,27 +1026,27 @@ export default function CustomerDetailPage() {
       {/* Rent progression — one vertical timeline per unit (right column) */}
       {hasProgression && (
         <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-[#1a1916] mb-4 flex items-center gap-2"><TrendingUp size={16} className="text-[#2e9f82]" /> Rent progression</h2>
+          <h2 className="text-sm font-semibold text-[#14201a] mb-4 flex items-center gap-2"><TrendingUp size={16} className="text-[#047246]" /> Rent progression</h2>
           <div className="space-y-5 max-h-[460px] overflow-y-auto pr-1">
             {progressionByUnit.map(g => (
               <div key={g.unitLabel}>
-                {progressionByUnit.length > 1 && <div className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] mb-2">{g.unitLabel}</div>}
+                {progressionByUnit.length > 1 && <div className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d] mb-2">{g.unitLabel}</div>}
                 <div className="flex flex-col">
                   {g.leases.map((l, i) => {
                     const prev = i > 0 ? g.leases[i - 1].annualRent : null;
                     const delta = prev != null ? l.annualRent - prev : 0;
                     return (
                       <div key={l.id} className="flex flex-col">
-                        <div className="rounded-xl border border-[#e8e6e0] px-3 py-2">
-                          <div className="text-[11px] text-[#9b9890]">{fmtDate(l.startDate)}</div>
+                        <div className="rounded-xl border border-[#e4e9e5] px-3 py-2">
+                          <div className="text-[11px] text-[#8a948d]">{fmtDate(l.startDate)}</div>
                           <div className="flex items-baseline justify-between gap-2">
-                            <span className="text-sm font-semibold text-[#1a1916]">{fmtAed(l.annualRent)}</span>
+                            <span className="text-sm font-semibold text-[#14201a]">{fmtAed(l.annualRent)}</span>
                             {prev != null && delta !== 0 && (
                               <span className={`text-[11px] font-medium ${delta > 0 ? 'text-[#1a7a5a]' : 'text-[#b91c1c]'}`}>
                                 {delta > 0 ? '▲' : '▼'} {fmtAed(Math.abs(delta))} ({Math.round((delta / (prev || 1)) * 100)}%)
                               </span>
                             )}
-                            {prev != null && delta === 0 && <span className="text-[11px] text-[#9b9890]">no change</span>}
+                            {prev != null && delta === 0 && <span className="text-[11px] text-[#8a948d]">no change</span>}
                           </div>
                           {(l.discountAmount ?? 0) > 0 && l.listedRent != null && (
                             <div className="text-[10px] text-[#b91c1c] mt-0.5">listed {fmtAed(l.listedRent)} · −{fmtAed(l.discountAmount!)} off</div>
@@ -1072,48 +1072,48 @@ export default function CustomerDetailPage() {
       {occupantsApply && (
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
         <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-5 py-4 border-b border-[#eeece6]">
-          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><Users size={15} /></span>
-          <h2 className="text-sm font-bold text-[#1a1916]">
-            Additional Occupants <span className="font-normal text-[#9b9890]">({occupantGroups.length})</span>
+          <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#047246] flex items-center justify-center shrink-0"><Users size={15} /></span>
+          <h2 className="text-sm font-bold text-[#14201a]">
+            Additional Occupants <span className="font-normal text-[#8a948d]">({occupantGroups.length})</span>
           </h2>
           <div className="flex-1 min-w-[12px]" />
           {/* Stepper — total occupants including the primary (occupant 1) */}
           <div className="inline-flex items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">Occupants</span>
-            <div className="inline-flex items-center rounded-full border border-[#e8e6e0] bg-white overflow-hidden">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d]">Occupants</span>
+            <div className="inline-flex items-center rounded-full border border-[#e4e9e5] bg-white overflow-hidden">
               <button type="button" aria-label="Remove an occupant"
                 onClick={() => setOccupantOverride(Math.max(derivedOccupants, 1, totalOccupants - 1))}
                 disabled={totalOccupants <= Math.max(derivedOccupants, 1)}
                 title={totalOccupants <= Math.max(derivedOccupants, 1) ? 'An occupant with documents on file cannot be removed here' : 'Remove the last (empty) occupant'}
-                className="w-8 h-8 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                className="w-8 h-8 flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                 <Minus size={14} />
               </button>
-              <span className="min-w-[2.25rem] text-center text-sm font-semibold text-[#1a1916] tabular-nums">{totalOccupants}</span>
+              <span className="min-w-[2.25rem] text-center text-sm font-semibold text-[#14201a] tabular-nums">{totalOccupants}</span>
               <button type="button" aria-label="Add an occupant"
                 onClick={() => setOccupantOverride(Math.min(12, totalOccupants + 1))}
                 disabled={totalOccupants >= 12}
-                className="w-8 h-8 flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                className="w-8 h-8 flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                 <Plus size={14} />
               </button>
             </div>
           </div>
         </div>
 
-        <div className="px-5 py-2.5 text-[11px] text-[#9b9890] border-b border-[#f1efe9]">
+        <div className="px-5 py-2.5 text-[11px] text-[#8a948d] border-b border-[#f1efe9]">
           The primary customer is occupant 1 (their KYC is shown above). Use + to add the people living with them, then upload each occupant&apos;s identity documents.
         </div>
 
         {occupantGroups.length === 0 ? (
           <div className="px-5 py-10 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] text-[#9b9890] flex items-center justify-center mx-auto"><Users size={20} /></div>
-            <p className="text-sm text-[#6b6860] font-medium mt-3">No additional occupants</p>
-            <p className="text-xs text-[#9b9890] mt-1">Press + above to add an occupant, then upload their Emirates ID, passport and visa.</p>
+            <div className="w-12 h-12 rounded-2xl bg-[#eef1ef] text-[#8a948d] flex items-center justify-center mx-auto"><Users size={20} /></div>
+            <p className="text-sm text-[#5f6b63] font-medium mt-3">No additional occupants</p>
+            <p className="text-xs text-[#8a948d] mt-1">Press + above to add an occupant, then upload their Emirates ID, passport and visa.</p>
           </div>
         ) : (
           <div className="p-2 divide-y divide-[#f1efe9]">
             {occupantGroups.map(({ idx, reqs }) => (
               <div key={idx} className="px-1.5 py-3">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-[#6b6860] mb-1 px-2">Occupant {idx}</div>
+                <div className="text-[11px] font-bold uppercase tracking-wide text-[#5f6b63] mb-1 px-2">Occupant {idx}</div>
                 {reqs.map(req => {
                   const existing = findOccupantDoc(req.key);
                   // A requested slot HAS a row but no file — it is not uploaded.
@@ -1130,11 +1130,11 @@ export default function CustomerDetailPage() {
                     : () => pickDirect(occSlot);
                   return (
                     <div key={req.key} className="flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${occExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                      <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${occExpired ? 'bg-[#fee2e2] text-[#b91c1c]' : uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#eef1ef] text-[#8a948d]'}`}>
                         {occExpired ? <AlertTriangle size={16} /> : uploaded ? <Check size={16} /> : <FileText size={16} />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label.replace(/^Occupant \d+ — /, '')}</div>
+                        <div className="text-[13px] font-bold text-[#14201a] truncate">{req.label.replace(/^Occupant \d+ — /, '')}</div>
                         <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                           {uploaded
                             ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
@@ -1147,7 +1147,7 @@ export default function CustomerDetailPage() {
                       </div>
                       {uploaded && existing!.fileUrl && (
                         <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
-                          className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                          className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
                           <Eye size={13} /> View
                         </button>
                       )}
@@ -1155,7 +1155,7 @@ export default function CustomerDetailPage() {
                         <DeleteDocumentButton docId={existing!.id} label={req.label} onDeleted={() => load({ silent: true })} />
                       )}
                       <button type="button" onClick={onUpload} disabled={busy}
-                        className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                        className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e4e9e5] bg-white text-[#14201a] hover:bg-[#eef1ef]' : 'border border-[#047246] bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                         {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                         {uploaded ? 'Replace' : 'Upload'}
                       </button>
@@ -1177,12 +1177,12 @@ export default function CustomerDetailPage() {
       {showSupporting && (
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
           <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap px-5 py-4 border-b border-[#eeece6]">
-            <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#2e9f82] flex items-center justify-center shrink-0"><FileText size={15} /></span>
-            <h2 className="text-sm font-bold text-[#1a1916]">
-              Supporting Documents <span className="font-normal text-[#9b9890]">· optional</span>
+            <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#047246] flex items-center justify-center shrink-0"><FileText size={15} /></span>
+            <h2 className="text-sm font-bold text-[#14201a]">
+              Supporting Documents <span className="font-normal text-[#8a948d]">· optional</span>
             </h2>
           </div>
-          <div className="px-5 py-2.5 text-[11px] text-[#9b9890] border-b border-[#f1efe9]">
+          <div className="px-5 py-2.5 text-[11px] text-[#8a948d] border-b border-[#f1efe9]">
             Optional documents that strengthen the file — none are required to complete the tenancy.
           </div>
           <div className="p-2">
@@ -1195,23 +1195,23 @@ export default function CustomerDetailPage() {
               const onUpload = () => pickDirect({ label: req.label, canonicalKey: req.key, category: req.category, existing: slotDoc(existing) });
               return (
                 <div key={req.key} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
-                  <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]'}`}>
+                  <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#eef1ef] text-[#8a948d]'}`}>
                     {uploaded ? <Check size={16} /> : <FileText size={16} />}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-bold text-[#1a1916] truncate">{req.label}</div>
+                    <div className="text-[13px] font-bold text-[#14201a] truncate">{req.label}</div>
                     <div className="text-[11px] font-semibold mt-0.5">
                       {uploaded
                         ? <span className="text-[#1a7a5a]">{existing!.status === 'pending' ? 'Pending review' : 'On record'}</span>
                         : notUploaded
                           ? <span className="text-[#b07415]">Not uploaded</span>
-                          : <span className="text-[#9b9890]">{req.hint ?? 'Not uploaded'}</span>}
+                          : <span className="text-[#8a948d]">{req.hint ?? 'Not uploaded'}</span>}
                     </div>
                     {directErr[req.key] && <p className="text-xs mt-1 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {directErr[req.key]}</p>}
                   </div>
                   {uploaded && existing!.fileUrl && (
                     <button type="button" onClick={() => openDocViewer({ fileUrl: existing!.fileUrl, caption: req.label, mimeType: existing!.mimeType })}
-                      className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+                      className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
                       <Eye size={13} /> View
                     </button>
                   )}
@@ -1219,7 +1219,7 @@ export default function CustomerDetailPage() {
                     <DeleteDocumentButton docId={existing!.id} label={req.label} onDeleted={() => load({ silent: true })} />
                   )}
                   <button type="button" onClick={onUpload} disabled={busy}
-                    className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                    className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer ${uploaded ? 'border border-[#e4e9e5] bg-white text-[#14201a] hover:bg-[#eef1ef]' : 'border border-[#047246] bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                     {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                     {uploaded ? 'Replace' : 'Upload'}
                   </button>
@@ -1257,13 +1257,13 @@ export default function CustomerDetailPage() {
           up the account can see, in sequence, what is going on. */}
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#eeece6]">
-          <h2 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
-            <StickyNote size={16} className="text-[#2e9f82]" /> Lease notes <span className="font-normal text-[#9b9890]">({notes.length})</span>
+          <h2 className="text-sm font-semibold text-[#14201a] flex items-center gap-2">
+            <StickyNote size={16} className="text-[#047246]" /> Lease notes <span className="font-normal text-[#8a948d]">({notes.length})</span>
           </h2>
           {data.leases.length > 0 && (
             <button type="button"
               onClick={() => { setNoteErr(null); setNoteLeaseId(prev => prev ?? (currentLeases[0]?.id ?? data.leases[0]?.id ?? null)); setNoteOpen(o => !o); }}
-              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
               <Plus size={14} /> Add note
             </button>
           )}
@@ -1273,32 +1273,32 @@ export default function CustomerDetailPage() {
         {noteOpen && (
           <div className="px-5 py-4 border-b border-[#eeece6] bg-[#fbfcfb]">
             <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-              <label className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">Lease</label>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d]">Lease</label>
               <select
                 value={noteLeaseId ?? ''}
                 onChange={e => setNoteLeaseId(Number(e.target.value))}
-                className="text-xs font-medium text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 bg-white cursor-pointer focus:outline-none focus:border-[#2e9f82]">
+                className="text-xs font-medium text-[#14201a] border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 bg-white cursor-pointer focus:outline-none focus:border-[#047246]">
                 {data.leases.map(l => (
                   <option key={l.id} value={l.id}>
                     {(l.unit.number ? `Unit ${l.unit.number}` : (l.unit.name ?? 'Unit')) + ` · ${l.ref}`}
                   </option>
                 ))}
               </select>
-              <span className="text-[11px] text-[#9b9890]">Shared across this tenancy&apos;s renewals.</span>
+              <span className="text-[11px] text-[#8a948d]">Shared across this tenancy&apos;s renewals.</span>
             </div>
             <textarea
               value={noteDraft}
               onChange={e => setNoteDraft(e.target.value)}
               rows={3}
               placeholder="What's going on with this lease? (e.g. payment arrangement, renewal intent, signatory change…)"
-              className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3.5 py-2.5 resize-y focus:outline-none focus:border-[#2e9f82] placeholder:text-[#b3b0a8]"
+              className="w-full text-sm text-[#14201a] border border-[#e4e9e5] rounded-xl px-3.5 py-2.5 resize-y focus:outline-none focus:border-[#047246] placeholder:text-[#b3b0a8]"
             />
             {noteErr && <p className="text-xs mt-1.5 text-[#b91c1c] flex items-center gap-1"><AlertTriangle size={11} /> {noteErr}</p>}
             <div className="flex items-center justify-end gap-2 mt-2.5">
               <button type="button" onClick={() => { setNoteOpen(false); setNoteDraft(''); setNoteErr(null); }}
-                className="text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer">Cancel</button>
+                className="text-xs font-semibold px-3 py-2 rounded-full border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer">Cancel</button>
               <button type="button" onClick={submitNote} disabled={noteBusy || !noteDraft.trim() || noteLeaseId == null}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
                 {noteBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Save note
               </button>
             </div>
@@ -1308,9 +1308,9 @@ export default function CustomerDetailPage() {
         {/* Journal */}
         {notes.length === 0 ? (
           <div className="px-5 py-10 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] text-[#9b9890] flex items-center justify-center mx-auto"><StickyNote size={20} /></div>
-            <p className="text-sm text-[#6b6860] font-medium mt-3">No notes yet</p>
-            <p className="text-xs text-[#9b9890] mt-1">Keep a running log of what&apos;s happening on each lease — payment arrangements, renewals, signatory changes.</p>
+            <div className="w-12 h-12 rounded-2xl bg-[#eef1ef] text-[#8a948d] flex items-center justify-center mx-auto"><StickyNote size={20} /></div>
+            <p className="text-sm text-[#5f6b63] font-medium mt-3">No notes yet</p>
+            <p className="text-xs text-[#8a948d] mt-1">Keep a running log of what&apos;s happening on each lease — payment arrangements, renewals, signatory changes.</p>
           </div>
         ) : (
           <div className="divide-y divide-[#f1efe9]">
@@ -1318,18 +1318,18 @@ export default function CustomerDetailPage() {
               const isMgr = n.authorRole === 'manager';
               return (
                 <div key={n.id} className="flex gap-3.5 px-5 py-4">
-                  <span className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${isMgr ? 'bg-[#eef2fb] text-[#3b5bb5]' : 'bg-[#d8f2e8] text-[#1a7a5a]'}`}>
+                  <span className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${isMgr ? 'bg-[#eef2fb] text-[#3b5bb5]' : 'bg-[#d8efe3] text-[#1a7a5a]'}`}>
                     {noteInitials(n.authorName)}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-[#1a1916]">{n.authorName ?? 'Unknown'}</span>
+                      <span className="text-sm font-semibold text-[#14201a]">{n.authorName ?? 'Unknown'}</span>
                       {isMgr && <span className="inline-flex rounded text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 bg-[#eef2fb] text-[#3b5bb5]">Manager</span>}
                       <Link href={contractHref(n.leaseId)}
-                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6b6860] bg-[#f4f3ef] hover:bg-[#eceae4] rounded px-1.5 py-0.5">
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#5f6b63] bg-[#eef1ef] hover:bg-[#eceae4] rounded px-1.5 py-0.5">
                         {n.unitLabel ? `${n.unitLabel} · ` : ''}{n.leaseRef}
                       </Link>
-                      <span className="ml-auto text-[11px] text-[#9b9890]">{fmtNoteDate(n.createdAt)}</span>
+                      <span className="ml-auto text-[11px] text-[#8a948d]">{fmtNoteDate(n.createdAt)}</span>
                     </div>
                     <p className="text-sm text-[#5a564e] leading-relaxed mt-1 whitespace-pre-wrap break-words">{n.body}</p>
                   </div>
@@ -1400,14 +1400,14 @@ export default function CustomerDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowHistoryModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-6xl max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e8e6e0]">
-              <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><History size={16} className="text-[#6b6860]" /> Lease history ({pastLeases.length})</h3>
-              <button type="button" onClick={() => setShowHistoryModal(false)} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e4e9e5]">
+              <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2"><History size={16} className="text-[#5f6b63]" /> Lease history ({pastLeases.length})</h3>
+              <button type="button" onClick={() => setShowHistoryModal(false)} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
             </div>
             <div className="overflow-y-auto">
               <table className="w-full text-left text-sm">
-                <thead><tr className="bg-[#f4f3ef]">
-                  {LEASE_COLS.map(h => (<th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#6b6860]">{h}</th>))}
+                <thead><tr className="bg-[#eef1ef]">
+                  {LEASE_COLS.map(h => (<th key={h} className="px-4 py-3 text-xs font-medium uppercase text-[#5f6b63]">{h}</th>))}
                 </tr></thead>
                 <tbody>{pastLeases.map(leaseRow)}</tbody>
               </table>

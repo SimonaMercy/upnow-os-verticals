@@ -163,14 +163,14 @@ export function ProfileCompletionBanner() {
       {/* Icon */}
       <div
         className="shrink-0 flex items-center justify-center rounded-full w-10 h-10"
-        style={{ backgroundColor: "var(--color-primary, #2e9f82)", color: "#fff" }}
+        style={{ backgroundColor: "var(--color-primary, #047246)", color: "#fff" }}
       >
         <AlertCircle size={20} />
       </div>
 
       {/* Text + progress */}
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm" style={{ color: "var(--color-text, #1a1916)" }}>
+        <p className="font-semibold text-sm" style={{ color: "var(--color-text, #14201a)" }}>
           Complete your profile ({pct}%)
         </p>
         <p className="text-sm mt-0.5" style={{ color: "var(--neutral-600, #4b5563)" }}>
@@ -186,7 +186,7 @@ export function ProfileCompletionBanner() {
             className="h-full rounded-full transition-all duration-500"
             style={{
               width: `${pct}%`,
-              backgroundColor: "var(--color-primary, #2e9f82)",
+              backgroundColor: "var(--color-primary, #047246)",
             }}
           />
         </div>
@@ -198,7 +198,7 @@ export function ProfileCompletionBanner() {
               {step.done ? (
                 <CheckCircle
                   size={14}
-                  style={{ color: "var(--color-primary, #2e9f82)", flexShrink: 0 }}
+                  style={{ color: "var(--color-primary, #047246)", flexShrink: 0 }}
                 />
               ) : (
                 <span
@@ -206,7 +206,7 @@ export function ProfileCompletionBanner() {
                   style={{ borderColor: "var(--neutral-400, #9ca3af)" }}
                 />
               )}
-              <span style={{ color: step.done ? "var(--neutral-500, #6b7280)" : "var(--color-text, #1a1916)" }}>
+              <span style={{ color: step.done ? "var(--neutral-500, #6b7280)" : "var(--color-text, #14201a)" }}>
                 {step.label}
               </span>
               {/* Resend button — only for the unverified email step */}
@@ -221,11 +221,11 @@ export function ProfileCompletionBanner() {
                       resendStatus === "sent"
                         ? "var(--color-teal-200, #c3e8df)"
                         : "transparent",
-                    border: "1px solid var(--color-primary, #2e9f82)",
+                    border: "1px solid var(--color-primary, #047246)",
                     color:
                       resendStatus === "error"
                         ? "var(--error, #dc2626)"
-                        : "var(--color-primary, #2e9f82)",
+                        : "var(--color-primary, #047246)",
                   }}
                 >
                   <Mail size={10} />
@@ -247,7 +247,7 @@ export function ProfileCompletionBanner() {
       <Link
         href={nextStep.href}
         className="shrink-0 flex items-center gap-1 px-4 py-2 rounded-full text-sm font-semibold text-white"
-        style={{ backgroundColor: "var(--color-primary, #2e9f82)" }}
+        style={{ backgroundColor: "var(--color-primary, #047246)" }}
       >
         Continue
         <ChevronRight size={16} />

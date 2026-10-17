@@ -47,7 +47,7 @@ export function BusinessOnboardingPage({
             <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--color-primary)" }}>
               {roleLabel} onboarding
             </p>
-            <p className="text-sm font-semibold" style={{ color: "var(--color-text, #1a1916)" }}>
+            <p className="text-sm font-semibold" style={{ color: "var(--color-text, #14201a)" }}>
               KYC progress
             </p>
           </div>
@@ -95,7 +95,7 @@ export function BusinessOnboardingPage({
                         ? {
                             backgroundColor: "var(--color-primary)",
                             color: "#fff",
-                            boxShadow: "0 0 0 4px rgba(46,159,130,0.18)",
+                            boxShadow: "0 0 0 4px rgba(4,114,70,0.18)",
                           }
                         : {
                             backgroundColor: "var(--color-base-200, #f3f4f6)",
@@ -113,7 +113,7 @@ export function BusinessOnboardingPage({
                     className="text-sm font-semibold leading-snug"
                     style={{
                       color: isDone || isActive
-                        ? "var(--color-text, #1a1916)"
+                        ? "var(--color-text, #14201a)"
                         : "var(--color-neutral-400, #9ca3af)",
                     }}
                   >
@@ -123,7 +123,7 @@ export function BusinessOnboardingPage({
                     <span
                       className="mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
                       style={{
-                        backgroundColor: isDone ? "rgba(46,159,130,0.12)" : "rgba(46,159,130,0.12)",
+                        backgroundColor: isDone ? "rgba(4,114,70,0.12)" : "rgba(4,114,70,0.12)",
                         color: "var(--color-primary)",
                       }}
                     >
@@ -143,12 +143,12 @@ export function BusinessOnboardingPage({
       <div className="grid gap-6 lg:grid-cols-2">
           <Link
             href={profileHref}
-            className="block rounded-3xl border p-6 transition-colors hover:bg-[rgba(46,159,130,0.05)]"
+            className="block rounded-3xl border p-6 transition-colors hover:bg-[rgba(4,114,70,0.05)]"
             style={{ backgroundColor: "#fff", borderColor: "var(--color-base-200)" }}
           >
             <div className="flex items-center gap-3 mb-3">
               <FileBadge2 size={20} style={{ color: "var(--color-primary)" }} />
-              <h3 className="text-lg font-semibold" style={{ color: "var(--color-text, #1a1916)" }}>
+              <h3 className="text-lg font-semibold" style={{ color: "var(--color-text, #14201a)" }}>
                 Complete profile
               </h3>
             </div>
@@ -159,12 +159,12 @@ export function BusinessOnboardingPage({
 
           <Link
             href={documentsHref}
-            className="block rounded-3xl border p-6 transition-colors hover:bg-[rgba(46,159,130,0.05)]"
+            className="block rounded-3xl border p-6 transition-colors hover:bg-[rgba(4,114,70,0.05)]"
             style={{ backgroundColor: "#fff", borderColor: "var(--color-base-200)" }}
           >
             <div className="flex items-center gap-3 mb-3">
               <FolderOpen size={20} style={{ color: "var(--color-primary)" }} />
-              <h3 className="text-lg font-semibold" style={{ color: "var(--color-text, #1a1916)" }}>
+              <h3 className="text-lg font-semibold" style={{ color: "var(--color-text, #14201a)" }}>
                 Upload KYC documents
               </h3>
             </div>

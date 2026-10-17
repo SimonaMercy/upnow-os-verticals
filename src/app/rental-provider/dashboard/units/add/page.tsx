@@ -1,10 +1,36 @@
 'use client';
 
+/**
+ * Catalogue › Add units / Add listing.
+ *  - RP owner (no ?rp): renders <AddUnitsExperience> — the Genspark listing wizard for Spaces
+ *    (see that file for its parity checklist).
+ *  - Manager (?rp=<id>, re-exported by /dashboard/manager/units/add and /properties/add): the
+ *    property + units + CSV wizard below, now framed as the Genspark wizard (OsPage · PageHead ·
+ *    step list · step body · live preview). The step bodies are the previous sections, unchanged.
+ *
+ * Parity with previous page (manager branch):
+ *   [x] GET /manager/my-rps (acting-landlord name) · GET /manager/properties?rp= · GET /locations/countries,
+ *       /countries/:id/emirates, /emirates/:id/communities (CSV community matching)
+ *   [x] POST /properties (rentalProviderId for ?rp) + title deed / drawings / extra docs / property photos uploads
+ *   [x] POST /properties/:pid/units per row (same DTO) · unit media, floor-plan, addendum-file uploads
+ *   [x] Addendum: GET /manager/units?propertyId=&rp= + PATCH /manager/units/addendum-terms?rp= (RP paths without ?rp)
+ *   [x] Modes Manual entry / Import CSV (now a Seg) · existing-property select OR new property via <PropertyFields>
+ *       (category list = NEW_SPACE_CATEGORIES, so no new mixed-use; existing mixed-use properties still selectable)
+ *   [x] Unit cards: expand/collapse, duplicate, delete, every field incl. tier, min lease, payments, escalation,
+ *       grace period, late fee, photos (reorder / cover), floor plan · Add another unit
+ *   [x] Addendum template picker · Preview PDF · Write/Edit (AddendumEditorModal)
+ *   [x] CSV: template download, column reference, upload + parse, preview (12 rows), skipped-row errors, import progress
+ *   [x] Validation (category + emirate for a new property; unit number + type) → now also jumps to the failing step
+ *   [x] Save progress, error banner, done screen (Add another listing / Go to Portfolio), Cancel → back
+ *  Added: step list, "Preview & validate" checklist, live preview, Gate 3 note (units are saved as drafts;
+ *  submitting for review happens per unit on Units & listings). CSV rows with category mixed_use are skipped.
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, Plus, Trash2, Upload, Download, CheckCircle2,
+  Plus, Trash2, Upload, Download, CheckCircle2,
   AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
   ImagePlus, X, Camera, Copy, Building2, Eye, FileText,
 } from 'lucide-react';
@@ -25,14 +51,21 @@ import AddendumTemplatePicker from '@/components/upnow/AddendumTemplatePicker';
 import { type AddendumTerms, emptyAddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 import { openAddendumPdfInNewTab } from '@/lib/openAddendumPdf';
 import AddUnitsExperience from './AddUnitsExperience';
+import {
+  Btn, Callout, Card, Checklist, Evid, OsPage, PageHead, Pill, ScopeStrip, Seg, fmtAed,
+} from '@/components/os/kit';
+
+type MgrStep = 'property' | 'units' | 'addendum' | 'validate' | 'save' | 'csv' | 'import';
+const MGR_PHONE_RE = /(\+?\d[\d\s().-]{7,}\d)/;
+const MGR_LINK_RE = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(com|ae|net|org|io|co)\b|@[a-z0-9-]+\.)/i;
 
 /* ─── shared styles ───────────────────────────────────────────────────────── */
-const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const INPUT  = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]';
 const SELECT = INPUT + ' appearance-none';
 
 function Label({ t, req }: { t: string; req?: boolean }) {
   return (
-    <label className="block text-xs font-medium text-[#6b6860] mb-1">
+    <label className="block text-xs font-medium text-[#5f6b63] mb-1">
       {t}{req && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
@@ -40,8 +73,8 @@ function Label({ t, req }: { t: string; req?: boolean }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-6">
-      <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-4">{title}</p>
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-6">
+      <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-4">{title}</p>
       {children}
     </div>
   );
@@ -97,6 +130,8 @@ interface UnitRow {
   stagedFloorPlan: File | null;
   stagedAddendums: File[];
 }
+
+const newRowId = () => Math.random().toString(36).slice(2);
 
 function emptyRow(expanded = true): UnitRow {
   return {
@@ -170,6 +205,9 @@ function parseCsv(text: string): CsvRow[] {
     const errs: string[] = [];
     if (!row.building_name) errs.push('building_name required');
     if (!row.unit_number)   errs.push('unit_number required');
+    // Mixed-use is retired for NEW properties (NEW_SPACE_CATEGORIES); the CSV import always
+    // creates new properties, so a mixed_use row is skipped. Existing mixed-use properties are untouched.
+    if ((row.category ?? '').trim().toLowerCase() === 'mixed_use') errs.push('category mixed_use is no longer offered for new properties');
     if (errs.length) row._error = `Row ${i + 2}: ${errs.join(', ')}`;
     return row;
   });
@@ -222,6 +260,7 @@ export default function AddListingPage() {
   const unitsOnly = !actingRpId;
   type Mode = 'new' | 'import';
   const [mode, setMode] = useState<Mode>('new');
+  const [mstep, setMstep] = useState<MgrStep>('property');
 
   /* property form */
   const [pf, setPf]   = useState<PropertyFormData>({ ...EMPTY_PROP });
@@ -298,9 +337,9 @@ export default function AddListingPage() {
 
   // Reload emirates when country changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clear the dependent list when the country is cleared
     if (!pf.countryId) { setEmirates([]); return; }
     apiGet<Emirate[]>(`/locations/countries/${pf.countryId}/emirates`).then(setEmirates).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pf.countryId]);
 
   // Property location cascade + building-search auto-fill now live inside the
@@ -308,8 +347,8 @@ export default function AddListingPage() {
   // wizard no longer maintains its own copy. Changing the category still clears
   // per-unit amenities, so that one hook stays here on pf.spaceCategory.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a category change invalidates per-unit amenities
     setRows(prev => prev.map(r => ({ ...r, amenities: [] })));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pf.spaceCategory]);
 
   /* ── unit row helpers ── */
@@ -346,7 +385,7 @@ export default function AddListingPage() {
   const dupRow = (id: string) => {
     const src = rows.find(r => r.id === id);
     if (!src) return;
-    const dup: UnitRow = { ...src, id: Math.random().toString(36).slice(2), expanded: true, unitNumber: '', stagedPhotos: [], stagedFloorPlan: null, stagedAddendums: [] };
+    const dup: UnitRow = { ...src, id: newRowId(), expanded: true, unitNumber: '', stagedPhotos: [], stagedFloorPlan: null, stagedAddendums: [] };
     setRows(prev => {
       const idx = prev.findIndex(r => r.id === id);
       const next = [...prev.map(r => ({ ...r, expanded: false }))];
@@ -390,13 +429,17 @@ export default function AddListingPage() {
     // Units-only flow never creates a property — a selection is mandatory.
     if (unitsOnly && !selectedPropId) {
       setError('Select a property to add units to.');
+      setMstep('property');
       return false;
     }
+    let propFail = false;
     if (!unitsOnly && mode === 'new' && !selectedPropId) {
       const errs: typeof pe = {};
       if (!pf.spaceCategory) { errs.spaceCategory = 'Required'; ok = false; }
       if (!pf.emirateId)     { errs.emirateId = 'Required'; ok = false; }
       setPe(errs);
+      propFail = !ok;
+      if (propFail) setMstep('property');
     }
     const newRowErrors: typeof rowErrors = {};
     for (const r of rows) {
@@ -413,7 +456,7 @@ export default function AddListingPage() {
     if (!ok) {
       // expand first row with errors
       const firstErrId = Object.keys(newRowErrors)[0];
-      if (firstErrId) setRows(prev => prev.map(r => ({ ...r, expanded: r.id === firstErrId ? true : r.expanded })));
+      if (firstErrId) { setRows(prev => prev.map(r => ({ ...r, expanded: r.id === firstErrId ? true : r.expanded }))); setMstep(propFail ? 'property' : 'units'); }
     }
     return ok;
   }
@@ -781,64 +824,111 @@ export default function AddListingPage() {
   if (unitsOnly) return <AddUnitsExperience backHref={backHref} />;
 
   /* ══════════════════════════════════════════════════════════════════════════ */
+  // Manager property + units wizard (?rp), presented as the Genspark wizard. The step
+  // bodies below are the previous sections, unchanged; only the frame + step routing are new.
+  const mgrSteps: { id: MgrStep; t: string; d: string }[] = mode === 'import'
+    ? [
+        { id: 'csv',    t: 'CSV file',       d: 'Template, columns, upload & check' },
+        { id: 'import', t: 'Import',         d: 'Create properties + units' },
+      ]
+    : [
+        { id: 'property', t: 'Property',            d: 'Pick existing or create new' },
+        { id: 'units',    t: 'Units',               d: `${rows.length} in this listing` },
+        { id: 'addendum', t: 'Agreement addendum',  d: 'Optional · all new units' },
+        { id: 'validate', t: 'Preview & validate',  d: 'Checklist before saving' },
+        { id: 'save',     t: 'Save',                d: 'Created as draft listings' },
+      ];
+  const curStep: MgrStep = mgrSteps.some(s => s.id === mstep) ? mstep : mgrSteps[0].id;
+  const curIdx = mgrSteps.findIndex(s => s.id === curStep);
+  const selectedExisting = existingProps.find(p => p.id === selectedPropId) ?? null;
+  const propOk = !!selectedPropId || (!!pf.spaceCategory && !!pf.emirateId);
+  const propName = selectedExisting?.buildingName || pf.buildingName.trim() || (selectedPropId ? 'Property' : 'New property');
+  const mgrChecks = rows.map((r, i) => {
+    const contact = MGR_PHONE_RE.test(r.description) || MGR_LINK_RE.test(r.description);
+    return {
+      key: r.id,
+      title: `Unit ${i + 1}${r.unitNumber.trim() ? ` · ${r.unitNumber.trim()}` : ''}`,
+      required: [
+        { l: 'Unit number', sub: r.unitNumber.trim() || 'Required', state: r.unitNumber.trim() ? 'pass' : 'fail' },
+        { l: 'Unit type', sub: r.unitType ? (UNIT_TYPE_LABELS[r.unitType] ?? r.unitType.replace(/_/g, ' ')) : 'Required', state: r.unitType ? 'pass' : 'fail' },
+      ] as { l: string; sub?: string; state: 'pass' | 'fail' }[],
+      readiness: [
+        { l: 'At least 3 photos', sub: `${r.stagedPhotos.length} added · the first is the cover`, state: r.stagedPhotos.length >= 3 ? 'pass' : 'fail' },
+        { l: 'Annual rent set', sub: Number(r.rentalPrice) > 0 ? fmtAed(r.rentalPrice) : 'Not set', state: Number(r.rentalPrice) > 0 ? 'pass' : 'fail' },
+        { l: 'Size set', sub: Number(r.unitSizeSqft) > 0 ? `${r.unitSizeSqft} sq.ft` : 'Not set', state: Number(r.unitSizeSqft) > 0 ? 'pass' : 'fail' },
+        { l: 'Description written', sub: r.description.trim() ? `${r.description.trim().length} characters` : 'Empty', state: r.description.trim() ? 'pass' : 'fail' },
+        { l: 'No phone numbers or links in the description', sub: contact ? 'Remove contact details — customers reach you through UpNow' : undefined, state: contact ? 'fail' : 'pass' },
+      ] as { l: string; sub?: string; state: 'pass' | 'fail' }[],
+    };
+  });
+  const propertyCheck = {
+    l: selectedPropId ? 'Existing property selected' : 'New property: category and emirate',
+    sub: selectedPropId ? propName : (propOk ? `${propName} · ${pf.spaceCategory}` : 'Category and emirate are required'),
+    state: propOk ? 'pass' as const : 'fail' as const,
+  };
+  const mgrRequiredOk = propOk && mgrChecks.every(c => c.required.every(x => x.state === 'pass'));
+  const validCsv = csvRows.filter(r => !r._error).length;
+  const firstRow = rows[0];
+
   return (
-    <div className="min-h-full bg-[#f9f8f5]">
-      {/* ── Top bar ── */}
-      <div className="bg-white border-b border-[#e8e6e0] px-6 py-4 flex items-center gap-4">
-        <button
-          onClick={() => router.push(backHref)}
-          className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] cursor-pointer"
-        >
-          <ArrowLeft size={16} /> {unitsOnly ? 'Units' : 'Portfolio'}
-        </button>
-        <div className="w-px h-4 bg-[#e8e6e0]" />
-        <div>
-          <h1 className="font-semibold text-[#1a1916] text-sm leading-tight">{unitsOnly ? 'Add Units' : 'Add Listing'}</h1>
-          <p className="text-xs text-[#9b9890]">{unitsOnly ? 'Add units to one of your properties' : 'Property + units in one go'}</p>
+    <OsPage>
+      <PageHead
+        eyebrow="Catalogue"
+        title="Add listing"
+        lede="Property + units in one go. Units are saved as draft listings — each is submitted for UpNow review from Units & listings."
+        actions={<>
+          {actingRpId && <Pill tone="info">Listing on behalf of {actingRpName ?? '…'}</Pill>}
+          <Btn onClick={() => router.push(backHref)}>Back to portfolio</Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Catalogue' },
+        { label: 'Vertical', value: 'Spaces' },
+        { label: 'Entry', value: mode === 'import' ? 'Import CSV' : 'Manual entry' },
+        { label: 'Units', value: mode === 'import' ? `${validCsv} valid CSV rows` : `${rows.length} in this listing` },
+      ]} />
+      {/* Mode tabs — CSV import creates properties (manager wizard only). */}
+      {!done && (
+        <div style={{ marginBottom: 12 }}>
+          <Seg label="Entry mode" value={mode}
+            onChange={(m) => { setMode(m); setError(null); setMstep(m === 'new' ? 'property' : 'csv'); }}
+            options={[{ v: 'new', l: 'Manual entry' }, { v: 'import', l: 'Import CSV' }]} />
         </div>
+      )}
 
-        {/* Manager acting-on-behalf banner */}
-        {actingRpId && (
-          <div className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--color-primary-50, #f0faf6)', color: 'var(--color-primary-dark, #1a5a4a)' }}>
-            <Building2 size={12} />
-            Listing on behalf of {actingRpName ?? '…'}
-          </div>
-        )}
+      <section className="gx-card">
+        <div className="gx-wz">
+          <nav className="gx-wz-steps" aria-label="Add listing steps">
+            {mgrSteps.map((sx, i) => {
+              const isDone = done || i < curIdx;
+              return (
+                <button key={sx.id} type="button" className={`gx-wz-s${isDone ? ' done' : ''}`}
+                  aria-current={!done && sx.id === curStep ? 'step' : undefined}
+                  disabled={done} onClick={() => setMstep(sx.id)}>
+                  <span className="n">{isDone ? '✓' : i + 1}</span>
+                  <span><span className="t">{sx.t}</span><span className="d">{sx.d}</span></span>
+                </button>
+              );
+            })}
+          </nav>
 
-        {/* Mode tabs — CSV import creates properties, so it's hidden in the
-            units-only (RP) flow; only the manager property+units wizard shows it. */}
-        {!done && !unitsOnly && (
-          <div className="ml-auto flex rounded-xl border border-[#e8e6e0] overflow-hidden bg-[#f4f3ef]">
-            {([
-              { key: 'new',    label: 'Manual Entry' },
-              { key: 'import', label: 'Import CSV' },
-            ] as { key: Mode; label: string }[]).map(m => (
-              <button
-                key={m.key}
-                onClick={() => { setMode(m.key); setError(null); }}
-                className={`px-4 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                  mode === m.key ? 'bg-white text-[#1a1916] shadow-sm rounded-lg m-0.5' : 'text-[#6b6860] hover:text-[#1a1916]'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Main content ── */}
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-5">
+          <div className="gx-wz-main">
+            {!done && (
+              <>
+                <h2 style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>{curIdx + 1}. {mgrSteps[curIdx].t}</h2>
+                <p style={{ fontSize: 12, color: 'var(--ms-ink-3)', marginBottom: 14 }}>{mgrSteps[curIdx].d}</p>
+              </>
+            )}
+            <div className="space-y-5">
 
         {/* ══ DONE ══ */}
         {done && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 text-center max-w-2xl mx-auto">
-            <div className="w-16 h-16 rounded-full bg-[#d8f2e8] flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 size={32} className="text-[#2e9f82]" />
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] p-10 text-center max-w-2xl mx-auto">
+            <div className="w-16 h-16 rounded-full bg-[#d8efe3] flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 size={32} className="text-[#047246]" />
             </div>
-            <h2 className="text-xl font-bold text-[#1a1916] mb-1">All done!</h2>
-            <p className="text-sm text-[#6b6860] mb-6">{doneMsg}</p>
+            <h2 className="text-xl font-bold text-[#14201a] mb-1">All done!</h2>
+            <p className="text-sm text-[#5f6b63] mb-6">{doneMsg}</p>
             {doneErrs.length > 0 && (
               <div className="text-left bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
                 <p className="text-xs font-semibold text-amber-700 mb-2">Some rows had errors:</p>
@@ -848,18 +938,18 @@ export default function AddListingPage() {
             <div className="flex gap-3 justify-center">
               <button
                 onClick={() => {
-                  setDone(false); setRows([emptyRow(true)]); setMode('new');
+                  setDone(false); setRows([emptyRow(true)]); setMode('new'); setMstep('property');
                   setSelectedPropId(null); setPf({ ...EMPTY_PROP }); setCsvRows([]); setDoneErrs([]);
                   setTitleDeed(null); setDrawings([]); setExtraDocs({}); setPropertyPhotos([]);
                 }}
-                className="px-5 py-2.5 rounded-lg border border-[#2e9f82] text-[#2e9f82] text-sm font-medium hover:bg-[#f0fdf8] cursor-pointer"
+                className="px-5 py-2.5 rounded-lg border border-[#047246] text-[#047246] text-sm font-medium hover:bg-[#f0fdf8] cursor-pointer"
               >
                 {unitsOnly ? 'Add More Units' : 'Add Another Listing'}
               </button>
               <button
                 onClick={() => router.push(backHref)}
                 className="px-5 py-2.5 rounded-lg text-white text-sm font-semibold cursor-pointer"
-                style={{ background: '#1a1916' }}
+                style={{ background: '#14201a' }}
               >
                 {unitsOnly ? 'Go to Units' : 'Go to Portfolio'}
               </button>
@@ -867,6 +957,8 @@ export default function AddListingPage() {
           </div>
         )}
 
+
+        {curStep === 'property' && <>
         {/* ══ PROPERTY ══ Units-only (RP) = pick an existing property; full mode
             (manager) = pick existing OR create a new property. */}
         {!done && mode === 'new' && (
@@ -900,9 +992,9 @@ export default function AddListingPage() {
                     ))}
                   </select>
                   {unitsOnly && (
-                    <p className="text-[11px] text-[#9b9890] mt-1.5">
+                    <p className="text-[11px] text-[#8a948d] mt-1.5">
                       Need a new building?{' '}
-                      <Link href="/rental-provider/dashboard/portfolio?add=1" className="font-medium text-[#2e9f82] hover:underline">Add a property</Link>{' '}
+                      <Link href="/rental-provider/dashboard/portfolio?add=1" className="font-medium text-[#047246] hover:underline">Add a property</Link>{' '}
                       on the Portfolio page.
                     </p>
                   )}
@@ -913,12 +1005,12 @@ export default function AddListingPage() {
               {unitsOnly && existingProps.length === 0 && (
                 <div className="text-center py-6">
                   <Building2 size={22} className="mx-auto mb-2 text-[#c5c3bc]" />
-                  <p className="text-sm text-[#6b6860] mb-3">
+                  <p className="text-sm text-[#5f6b63] mb-3">
                     You don’t have any properties yet. Create a property first, then come back to add its units.
                   </p>
                   <Link href="/rental-provider/dashboard/portfolio?add=1"
                     className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2.5 rounded-lg"
-                    style={{ background: '#2e9f82', color: '#fff' }}>
+                    style={{ background: '#047246', color: '#fff' }}>
                     <Building2 size={15} /> Add a property
                   </Link>
                 </div>
@@ -928,9 +1020,9 @@ export default function AddListingPage() {
                   shared <PropertyFields> (byte-identical to the Edit modal). */}
               {!unitsOnly && existingProps.length > 0 && (
                 <div className="relative">
-                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e8e6e0]" /></div>
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e4e9e5]" /></div>
                   <div className="relative flex justify-center">
-                    <span className="bg-white px-3 text-[10px] font-medium text-[#9b9890] uppercase tracking-wider">or create new</span>
+                    <span className="bg-white px-3 text-[10px] font-medium text-[#8a948d] uppercase tracking-wider">or create new</span>
                   </div>
                 </div>
               )}
@@ -953,39 +1045,42 @@ export default function AddListingPage() {
           </Section>
         )}
 
+        </>}
+
+        {curStep === 'csv' && <>
         {/* ══ IMPORT CSV ══ */}
         {!done && mode === 'import' && (
           <Section title="Import from CSV">
             <div className="space-y-5">
               <div className="bg-[#f0fdf8] border border-[#a7f3d0] rounded-xl p-4">
                 <p className="text-sm font-semibold text-[#1a7a5a] mb-1">Single file — property + units combined</p>
-                <p className="text-xs text-[#3d3b35] leading-relaxed">
+                <p className="text-xs text-[#46534c] leading-relaxed">
                   Each row contains both property and unit data. Rows sharing the same <strong>building_name</strong> are grouped into one property automatically.
                 </p>
               </div>
 
-              <div className="flex items-center gap-3 bg-[#f4f3ef] rounded-xl p-4">
-                <FileSpreadsheet size={20} className="text-[#2e9f82] shrink-0" />
+              <div className="flex items-center gap-3 bg-[#eef1ef] rounded-xl p-4">
+                <FileSpreadsheet size={20} className="text-[#047246] shrink-0" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-[#1a1916]">Download the CSV template</p>
-                  <p className="text-xs text-[#9b9890]">Fill in your data then upload below.</p>
+                  <p className="text-sm font-medium text-[#14201a]">Download the CSV template</p>
+                  <p className="text-xs text-[#8a948d]">Fill in your data then upload below.</p>
                 </div>
                 <button onClick={downloadTemplate}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-2 hover:bg-[#f0fdf8] cursor-pointer shrink-0">
+                  className="flex items-center gap-1.5 text-xs font-semibold text-[#047246] border border-[#047246] rounded-lg px-3 py-2 hover:bg-[#f0fdf8] cursor-pointer shrink-0">
                   <Download size={13} /> Template
                 </button>
               </div>
 
               {/* Column reference */}
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-2">CSV Columns</p>
-                <div className="overflow-x-auto rounded-xl border border-[#e8e6e0]">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-2">CSV Columns</p>
+                <div className="overflow-x-auto rounded-xl border border-[#e4e9e5]">
                   <table className="w-full text-xs min-w-[540px]">
                     <thead>
-                      <tr className="bg-[#f4f3ef]">
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Column</th>
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Required</th>
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Notes</th>
+                      <tr className="bg-[#eef1ef]">
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Column</th>
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Required</th>
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Notes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#f0ede8]">
@@ -1011,10 +1106,10 @@ export default function AddListingPage() {
                         ['view',                 '',  'e.g. Sea View, City View, Pool View'],
                         ['description',          '',  'Free text for the listing'],
                       ].map(([col, req, note]) => (
-                        <tr key={col} className="hover:bg-[#fafaf8]">
-                          <td className="px-3 py-1.5 font-mono text-[#1a1916]">{col}</td>
+                        <tr key={col} className="hover:bg-[#f6f8f6]">
+                          <td className="px-3 py-1.5 font-mono text-[#14201a]">{col}</td>
                           <td className="px-3 py-1.5 text-center">{req && <span className="text-red-500 font-bold">{req}</span>}</td>
-                          <td className="px-3 py-1.5 text-[#6b6860]">{note}</td>
+                          <td className="px-3 py-1.5 text-[#5f6b63]">{note}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1024,9 +1119,9 @@ export default function AddListingPage() {
 
               <div>
                 <Label t="Upload your CSV" req />
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-8 cursor-pointer hover:border-[#2e9f82] transition-colors">
-                  <Upload size={24} className="text-[#9b9890] mb-2" />
-                  <span className="text-sm text-[#6b6860]">Click to choose a .csv file</span>
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-8 cursor-pointer hover:border-[#047246] transition-colors">
+                  <Upload size={24} className="text-[#8a948d] mb-2" />
+                  <span className="text-sm text-[#5f6b63]">Click to choose a .csv file</span>
                   <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
                 </label>
                 {csvError && <p className="text-[10px] text-red-500 mt-1">{csvError}</p>}
@@ -1035,39 +1130,39 @@ export default function AddListingPage() {
               {csvRows.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-[#3d3b35]">
+                    <p className="text-xs font-semibold text-[#46534c]">
                       {csvRows.length} row{csvRows.length !== 1 ? 's' : ''} parsed —{' '}
-                      <span className="text-[#2e9f82]">{csvRows.filter(r => !r._error).length} valid</span>
+                      <span className="text-[#047246]">{csvRows.filter(r => !r._error).length} valid</span>
                       {csvRows.filter(r => r._error).length > 0 && (
                         <span className="text-amber-600">, {csvRows.filter(r => r._error).length} will be skipped</span>
                       )}
                     </p>
                   </div>
-                  <div className="overflow-x-auto rounded-xl border border-[#e8e6e0]">
+                  <div className="overflow-x-auto rounded-xl border border-[#e4e9e5]">
                     <table className="w-full text-xs min-w-[580px]">
                       <thead>
-                        <tr className="bg-[#f4f3ef]">
+                        <tr className="bg-[#eef1ef]">
                           {['Building', 'Unit #', 'Type', 'Beds', 'sqm', 'Rent AED', 'View', ''].map(h => (
-                            <th key={h} className="px-3 py-2 text-left font-medium text-[#6b6860]">{h}</th>
+                            <th key={h} className="px-3 py-2 text-left font-medium text-[#5f6b63]">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#f0ede8]">
                         {csvRows.slice(0, 12).map((row, i) => (
-                          <tr key={i} className={row._error ? 'bg-red-50 opacity-60' : 'hover:bg-[#fafaf8]'}>
-                            <td className="px-3 py-1.5 font-medium text-[#1a1916]">{row.building_name || '—'}</td>
+                          <tr key={i} className={row._error ? 'bg-red-50 opacity-60' : 'hover:bg-[#f6f8f6]'}>
+                            <td className="px-3 py-1.5 font-medium text-[#14201a]">{row.building_name || '—'}</td>
                             <td className="px-3 py-1.5">{row.unit_number || '—'}</td>
-                            <td className="px-3 py-1.5 text-[#6b6860]">{row.unit_type || '—'}</td>
+                            <td className="px-3 py-1.5 text-[#5f6b63]">{row.unit_type || '—'}</td>
                             <td className="px-3 py-1.5">{row.bedrooms || '—'}</td>
                             <td className="px-3 py-1.5">{row.size_sqm || '—'}</td>
-                            <td className="px-3 py-1.5 text-[#2e9f82] font-medium">
+                            <td className="px-3 py-1.5 text-[#047246] font-medium">
                               {row.annual_rent_aed ? Number(row.annual_rent_aed).toLocaleString('en-AE') : '—'}
                             </td>
-                            <td className="px-3 py-1.5 text-[#6b6860]">{row.view || '—'}</td>
+                            <td className="px-3 py-1.5 text-[#5f6b63]">{row.view || '—'}</td>
                             <td className="px-3 py-1.5">
                               {row._error
                                 ? <span title={row._error}><AlertCircle size={12} className="text-red-500" /></span>
-                                : <CheckCircle2 size={12} className="text-[#2e9f82]" />
+                                : <CheckCircle2 size={12} className="text-[#047246]" />
                               }
                             </td>
                           </tr>
@@ -1075,7 +1170,7 @@ export default function AddListingPage() {
                       </tbody>
                     </table>
                     {csvRows.length > 12 && (
-                      <p className="text-center text-xs text-[#9b9890] py-2">… and {csvRows.length - 12} more rows</p>
+                      <p className="text-center text-xs text-[#8a948d] py-2">… and {csvRows.length - 12} more rows</p>
                     )}
                   </div>
                 </div>
@@ -1083,12 +1178,12 @@ export default function AddListingPage() {
 
               {importing && (
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-sm text-[#6b6860]">
-                    <Loader2 size={14} className="animate-spin text-[#2e9f82]" />
+                  <div className="flex items-center gap-2 text-sm text-[#5f6b63]">
+                    <Loader2 size={14} className="animate-spin text-[#047246]" />
                     Importing {importProgress.done} / {importProgress.total}…
                   </div>
-                  <div className="h-1.5 bg-[#e8e6e0] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#2e9f82] rounded-full transition-all"
+                  <div className="h-1.5 bg-[#e4e9e5] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#047246] rounded-full transition-all"
                       style={{ width: `${importProgress.total ? (importProgress.done / importProgress.total) * 100 : 0}%` }} />
                   </div>
                 </div>
@@ -1097,13 +1192,9 @@ export default function AddListingPage() {
           </Section>
         )}
 
-        {/* Units-only: prompt to pick a property before the unit rows appear. */}
-        {!done && unitsOnly && !selectedPropId && existingProps.length > 0 && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-6 text-center text-sm text-[#9b9890]">
-            Select a property above to start adding its units.
-          </div>
-        )}
+        </>}
 
+        {curStep === 'units' && <>
         {/* ══ UNITS section (new + existing modes) ══ */}
         {!done && mode !== 'import' && (!unitsOnly || selectedPropId) && (
           <Section title={`Units  ·  ${rows.length} added`}>
@@ -1129,7 +1220,7 @@ export default function AddListingPage() {
               ))}
               <button
                 onClick={addRow}
-                className="flex items-center gap-2 w-full py-3 rounded-xl border-2 border-dashed border-[#e8e6e0] text-sm font-medium text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
+                className="flex items-center gap-2 w-full py-3 rounded-xl border-2 border-dashed border-[#e4e9e5] text-sm font-medium text-[#5f6b63] hover:border-[#047246] hover:text-[#047246] transition-colors cursor-pointer"
               >
                 <Plus size={15} /> Add another unit
               </button>
@@ -1137,22 +1228,18 @@ export default function AddListingPage() {
           </Section>
         )}
 
-        {/* ── error banner ── */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-center gap-2">
-            <AlertCircle size={14} className="shrink-0" /> {error}
-          </div>
-        )}
+        </>}
 
+        {curStep === 'addendum' && <>
         {/* ── Agreement Addendum (one for the listing, applied to the new layout(s)) ── */}
         {!done && mode !== 'import' && (!unitsOnly || selectedPropId) && (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-6">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-3">
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] p-6">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-3">
               Agreement Addendum <span className="font-normal normal-case text-[#bdbab2]">· optional</span>
             </p>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-[#1a1916] truncate">{addendumTerms.name?.trim() || 'Agreement Addendum'}</p>
+                <p className="text-sm font-medium text-[#14201a] truncate">{addendumTerms.name?.trim() || 'Agreement Addendum'}</p>
                 <p className="text-[11px] text-[#a16207]">
                   {(() => {
                     const n = (addendumTerms.en?.filter(l => l.trim()).length ?? 0) + (addendumTerms.ar?.filter(l => l.trim()).length ?? 0);
@@ -1171,7 +1258,7 @@ export default function AddListingPage() {
                       try { await openAddendumPdfInNewTab(addendumTerms, addendumTerms.name?.trim() || 'Agreement Addendum'); }
                       finally { setAddendumPreviewBusy(false); }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer disabled:opacity-50">
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#047246] text-xs font-semibold hover:bg-[#eef7f2] cursor-pointer disabled:opacity-50">
                     {addendumPreviewBusy ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />} Preview
                   </button>
                 )}
@@ -1185,16 +1272,73 @@ export default function AddListingPage() {
           </div>
         )}
 
+        </>}
+
+        {!done && curStep === 'validate' && (
+          <div>
+            <Checklist items={[propertyCheck]} />
+            {mgrChecks.map(c => (
+              <div key={c.key} style={{ marginTop: 14 }}>
+                <Card title={c.title} right={<Btn size="xs" onClick={() => { setRows(prev => prev.map(r => ({ ...r, expanded: r.id === c.key }))); setMstep('units'); }}>Edit unit</Btn>} pad>
+                  <div className="gx-lb">Required to save</div>
+                  <Checklist items={c.required} />
+                  <div className="gx-lb" style={{ marginTop: 10 }}>Listing readiness for review</div>
+                  <Checklist items={c.readiness} />
+                </Card>
+              </div>
+            ))}
+            <div style={{ marginTop: 12 }}>
+              {mgrRequiredOk
+                ? <Evid tone="ok">Ready to save. Open readiness checks can be finished before each listing is submitted for review.</Evid>
+                : <Evid tone="warn">Fix the required items before saving.</Evid>}
+            </div>
+          </div>
+        )}
+
+        {!done && curStep === 'save' && (
+          <Callout tone="info" title="Saved as drafts — not yet submitted for review.">
+            Saving {selectedPropId ? `adds ${rows.length} unit${rows.length !== 1 ? 's' : ''} to ${propName}` : `creates ${propName} and ${rows.length} unit${rows.length !== 1 ? 's' : ''}`} as <b>draft</b> listings,
+            then uploads documents, photos, floor plans and the addendum. To publish, use “Submit listing” on each unit in Units &amp; listings — that sends it to UpNow listing review (Gate 3).
+          </Callout>
+        )}
+
+        {(curStep === 'save' || curStep === 'import' || curStep === 'property') && <>
+        {/* ── error banner ── */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertCircle size={14} className="shrink-0" /> {error}
+          </div>
+        )}
+
+        </>}
+
+        {curStep === 'save' && <>
         {/* ── Save progress ── */}
         {saving && saveProgress && (
-          <div className="bg-white rounded-xl border border-[#e8e6e0] p-4 space-y-2">
-            <div className="flex items-center gap-2 text-sm text-[#6b6860]">
-              <Loader2 size={14} className="animate-spin text-[#2e9f82]" /> {saveProgress.phase}
+          <div className="bg-white rounded-xl border border-[#e4e9e5] p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm text-[#5f6b63]">
+              <Loader2 size={14} className="animate-spin text-[#047246]" /> {saveProgress.phase}
             </div>
             {saveProgress.total > 0 && (
-              <div className="h-1.5 bg-[#e8e6e0] rounded-full overflow-hidden">
-                <div className="h-full bg-[#2e9f82] rounded-full transition-all"
+              <div className="h-1.5 bg-[#e4e9e5] rounded-full overflow-hidden">
+                <div className="h-full bg-[#047246] rounded-full transition-all"
                   style={{ width: `${(saveProgress.done / saveProgress.total) * 100}%` }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        </>}
+
+        {!done && curStep === 'import' && (
+          <div>
+            <Callout tone="info" title="Import creates drafts.">
+              {validCsv} valid row{validCsv !== 1 ? 's' : ''} will be imported; rows sharing a building_name become one property. Units start as draft listings and are submitted for review (Gate 3) from Units &amp; listings.
+            </Callout>
+            {importing && (
+              <div style={{ marginTop: 12 }} role="status" aria-live="polite">
+                <div style={{ fontSize: 12, marginBottom: 6 }}>Importing {importProgress.done} / {importProgress.total}…</div>
+                <span className="gx-bar" style={{ display: 'block' }}><i style={{ width: `${importProgress.total ? (importProgress.done / importProgress.total) * 100 : 0}%` }} /></span>
               </div>
             )}
           </div>
@@ -1202,46 +1346,64 @@ export default function AddListingPage() {
 
         {/* ── bottom actions ── */}
         {!done && (
-          <div className="flex items-center justify-between pb-8">
-            <button
-              onClick={() => router.push(backHref)}
-              className="text-sm text-[#6b6860] hover:text-[#1a1916] px-4 py-2 cursor-pointer"
-            >
-              Cancel
-            </button>
-
-            {mode !== 'import' && (
-              <button
-                onClick={handleSaveAll}
-                disabled={saving}
-                className="flex items-center gap-2 text-sm font-semibold text-white px-6 py-2.5 rounded-xl disabled:opacity-50 cursor-pointer"
-                style={{ background: '#2e9f82' }}
-              >
-                {saving && <Loader2 size={14} className="animate-spin" />}
-                Save{!unitsOnly && !selectedPropId ? ' Property +' : ''} {rows.length} Unit{rows.length !== 1 ? 's' : ''}
-              </button>
+          <div className="gx-btn-row" style={{ marginTop: 18, borderTop: '1px solid var(--ms-surface-3)', paddingTop: 14 }}>
+            <Btn onClick={() => router.push(backHref)}>Cancel</Btn>
+            <span style={{ flex: 1 }} />
+            {curIdx > 0 && <Btn onClick={() => setMstep(mgrSteps[curIdx - 1].id)}>Back</Btn>}
+            {curIdx < mgrSteps.length - 1 && <Btn variant="primary" onClick={() => setMstep(mgrSteps[curIdx + 1].id)}>Continue</Btn>}
+            {curStep === 'save' && (
+              <Btn variant="primary" onClick={handleSaveAll} disabled={saving}>
+                {saving ? 'Saving…' : `Save${!unitsOnly && !selectedPropId ? ' property +' : ''} ${rows.length} unit${rows.length !== 1 ? 's' : ''}`}
+              </Btn>
             )}
-
-            {mode === 'import' && (
-              <button
-                onClick={runImport}
-                disabled={importing || csvRows.filter(r => !r._error).length === 0}
-                className="flex items-center gap-2 text-sm font-semibold text-white px-6 py-2.5 rounded-xl disabled:opacity-50 cursor-pointer"
-                style={{ background: '#2e9f82' }}
-              >
-                {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                Import {csvRows.filter(r => !r._error).length} Rows
-              </button>
+            {curStep === 'import' && (
+              <Btn variant="primary" onClick={runImport} disabled={importing || validCsv === 0}>
+                {importing ? 'Importing…' : `Import ${validCsv} rows`}
+              </Btn>
             )}
           </div>
         )}
+            </div>
+          </div>
+
+          {/* Live preview */}
+          <aside className="gx-wz-prev" aria-label="Live preview">
+            <div className="gx-lb" style={{ marginBottom: 8 }}>Live preview</div>
+            {mode === 'import' ? (
+              <div className="gx-card gx-pad" style={{ fontSize: 11.5, lineHeight: 1.6 }}>
+                <b>{csvRows.length}</b> rows parsed · <b>{validCsv}</b> valid
+                {csvRows.length - validCsv > 0 && <> · <span style={{ color: 'var(--ms-danger)' }}>{csvRows.length - validCsv} will be skipped</span></>}
+                <br />{new Set(csvRows.filter(r => !r._error).map(r => r.building_name)).size} propert{new Set(csvRows.filter(r => !r._error).map(r => r.building_name)).size === 1 ? 'y' : 'ies'}
+              </div>
+            ) : (
+              <div className="gx-card" style={{ overflow: 'hidden' }}>
+                <div style={{ height: 110, background: 'var(--ms-surface-3)', display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--ms-ink-3)' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {firstRow?.stagedPhotos[0] ? <img src={firstRow.stagedPhotos[0].previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : 'No photo yet'}
+                </div>
+                <div style={{ padding: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>{firstRow?.unitName.trim() || (firstRow ? unitLabel(firstRow) : 'New unit')}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ms-ink-3)', marginTop: 3 }}>{propName}{propCategory ? ` · ${propCategory.replace(/_/g, ' ')}` : ''}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, marginTop: 8 }}>{firstRow && Number(firstRow.rentalPrice) > 0 ? fmtAed(firstRow.rentalPrice) : 'Rent not set'}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>per year · unit 1 of {rows.length}</div>
+                  <div style={{ marginTop: 8 }}><Pill tone="neutral" dot={false}>Draft</Pill></div>
+                </div>
+              </div>
+            )}
+            {mode !== 'import' && (
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ms-ink-3)' }}>
+                {mgrRequiredOk ? 'Required items complete' : 'Required items missing'} · {mgrChecks.reduce((n, c) => n + c.readiness.filter(x => x.state === 'pass').length, 0)} of {mgrChecks.reduce((n, c) => n + c.readiness.length, 0)} readiness checks passing
+              </div>
+            )}
+          </aside>
+        </div>
+      </section>
 
         {addendumEditorOpen && (
           <AddendumEditorModal value={addendumTerms} onChange={setAddendumTerms} onClose={() => setAddendumEditorOpen(false)}
             title="Agreement Addendum" subtitle="Write the terms; they're applied to the layout(s) you create. Preview on the right." />
         )}
-      </div>
-    </div>
+    </OsPage>
   );
 }
 
@@ -1261,7 +1423,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
   return (
     <div className="relative">
       <input
-        className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]"
+        className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]"
         placeholder="e.g. Sea View, Marina View…"
         value={value}
         onChange={e => { onChange(e.target.value); setOpen(true); }}
@@ -1270,12 +1432,12 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
         onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}
       />
       {value.length > 0 && value.length < 3 && (
-        <p className="text-[10px] text-[#9b9890] mt-0.5">
+        <p className="text-[10px] text-[#8a948d] mt-0.5">
           Type {3 - value.length} more character{3 - value.length !== 1 ? 's' : ''} to see suggestions
         </p>
       )}
       {showDropdown && (
-        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-[#e8e6e0] rounded-xl shadow-lg max-h-52 overflow-y-auto">
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-[#e4e9e5] rounded-xl shadow-lg max-h-52 overflow-y-auto">
           {filtered.map(v => (
             <button key={v} type="button"
               onMouseDown={e => e.preventDefault()}
@@ -1283,7 +1445,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
               className={`w-full text-left px-3 py-2 text-sm transition-colors ${
                 value === v
                   ? 'bg-[#f0fdf8] text-[#1a7a5a] font-medium'
-                  : 'text-[#1a1916] hover:bg-[#f4f3ef]'
+                  : 'text-[#14201a] hover:bg-[#eef1ef]'
               }`}>
               {v}
             </button>
@@ -1293,7 +1455,7 @@ function ViewInput({ value, onChange }: { value: string; onChange: (v: string) =
               <button type="button"
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => select(value)}
-                className="w-full text-left px-3 py-2 text-sm text-[#2e9f82] font-medium hover:bg-[#f0fdf8] transition-colors">
+                className="w-full text-left px-3 py-2 text-sm text-[#047246] font-medium hover:bg-[#f0fdf8] transition-colors">
                 + Use &quot;{value}&quot;
               </button>
             </div>
@@ -1327,30 +1489,31 @@ function UnitCard({
   const floorPlanInputRef = useRef<HTMLInputElement>(null);
   const dragIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
   const showBedBath = !row.unitType || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
   const isResidentialUnit = propCategory === 'residential' || RESIDENTIAL_UNIT_TYPES.includes(row.unitType);
 
-  const INPUT_C  = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+  const INPUT_C  = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]';
   const INPUT_ERR = 'w-full border border-red-400 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-red-400';
   const SELECT_C = INPUT_C + ' appearance-none';
 
   return (
-    <div id={`unit-card-${row.id}`} className="bg-white rounded-xl border border-[#e8e6e0] overflow-hidden">
+    <div id={`unit-card-${row.id}`} className="bg-white rounded-xl border border-[#e4e9e5] overflow-hidden">
       {/* Card header — always visible */}
       <div className="flex items-center gap-3 px-4 py-3 cursor-pointer" onClick={onToggle}>
-        <div className="w-6 h-6 rounded-full bg-[#f4f3ef] flex items-center justify-center shrink-0">
-          <span className="text-[11px] font-bold text-[#9b9890]">{index + 1}</span>
+        <div className="w-6 h-6 rounded-full bg-[#eef1ef] flex items-center justify-center shrink-0">
+          <span className="text-[11px] font-bold text-[#8a948d]">{index + 1}</span>
         </div>
         <div className="flex-1 min-w-0">
           {row.expanded ? (
-            <p className="text-sm font-semibold text-[#1a1916]">Unit {index + 1}</p>
+            <p className="text-sm font-semibold text-[#14201a]">Unit {index + 1}</p>
           ) : (
-            <p className="text-sm font-medium text-[#1a1916] truncate">{unitLabel(row)}</p>
+            <p className="text-sm font-medium text-[#14201a] truncate">{unitLabel(row)}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {row.stagedPhotos.length > 0 && !row.expanded && (
-            <span className="flex items-center gap-1 text-[10px] text-[#9b9890]">
+            <span className="flex items-center gap-1 text-[10px] text-[#8a948d]">
               <Camera size={11} /> {row.stagedPhotos.length}
             </span>
           )}
@@ -1358,7 +1521,7 @@ function UnitCard({
             <AlertCircle size={14} className="text-red-500" />
           )}
           <button onClick={e => { e.stopPropagation(); onDuplicate(); }}
-            className="text-[#c8c6c0] hover:text-[#2e9f82] cursor-pointer p-1" title="Duplicate unit">
+            className="text-[#c8c6c0] hover:text-[#047246] cursor-pointer p-1" title="Duplicate unit">
             <Copy size={14} />
           </button>
           {canDelete && (
@@ -1367,7 +1530,7 @@ function UnitCard({
               <Trash2 size={14} />
             </button>
           )}
-          {row.expanded ? <ChevronUp size={15} className="text-[#9b9890]" /> : <ChevronDown size={15} className="text-[#9b9890]" />}
+          {row.expanded ? <ChevronUp size={15} className="text-[#8a948d]" /> : <ChevronDown size={15} className="text-[#8a948d]" />}
         </div>
       </div>
 
@@ -1377,7 +1540,7 @@ function UnitCard({
 
           {/* Row 1: Listing Unit Title — full width */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Listing Unit Title</label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1">Listing Unit Title</label>
             <input className={INPUT_C}
               placeholder="e.g. Spacious 2BR Apartment with Balcony in Al Raffa"
               value={row.unitName}
@@ -1387,7 +1550,7 @@ function UnitCard({
           {/* Row 2: Unit Type + Unit Number + Floor */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Type <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Unit Type <span className="text-red-500">*</span></label>
               <select className={errors.unitType ? INPUT_ERR + ' appearance-none' : SELECT_C}
                 value={row.unitType}
                 onChange={e => onUpdate({ unitType: e.target.value })}>
@@ -1397,13 +1560,13 @@ function UnitCard({
               {errors.unitType && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitType}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Tier</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Unit Tier</label>
               <select className={SELECT_C} value={row.unitTier} onChange={e => onUpdate({ unitTier: e.target.value })}>
                 {UNIT_TIERS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Number <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Unit Number <span className="text-red-500">*</span></label>
               <input className={errors.unitNumber ? INPUT_ERR : INPUT_C}
                 placeholder="e.g. 101, G-02"
                 value={row.unitNumber}
@@ -1411,12 +1574,12 @@ function UnitCard({
               {errors.unitNumber && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitNumber}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Floor</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Floor</label>
               <input className={INPUT_C} placeholder="e.g. G, 1, 2…"
                 value={row.floor} onChange={e => onUpdate({ floor: e.target.value })} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Utility Premises No.</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Utility Premises No.</label>
               <input className={INPUT_C} placeholder="e.g. 1234567"
                 value={row.premiseNumber} onChange={e => onUpdate({ premiseNumber: e.target.value })} />
             </div>
@@ -1426,7 +1589,7 @@ function UnitCard({
           {showBedBath && (
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1">Bedrooms</label>
+                <label className="block text-xs font-medium text-[#5f6b63] mb-1">Bedrooms</label>
                 <select className={SELECT_C} value={row.bedrooms} onChange={e => onUpdate({ bedrooms: e.target.value })}>
                   {['Studio', '1', '2', '3', '4', '5', '6+'].map(b => (
                     <option key={b} value={b}>{b === 'Studio' ? 'Studio' : `${b} BR`}</option>
@@ -1434,13 +1597,13 @@ function UnitCard({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1">Bathrooms</label>
+                <label className="block text-xs font-medium text-[#5f6b63] mb-1">Bathrooms</label>
                 <select className={SELECT_C} value={row.bathrooms} onChange={e => onUpdate({ bathrooms: e.target.value })}>
                   {['1', '2', '3', '4', '5+'].map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1">Furnishing</label>
+                <label className="block text-xs font-medium text-[#5f6b63] mb-1">Furnishing</label>
                 <select className={SELECT_C} value={row.furnishing} onChange={e => onUpdate({ furnishing: e.target.value })}>
                   {FURNISHING_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
@@ -1451,11 +1614,11 @@ function UnitCard({
           {/* View + Parking allocation */}
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">View</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">View</label>
               <ViewInput value={row.view} onChange={v => onUpdate({ view: v })} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Parking</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Parking</label>
               <input type="number" min="0" step="1" className={INPUT_C} placeholder="e.g. 1"
                 value={row.parkingSpaces} onChange={e => onUpdate({ parkingSpaces: e.target.value })} />
             </div>
@@ -1464,7 +1627,7 @@ function UnitCard({
           {/* Row 4: Size (sq.ft ↔ sq.m, capture one) */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Size (sq.ft) <span className="text-red-500">*</span></label>
               <input type="number" min="0" step="any"
                 className={errors.unitSizeSqft ? INPUT_ERR : INPUT_C}
                 placeholder="e.g. 1200"
@@ -1473,20 +1636,20 @@ function UnitCard({
               {errors.unitSizeSqft && <p className="text-[10px] text-red-500 mt-0.5">{errors.unitSizeSqft}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#6b6860] mb-1">Size (sq.m)</label>
+              <label className="block text-xs font-medium text-[#5f6b63] mb-1">Size (sq.m)</label>
               <input type="number" min="0" step="any"
                 className={INPUT_C}
                 placeholder="e.g. 111"
                 value={row.unitSizeSqm}
                 onChange={e => onUpdate({ unitSizeSqm: e.target.value, unitSizeSqft: sqftFromSqm(e.target.value) })} />
-              <p className="text-[10px] text-[#9b9890] mt-0.5">Auto-converts with sq.ft.</p>
+              <p className="text-[10px] text-[#8a948d] mt-0.5">Auto-converts with sq.ft.</p>
             </div>
           </div>
 
           {/* Row 5: Annual rent — the unit's asking/list price (a discount at
               contract time becomes the contract's annual rent). */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1">Annual Rent (AED) <span className="text-red-500">*</span></label>
             <input type="number" min="0" step="any"
               className={errors.rentalPrice ? INPUT_ERR : INPUT_C}
               placeholder="e.g. 85000"
@@ -1516,14 +1679,14 @@ function UnitCard({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Security Deposit</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Security Deposit</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 10000"
                   value={row.securityDeposit}
                   onChange={e => onUpdate({ securityDeposit: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Admin Fee</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Admin Fee</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 5000"
                   value={row.adminFee}
@@ -1532,14 +1695,14 @@ function UnitCard({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Contract Registration Fee</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Contract Registration Fee</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="220"
                   value={row.ejariFeeFils}
                   onChange={e => onUpdate({ ejariFeeFils: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Commission</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Commission</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 4000"
                   value={row.commission}
@@ -1548,7 +1711,7 @@ function UnitCard({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Service Charges</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Service Charges</label>
                 <input type="number" min="0" step="any" className={INPUT_C}
                   placeholder="e.g. 3000"
                   value={row.serviceCharges}
@@ -1560,7 +1723,7 @@ function UnitCard({
                 on booking + added to the contract as "Others" rows. */}
             <div className="border-t border-[#a7f3d0] pt-3">
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-medium text-[#3d3b35]">Additional Payments</label>
+                <label className="block text-xs font-medium text-[#46534c]">Additional Payments</label>
                 <button
                   type="button"
                   className="text-[11px] font-semibold text-[#1a7a5a] hover:underline"
@@ -1568,10 +1731,10 @@ function UnitCard({
                 >+ Add payment</button>
               </div>
               {(row.additionalPayments ?? []).length === 0 ? (
-                <p className="text-[11px] text-[#9b9890] italic">None — only rent, deposit and the fees above apply.</p>
+                <p className="text-[11px] text-[#8a948d] italic">None — only rent, deposit and the fees above apply.</p>
               ) : (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[1fr_72px_72px_24px] gap-2 text-[10px] font-medium uppercase tracking-wider text-[#6b6860]">
+                  <div className="grid grid-cols-[1fr_72px_72px_24px] gap-2 text-[10px] font-medium uppercase tracking-wider text-[#5f6b63]">
                     <span>Label</span><span>Net AED</span><span>VAT AED</span><span />
                   </div>
                   {(row.additionalPayments ?? []).map((p, i) => (
@@ -1602,47 +1765,47 @@ function UnitCard({
             <p className="text-[10px] font-bold uppercase tracking-widest text-[#6d28d9]">Leasing Configuration</p>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rental Type</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Rental Type</label>
                 <select className={SELECT_C} value={row.rentalType} onChange={e => onUpdate({ rentalType: e.target.value })}>
                   {RENTAL_TYPE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Min. Lease (months)</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Min. Lease (months)</label>
                 <input type="number" min="0" step="any" className={INPUT_C} placeholder="12"
                   value={row.minLeaseMonths} onChange={e => onUpdate({ minLeaseMonths: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Notice (days)</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Notice (days)</label>
                 <input type="number" min="0" step="any" className={INPUT_C} placeholder="60"
                   value={row.noticePeriodDays} onChange={e => onUpdate({ noticePeriodDays: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">No. of Payments</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">No. of Payments</label>
                 <input type="number" min="1" step="1" className={INPUT_C} placeholder="e.g. 4"
                   value={row.numberOfPayments} onChange={e => onUpdate({ numberOfPayments: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Advance Payment</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Advance Payment</label>
                 <input type="number" min="0" step="any" className={INPUT_C} placeholder="e.g. 5000"
                   value={row.advancePayment} onChange={e => onUpdate({ advancePayment: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Rent Escalation (%/yr)</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Rent Escalation (%/yr)</label>
                 <input type="number" min="0" max="100" step="0.5" className={INPUT_C} placeholder="e.g. 5"
                   value={row.rentEscalationPct} onChange={e => onUpdate({ rentEscalationPct: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Grace Period (days)</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Grace Period (days)</label>
                 <input type="number" min="0" step="1" className={INPUT_C} placeholder="e.g. 7"
                   value={row.gracePeriodDays} onChange={e => onUpdate({ gracePeriodDays: e.target.value })} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#3d3b35] mb-1">Late Payment Fee (AED)</label>
+                <label className="block text-xs font-medium text-[#46534c] mb-1">Late Payment Fee (AED)</label>
                 <input type="number" min="0" step="any" className={INPUT_C} placeholder="e.g. 500"
                   value={row.latePaymentFee} onChange={e => onUpdate({ latePaymentFee: e.target.value })} />
               </div>
@@ -1654,14 +1817,14 @@ function UnitCard({
 
           {/* Amenities */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-2">
+            <label className="block text-xs font-medium text-[#5f6b63] mb-2">
               Amenities
               {row.amenities.length > 0 && (
-                <span className="ml-1.5 text-[#2e9f82] font-semibold">{row.amenities.length} selected</span>
+                <span className="ml-1.5 text-[#047246] font-semibold">{row.amenities.length} selected</span>
               )}
             </label>
             {!propCategory ? (
-              <p className="text-xs text-[#9b9890] bg-[#f4f3ef] rounded-lg px-3 py-2.5">
+              <p className="text-xs text-[#8a948d] bg-[#eef1ef] rounded-lg px-3 py-2.5">
                 Select a property category above to see relevant amenities.
               </p>
             ) : (
@@ -1672,8 +1835,8 @@ function UnitCard({
                     onClick={() => onUpdate({ amenities: row.amenities.includes(a) ? row.amenities.filter(x => x !== a) : [...row.amenities, a] })}
                     className={`px-3 py-1.5 rounded-full border text-xs font-medium cursor-pointer transition-colors ${
                       row.amenities.includes(a)
-                        ? 'border-[#2e9f82] bg-[#d8f2e8] text-[#1a7a5a]'
-                        : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c8c6c0]'
+                        ? 'border-[#047246] bg-[#d8efe3] text-[#1a7a5a]'
+                        : 'border-[#e4e9e5] text-[#5f6b63] hover:border-[#c8c6c0]'
                     }`}
                   >
                     {a}
@@ -1685,7 +1848,7 @@ function UnitCard({
 
           {/* Description */}
           <div>
-            <label className="block text-xs font-medium text-[#6b6860] mb-1">Unit Description</label>
+            <label className="block text-xs font-medium text-[#5f6b63] mb-1">Unit Description</label>
             <textarea className={INPUT_C + ' min-h-[70px] resize-vertical'}
               placeholder="Describe this unit for the listing — features, highlights, unique selling points…"
               value={row.description}
@@ -1709,18 +1872,18 @@ function UnitCard({
             />
 
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-medium text-[#6b6860]">
+              <p className="text-xs font-medium text-[#5f6b63]">
                 Unit Photos
-                <span className="text-[#9b9890] font-normal ml-1">({row.stagedPhotos.length}/20)</span>
+                <span className="text-[#8a948d] font-normal ml-1">({row.stagedPhotos.length}/20)</span>
                 {row.stagedPhotos.length > 1 && (
-                  <span className="text-[#9b9890] font-normal ml-2">· drag to set cover</span>
+                  <span className="text-[#8a948d] font-normal ml-2">· drag to set cover</span>
                 )}
               </p>
               {row.stagedPhotos.length > 0 && row.stagedPhotos.length < 20 && (
                 <button
                   type="button"
                   onClick={() => photoInputRef.current?.click()}
-                  className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer"
+                  className="flex items-center gap-1 text-xs text-[#047246] font-medium hover:text-[#1f6655] cursor-pointer"
                 >
                   <ImagePlus size={13} /> Add Photos
                 </button>
@@ -1731,10 +1894,10 @@ function UnitCard({
               <button
                 type="button"
                 onClick={() => photoInputRef.current?.click()}
-                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-5 hover:border-[#047246] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
               >
                 <Camera size={22} className="text-[#c8c6c0] mb-1.5" />
-                <span className="text-xs text-[#9b9890]">Click to add photos</span>
+                <span className="text-xs text-[#8a948d]">Click to add photos</span>
               </button>
             ) : (
               <div className="flex gap-2 flex-wrap">
@@ -1742,7 +1905,7 @@ function UnitCard({
                   <div
                     key={sp.previewUrl}
                     draggable
-                    onDragStart={() => { dragIdxRef.current = idx; }}
+                    onDragStart={() => { dragIdxRef.current = idx; setDragFromIdx(idx); }}
                     onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
                     onDrop={(e) => {
                       e.preventDefault();
@@ -1754,20 +1917,21 @@ function UnitCard({
                         onReorderPhotos(arr);
                       }
                       dragIdxRef.current = null;
+                      setDragFromIdx(null);
                       setDragOverIdx(null);
                     }}
-                    onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null); }}
+                    onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null); setDragFromIdx(null); }}
                     className={`relative rounded-lg overflow-hidden border group transition-all select-none
                       ${idx === 0 ? 'w-24 h-24' : 'w-20 h-20'}
-                      ${dragOverIdx === idx && dragIdxRef.current !== idx
-                        ? 'border-[#2e9f82] ring-2 ring-[#2e9f82] scale-105'
-                        : idx === 0 ? 'border-[#2e9f82]' : 'border-[#e8e6e0]'}
+                      ${dragOverIdx === idx && dragFromIdx !== idx
+                        ? 'border-[#047246] ring-2 ring-[#047246] scale-105'
+                        : idx === 0 ? 'border-[#047246]' : 'border-[#e4e9e5]'}
                     `}
                     style={{ cursor: 'grab' }}
                   >
                     {/* Cover badge */}
                     {idx === 0 && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-[#2e9f82] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
+                      <div className="absolute bottom-0 left-0 right-0 bg-[#047246] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
                         COVER
                       </div>
                     )}
@@ -1787,14 +1951,14 @@ function UnitCard({
                   <button
                     type="button"
                     onClick={() => photoInputRef.current?.click()}
-                    className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e8e6e0] flex items-center justify-center cursor-pointer hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors"
+                    className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e4e9e5] flex items-center justify-center cursor-pointer hover:border-[#047246] hover:bg-[#f0fdf8] transition-colors"
                   >
                     <Plus size={16} className="text-[#c8c6c0]" />
                   </button>
                 )}
               </div>
             )}
-            <p className="text-[10px] text-[#9b9890] mt-1">JPEG, PNG or WebP · up to 20 per unit · drag thumbnails to reorder · first image is the cover.</p>
+            <p className="text-[10px] text-[#8a948d] mt-1">JPEG, PNG or WebP · up to 20 per unit · drag thumbnails to reorder · first image is the cover.</p>
           </div>
 
           {/* Row 10: Floor plan */}
@@ -1806,28 +1970,28 @@ function UnitCard({
               className="sr-only"
               onChange={e => { const f = e.target.files?.[0] ?? null; if (f) onSetFloorPlan(f); e.target.value = ''; }}
             />
-            <p className="text-xs font-medium text-[#6b6860] mb-2">
-              Floor plan <span className="text-[#9b9890] font-normal">(optional)</span>
+            <p className="text-xs font-medium text-[#5f6b63] mb-2">
+              Floor plan <span className="text-[#8a948d] font-normal">(optional)</span>
             </p>
             {row.stagedFloorPlan ? (
-              <div className="flex items-center gap-2 border border-[#e8e6e0] rounded-lg px-3 py-2">
-                <Upload size={14} className="text-[#2e9f82] shrink-0" />
-                <span className="text-sm text-[#1a1916] truncate flex-1">{row.stagedFloorPlan.name}</span>
+              <div className="flex items-center gap-2 border border-[#e4e9e5] rounded-lg px-3 py-2">
+                <Upload size={14} className="text-[#047246] shrink-0" />
+                <span className="text-sm text-[#14201a] truncate flex-1">{row.stagedFloorPlan.name}</span>
                 <button type="button" onClick={() => floorPlanInputRef.current?.click()}
-                  className="text-xs text-[#2e9f82] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
+                  className="text-xs text-[#047246] font-medium hover:text-[#1f6655] cursor-pointer">Replace</button>
                 <button type="button" onClick={() => onSetFloorPlan(null)}
-                  className="w-5 h-5 rounded-full bg-[#f4f3ef] flex items-center justify-center text-[#9b9890] hover:text-[#b91c1c] cursor-pointer">
+                  className="w-5 h-5 rounded-full bg-[#eef1ef] flex items-center justify-center text-[#8a948d] hover:text-[#b91c1c] cursor-pointer">
                   <X size={11} />
                 </button>
               </div>
             ) : (
               <button type="button" onClick={() => floorPlanInputRef.current?.click()}
-                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer">
+                className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-5 hover:border-[#047246] hover:bg-[#f0fdf8] transition-colors cursor-pointer">
                 <Upload size={20} className="text-[#c8c6c0] mb-1.5" />
-                <span className="text-xs text-[#9b9890]">Click to attach a floor plan (PDF or image)</span>
+                <span className="text-xs text-[#8a948d]">Click to attach a floor plan (PDF or image)</span>
               </button>
             )}
-            <p className="text-[10px] text-[#9b9890] mt-1">PDF, PNG, JPG or WebP · the layout drawing for this unit.</p>
+            <p className="text-[10px] text-[#8a948d] mt-1">PDF, PNG, JPG or WebP · the layout drawing for this unit.</p>
           </div>
         </div>
       )}

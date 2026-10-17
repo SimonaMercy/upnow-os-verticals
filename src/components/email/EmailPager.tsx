@@ -10,9 +10,9 @@ export function EmailPager({ page, pageSize, total, onPage, disabled = false }: 
   const last = Math.max(1, Math.ceil(total / pageSize));
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
-  const btn = 'w-8 h-8 grid place-items-center rounded-lg border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:border-[#e8e6e0]';
+  const btn = 'w-8 h-8 grid place-items-center rounded-lg border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:border-[#e4e9e5]';
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-t border-[#e8e6e0] bg-[#fbfaf8] text-xs text-[#6b6860]">
+    <div className="flex items-center gap-2 px-3 py-2 border-t border-[#e4e9e5] bg-[#fbfaf8] text-xs text-[#5f6b63]">
       <span className="flex-1">{from.toLocaleString('en-GB')}–{to.toLocaleString('en-GB')} of {total.toLocaleString('en-GB')}</span>
       <button type="button" aria-label="Newer" className={btn} disabled={disabled || page <= 1} onClick={() => onPage(page - 1)}><ChevronLeft size={14} /></button>
       <span>Page {page} of {last.toLocaleString('en-GB')}</span>

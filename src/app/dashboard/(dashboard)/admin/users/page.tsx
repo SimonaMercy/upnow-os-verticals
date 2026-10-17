@@ -1,20 +1,53 @@
 'use client';
-import { APP_TIME_ZONE } from '@/lib/datetime';
 
-import { useEffect, useState, useCallback } from 'react';
+/**
+ * Admin › People › Users — Genspark OS rebuild of User Management.
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - GET /api/admin/users?limit=25&offset=N[&search][&role][&status][&engagement]
+ *    → { data: AdminUser[]; total }. `engagement` is only sent on the Customers tab.
+ *  - PATCH /api/admin/users/:id/status { status: 'suspended' | 'active' } — row actions
+ *    Suspend (never for super_admin, never when already suspended) and Reactivate
+ *    (suspended or legacy banned). Row status updates in place on success; a failure
+ *    is shown (was alert(), now an inline danger Callout).
+ *  - Role tabs (always exactly one role; default rental_provider; unknown ?role= falls
+ *    back to the default) — now a kit Seg. Switching role resets engagement + page.
+ *  - Customers-only engagement filter (All / Rental only / Service only / Both) — kit chips.
+ *  - Search (name, email, phone) and status filter (active / pending verification /
+ *    suspended / banned — banned is retired but stays filterable), both reset the page.
+ *  - Filters restored from ?role / ?status / ?search / ?engagement on mount; role +
+ *    engagement synced back to the URL with history.replaceState.
+ *  - Refresh button; "Showing X–Y of N" + Previous / Next pagination with page count.
+ *  - Row click → /dashboard/admin/users/:id (detail route, unchanged); now also a
+ *    labelled "Open" button.
+ *  - Customer rows show Rental / Service engagement pills; KYC Pending pill when
+ *    kycStatus = pending_review; Last active = lastLoginAt or "Never signed in".
+ *  - Loading / error (message + retry) / empty states.
+ *  - New: "Gate 1" column on the Rental Providers / Service Providers tabs, from the
+ *    kycStatus the list already returns (no extra request). No Gate 2 here.
+ *    Badge copy names the check: "KYC docs verified" — never a bare "Verified". The list
+ *    returns no decision date, so the pill says "date not in list" (decision dates live on
+ *    the KYC record's document rows).
+ *  - The old `back` header arrow is covered by the shell breadcrumb.
+ *  - No manager/other route re-exports this page.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Users, Search, RefreshCw, ShieldCheck, UserX, UserCheck, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { DashboardPage, SectionHeader, DashboardEmpty } from '@/components/dashboard/DashboardWidgets';
 import { apiGet, apiPatch } from '@/lib/api';
+import {
+  Btn, Callout, EmptyRow, ErrorRow, OsPage, PageHead, Pill, ScopeStrip, SearchField, Seg, SkeletonRows,
+  StatusTag, TableWrap, Thumb, fmtDate,
+} from '@/components/os/kit';
 
 // `banned` is retired — no button writes it any more — but it stays filterable
 // and renderable so any row left on that status from before is still findable.
-const STATUSES = ['', 'active', 'pending_verification', 'suspended', 'banned'];
+const STATUSES = ['active', 'pending_verification', 'suspended', 'banned'];
 
-// Role tabs — the list is always filtered to exactly one role; there is no "All"
-// pour-everything-in view. Rental Providers leads because it is the role admins
-// open this page for. Landing tab, and the fallback for any unknown ?role=.
+// Role tabs — the list is always filtered to exactly one role; there is no "All" view.
 const DEFAULT_ROLE = 'rental_provider';
 const ROLE_TABS: { key: string; label: string }[] = [
   { key: 'rental_provider', label: 'Rental Providers' },
@@ -25,6 +58,7 @@ const ROLE_TABS: { key: string; label: string }[] = [
   { key: 'super_admin', label: 'Super Admins' },
   { key: 'customer', label: 'Customers' },
 ];
+const PROVIDER_ROLES = new Set(['rental_provider', 'service_provider']);
 
 // Customer engagement split — rental tenancy vs service bookings vs both.
 const ENGAGEMENT_TABS: { key: string; label: string }[] = [
@@ -33,6 +67,10 @@ const ENGAGEMENT_TABS: { key: string; label: string }[] = [
   { key: 'service', label: 'Service only' },
   { key: 'both', label: 'Both' },
 ];
+
+const KYC_LABEL: Record<string, string> = {
+  verified: 'Verified', pending_review: 'Pending review', unverified: 'Not started', rejected: 'Rejected',
+};
 
 interface AdminUser {
   id: number;
@@ -52,13 +90,7 @@ interface AdminUser {
   serviceActive?: boolean;
 }
 
-const statusColor: Record<string, { bg: string; color: string }> = {
-  active: { bg: 'var(--color-primary-50)', color: 'var(--color-primary)' },
-  pending_verification: { bg: '#fef9eb', color: 'var(--color-gold)' },
-  suspended: { bg: '#fef2f2', color: 'var(--color-error)' },
-  banned: { bg: '#fef2f2', color: 'var(--color-error)' },
-};
-
+const LIMIT = 25;
 
 export default function AdminUsersPage() {
   useAuth();
@@ -73,18 +105,17 @@ export default function AdminUsersPage() {
   const [engagementFilter, setEngagementFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
-  const limit = 25;
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) });
       if (search) params.set('search', search);
       if (roleFilter) params.set('role', roleFilter);
       if (statusFilter) params.set('status', statusFilter);
       if (roleFilter === 'customer' && engagementFilter) params.set('engagement', engagementFilter);
-
       const result = await apiGet<{ data: AdminUser[]; total: number }>(`/admin/users?${params}`);
       setUsers(result.data);
       setTotal(result.total);
@@ -95,14 +126,15 @@ export default function AdminUsersPage() {
     }
   }, [search, roleFilter, statusFilter, engagementFilter, offset]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch whenever the filters change
   useEffect(() => { void fetchUsers(); }, [fetchUsers]);
 
   // Restore filters from URL on mount
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const r = p.get('role'); const s = p.get('status'); const q = p.get('search'); const e = p.get('engagement');
-    // Old links carrying ?role= (the retired All tab) land on the default role
-    // rather than on an unfiltered list with no tab lit up.
+    // Old links carrying ?role= (the retired All tab) land on the default role.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot URL filter restore after hydration
     if (ROLE_TABS.some((t) => t.key === r)) setRoleFilter(r!);
     if (s != null) setStatusFilter(s);
     if (q != null) setSearch(q);
@@ -119,288 +151,181 @@ export default function AdminUsersPage() {
     window.history.replaceState(null, '', url.toString());
   }, [roleFilter, engagementFilter]);
 
-  // Suspend is the only lock-out. Ban used to sit beside it but set a status the
-  // auth service never checked, so it blocked nothing — it is gone rather than
-  // fixed, since a working Ban would have been Suspend under another name.
+  // Suspend is the only lock-out (Ban set a status the auth service never checked).
   async function updateStatus(userId: number, status: string) {
     setActionLoading(userId);
+    setActionError(null);
     try {
       await apiPatch(`/admin/users/${userId}/status`, { status });
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status } : u));
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status } : u)));
     } catch (err) {
-      alert((err as Error).message);
+      setActionError((err as Error).message);
     } finally {
       setActionLoading(null);
     }
   }
 
-  const totalPages = Math.ceil(total / limit);
-  const currentPage = Math.floor(offset / limit) + 1;
-  // One role is always in force, so the count is that role's — never a platform total.
+  const totalPages = Math.ceil(total / LIMIT);
+  const currentPage = Math.floor(offset / LIMIT) + 1;
   const activeRoleLabel = ROLE_TABS.find((t) => t.key === roleFilter)?.label ?? 'users';
+  const isProviderTab = PROVIDER_ROLES.has(roleFilter);
+  const cols = isProviderTab ? 5 : 4;
 
   return (
-    <DashboardPage
-      back
-      title="User Management"
-      subtitle={`${total} ${activeRoleLabel.toLowerCase()}`}
-    >
-      {/* Role tabs */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {ROLE_TABS.map((t) => {
-          const active = roleFilter === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => { setRoleFilter(t.key); setEngagementFilter(''); setOffset(0); }}
-              className="px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors"
-              style={
-                active
-                  ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
-                  : { backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-600)' }
-              }
-            >
-              {t.label}
-            </button>
-          );
-        })}
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › People"
+        title="Users"
+        lede="Every account on the platform, one role at a time. Open a user for their full record; suspend blocks sign-in."
+        actions={<Btn onClick={() => void fetchUsers()} disabled={loading}><RefreshCw size={13} aria-hidden /> Refresh</Btn>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'People' },
+        { label: 'Role', value: activeRoleLabel },
+        { label: 'Matching', value: loading ? '…' : total },
+        ...(statusFilter ? [{ label: 'Status', value: statusFilter.replace(/_/g, ' ') }] : []),
+      ]} />
+
+      <div style={{ marginBottom: 12, overflowX: 'auto' }}>
+        <Seg
+          label="Role"
+          value={roleFilter}
+          options={ROLE_TABS.map((t) => ({ v: t.key, l: t.label, n: t.key === roleFilter && !loading ? total : undefined }))}
+          onChange={(v) => { setRoleFilter(v); setEngagementFilter(''); setOffset(0); }}
+        />
       </div>
 
-      {/* Customer engagement split — only for the Customers tab */}
-      {roleFilter === 'customer' && (
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="text-xs font-semibold uppercase tracking-wide mr-1" style={{ color: 'var(--color-neutral-400)' }}>
-            Active in
-          </span>
-          {ENGAGEMENT_TABS.map((t) => {
-            const active = engagementFilter === t.key;
-            return (
-              <button
-                key={t.key || 'all'}
-                onClick={() => { setEngagementFilter(t.key); setOffset(0); }}
-                className="px-3 py-1 rounded-full text-xs font-medium transition-colors border"
-                style={active
-                  ? { backgroundColor: 'var(--color-neutral-800)', color: '#fff', borderColor: 'var(--color-neutral-800)' }
-                  : { backgroundColor: '#fff', color: 'var(--color-neutral-600)', borderColor: 'var(--color-base-200)' }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
+      {actionError && (
+        <div style={{ marginBottom: 12 }}>
+          <Callout tone="bad" title="Status change failed.">{actionError}</Callout>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <div
-          className="flex items-center gap-2 flex-1 min-w-[220px] px-3.5 py-2.5 rounded-xl bg-white text-sm"
-          style={{ boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-base-200)' }}
-        >
-          <Search size={15} style={{ color: 'var(--color-neutral-400)' }} />
-          <input
-            type="text"
-            placeholder="Search by name, email or phone…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
-            className="flex-1 outline-none bg-transparent text-sm"
-            style={{ color: 'var(--color-neutral-900)' }}
-          />
+      {isProviderTab && (
+        <div style={{ marginBottom: 12 }}>
+          <Callout tone="info" title="Gate 1 is business verification.">
+            The column shows the account&apos;s KYC status from this list. Decisions are made in the <Link href="/dashboard/admin/kyc" style={{ fontWeight: 700, textDecoration: 'underline' }}>Profile Verification queue</Link>.
+          </Callout>
         </div>
+      )}
 
-        <div className="relative">
+      <TableWrap toolbar={
+        <>
+          <SearchField value={search} onChange={(v) => { setSearch(v); setOffset(0); }} placeholder="Search by name, email or phone…" />
           <select
+            className="gx-sel"
+            style={{ width: 'auto', height: 30 }}
+            aria-label="Status"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
-            className="appearance-none pl-3.5 pr-8 py-2.5 rounded-xl bg-white text-sm outline-none"
-            style={{ boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-base-200)', color: 'var(--color-neutral-700)' }}
           >
             <option value="">All statuses</option>
-            {STATUSES.filter(Boolean).map((s) => (
-              <option key={s} value={s}>{s.replace('_', ' ')}</option>
-            ))}
+            {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
           </select>
-          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-neutral-400)' }} />
-        </div>
-
-        <button
-          onClick={() => void fetchUsers()}
-          className="p-2.5 rounded-xl bg-white transition-colors hover:bg-base-100"
-          style={{ boxShadow: 'var(--shadow-sm)', border: '1px solid var(--color-base-200)' }}
-          title="Refresh"
-        >
-          <RefreshCw size={15} style={{ color: 'var(--color-neutral-500)' }} />
-        </button>
-      </div>
-
-      {/* Table */}
-      {loading && (
-        <div className="rounded-2xl p-8 bg-white text-center text-sm" style={{ color: 'var(--color-neutral-400)', boxShadow: 'var(--shadow-sm)' }}>
-          Loading…
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="rounded-2xl p-8 bg-white text-center text-sm" style={{ color: 'var(--color-error)', boxShadow: 'var(--shadow-sm)' }}>
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && users.length === 0 && (
-        <DashboardEmpty message="No users match the current filters." />
-      )}
-
-      {!loading && !error && users.length > 0 && (
-        <>
-          <SectionHeader title={`Showing ${offset + 1}–${Math.min(offset + users.length, total)} of ${total}`} />
-
-          <div className="bg-white rounded-2xl overflow-hidden mb-6" style={{ boxShadow: 'var(--shadow-sm)' }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr style={{ backgroundColor: 'var(--color-base-100)' }}>
-                    {['Details', 'Status', 'Last active', 'Action'].map((h, i) => (
-                      <th
-                        key={h}
-                        className={`px-4 py-3 text-[11px] font-bold uppercase tracking-[0.06em] whitespace-nowrap ${i === 3 ? 'text-right' : 'text-left'}`}
-                        style={{ color: 'var(--color-neutral-500)' }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                    <th className="w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => {
-                    const sc = statusColor[u.status] ?? { bg: 'var(--color-base-100)', color: 'var(--color-neutral-600)' };
-                    return (
-                      <tr
-                        key={u.id}
-                        onClick={() => router.push(`/dashboard/admin/users/${u.id}`)}
-                        className="cursor-pointer transition-colors hover:bg-[var(--color-base-100)]"
-                        style={{ borderTop: '1px solid var(--color-base-200)' }}
-                      >
-                        {/* Details — identity, and the badges that qualify it */}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div
-                              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                              style={{ backgroundColor: 'var(--color-base-100)' }}
-                            >
-                              <Users size={16} style={{ color: 'var(--color-neutral-500)' }} />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-semibold truncate" style={{ color: 'var(--color-neutral-900)' }}>{u.name}</p>
-                              <p className="text-xs truncate" style={{ color: 'var(--color-neutral-500)' }}>
-                                {u.email}{u.phone ? ` · ${u.phone}` : ''}
-                              </p>
-                            </div>
-                            {/* Engagement badges (customers only) */}
-                            {u.role === 'customer' && u.rentalActive && (
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                                style={{ backgroundColor: '#eff6ff', color: '#3b82f6' }}>Rental</span>
-                            )}
-                            {u.role === 'customer' && u.serviceActive && (
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
-                                style={{ backgroundColor: '#ecfeff', color: '#0891b2' }}>Service</span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Status — account state, plus KYC only when it needs a decision */}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap"
-                              style={{ backgroundColor: sc.bg, color: sc.color }}>
-                              {u.status.replace('_', ' ')}
-                            </span>
-                            {u.kycStatus === 'pending_review' && (
-                              <span className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap"
-                                style={{ backgroundColor: '#fef9eb', color: 'var(--color-gold)' }}>
-                                <ShieldCheck size={11} /> KYC Pending
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Last active — last sign-in, not sign-up */}
-                        <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: 'var(--color-neutral-500)' }}>
-                          {u.lastLoginAt
-                            ? new Date(u.lastLoginAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })
-                            : <span style={{ color: 'var(--color-neutral-300)' }}>Never signed in</span>}
-                        </td>
-
-                        {/* Action — super admins are never suspendable */}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-2">
-                            {u.status !== 'suspended' && u.role !== 'super_admin' && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'suspended'); }}
-                                disabled={actionLoading === u.id}
-                                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
-                                style={{
-                                  backgroundColor: '#fef2f2',
-                                  color: 'var(--color-error)',
-                                  opacity: actionLoading === u.id ? 0.5 : 1,
-                                }}
-                                title="Block this user from signing in"
-                              >
-                                <UserX size={12} /> Suspend
-                              </button>
-                            )}
-                            {(u.status === 'suspended' || u.status === 'banned') && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); void updateStatus(u.id, 'active'); }}
-                                disabled={actionLoading === u.id}
-                                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
-                                style={{
-                                  backgroundColor: 'var(--color-primary-50)',
-                                  color: 'var(--color-primary)',
-                                  opacity: actionLoading === u.id ? 0.5 : 1,
-                                }}
-                              >
-                                <UserCheck size={12} /> Reactivate
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="pr-3">
-                          <ChevronRight size={16} style={{ color: 'var(--color-neutral-300)' }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => setOffset(Math.max(0, offset - limit))}
-                disabled={offset === 0}
-                className="px-4 py-2 rounded-xl text-sm font-medium transition-opacity disabled:opacity-40"
-                style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-700)' }}
-              >
-                Previous
-              </button>
-              <span className="text-sm" style={{ color: 'var(--color-neutral-500)' }}>
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                onClick={() => setOffset(offset + limit)}
-                disabled={offset + limit >= total}
-                className="px-4 py-2 rounded-xl text-sm font-medium transition-opacity disabled:opacity-40"
-                style={{ backgroundColor: 'var(--color-base-100)', color: 'var(--color-neutral-700)' }}
-              >
-                Next
-              </button>
+          {roleFilter === 'customer' && (
+            <div className="gx-chips" role="group" aria-label="Active in">
+              {ENGAGEMENT_TABS.map((t) => (
+                <button
+                  key={t.key || 'all'}
+                  type="button"
+                  className="gx-chip"
+                  aria-pressed={engagementFilter === t.key}
+                  onClick={() => { setEngagementFilter(t.key); setOffset(0); }}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           )}
+          <span className="sp" />
+          {!loading && !error && users.length > 0 && (
+            <span style={{ fontSize: 11, color: 'var(--ms-ink-3)' }}>
+              Showing {offset + 1}–{Math.min(offset + users.length, total)} of {total}
+            </span>
+          )}
         </>
+      }>
+        <table className="gx-tbl">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Status</th>
+              {isProviderTab && <th>Gate 1</th>}
+              <th>Last active</th>
+              <th className="act">Actions</th>
+            </tr>
+          </thead>
+          {loading ? (
+            <SkeletonRows rows={8} cols={cols} />
+          ) : error ? (
+            <>
+              <tbody><tr><td colSpan={cols}><Callout tone="bad">{error}</Callout></td></tr></tbody>
+              <ErrorRow cols={cols} onRetry={() => void fetchUsers()} />
+            </>
+          ) : users.length === 0 ? (
+            <EmptyRow cols={cols} title="No users match the current filters." text="Clear the search or status filter, or pick another role." />
+          ) : (
+            <tbody>
+              {users.map((u) => {
+                const busy = actionLoading === u.id;
+                return (
+                  <tr key={u.id} className="click" onClick={() => router.push(`/dashboard/admin/users/${u.id}`)}>
+                    <td>
+                      <div className="gx-cell">
+                        <Thumb text={u.name} />
+                        <span>
+                          <span className="strong">{u.name}</span>
+                          <span className="sub">{u.email}{u.phone ? ` · ${u.phone}` : ''}</span>
+                        </span>
+                        {u.role === 'customer' && u.rentalActive && <Pill tone="info" dot={false}>Rental</Pill>}
+                        {u.role === 'customer' && u.serviceActive && <Pill tone="outline" dot={false}>Service</Pill>}
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        <StatusTag status={u.status} />
+                        {u.kycStatus === 'pending_review' && <Pill tone="amber">KYC Pending</Pill>}
+                      </div>
+                    </td>
+                    {isProviderTab && (
+                      <td>
+                        {u.kycStatus === 'verified'
+                          ? <Pill tone="primary" title="Identity / KYC documents verified by an admin. The users list returns no decision date — open the record for document verification dates.">KYC docs verified · date not in list</Pill>
+                          : <StatusTag status={u.kycStatus} label={KYC_LABEL[u.kycStatus] ?? undefined} />}
+                      </td>
+                    )}
+                    <td className="nowrap">
+                      {u.lastLoginAt ? fmtDate(u.lastLoginAt) : <span style={{ color: 'var(--ms-ink-3)' }}>Never signed in</span>}
+                    </td>
+                    <td className="act" onClick={(e) => e.stopPropagation()}>
+                      <div className="gx-btn-row" style={{ justifyContent: 'flex-end' }}>
+                        {u.status !== 'suspended' && u.role !== 'super_admin' && (
+                          <Btn size="xs" variant="danger" disabled={busy} title="Block this user from signing in"
+                            onClick={() => void updateStatus(u.id, 'suspended')}>
+                            Suspend
+                          </Btn>
+                        )}
+                        {(u.status === 'suspended' || u.status === 'banned') && (
+                          <Btn size="xs" disabled={busy} onClick={() => void updateStatus(u.id, 'active')}>Reactivate</Btn>
+                        )}
+                        <Btn size="xs" variant="primary" href={`/dashboard/admin/users/${u.id}`}>Open</Btn>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          )}
+        </table>
+      </TableWrap>
+
+      {!loading && !error && totalPages > 1 && (
+        <div className="gx-btn-row" style={{ justifyContent: 'center', marginTop: 14 }}>
+          <Btn size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - LIMIT))}>Previous</Btn>
+          <span style={{ fontSize: 12, color: 'var(--ms-ink-3)' }}>Page {currentPage} of {totalPages}</span>
+          <Btn size="sm" disabled={offset + LIMIT >= total} onClick={() => setOffset(offset + LIMIT)}>Next</Btn>
+        </div>
       )}
-    </DashboardPage>
+    </OsPage>
   );
 }

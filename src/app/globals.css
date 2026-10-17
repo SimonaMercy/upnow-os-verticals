@@ -2,32 +2,33 @@
 
 @theme inline {
   /* === Brand === */
-  --color-primary:       #2e9f82;
-  --color-primary-dark:  #1a5a4a;
-  --color-primary-light: #d8f2e8;
-  --color-primary-50:    #f0faf6;
+  --color-primary:       #047246;
+  --color-primary-dark:  #0f4f36;
+  --color-primary-light: #d8efe3;
+  --color-primary-50:    #eef7f2;
 
   /* === Gold === */
   --color-gold:          #d4a820;
   --color-gold-light:    #f5d97a;
 
   /* === Base / Background === */
-  --color-surface:       #fafaf8;   /* renamed from --color-base to avoid colliding with Tailwind's text-base font-size utility */
-  --color-base-100:      #f4f3ef;
-  --color-base-200:      #e8e6e0;
+  --color-surface:       #f6f8f6;   /* renamed from --color-base to avoid colliding with Tailwind's text-base font-size utility */
+  --color-base-100:      #eef1ef;
+  --color-base-200:      #e4e9e5;
 
   /* === Neutral (Text) === */
-  --color-neutral-900:   #1a1916;
-  --color-neutral-700:   #3d3b35;
-  --color-neutral-500:   #6b6860;
-  --color-neutral-400:   #9b9890;
+  --color-neutral-900:   #14201a;
+  --color-neutral-700:   #46534c;
+  --color-neutral-500:   #5f6b63;
+  --color-neutral-400:   #8a948d;
 
   /* === Semantic === */
-  --color-error:         #d43f3f;
+  --color-error:         #c2413b;
   --color-warning:       #e8a020;
 
   /* === Font === */
-  --font-sans: 'Manrope', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Roboto Serif', 'Plus Jakarta Sans', serif;
 }
 
 :root {
@@ -37,23 +38,61 @@
   --radius:    0.75rem;
 
   /* Alias vars -- match the Vite project's CSS variable names exactly */
-  --primary:       #2e9f82;
-  --primary-dark:  #1a5a4a;
-  --primary-light: #d8f2e8;
-  --primary-50:    #f0faf6;
+  --primary:       #047246;
+  --primary-dark:  #0f4f36;
+  --primary-light: #d8efe3;
+  --primary-50:    #eef7f2;
   --gold:          #d4a820;
   --gold-light:    #f5d97a;
   --white:         #ffffff;
-  --base:          #fafaf8;
-  --base-100:      #f4f3ef;
-  --base-200:      #e8e6e0;
-  --neutral-900:   #1a1916;
-  --neutral-700:   #3d3b35;
-  --neutral-600:   #4f4c44;
-  --neutral-500:   #6b6860;
-  --neutral-400:   #9b9890;
-  --error:         #d43f3f;
+  --base:          #f6f8f6;
+  --base-100:      #eef1ef;
+  --base-200:      #e4e9e5;
+  --neutral-900:   #14201a;
+  --neutral-700:   #46534c;
+  --neutral-600:   #46534c;
+  --neutral-500:   #5f6b63;
+  --neutral-400:   #8a948d;
+  --error:         #c2413b;
   --warning:       #e8a020;
+
+  /* MarketSpace design tokens (authoritative: upnow-marketspace css/variables.css).
+     The legacy OS palette above was remapped onto these values; new code should
+     read these names. */
+  --font-sans:              'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif:             'Roboto Serif', 'Plus Jakarta Sans', serif;
+  --ms-primary-darkest:     #0b3d2a;
+  --ms-primary-dark:        #0f4f36;
+  --ms-primary:             #047246;
+  --ms-primary-light:       #1a7a53;
+  --ms-primary-lighter:     #25946a;
+  --ms-tint:                #d8efe3;
+  --ms-tint-light:          #eef7f2;
+  --ms-tint-pale:           #f6fbf8;
+  --ms-ink:                 #14201a;
+  --ms-ink-2:               #46534c;
+  --ms-ink-3:               #5f6b63;
+  --ms-ink-disabled:        #c3cbc6;
+  --ms-bg:                  #fefffe;
+  --ms-surface:             #ffffff;
+  --ms-surface-2:           #f6f8f6;
+  --ms-surface-3:           #eef1ef;
+  --ms-border:              #e4e9e5;
+  --ms-border-strong:       #d3dad5;
+  --ms-whatsapp:            #14853f;
+  --ms-amber:               #94600f;
+  --ms-amber-bg:            #f8eedb;
+  --ms-amber-text:          #8a5a12;
+  --ms-danger:              #c2413b;
+  --ms-danger-bg:           #fbeae9;
+  --ms-info:                #2f5f9e;
+  --ms-info-bg:             #e8eff9;
+  --ms-star:                #e0a526;
+  --ms-radius:              12px;
+  --ms-radius-sm:           8px;
+  --ms-shadow:              0 1px 2px rgba(15,40,28,.06), 0 4px 16px rgba(15,40,28,.06);
+  --ms-shadow-md:           0 4px 14px rgba(15,40,28,.09);
+  --ms-shadow-lg:           0 12px 40px rgba(15,40,28,.16);
 }
 
 /* Layout utilities */
@@ -96,7 +135,7 @@ input[type="range"].dual-range::-webkit-slider-thumb {
   width: 18px;
   border-radius: 50%;
   background-color: #ffffff;
-  border: 2.5px solid #2e9f82;
+  border: 2.5px solid #047246;
   cursor: pointer;
   box-shadow: 0 1px 5px rgba(15,30,25,.28);
   margin-top: 0;
@@ -107,12 +146,12 @@ input[type="range"].dual-range::-moz-range-thumb {
   width: 18px;
   border-radius: 50%;
   background-color: #ffffff;
-  border: 2.5px solid #2e9f82;
+  border: 2.5px solid #047246;
   cursor: pointer;
   box-shadow: 0 1px 5px rgba(15,30,25,.28);
 }
 input[type="range"].dual-range:focus::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(46,159,130,0.25);
+  box-shadow: 0 0 0 3px rgba(4,114,70,0.25);
 }
 
 * {
@@ -120,10 +159,10 @@ input[type="range"].dual-range:focus::-webkit-slider-thumb {
 }
 
 html, body {
-  font-family: 'Manrope', sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 18px;
-  background-color: #fafaf8;
-  color: #1a1916;
+  background-color: #f6f8f6;
+  color: #14201a;
 }
 
 /* Card hover utility */
@@ -154,21 +193,21 @@ html, body {
 }
 .skeleton-pulse {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
-  background-color: #e8e6e0;
+  background-color: #e4e9e5;
 }
 
 /* -- react-day-picker v9 theme overrides ------------------------ */
 .rdp-root {
-  --rdp-accent-color:            #2e9f82;
-  --rdp-accent-background-color: #d8f2e8;
-  --rdp-today-color:             #2e9f82;
+  --rdp-accent-color:            #047246;
+  --rdp-accent-background-color: #d8efe3;
+  --rdp-today-color:             #047246;
   --rdp-day-height:              38px;
   --rdp-day-width:               38px;
   --rdp-day_button-height:       36px;
   --rdp-day_button-width:        36px;
-  font-family: 'Manrope', sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 0.875rem;
-  color: #1a1916;
+  color: #14201a;
 }
 
 /* Caption (month + year label row) */
@@ -181,21 +220,21 @@ html, body {
 .rdp-caption_label {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #1a1916;
+  color: #14201a;
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   border-radius: 0.5rem;
   transition: background 150ms;
 }
 .rdp-caption_label:hover {
-  background: #f4f3ef;
+  background: #eef1ef;
 }
 
 /* Weekday header row */
 .rdp-weekday {
   font-size: 0.75rem;
   font-weight: 500;
-  color: #9b9890;
+  color: #8a948d;
 }
 
 /* Day buttons */
@@ -208,7 +247,7 @@ html, body {
 /* Today indicator */
 .rdp-today:not(.rdp-selected) .rdp-day_button {
   font-weight: 700;
-  color: #2e9f82;
+  color: #047246;
 }
 
 /* Navigation prev/next buttons */
@@ -224,16 +263,16 @@ html, body {
 }
 .rdp-button_previous:hover,
 .rdp-button_next:hover {
-  background: #f4f3ef;
+  background: #eef1ef;
 }
 
 /* Chevron inside nav buttons and dropdowns */
 .rdp-chevron {
-  fill: #3d3b35 !important;
+  fill: #46534c !important;
 }
 /* Disabled dropdown chevron */
 .rdp-dropdown_root[data-disabled="true"] .rdp-chevron {
-  fill: #9b9890 !important;
+  fill: #8a948d !important;
 }
 
 /* ============================================================
@@ -249,7 +288,7 @@ html, body {
   position: sticky; top: 0; z-index: 60;
   background: rgba(255,255,255,.9);
   backdrop-filter: blur(16px);
-  border-bottom: 1px solid #e8ece9;
+  border-bottom: 1px solid #e4e9e5;
 }
 .l-nav-inner {
   display: flex; align-items: center; justify-content: space-between;
@@ -259,7 +298,7 @@ html, body {
 .l-brand {
   display: flex; align-items: center; gap: 10px;
   font-weight: 800; font-size: 21px; letter-spacing: -.02em;
-  color: #1f7e66; text-decoration: none; flex-shrink: 0;
+  color: #0f4f36; text-decoration: none; flex-shrink: 0;
 }
 .l-brand-mark {
   width: 24px; height: 24px; border-radius: 8px;
@@ -270,12 +309,12 @@ html, body {
 .l-nav-center { display: flex; align-items: center; gap: 4px; }
 .l-nav-tab {
   position: relative; padding: 10px 18px; border-radius: 999px;
-  font-size: 15px; font-weight: 600; color: #36433d;
+  font-size: 15px; font-weight: 600; color: #46534c;
   background: transparent; border: none; cursor: pointer;
   transition: all .15s; white-space: nowrap; font-family: inherit;
 }
-.l-nav-tab:hover { background: #f4f6f3; color: #0e1a16; }
-.l-nav-tab.active { background: #0e1a16; color: #fff; }
+.l-nav-tab:hover { background: #f4f6f3; color: #14201a; }
+.l-nav-tab.active { background: #14201a; color: #fff; }
 .l-nav-tab .dot {
   display: inline-block; width: 6px; height: 6px; border-radius: 99px;
   background: currentColor; margin-right: 7px; opacity: .5;
@@ -283,9 +322,9 @@ html, body {
 .l-nav-tab.active .dot { opacity: 1; }
 .l-nav-link {
   padding: 10px 14px; font-size: 15px; font-weight: 600;
-  color: #36433d; text-decoration: none; white-space: nowrap;
+  color: #46534c; text-decoration: none; white-space: nowrap;
 }
-.l-nav-link:hover { color: #1f7e66; }
+.l-nav-link:hover { color: #0f4f36; }
 .l-nav-actions { align-items: center; gap: 8px; }
 @media (max-width: 980px) { .l-nav-center { display: none; } }
 @media (max-width: 560px) { .l-nav-actions .hide-sm { display: none; } }
@@ -298,7 +337,7 @@ html, body {
      border-box regardless of overflow, so it is unaffected. */
   position: relative; overflow: visible; padding: 40px 0 30px;
   background:
-    radial-gradient(900px 420px at 50% -20%, #e7f5f0 0%, transparent 60%),
+    radial-gradient(900px 420px at 50% -20%, #eef7f2 0%, transparent 60%),
     linear-gradient(180deg, #fff 0, #fff 70%, #fafbf9 100%);
 }
 .l-hero-inner {
@@ -307,7 +346,7 @@ html, body {
 }
 .l-hero-line {
   font-size: clamp(22px, 3.2vw, 38px); font-weight: 700;
-  letter-spacing: -.02em; line-height: 1.12; margin: 0; color: #0e1a16;
+  letter-spacing: -.02em; line-height: 1.12; margin: 0; color: #14201a;
   text-wrap: balance;
 }
 @media (max-width: 560px) { .l-hero { padding: 28px 0 22px; } }
@@ -315,18 +354,18 @@ html, body {
 /* -- Segment toggle ----------------------------------------- */
 .l-segwrap {
   margin-top: 22px; display: inline-flex; padding: 5px;
-  background: #f4f6f3; border: 1px solid #e8ece9; border-radius: 999px; gap: 4px;
+  background: #f4f6f3; border: 1px solid #e4e9e5; border-radius: 999px; gap: 4px;
 }
 .l-seg {
   display: inline-flex; align-items: center; gap: 9px;
   padding: 11px 22px; border-radius: 999px; border: none;
   background: transparent; font-size: 15px; font-weight: 700;
-  color: #36433d; cursor: pointer; transition: all .18s; white-space: nowrap;
+  color: #46534c; cursor: pointer; transition: all .18s; white-space: nowrap;
   font-family: inherit;
 }
 .l-seg .si { width: 18px; height: 18px; display: grid; place-items: center; }
-.l-seg.active { background: #fff; color: #0e1a16; box-shadow: 0 6px 24px -14px rgba(15,30,25,.22); }
-.l-seg.active .si { color: #1f7e66; }
+.l-seg.active { background: #fff; color: #14201a; box-shadow: 0 6px 24px -14px rgba(15,30,25,.22); }
+.l-seg.active .si { color: #0f4f36; }
 @media (max-width: 560px) {
   .l-seg { padding: 10px 15px; font-size: 13.5px; gap: 7px; }
   .l-seg .si { width: 16px; height: 16px; }
@@ -334,7 +373,7 @@ html, body {
 
 /* -- Search bar --------------------------------------------- */
 .l-search {
-  margin: 20px auto 0; background: #fff; border: 1px solid #e8ece9;
+  margin: 20px auto 0; background: #fff; border: 1px solid #e4e9e5;
   border-radius: 999px; display: flex; align-items: stretch;
   box-shadow: 0 24px 60px -28px rgba(15,30,25,.34);
   width: 100%; max-width: 880px; overflow: hidden;
@@ -347,27 +386,27 @@ html, body {
 .l-search .field:hover { background: #fafbf9; }
 .l-search .field + .field::before {
   content: ""; position: absolute; left: 0; top: 18px; bottom: 18px;
-  width: 1px; background: #e8ece9;
+  width: 1px; background: #e4e9e5;
 }
 .l-search .field .lbl {
-  font-size: 11.5px; font-weight: 700; color: #0e1a16; letter-spacing: .02em;
+  font-size: 11.5px; font-weight: 700; color: #14201a; letter-spacing: .02em;
 }
 .l-search .field .val {
-  font-size: 14px; color: #6b7a74; font-weight: 500;
+  font-size: 14px; color: #5f6b63; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .l-search .field input {
   border: none; outline: none; background: transparent;
-  font-size: 14px; color: #0e1a16; font-family: inherit; font-weight: 500; padding: 0;
+  font-size: 14px; color: #14201a; font-family: inherit; font-weight: 500; padding: 0;
 }
-.l-search .field input::placeholder { color: #6b7a74; }
+.l-search .field input::placeholder { color: #5f6b63; }
 .l-search .go {
   flex-shrink: 0; margin: 7px; min-width: 54px; border-radius: 999px;
-  background: #2e9f82; color: #fff; border: none; display: flex;
+  background: #047246; color: #fff; border: none; display: flex;
   align-items: center; justify-content: center; gap: 0;
   transition: all .16s; cursor: pointer; overflow: hidden;
 }
-.l-search .go:hover { background: #1f7e66; min-width: 120px; gap: 8px; }
+.l-search .go:hover { background: #0f4f36; min-width: 120px; gap: 8px; }
 .l-search .go .gtxt { display: none; font-weight: 700; font-size: 14px; }
 .l-search .go:hover .gtxt { display: inline; }
 @media (max-width: 760px) {
@@ -381,7 +420,7 @@ html, body {
 /* -- Location / budget dropdowns ----------------------------- */
 .loc-dropdown {
   position: absolute; top: calc(100% + 10px); z-index: 200;
-  background: #fff; border: 1px solid #e8ece9; border-radius: 16px;
+  background: #fff; border: 1px solid #e4e9e5; border-radius: 16px;
   box-shadow: 0 12px 40px -8px rgba(15,30,25,.18);
   overflow: hidden; padding: 6px 0;
 }
@@ -391,13 +430,13 @@ html, body {
   display: flex; align-items: center; gap: 10px;
   width: 100%; padding: 10px 16px; border: none; background: transparent;
   text-align: left; cursor: pointer; transition: background .12s;
-  font-size: 14px; font-family: inherit; color: #0e1a16;
+  font-size: 14px; font-family: inherit; color: #14201a;
 }
 .loc-option:hover { background: #f5faf8; }
-.loc-option.sel { background: #f0faf6; }
-.loc-pin { color: #2e9f82; flex-shrink: 0; }
+.loc-option.sel { background: #eef7f2; }
+.loc-pin { color: #047246; flex-shrink: 0; }
 .loc-name { font-weight: 600; }
-.loc-sub  { color: #6b7a74; }
+.loc-sub  { color: #5f6b63; }
 .l-budget-display {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 14px; font-weight: 500; width: 100%;
@@ -414,13 +453,13 @@ html, body {
 .l-catchip {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 9px;
   padding: 10px 16px; border-radius: 999px; background: #fff;
-  border: 1px solid #e8ece9; font-size: 14px; font-weight: 600;
-  color: #36433d; cursor: pointer; transition: all .15s; white-space: nowrap;
+  border: 1px solid #e4e9e5; font-size: 14px; font-weight: 600;
+  color: #46534c; cursor: pointer; transition: all .15s; white-space: nowrap;
   font-family: inherit;
 }
-.l-catchip:hover { border-color: #0e1a16; color: #0e1a16; }
-.l-catchip.active { background: #e7f5f0; border-color: #2e9f82; color: #155a48; }
-.l-catchip .ci { width: 17px; height: 17px; display: grid; place-items: center; color: #1f7e66; }
+.l-catchip:hover { border-color: #14201a; color: #14201a; }
+.l-catchip.active { background: #eef7f2; border-color: #047246; color: #0b3d2a; }
+.l-catchip .ci { width: 17px; height: 17px; display: grid; place-items: center; color: #0f4f36; }
 @media (max-width: 560px) { .l-catchip { padding: 9px 13px; font-size: 13px; } }
 
 /* -- Wrap --------------------------------------------------- */
@@ -436,14 +475,14 @@ html, body {
   font-size: clamp(22px, 2.4vw, 30px); font-weight: 700;
   letter-spacing: -.02em; line-height: 1.1;
 }
-.l-sec-head .s { margin-top: 7px; color: #6b7a74; font-size: 15.5px; max-width: 52ch; }
+.l-sec-head .s { margin-top: 7px; color: #5f6b63; font-size: 15.5px; max-width: 52ch; }
 .l-viewall {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px;
-  font-weight: 700; font-size: 14.5px; color: #1f7e66; padding: 9px 4px;
+  font-weight: 700; font-size: 14.5px; color: #0f4f36; padding: 9px 4px;
   border-bottom: 2px solid transparent; transition: all .15s; white-space: nowrap;
   text-decoration: none;
 }
-.l-viewall:hover { border-color: #2e9f82; gap: 10px; }
+.l-viewall:hover { border-color: #047246; gap: 10px; }
 @media (max-width: 680px) { .l-sec-head { flex-direction: column; align-items: flex-start; gap: 12px; } }
 
 /* -- Card rail (grid) --------------------------------------- */
@@ -491,21 +530,21 @@ html, body {
 }
 .l-pcard .rate {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 13.5px; font-weight: 600; color: #0e1a16; flex-shrink: 0;
+  font-size: 13.5px; font-weight: 600; color: #14201a; flex-shrink: 0;
 }
-.l-pcard .loc { font-size: 13.5px; color: #6b7a74; margin-top: 2px; }
-.l-pcard .price { margin-top: 9px; font-weight: 700; font-size: 15px; color: #0e1a16; }
-.l-pcard .price small { font-weight: 500; color: #6b7a74; font-size: 12.5px; }
+.l-pcard .loc { font-size: 13.5px; color: #5f6b63; margin-top: 2px; }
+.l-pcard .price { margin-top: 9px; font-weight: 700; font-size: 15px; color: #14201a; }
+.l-pcard .price small { font-weight: 500; color: #5f6b63; font-size: 12.5px; }
 .l-pcard .badge {
   position: absolute; top: 12px; left: 12px;
   background: rgba(255,255,255,.94); backdrop-filter: blur(4px);
-  color: #0e1a16; font-size: 11.5px; font-weight: 700;
+  color: #14201a; font-size: 11.5px; font-weight: 700;
   padding: 6px 11px; border-radius: 99px; letter-spacing: .01em; z-index: 2;
 }
 .l-pcard .heart {
   position: absolute; top: 11px; right: 11px; width: 32px; height: 32px;
   border-radius: 99px; background: rgba(255,255,255,.85);
-  display: grid; place-items: center; color: #0e1a16; z-index: 2;
+  display: grid; place-items: center; color: #14201a; z-index: 2;
   border: none; cursor: pointer; transition: all .15s;
 }
 .l-pcard .heart:hover { transform: scale(1.1); background: #fff; }
@@ -530,7 +569,7 @@ html, body {
 
 /* -- Grow band ---------------------------------------------- */
 .l-grow {
-  background: linear-gradient(155deg, #1f7e66 0%, #155a48 100%);
+  background: linear-gradient(155deg, #0f4f36 0%, #0b3d2a 100%);
   color: #fff; border-radius: 26px; padding: 54px;
   position: relative; overflow: hidden;
 }
@@ -565,32 +604,32 @@ html, body {
 .l-gcard .btn {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 11px 18px; border-radius: 999px; font-weight: 600; font-size: 14px;
-  background: #fff; color: #155a48; border: none; cursor: pointer;
+  background: #fff; color: #0b3d2a; border: none; cursor: pointer;
   text-decoration: none; transition: all .16s; font-family: inherit;
 }
-.l-gcard .btn:hover { background: #0e1a16; color: #fff; }
+.l-gcard .btn:hover { background: #14201a; color: #fff; }
 
 /* -- Paths -------------------------------------------------- */
 .l-paths { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 @media (max-width: 880px) { .l-paths { grid-template-columns: 1fr; } }
 .l-path {
-  background: #fff; border: 1px solid #e8ece9; border-radius: 20px;
+  background: #fff; border: 1px solid #e4e9e5; border-radius: 20px;
   padding: 30px; display: flex; flex-direction: column; gap: 14px; transition: all .18s;
 }
-.l-path:hover { border-color: #2e9f82; box-shadow: 0 6px 24px -14px rgba(15,30,25,.22); transform: translateY(-3px); }
+.l-path:hover { border-color: #047246; box-shadow: 0 6px 24px -14px rgba(15,30,25,.22); transform: translateY(-3px); }
 .l-path .pi {
   width: 50px; height: 50px; border-radius: 14px;
-  background: #e7f5f0; color: #1f7e66; display: grid; place-items: center;
+  background: #eef7f2; color: #0f4f36; display: grid; place-items: center;
 }
 .l-path h4 { margin: 4px 0 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
-.l-path p { margin: 0; color: #36433d; font-size: 14.5px; line-height: 1.5; flex: 1; }
+.l-path p { margin: 0; color: #46534c; font-size: 14.5px; line-height: 1.5; flex: 1; }
 .l-path .cta {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 11px 20px; border-radius: 999px; font-weight: 600; font-size: 14px;
-  background: #2e9f82; color: #fff; text-decoration: none; border: none;
+  background: #047246; color: #fff; text-decoration: none; border: none;
   cursor: pointer; transition: all .16s; font-family: inherit; align-self: flex-start;
 }
-.l-path .cta:hover { background: #1f7e66; transform: translateY(-1px); }
+.l-path .cta:hover { background: #0f4f36; transform: translateY(-1px); }
 
 /* -- Skeleton shimmer --------------------------------------- */
 @keyframes l-shimmer {
@@ -598,7 +637,7 @@ html, body {
   100% { background-position: -200% 0; }
 }
 .l-skel {
-  background: linear-gradient(90deg, #e8ece9 25%, #f1f4f2 50%, #e8ece9 75%);
+  background: linear-gradient(90deg, #e4e9e5 25%, #f1f4f2 50%, #e4e9e5 75%);
   background-size: 200% 100%;
   animation: l-shimmer 1.4s ease-in-out infinite;
 }
@@ -606,7 +645,7 @@ html, body {
 /* -- Eyebrow label ------------------------------------------ */
 .l-eyebrow {
   font-size: 12px; font-weight: 700; letter-spacing: .16em;
-  text-transform: uppercase; color: #1f7e66;
+  text-transform: uppercase; color: #0f4f36;
 }
 
 /* ================================================================
@@ -615,15 +654,15 @@ html, body {
 
 /* Design tokens for listings system */
 :root {
-  --green:        #2e9f82;
-  --green-d:      #1f7e66;
-  --green-dd:     #155a48;
-  --green-tint:   #e7f5f0;
+  --green:        #047246;
+  --green-d:      #0f4f36;
+  --green-dd:     #0b3d2a;
+  --green-tint:   #eef7f2;
   --green-tint-2: #f1faf5;
-  --ink:          #0e1a16;
-  --ink-2:        #36433d;
-  --mute:         #6b7a74;
-  --line:         #e8ece9;
+  --ink:          #14201a;
+  --ink-2:        #46534c;
+  --mute:         #5f6b63;
+  --line:         #e4e9e5;
   --line-2:       #eff2ef;
   --paper:        #fafbf9;
   --paper-2:      #f4f6f3;
@@ -910,7 +949,7 @@ body:has(.slideover-panel) { overflow-x: clip; }
   width: var(--doc-dock-w);
   display: flex; flex-direction: column;
   background: #fff;
-  border-left: 1px solid #e8e6e0;
+  border-left: 1px solid #e4e9e5;
   box-shadow: -14px 0 34px rgba(24, 22, 18, 0.10);
   animation: docDockIn .26s cubic-bezier(.22,.9,.3,1) both;
 }
@@ -918,34 +957,34 @@ body:has(.slideover-panel) { overflow-x: clip; }
 
 .doc-dock-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 11px 12px 11px 14px; border-bottom: 1px solid #e8e6e0;
+  padding: 11px 12px 11px 14px; border-bottom: 1px solid #e4e9e5;
   flex-shrink: 0;
 }
 .doc-dock-title {
   display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0;
-  font-size: 12.5px; font-weight: 700; color: #1a1916;
+  font-size: 12.5px; font-weight: 700; color: #14201a;
 }
-.doc-dock-title svg { color: #2e9f82; flex-shrink: 0; }
+.doc-dock-title svg { color: #047246; flex-shrink: 0; }
 .doc-dock-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .doc-dock-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 8px; border: none; background: none;
-  color: #6b6860; cursor: pointer;
+  color: #5f6b63; cursor: pointer;
 }
-.doc-dock-btn:hover:not(:disabled) { background: #f4f3ef; color: #1a1916; }
+.doc-dock-btn:hover:not(:disabled) { background: #eef1ef; color: #14201a; }
 .doc-dock-btn:disabled { opacity: .35; cursor: default; }
 
 .doc-dock-nav {
   display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 6px 12px; border-bottom: 1px solid #e8e6e0;
+  padding: 6px 12px; border-bottom: 1px solid #e4e9e5;
   flex-shrink: 0;
 }
 .doc-dock-count {
-  font-size: 11px; font-weight: 700; color: #6b6860;
+  font-size: 11px; font-weight: 700; color: #5f6b63;
   font-variant-numeric: tabular-nums; min-width: 58px; text-align: center;
 }
-.doc-dock-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; background: #f4f3ef; }
-.doc-dock-body > div { background: #fff; border: 1px solid #e8e6e0; border-radius: 10px; overflow: hidden; }
+.doc-dock-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; background: #eef1ef; }
+.doc-dock-body > div { background: #fff; border: 1px solid #e4e9e5; border-radius: 10px; overflow: hidden; }
 
 /* Make room for the rail. The RP/SP shell is a full-height flex row that ignores
    body padding, so it is inset directly — one rule, keyed off the same variable. */
@@ -957,7 +996,7 @@ body.doc-dock-open .app-shell-root { padding-right: var(--doc-dock-w); }
 @media (max-width: 1040px) {
   .doc-dock {
     top: auto; left: 0; width: auto; height: 46vh;
-    border-left: none; border-top: 1px solid #e8e6e0;
+    border-left: none; border-top: 1px solid #e4e9e5;
     box-shadow: 0 -14px 34px rgba(24, 22, 18, 0.12);
     animation-name: docDockUp;
   }
@@ -981,9 +1020,9 @@ body.doc-dock-open .app-shell-root { padding-right: var(--doc-dock-w); }
   .quest-page .paygrid .payrow { grid-template-columns: 1fr; }
 }
 
-/* Marketspace type (self-hosted in /public/fonts/marketspace — never fetched at build
-   time). Declared here, used only where a page opts in (the Leases – Monthly report
-   and the lease record). SIL Open Font License, from the upnow-marketspace repo. */
+/* MarketSpace type (self-hosted in /public/fonts/marketspace — never fetched at build
+   time). Plus Jakarta Sans is the app-wide UI font and Roboto Serif the display serif
+   (--font-sans / --font-serif). SIL Open Font License, from the upnow-marketspace repo. */
 @font-face { font-family: 'Plus Jakarta Sans'; font-style: normal; font-weight: 200 800; font-display: swap; src: url('/fonts/marketspace/plus-jakarta-sans-latin-ext.woff2') format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 @font-face { font-family: 'Plus Jakarta Sans'; font-style: normal; font-weight: 200 800; font-display: swap; src: url('/fonts/marketspace/plus-jakarta-sans-latin.woff2') format('woff2'); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: 'Roboto Serif'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/marketspace/roboto-serif-latin-ext.woff2') format('woff2'); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }

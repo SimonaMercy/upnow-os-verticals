@@ -89,15 +89,15 @@ function flattenEndpoints(spec: OpenAPISpec): EndpointEntry[] {
 // ── loading ─────────────────────────────────────────────────────
 function LoadingScreen() {
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafaf8' }}>
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f6f8f6' }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{
           width: 36, height: 36, borderRadius: '50%',
-          border: '3px solid #e8e6e0', borderTopColor: '#2e9f82',
+          border: '3px solid #e4e9e5', borderTopColor: '#047246',
           animation: 'spin 0.7s linear infinite',
           margin: '0 auto 14px',
         }} />
-        <p style={{ color: '#6b6860', fontSize: 14 }}>Loading API documentation…</p>
+        <p style={{ color: '#5f6b63', fontSize: 14 }}>Loading API documentation…</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
@@ -107,11 +107,11 @@ function LoadingScreen() {
 // ── error ────────────────────────────────────────────────────────
 function ErrorScreen({ error }: { error: string }) {
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fafaf8' }}>
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f6f8f6' }}>
       <div style={{ textAlign: 'center', maxWidth: 460, padding: 32 }}>
         <div style={{ fontSize: 40, marginBottom: 14 }}>⚠️</div>
-        <h2 style={{ color: '#1a1916', marginBottom: 8, fontSize: 18 }}>Could not load API spec</h2>
-        <p style={{ color: '#6b6860', fontSize: 14, lineHeight: 1.6 }}>{error}</p>
+        <h2 style={{ color: '#14201a', marginBottom: 8, fontSize: 18 }}>Could not load API spec</h2>
+        <p style={{ color: '#5f6b63', fontSize: 14, lineHeight: 1.6 }}>{error}</p>
       </div>
     </div>
   );

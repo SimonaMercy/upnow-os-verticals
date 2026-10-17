@@ -188,21 +188,21 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
   const expected = !ongoing && annualValue.trim() !== '' && !Number.isNaN(Number(annualValue)) ? Math.round(Number(annualValue) * (months / 12) * 100) / 100 : null;
   const regen = (n: number) => { setDirty(false); onCount?.(n === def ? null : n); onChange(ongoing ? buildOngoingRows(start, frequency, annualValue) : buildPayRows(start, end, n, annualValue)); };
   const setRow = (i: number, patch: Partial<PayRow>) => { setDirty(true); onChange(rows.map((r, j) => j === i ? { ...r, ...patch } : r)); };
-  const field = 'text-xs px-2.5 py-1.5 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
+  const field = 'text-xs px-2.5 py-1.5 border border-[#e4e9e5] rounded-lg bg-white focus:outline-none focus:border-[#047246]';
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-medium text-[#6b6860]">Payment plan</span>
+        <span className="text-xs font-medium text-[#5f6b63]">Payment plan</span>
         {ongoing
-          ? <span className="text-[11px] text-[#6b6860]">One per {frequency === 'quarterly' ? 'quarter' : frequency === 'annually' ? 'year' : 'month'} · {rows.length} to {rows.length ? rows[rows.length - 1].dueDate : '—'} · next year added automatically</span>
+          ? <span className="text-[11px] text-[#5f6b63]">One per {frequency === 'quarterly' ? 'quarter' : frequency === 'annually' ? 'year' : 'month'} · {rows.length} to {rows.length ? rows[rows.length - 1].dueDate : '—'} · next year added automatically</span>
           : <select className={field} value={presets.includes(count) ? String(count) : 'custom'} onChange={e => { if (e.target.value !== 'custom') regen(Number(e.target.value)); }} disabled={!start}>
           {presets.map(n => <option key={n} value={n}>{n === def ? `${n} · from ${frequency ? frequency.replace(/_/g, ' ') : 'frequency'}` : n === 1 ? '1 · single payment' : `${n} payments`}</option>)}
           {!presets.includes(count) && <option value="custom">{count} · custom</option>}
         </select>}
         <button type="button" onClick={() => { setDirty(true); onChange([...rows, { dueDate: rows[rows.length - 1]?.dueDate ?? start, amountAed: '' }]); }} className="text-[11px] font-semibold text-[#1a7a5a] cursor-pointer" disabled={!start}>+ Add installment</button>
-        {dirty && <button type="button" onClick={() => regen(def)} className="text-[11px] font-semibold text-[#6b6860] hover:text-[#1a1916] cursor-pointer ml-auto">Regenerate from frequency</button>}
+        {dirty && <button type="button" onClick={() => regen(def)} className="text-[11px] font-semibold text-[#5f6b63] hover:text-[#14201a] cursor-pointer ml-auto">Regenerate from frequency</button>}
       </div>
-      {!start && <p className="text-[11px] text-[#9b9890] mt-1">Set the start date first.</p>}
+      {!start && <p className="text-[11px] text-[#8a948d] mt-1">Set the start date first.</p>}
       {rows.length > 0 && (
         <div className="mt-2 border border-[#f0eee8] rounded-lg divide-y divide-[#f4f2ec] max-h-56 overflow-y-auto">
           {rows.map((r, i) => {
@@ -210,20 +210,20 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
             return (
               <div key={r.id ?? `n${i}`} className="px-2.5 py-1.5">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] text-[#9b9890] w-6 shrink-0">#{i + 1}</span>
+                  <span className="text-[11px] text-[#8a948d] w-6 shrink-0">#{i + 1}</span>
                   <input type="date" className={field + ' w-[138px]'} value={r.dueDate} disabled={locked} onChange={e => setRow(i, { dueDate: e.target.value })} />
                   <input type="number" min="0" step="0.01" placeholder={showVat ? 'AED incl. VAT' : 'AED'} title={showVat ? 'What is paid — VAT included' : undefined} className={field + ' w-[110px]'} value={r.amountAed} disabled={locked} onChange={e => setRow(i, { amountAed: e.target.value })} />
                   {showVat && Number(r.amountAed) > 0 && (
-                    <span className="text-[10.5px] text-[#6b6860] whitespace-nowrap">{aed2(Math.round((Number(r.amountAed) - rowVat(r)) * 100) / 100)} + VAT {aed2(rowVat(r))}</span>
+                    <span className="text-[10.5px] text-[#5f6b63] whitespace-nowrap">{aed2(Math.round((Number(r.amountAed) - rowVat(r)) * 100) / 100)} + VAT {aed2(rowVat(r))}</span>
                   )}
                   {proofs && !locked && (
-                    <label className="text-[11px] text-[#6b6860] flex items-center gap-1 whitespace-nowrap cursor-pointer" title="Already paid — record the cheque / transfer details now">
+                    <label className="text-[11px] text-[#5f6b63] flex items-center gap-1 whitespace-nowrap cursor-pointer" title="Already paid — record the cheque / transfer details now">
                       <input type="checkbox" checked={!!r.paid} onChange={e => setRow(i, { paid: e.target.checked, paidAt: r.paidAt || r.dueDate || new Date().toISOString().slice(0, 10) })} /> paid
                     </label>
                   )}
                   {locked
                     ? <span className="text-[10.5px] font-bold text-[#1a7a52] ml-auto">paid{r.reference ? ` · ${r.reference}` : ''}</span>
-                    : <button type="button" onClick={() => { setDirty(true); onChange(rows.filter((_, j) => j !== i)); }} className="text-[#9b9890] hover:text-[#b91c1c] cursor-pointer ml-auto" aria-label="Remove installment"><X size={13} /></button>}
+                    : <button type="button" onClick={() => { setDirty(true); onChange(rows.filter((_, j) => j !== i)); }} className="text-[#8a948d] hover:text-[#b91c1c] cursor-pointer ml-auto" aria-label="Remove installment"><X size={13} /></button>}
                 </div>
                 {proofs && r.paid && !locked && (
                   <div className="flex items-center gap-2 flex-wrap mt-1.5 ml-8">
@@ -233,7 +233,7 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
                       <option value="">{modeOfPayment ? `${modeOfPayment.replace(/_/g, ' ')} (contract)` : 'Method…'}</option>
                       {PAY_METHODS.map(m => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}
                     </select>
-                    <label className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${r.proofFile ? 'border-[#1a7a5a] text-[#1a7a5a] bg-[#e6f4ef]' : 'border-dashed border-[#d8d6d0] text-[#6b6860] hover:bg-[#f9f8f6]'}`}>
+                    <label className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${r.proofFile ? 'border-[#1a7a5a] text-[#1a7a5a] bg-[#e6f4ef]' : 'border-dashed border-[#d8d6d0] text-[#5f6b63] hover:bg-[#f9f8f6]'}`}>
                       {r.proofFile ? r.proofFile.name.slice(0, 22) : 'Attach proof'}
                       <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { setRow(i, { proofFile: e.target.files?.[0] ?? null }); e.target.value = ''; }} />
                     </label>
@@ -245,7 +245,7 @@ export function PaymentPlanEditor({ start, end, frequency, annualValue, rows, on
         </div>
       )}
       {rows.length > 0 && (
-        <p className={`text-[11px] mt-1 ${expected != null && Math.abs(total - expected) > 0.5 ? 'text-[#b45309]' : 'text-[#9b9890]'}`}>
+        <p className={`text-[11px] mt-1 ${expected != null && Math.abs(total - expected) > 0.5 ? 'text-[#b45309]' : 'text-[#8a948d]'}`}>
           {rows.length} installment{rows.length === 1 ? '' : 's'} · total AED {total.toLocaleString('en-AE')}{showVat ? ` (before VAT ${aed2(Math.round((total - totalVat) * 100) / 100)} + VAT ${aed2(totalVat)})` : ''}{expected != null ? ` · contract value for the term AED ${expected.toLocaleString('en-AE')}${Math.abs(total - expected) > 0.5 ? ' — does not match' : ''}` : ''}{proofs && rows.some(r => r.paid) ? ` · ${rows.filter(r => r.paid).length} already paid — recorded on creation` : ''}
         </p>
       )}
@@ -615,9 +615,9 @@ export function AmcView({ base, rp, propertiesUrl, vendorsHref, reportHref, cate
 
 function Empty({ icon: Icon, msg }: { icon: React.ComponentType<{ size?: number; className?: string }>; msg: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
       <Icon size={28} className="mx-auto mb-2 text-[#c5c3bc]" />
-      <p className="text-sm text-[#9b9890]">{msg}</p>
+      <p className="text-sm text-[#8a948d]">{msg}</p>
     </div>
   );
 }
@@ -628,8 +628,8 @@ function Section({ n, title, hint, action, children }: { n: number; title: strin
     <section className="border border-[#eef0ee] rounded-xl px-3.5 py-3">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
-          <div className="text-[12px] font-bold text-[#1a1916] flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[#1a1916] text-white text-[10px] font-extrabold grid place-items-center shrink-0">{n}</span>{title}</div>
-          {hint && <p className="text-[11px] text-[#9b9890] mt-0.5">{hint}</p>}
+          <div className="text-[12px] font-bold text-[#14201a] flex items-center gap-2"><span className="w-5 h-5 rounded-full bg-[#14201a] text-white text-[10px] font-extrabold grid place-items-center shrink-0">{n}</span>{title}</div>
+          {hint && <p className="text-[11px] text-[#8a948d] mt-0.5">{hint}</p>}
         </div>
         {action}
       </div>
@@ -830,8 +830,8 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
     return doc?.id ?? null;
   }
 
-  const field = 'w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
-  const lbl = 'text-xs font-medium text-[#6b6860] mb-1 block';
+  const field = 'w-full text-sm px-3 py-2 border border-[#e4e9e5] rounded-lg bg-white focus:outline-none focus:border-[#047246]';
+  const lbl = 'text-xs font-medium text-[#5f6b63] mb-1 block';
   const link = 'text-[#1a7a52] font-semibold hover:underline cursor-pointer';
   // The short form: a bill-type kind (utility account, recurring cost) being added, not renewed, with the details not asked for.
   const simple = !from && km.schedule === 'bills' && !showAll;
@@ -848,21 +848,21 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
       <div className={`bg-white rounded-2xl w-full ${simple ? 'max-w-lg' : 'max-w-3xl'} max-h-[92vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef] sticky top-0 bg-white z-10">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#eef1ef] sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-sm font-bold text-[#1a1916]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : simple ? `Add ${km.label.toLowerCase()}` : 'Add a contract or expense'}</h2>
+            <h2 className="text-sm font-bold text-[#14201a]">{from ? `Renew AMC-${from.id} — ${from.vendorName}` : simple ? `Add ${km.label.toLowerCase()}` : 'Add a contract or expense'}</h2>
             {simple
-              ? <p className="text-[11px] text-[#9b9890] mt-0.5">Sender, account and schedule — each bill fills its amount in as it arrives.</p>
-              : <p className="text-[11px] text-[#9b9890] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{accountNumber.trim() ? ` · Acc ${accountNumber.trim()}` : ''}{isOngoing ? ' · ongoing' : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>}
+              ? <p className="text-[11px] text-[#8a948d] mt-0.5">Sender, account and schedule — each bill fills its amount in as it arrives.</p>
+              : <p className="text-[11px] text-[#8a948d] mt-0.5">{km.label}{categoryLabel ? ` · ${categoryLabel}` : ''}{vendorId ? ` · ${allVendors.find(v => String(v.id) === vendorId)?.name ?? from?.vendorName ?? ''}` : ''}{accountNumber.trim() ? ` · Acc ${accountNumber.trim()}` : ''}{isOngoing ? ' · ongoing' : ''}{annualTotal ? ` · AED ${Number(annualTotal).toLocaleString('en-AE')}/yr${vatMode !== 'none' ? ' incl. VAT' : ''}` : ''}{km.schedule !== 'none' && payRows.length ? ` · ${payRows.length} ${km.schedule === 'bills' ? (payRows.length === 1 ? 'bill' : 'bills') : (payRows.length === 1 ? 'payment' : 'payments')}` : ''}</p>}
           </div>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916]"><X size={18} /></button>
+          <button onClick={onClose} className="text-[#8a948d] hover:text-[#14201a]"><X size={18} /></button>
         </div>
         {simple ? (
         <div className="px-5 py-4 space-y-4">
           <div>
             <span className={lbl}>What it is</span>
             {kindChips}
-            <p className="text-[11px] text-[#9b9890] mt-1">{km.hint}</p>
+            <p className="text-[11px] text-[#8a948d] mt-1">{km.hint}</p>
           </div>
           <div>
             <span className={lbl}>{kind === 'recurring' ? 'Payee' : 'Vendor'}</span>
@@ -870,12 +870,12 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
               <option value="">Select…</option>
               {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.serviceCategory ? ` · ${v.serviceCategory.replace(/_/g,' ')}` : ''}</option>)}
             </select>
-            <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <Link href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</Link> first.</p>
+            <p className="text-[11px] text-[#8a948d] mt-1">Not listed? Record it on the <Link href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</Link> first.</p>
           </div>
           <div>
-            <span className={lbl}>Account number <span className="font-normal text-[#9b9890]">— as printed on the bill</span></span>
+            <span className={lbl}>Account number <span className="font-normal text-[#8a948d]">— as printed on the bill</span></span>
             <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. 2042391123" />
-            <p className="text-[11px] text-[#9b9890] mt-1">Bills that arrive by email are filed on this account.</p>
+            <p className="text-[11px] text-[#8a948d] mt-1">Bills that arrive by email are filed on this account.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><span className={lbl}>Property</span>
@@ -885,7 +885,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
               </select>
             </div>
             {propertyId && units.length > 0 && (
-              <div><span className={lbl}>Unit <span className="font-normal text-[#9b9890]">— if for one unit</span></span>
+              <div><span className={lbl}>Unit <span className="font-normal text-[#8a948d]">— if for one unit</span></span>
                 <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
                   <option value="">— whole building —</option>
                   {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
@@ -909,7 +909,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
               ? <>Ongoing — no end date. <button type="button" onClick={() => { setOngoing(false); setPayDirty(false); }} className={link}>Set an end date</button></>
               : <span className="flex items-center gap-2 flex-wrap">Ends on <input type="date" className={field + ' w-auto'} value={endDate} onChange={e => { setEndDate(e.target.value); setPayDirty(false); }} /> <button type="button" onClick={() => { setOngoing(true); setPayDirty(false); }} className={link}>No end date</button></span>}
           </div>
-          <p className="text-[11px] text-[#9b9890]">Annual value, VAT, mode of payment, the bill rows and a contract copy can be added on the contract page later — or <button type="button" onClick={() => setShowAll(true)} className={link}>show all details</button> now.</p>
+          <p className="text-[11px] text-[#8a948d]">Annual value, VAT, mode of payment, the bill rows and a contract copy can be added on the contract page later — or <button type="button" onClick={() => setShowAll(true)} className={link}>show all details</button> now.</p>
           {error && <p className="text-xs text-[#b91c1c] bg-[#fef2f2] rounded-lg px-3 py-2">{error}</p>}
         </div>
         ) : (
@@ -924,19 +924,19 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
                 {allVendors.map(v => <option key={v.id} value={v.id}>{v.name}{v.serviceCategory ? ` · ${v.serviceCategory.replace(/_/g,' ')}` : ''}</option>)}
               </select>
               {from
-                ? <p className="text-[11px] text-[#2e9f82] mt-1">Everything from AMC-{from.id} ({fmt(from.startDate)} – {fmt(from.endDate)}) is prefilled for the next term — change what differs, then save. The old contract stays on record.</p>
-                : <p className="text-[11px] text-[#9b9890] mt-1">Not listed? Record it on the <a href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</a> first.</p>}
-              <div className="mt-3"><span className={lbl}>Account / contract no. <span className="font-normal text-[#9b9890]">— tells this vendor&rsquo;s contracts apart</span></span>
+                ? <p className="text-[11px] text-[#047246] mt-1">Everything from AMC-{from.id} ({fmt(from.startDate)} – {fmt(from.endDate)}) is prefilled for the next term — change what differs, then save. The old contract stays on record.</p>
+                : <p className="text-[11px] text-[#8a948d] mt-1">Not listed? Record it on the <a href="/rental-provider/dashboard/vendors" className="text-[#1a7a5a] font-semibold underline">Vendors page</a> first.</p>}
+              <div className="mt-3"><span className={lbl}>Account / contract no. <span className="font-normal text-[#8a948d]">— tells this vendor&rsquo;s contracts apart</span></span>
                 <input className={field} value={accountNumber} onChange={e => setAccountNumber(e.target.value)} maxLength={60} placeholder="e.g. Etisalat account 764506535, DEWA premise no." />
               </div>
-              <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#9b9890]">— which building this cost belongs to</span></span>
+              <div className="mt-3"><span className={lbl}>Property <span className="font-normal text-[#8a948d]">— which building this cost belongs to</span></span>
                 <select className={field} value={propertyId} onChange={e => { setPropertyId(e.target.value); setUnitId(''); }}>
                   <option value="">— all / none —</option>
                   {props.map(p => <option key={p.id} value={p.id}>{p.buildingName ?? p.name ?? `Property #${p.id}`}</option>)}
                 </select>
               </div>
               {propertyId && units.length > 0 && (
-                <div className="mt-3"><span className={lbl}>Unit <span className="font-normal text-[#9b9890]">— only when this account is for one unit</span></span>
+                <div className="mt-3"><span className={lbl}>Unit <span className="font-normal text-[#8a948d]">— only when this account is for one unit</span></span>
                   <select className={field} value={unitId} onChange={e => setUnitId(e.target.value)}>
                     <option value="">— whole building —</option>
                     {units.map(u => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
@@ -948,11 +948,11 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
             <Section n={2} title="Category" hint={vendorId && categoryId != null ? `Taken from the vendor — change it here if this contract is different. ${km.hint}` : km.hint}>
               {kindChips}
               <div className="mt-3">
-                <span className={lbl}>Sub-category <span className="font-normal text-[#9b9890]">— report grouping</span></span>
+                <span className={lbl}>Sub-category <span className="font-normal text-[#8a948d]">— report grouping</span></span>
                 {newCat ? (
                   <div className="flex items-center gap-2">
                     <input autoFocus className={field} placeholder="New sub-category name" value={categoryLabel} onChange={e => setCategoryLabel(e.target.value)} />
-                    <button type="button" onClick={() => { setNewCat(false); setCategoryLabel(''); }} className="text-[11px] text-[#9b9890] hover:text-[#1a1916] cursor-pointer whitespace-nowrap">Pick existing</button>
+                    <button type="button" onClick={() => { setNewCat(false); setCategoryLabel(''); }} className="text-[11px] text-[#8a948d] hover:text-[#14201a] cursor-pointer whitespace-nowrap">Pick existing</button>
                   </div>
                 ) : (
                   <select className={field} value={categoryId ?? ''} onChange={e => {
@@ -976,10 +976,10 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
                 <div><span className={lbl}>Start date</span><input type="date" className={field} value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
                 <div><span className={lbl}>End date</span>
                   {isOngoing
-                    ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#6b6860] bg-[#fafaf8]">Ongoing — no end date</div>
+                    ? <div className="text-sm px-3 py-2 border border-dashed border-[#d8d6d0] rounded-lg text-[#5f6b63] bg-[#f6f8f6]">Ongoing — no end date</div>
                     : <input type="date" className={field} value={endDate} onChange={e => setEndDate(e.target.value)} />}
                   {!km.visits && (
-                    <label className="flex items-center gap-1.5 text-[11px] text-[#6b6860] mt-1 cursor-pointer">
+                    <label className="flex items-center gap-1.5 text-[11px] text-[#5f6b63] mt-1 cursor-pointer">
                       <input type="checkbox" checked={isOngoing} onChange={e => { setOngoing(e.target.checked); setPayDirty(false); }} /> Ongoing — no end date
                     </label>
                   )}
@@ -991,7 +991,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
                   </select>
                 </div>
                 <div><span className={lbl}>{kind === 'policy' ? 'Annual premium (AED)' : km.schedule === 'bills' ? 'Annual value (AED, optional)' : 'Annual value (AED)'}</span>
-                  <AmountWithVat accent="#2e9f82" placeholder={km.schedule === 'bills' ? 'leave empty for variable bills' : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} vatOverride={annualVat} onVatOverride={setAnnualVat} /></div>
+                  <AmountWithVat accent="#047246" placeholder={km.schedule === 'bills' ? 'leave empty for variable bills' : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} vatOverride={annualVat} onVatOverride={setAnnualVat} /></div>
                 <div><span className={lbl}>Mode of payment</span>
                   <select className={field} value={modeOfPayment} onChange={e => setModeOfPayment(e.target.value)}>
                     <option value="">—</option><option value="cheque">Cheque</option><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option><option value="online">Online</option>
@@ -1003,7 +1003,7 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
                   </select>
                 </div>}
               </div>
-              {annualValue.trim() !== '' && vatMode !== 'none' && km.schedule !== 'none' && <p className="text-[11px] text-[#9b9890] mt-2">The payment plan shows what you pay — VAT included.</p>}
+              {annualValue.trim() !== '' && vatMode !== 'none' && km.schedule !== 'none' && <p className="text-[11px] text-[#8a948d] mt-2">The payment plan shows what you pay — VAT included.</p>}
             </Section>
           </div>
 
@@ -1016,29 +1016,29 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
 
             {km.visits && (
               <Section n={5} title={`Visits (${plan.length})`} hint="Generated from the cadence — rename, re-date, add or remove."
-                action={<button type="button" onClick={regenerate} className="text-[11px] text-[#2e9f82] font-medium cursor-pointer">Regenerate</button>}>
-                <div className="border border-[#e8e6e0] rounded-lg divide-y divide-[#f4f3ef] max-h-52 overflow-y-auto">
-                  {plan.length === 0 && <p className="text-[11px] text-[#9b9890] px-3 py-3 text-center">Set start &amp; end dates to generate the plan.</p>}
+                action={<button type="button" onClick={regenerate} className="text-[11px] text-[#047246] font-medium cursor-pointer">Regenerate</button>}>
+                <div className="border border-[#e4e9e5] rounded-lg divide-y divide-[#eef1ef] max-h-52 overflow-y-auto">
+                  {plan.length === 0 && <p className="text-[11px] text-[#8a948d] px-3 py-3 text-center">Set start &amp; end dates to generate the plan.</p>}
                   {plan.map((r, i) => (
                     <div key={i} className="p-2 flex items-start gap-2">
                       <div className="flex-1 space-y-1">
                         <div className="flex gap-2">
-                          <input className="flex-1 text-xs px-2 py-1 border border-[#e8e6e0] rounded" value={r.title} onChange={e => editRow(i, { title: e.target.value })} placeholder="Task" />
-                          <input type="date" className="text-xs px-2 py-1 border border-[#e8e6e0] rounded" value={r.dueDate} onChange={e => editRow(i, { dueDate: e.target.value })} />
+                          <input className="flex-1 text-xs px-2 py-1 border border-[#e4e9e5] rounded" value={r.title} onChange={e => editRow(i, { title: e.target.value })} placeholder="Task" />
+                          <input type="date" className="text-xs px-2 py-1 border border-[#e4e9e5] rounded" value={r.dueDate} onChange={e => editRow(i, { dueDate: e.target.value })} />
                         </div>
-                        <input className="w-full text-xs px-2 py-1 border border-[#e8e6e0] rounded" value={r.notes} onChange={e => editRow(i, { notes: e.target.value })} placeholder="Note (optional)" />
+                        <input className="w-full text-xs px-2 py-1 border border-[#e4e9e5] rounded" value={r.notes} onChange={e => editRow(i, { notes: e.target.value })} placeholder="Note (optional)" />
                       </div>
                       <button type="button" onClick={() => removeRow(i)} className="text-[#c5c3bc] hover:text-[#b91c1c] mt-1"><X size={14} /></button>
                     </div>
                   ))}
                 </div>
-                <button type="button" onClick={addRow} className="text-[11px] text-[#2e9f82] font-medium mt-1 flex items-center gap-1"><Plus size={11} /> Add visit</button>
+                <button type="button" onClick={addRow} className="text-[11px] text-[#047246] font-medium mt-1 flex items-center gap-1"><Plus size={11} /> Add visit</button>
               </Section>
             )}
 
             <Section n={km.visits ? 6 : 5} title="Paperwork & notes">
-              <label className="flex items-center gap-2 text-xs text-[#6b6860] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f9f8f6]">
-                <UploadCloud size={14} className="text-[#2e9f82]" />
+              <label className="flex items-center gap-2 text-xs text-[#5f6b63] border border-dashed border-[#d8d6d0] rounded-lg px-3 py-2.5 cursor-pointer hover:bg-[#f9f8f6]">
+                <UploadCloud size={14} className="text-[#047246]" />
                 {file ? file.name : kind === 'policy' ? 'Attach the policy document' : kind === 'head_lease' ? 'Attach the lease / tax notice' : 'Attach the contract PDF'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => {
                   const picked = e.target.files?.[0] ?? null;
@@ -1056,9 +1056,9 @@ export function AddAmcModal({ base, rp, propertiesUrl, renewFrom, prefill, onClo
           {error && <p className="lg:col-span-2 text-xs text-[#b91c1c] bg-[#fef2f2] rounded-lg px-3 py-2">{error}</p>}
         </div>
         )}
-        <div className="px-5 py-4 border-t border-[#f4f3ef] flex justify-end gap-2 sticky bottom-0 bg-white">
-          <button onClick={onClose} className="text-xs font-medium px-4 py-2 rounded-xl border border-[#e8e6e0] text-[#6b6860]">Cancel</button>
-          <button onClick={submit} disabled={saving} className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60" style={{ background: '#2e9f82' }}>
+        <div className="px-5 py-4 border-t border-[#eef1ef] flex justify-end gap-2 sticky bottom-0 bg-white">
+          <button onClick={onClose} className="text-xs font-medium px-4 py-2 rounded-xl border border-[#e4e9e5] text-[#5f6b63]">Cancel</button>
+          <button onClick={submit} disabled={saving} className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60" style={{ background: '#047246' }}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} {from ? 'Renew contract' : kind === 'service' ? 'Create AMC' : `Create ${km.label.toLowerCase()}`}
           </button>
         </div>
@@ -1112,18 +1112,18 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
     finally { setSaving(false); }
   }
 
-  const field = 'w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-lg bg-white focus:outline-none focus:border-[#2e9f82]';
-  const lbl = 'text-xs font-medium text-[#6b6860] mb-1 block';
+  const field = 'w-full text-sm px-3 py-2 border border-[#e4e9e5] rounded-lg bg-white focus:outline-none focus:border-[#047246]';
+  const lbl = 'text-xs font-medium text-[#5f6b63] mb-1 block';
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef]">
-          <h2 className="text-sm font-bold text-[#1a1916]">Renew — {from.vendorName}</h2>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916]"><X size={18} /></button>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#eef1ef]">
+          <h2 className="text-sm font-bold text-[#14201a]">Renew — {from.vendorName}</h2>
+          <button onClick={onClose} className="text-[#8a948d] hover:text-[#14201a]"><X size={18} /></button>
         </div>
         <div className="px-5 py-4 space-y-3">
-          <div className="rounded-xl border border-[#f0eee8] bg-[#fafaf8] px-3.5 py-2.5 text-[12px] text-[#6b6860]">
-            Carries over unchanged: <b className="text-[#1a1916]">{from.propertyName ?? 'All properties'}</b>
+          <div className="rounded-xl border border-[#f0eee8] bg-[#f6f8f6] px-3.5 py-2.5 text-[12px] text-[#5f6b63]">
+            Carries over unchanged: <b className="text-[#14201a]">{from.propertyName ?? 'All properties'}</b>
             {from.frequency ? <> · {from.frequency}</> : null}
             {from.modeOfPayment ? <> · {from.modeOfPayment.replace(/_/g, ' ')}</> : null}
             {from.numberOfPayments ? <> · {from.numberOfPayments} payments</> : null}
@@ -1135,20 +1135,20 @@ export function RenewAmcModal({ base, rp, from, onClose, onSaved }: {
           </div>
           <div>
             <span className={lbl}>Annual value (AED) — pricing revision</span>
-            <AmountWithVat accent="#2e9f82" placeholder={oldVal != null ? String(oldVal) : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} />
+            <AmountWithVat accent="#047246" placeholder={oldVal != null ? String(oldVal) : 'e.g. 25200'} amount={annualValue} onAmount={setAnnualValue} mode={vatMode} onMode={setVatMode} />
             {delta != null && delta !== 0 && (
               <p className={`text-[11.5px] font-semibold mt-1 ${delta > 0 ? 'text-[#b45309]' : 'text-[#15803d]'}`}>
                 {delta > 0 ? '▲' : '▼'} AED {Math.abs(delta).toLocaleString('en-AE')} ({Math.round(Math.abs(delta) / (oldVal || 1) * 100)}%) vs last term
               </p>
             )}
-            {delta === 0 && oldVal != null && <p className="text-[11.5px] text-[#6b6860] mt-1">Same price as last term.</p>}
+            {delta === 0 && oldVal != null && <p className="text-[11.5px] text-[#5f6b63] mt-1">Same price as last term.</p>}
           </div>
           {error && <p className="text-xs text-[#b91c1c]">{error}</p>}
         </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#f4f3ef]">
-          <button onClick={onClose} className="text-xs font-semibold px-3.5 py-2 rounded-xl border border-[#e8e6e0] text-[#6b6860]">Cancel</button>
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[#eef1ef]">
+          <button onClick={onClose} className="text-xs font-semibold px-3.5 py-2 rounded-xl border border-[#e4e9e5] text-[#5f6b63]">Cancel</button>
           <button onClick={() => void submit()} disabled={saving}
-            className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50" style={{ background: '#2e9f82' }}>
+            className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50" style={{ background: '#047246' }}>
             {saving ? 'Renewing…' : 'Renew contract'}
           </button>
         </div>

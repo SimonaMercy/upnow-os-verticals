@@ -66,7 +66,7 @@ export function GlobalSearchBar() {
         <button
           type="button"
           onClick={() => setDropdownOpen((o) => !o)}
-          className="flex items-center gap-1.5 px-3 h-10 text-sm font-medium border-r transition-colors hover:bg-[#f4f3ef] cursor-pointer"
+          className="flex items-center gap-1.5 px-3 h-10 text-sm font-medium border-r transition-colors hover:bg-[#eef1ef] cursor-pointer"
           style={{
             borderColor: 'var(--base-200)',
             color: 'var(--neutral-700)',

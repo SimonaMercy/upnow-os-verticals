@@ -77,7 +77,7 @@ export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager
   const body = (
     <>
       {chats.length === 0 && (
-        <p className="text-sm text-[#9b9890]">
+        <p className="text-sm text-[#8a948d]">
           {preset?.phone
             ? <>No WhatsApp conversation with {prettyPhone(preset.phone)} yet. If they write from another number, open that conversation on the WhatsApp page and link it to them.</>
             : 'No phone number on file for this person, so no conversation can be matched to them.'}
@@ -89,15 +89,15 @@ export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager
           {chats.map((c) => (
             <button key={c.id} type="button" onClick={() => setOpenChat(c.id)} className="block w-full min-w-0 text-left px-4 py-3 hover:bg-[#fbfaf8] cursor-pointer">
               <div className="flex items-baseline gap-2 min-w-0">
-                {c.unreadCount > 0 && <span className="w-2 h-2 rounded-full bg-[#2e9f82] shrink-0 self-center" aria-label="Unread" />}
-                <span className={`text-sm truncate flex-1 min-w-0 ${c.unreadCount > 0 ? 'font-bold text-[#1a1916]' : 'font-medium text-[#2b2a27]'}`}>
+                {c.unreadCount > 0 && <span className="w-2 h-2 rounded-full bg-[#047246] shrink-0 self-center" aria-label="Unread" />}
+                <span className={`text-sm truncate flex-1 min-w-0 ${c.unreadCount > 0 ? 'font-bold text-[#14201a]' : 'font-medium text-[#2b2a27]'}`}>
                   {prettyPhone(c.phone) || c.name}
-                  <span className="font-normal text-[#9b9890]"> · on {c.lineLabel}{c.linkedManually ? ` · ${c.savedName || c.profileName || 'linked by hand'}` : ''}</span>
+                  <span className="font-normal text-[#8a948d]"> · on {c.lineLabel}{c.linkedManually ? ` · ${c.savedName || c.profileName || 'linked by hand'}` : ''}</span>
                 </span>
-                <span className="text-xs text-[#9b9890] shrink-0">{waListWhen(c.lastMessageAt)}</span>
+                <span className="text-xs text-[#8a948d] shrink-0">{waListWhen(c.lastMessageAt)}</span>
               </div>
-              <div className="text-xs text-[#6b6860] truncate mt-0.5" dir="auto">
-                {c.lastDirection === 'out' ? 'You: ' : ''}{c.lastSnippet ?? ''} <span className="text-[#9b9890]">· {c.messageCount} {c.messageCount === 1 ? 'message' : 'messages'}</span>
+              <div className="text-xs text-[#5f6b63] truncate mt-0.5" dir="auto">
+                {c.lastDirection === 'out' ? 'You: ' : ''}{c.lastSnippet ?? ''} <span className="text-[#8a948d]">· {c.messageCount} {c.messageCount === 1 ? 'message' : 'messages'}</span>
               </div>
             </button>
           ))}
@@ -159,14 +159,14 @@ export function WhatsAppCard({ rp, tenantId, leadId, vendorId, person, isManager
   return (
     // min-w-0 / max-w-full: inside a flex or grid column the long one-line
     // preview would otherwise set the card's width and stretch the whole page.
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-base font-semibold text-[#1a1916] flex items-center gap-2 flex-1">
-          <MessageCircle size={16} className="text-[#2e9f82]" /> WhatsApp
-          {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
+        <h2 className="text-base font-semibold text-[#14201a] flex items-center gap-2 flex-1">
+          <MessageCircle size={16} className="text-[#047246]" /> WhatsApp
+          {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#047246] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
         </h2>
         {connected && canSend && preset?.phone && (
-          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">
+          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer">
             <Plus size={14} /> New message
           </button>
         )}

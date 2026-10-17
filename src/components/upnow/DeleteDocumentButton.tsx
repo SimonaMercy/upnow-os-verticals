@@ -80,14 +80,14 @@ export function DeleteDocumentButton({
               <span className="w-7 h-7 rounded-lg bg-[#fee2e2] text-[#b91c1c] flex items-center justify-center shrink-0">
                 <AlertTriangle size={15} />
               </span>
-              <p className="text-sm font-bold text-[#1a1916] flex-1 min-w-0">Remove this document?</p>
+              <p className="text-sm font-bold text-[#14201a] flex-1 min-w-0">Remove this document?</p>
               <button type="button" onClick={() => !busy && setConfirming(false)}
-                className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer shrink-0" aria-label="Close">
+                className="text-[#8a948d] hover:text-[#14201a] cursor-pointer shrink-0" aria-label="Close">
                 <X size={16} />
               </button>
             </div>
-            <p className="text-[12.5px] text-[#6b6860] mt-2.5 leading-relaxed">
-              <strong className="text-[#1a1916]">{label}</strong> will stop appearing anywhere on this record.
+            <p className="text-[12.5px] text-[#5f6b63] mt-2.5 leading-relaxed">
+              <strong className="text-[#14201a]">{label}</strong> will stop appearing anywhere on this record.
             </p>
             {err && (
               <p className="text-xs text-[#b91c1c] mt-2 flex items-start gap-1.5">
@@ -96,7 +96,7 @@ export function DeleteDocumentButton({
             )}
             <div className="flex items-center justify-end gap-2 mt-3.5">
               <button type="button" onClick={() => setConfirming(false)} disabled={busy}
-                className="px-3.5 py-2 rounded-xl text-sm font-semibold border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] disabled:opacity-50 cursor-pointer">
+                className="px-3.5 py-2 rounded-xl text-sm font-semibold border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef] disabled:opacity-50 cursor-pointer">
                 Cancel
               </button>
               <button type="button" onClick={run} disabled={busy}

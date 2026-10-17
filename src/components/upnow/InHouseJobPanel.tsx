@@ -49,8 +49,8 @@ export interface InHouseTask {
 
 /** One Restoration List item — the sub-list a task is built from. */
 interface ListItem { id: number; categoryKey: string; subCategory: string | null; label: string; unit: string; priceAed: number }
-const chipOn = { background: '#e6f7f1', color: '#1a7a5a', borderColor: '#2e9f82' } as const;
-const chipOff = { background: '#fff', color: '#6b6860', borderColor: '#e8e6e0' } as const;
+const chipOn = { background: '#e6f7f1', color: '#1a7a5a', borderColor: '#047246' } as const;
+const chipOff = { background: '#fff', color: '#5f6b63', borderColor: '#e4e9e5' } as const;
 
 /** Thumbnails shown per photo row before the "+N" tile. */
 const PHOTO_ROW = 8;
@@ -199,7 +199,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
     return (
       <div>
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-bold uppercase tracking-wide text-[#6b6860]">{kind === 'before' ? 'Before' : 'After'} · {rows.length}</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-[#5f6b63]">{kind === 'before' ? 'Before' : 'After'} · {rows.length}</h3>
           {open && (
             <>
               <input ref={ref} type="file" accept="image/*,video/*" multiple hidden onChange={e => { addPhotos(kind, e.target.files); e.target.value = ''; }} />
@@ -217,7 +217,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           )}
         </div>
         {rows.length === 0 ? (
-          <p className="text-[11.5px] text-[#9b9890] mt-2 border border-dashed border-[#e0ddd5] rounded-lg px-3 py-3 text-center">
+          <p className="text-[11.5px] text-[#8a948d] mt-2 border border-dashed border-[#e0ddd5] rounded-lg px-3 py-3 text-center">
             {kind === 'before' ? (moveOutLeft > 0 ? 'No before photos yet — bring them from the move-out report' : 'No before photos yet') : 'No after photos yet — needed to mark the work done'}
           </p>
         ) : (
@@ -278,7 +278,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           <p className="text-[11.5px] text-[#5b615e] mt-1">{!open ? 'What was done on this job. A late bill can still be filed against a task.' : tasks.length > 0 ? 'Tick each item when it is fixed — all ticked marks the task done. File bills against the task. Found more work? Add it.' : 'No task list on this job yet — add the work to be done, then tick each one when it is fixed.'}</p>
           {tasks.length > 0 && (
           <div className="h-1.5 rounded-full bg-[#eef1ec] mt-3 overflow-hidden">
-            <div className="h-full bg-[#2e9f82]" style={{ width: `${Math.round(((tasks.length - openTasks) / tasks.length) * 100)}%` }} />
+            <div className="h-full bg-[#047246]" style={{ width: `${Math.round(((tasks.length - openTasks) / tasks.length) * 100)}%` }} />
           </div>
           )}
           {tasks.length > 0 && (
@@ -289,15 +289,15 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                 <li key={t.id} className="flex items-start gap-3 px-3.5 py-3">
                   <button type="button" disabled={!open || !!busy} title={done ? 'Open again' : 'Mark done'}
                     onClick={() => run(`task-${t.id}`, async () => { await apiPatch(url(`/tasks/${t.id}`), { done: !done }); })}
-                    className={`mt-0.5 flex items-center justify-center w-5 h-5 rounded-md border shrink-0 cursor-pointer disabled:cursor-default ${done ? 'bg-[#2e9f82] border-[#2e9f82] text-white' : 'bg-white border-[#cfd6cf] hover:border-[#2e9f82]'}`}>
+                    className={`mt-0.5 flex items-center justify-center w-5 h-5 rounded-md border shrink-0 cursor-pointer disabled:cursor-default ${done ? 'bg-[#047246] border-[#047246] text-white' : 'bg-white border-[#cfd6cf] hover:border-[#047246]'}`}>
                     {done && <Check size={13} strokeWidth={3} />}
                   </button>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                      <span className={`text-[13px] font-semibold ${done ? 'text-[#9b9890] line-through' : 'text-[#1c1f1d]'}`}>{t.label}</span>
+                      <span className={`text-[13px] font-semibold ${done ? 'text-[#8a948d] line-through' : 'text-[#1c1f1d]'}`}>{t.label}</span>
                       <span className="flex items-center gap-3 text-xs">
-                        {t.bills > 0 && <span className="text-[#6b6860]">{t.bills} bill{t.bills === 1 ? '' : 's'} · <span className="font-semibold text-[#1a1916]">{aed(t.billsAed)}</span></span>}
-                        {(t.sharedBills ?? 0) > 0 && <span className="text-[#9b9890]" title="Bills that paid for this task together with other tasks">+ {t.sharedBills} shared</span>}
+                        {t.bills > 0 && <span className="text-[#5f6b63]">{t.bills} bill{t.bills === 1 ? '' : 's'} · <span className="font-semibold text-[#14201a]">{aed(t.billsAed)}</span></span>}
+                        {(t.sharedBills ?? 0) > 0 && <span className="text-[#8a948d]" title="Bills that paid for this task together with other tasks">+ {t.sharedBills} shared</span>}
                         <button type="button" disabled={!!busy} onClick={() => addBillFor(t.id)} className="inline-flex items-center gap-1 font-semibold text-[#1a7a5a] cursor-pointer disabled:opacity-50">
                           <Plus size={12} /> Bill
                         </button>
@@ -317,12 +317,12 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                             <li key={f.id} className="group flex items-start gap-2 text-[12px]">
                               <button type="button" disabled={!open || !!busy} title={fd ? 'Open again' : 'Tick when fixed'}
                                 onClick={() => run(`item-${f.id}`, async () => { await apiPatch(url(`/tasks/${t.id}/items/${f.id}`), { done: !fd }); })}
-                                className={`mt-px flex items-center justify-center w-4 h-4 rounded border shrink-0 cursor-pointer disabled:cursor-default ${fd ? 'bg-[#2e9f82] border-[#2e9f82] text-white' : 'bg-white border-[#cfd6cf] hover:border-[#2e9f82]'}`}>
+                                className={`mt-px flex items-center justify-center w-4 h-4 rounded border shrink-0 cursor-pointer disabled:cursor-default ${fd ? 'bg-[#047246] border-[#047246] text-white' : 'bg-white border-[#cfd6cf] hover:border-[#047246]'}`}>
                                 {fd && <Check size={10} strokeWidth={3} />}
                               </button>
-                              <span className={fd ? 'text-[#9b9890] line-through' : 'text-[#6b6860]'}>
+                              <span className={fd ? 'text-[#8a948d] line-through' : 'text-[#5f6b63]'}>
                                 {f.label}{f.condition && <span className="text-[#9a3412]"> · {f.condition}</span>}
-                                {f.costAed > 0 && <span className="text-[#9b9890]"> · {f.source === 'list' ? 'list price' : 'est.'} {aed(f.costAed)}{f.source === 'list' && f.unit ? ` / ${f.unit}` : ''}</span>}
+                                {f.costAed > 0 && <span className="text-[#8a948d]"> · {f.source === 'list' ? 'list price' : 'est.'} {aed(f.costAed)}{f.source === 'list' && f.unit ? ` / ${f.unit}` : ''}</span>}
                               </span>
                               {open && !fd && f.source !== 'move_out' && (
                                 <button type="button" disabled={!!busy} title="Remove this item"
@@ -338,17 +338,17 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                       <button type="button" disabled={!!busy} onClick={() => openAddItems(t.id)} className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#1a7a5a] cursor-pointer disabled:opacity-50"><Plus size={11} /> item</button>
                     )}
                     {itemsFor === t.id && (
-                      <div className="mt-2 border border-[#e8e6e0] rounded-lg p-3 bg-[#fafaf7]">
-                        {itemOptions == null ? <p className="text-xs text-[#9b9890]">Loading…</p> : itemOptions.length > 0 && (
+                      <div className="mt-2 border border-[#e4e9e5] rounded-lg p-3 bg-[#fafaf7]">
+                        {itemOptions == null ? <p className="text-xs text-[#8a948d]">Loading…</p> : itemOptions.length > 0 && (
                           <>
-                            <p className="text-[11px] font-semibold text-[#6b6860]">From your Restoration List</p>
+                            <p className="text-[11px] font-semibold text-[#5f6b63]">From your Restoration List</p>
                             <div className="flex gap-1.5 flex-wrap mt-1.5">
                               {itemOptions.map(o => {
                                 const on = itemPicks.includes(o.id);
                                 return (
                                   <button key={o.id} type="button" onClick={() => setItemPicks(p => on ? p.filter(x => x !== o.id) : [...p, o.id])}
                                     className="px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer border" style={on ? chipOn : chipOff}>
-                                    {o.label}<span className="ml-1.5 font-normal text-[#9b9890]">{aed(o.priceAed)}/{o.unit}</span>
+                                    {o.label}<span className="ml-1.5 font-normal text-[#8a948d]">{aed(o.priceAed)}/{o.unit}</span>
                                   </button>
                                 );
                               })}
@@ -362,7 +362,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                             className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer disabled:opacity-50" style={{ background: '#1a7a52' }}>
                             {busy === 'add-items' ? 'Adding…' : 'Add'}
                           </button>
-                          <button type="button" disabled={!!busy} onClick={() => setItemsFor(null)} className="text-xs font-semibold text-[#6b6860] cursor-pointer">Cancel</button>
+                          <button type="button" disabled={!!busy} onClick={() => setItemsFor(null)} className="text-xs font-semibold text-[#5f6b63] cursor-pointer">Cancel</button>
                         </div>
                       </div>
                     )}
@@ -374,10 +374,10 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           </ul>
           )}
           {addingTask && (
-            <div className="mt-3 border border-[#e8e6e0] rounded-xl p-4 bg-[#fafaf7]">
-              <p className="text-xs font-semibold text-[#6b6860]">Add to the task list</p>
+            <div className="mt-3 border border-[#e4e9e5] rounded-xl p-4 bg-[#fafaf7]">
+              <p className="text-xs font-semibold text-[#5f6b63]">Add to the task list</p>
               {taskOptions == null ? (
-                <p className="text-xs text-[#9b9890] mt-2">Loading…</p>
+                <p className="text-xs text-[#8a948d] mt-2">Loading…</p>
               ) : taskOptions.length > 0 ? (
                 <div className="flex gap-1.5 flex-wrap mt-2">
                   {taskOptions.map(o => {
@@ -386,32 +386,32 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                       <button key={o.key} type="button" title={o.findings.length ? o.findings.map(f => `${f.label}${f.condition ? ' — ' + f.condition : ''}`).join('\n') : undefined}
                         onClick={() => { setPickedTasks(p => on ? p.filter(k => k !== o.key) : [...p, o.key]); if (on) setPickedItems(p => p.filter(id => !o.items.some(it => it.id === id))); }}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold cursor-pointer border"
-                        style={on ? { background: '#e6f7f1', color: '#1a7a5a', borderColor: '#2e9f82' } : { background: '#fff', color: '#6b6860', borderColor: '#e8e6e0' }}>
+                        style={on ? { background: '#e6f7f1', color: '#1a7a5a', borderColor: '#047246' } : { background: '#fff', color: '#5f6b63', borderColor: '#e4e9e5' }}>
                         {o.label}{o.suggested && <span className="ml-1.5 text-[10.5px] font-bold text-[#9a3412]">move-out: {o.findings.length} issue{o.findings.length === 1 ? '' : 's'}</span>}
                       </button>
                     );
                   })}
                 </div>
               ) : (
-                <p className="text-xs text-[#9b9890] mt-2">Every category is already on the list — type the task below.</p>
+                <p className="text-xs text-[#8a948d] mt-2">Every category is already on the list — type the task below.</p>
               )}
               {(taskOptions ?? []).filter(o => pickedTasks.includes(o.key) && o.items.length > 0).map(o => (
                 <div key={o.key} className="mt-3 pl-3 border-l-2 border-[#cce6d8]">
-                  <p className="text-[11px] font-semibold text-[#6b6860]">{o.label} — what needs doing? <span className="font-normal text-[#9b9890]">from your Restoration List · optional</span></p>
+                  <p className="text-[11px] font-semibold text-[#5f6b63]">{o.label} — what needs doing? <span className="font-normal text-[#8a948d]">from your Restoration List · optional</span></p>
                   <div className="flex gap-1.5 flex-wrap mt-1.5">
                     {o.items.map(it => {
                       const on = pickedItems.includes(it.id);
                       return (
                         <button key={it.id} type="button" onClick={() => setPickedItems(p => on ? p.filter(x => x !== it.id) : [...p, it.id])}
                           className="px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer border" style={on ? chipOn : chipOff}>
-                          {it.label}<span className="ml-1.5 font-normal text-[#9b9890]">{aed(it.priceAed)}/{it.unit}</span>
+                          {it.label}<span className="ml-1.5 font-normal text-[#8a948d]">{aed(it.priceAed)}/{it.unit}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               ))}
-              <label className="block text-xs font-semibold text-[#6b6860] mt-3">Something else — in your own words
+              <label className="block text-xs font-semibold text-[#5f6b63] mt-3">Something else — in your own words
                 <input className={field + ' mt-1'} value={customTask} maxLength={120} onChange={e => setCustomTask(e.target.value)} placeholder="e.g. Replace balcony door lock" />
               </label>
               <div className="flex items-center gap-2 mt-3">
@@ -420,7 +420,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                   className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
                   {busy === 'add-task' ? 'Adding…' : pickedTasks.length + (customTask.trim() ? 1 : 0) > 1 ? `Add ${pickedTasks.length + (customTask.trim() ? 1 : 0)} tasks` : 'Add task'}
                 </button>
-                <button type="button" disabled={!!busy} onClick={() => setAddingTask(false)} className={btn + ' text-[#6b6860] bg-[#eef1ec]'}>Cancel</button>
+                <button type="button" disabled={!!busy} onClick={() => setAddingTask(false)} className={btn + ' text-[#5f6b63] bg-[#eef1ec]'}>Cancel</button>
               </div>
             </div>
           )}
@@ -459,7 +459,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
           <div className="overflow-x-auto mt-3">
             <table className="w-full text-[12.5px]">
               <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-[#9b9890]">
+                <tr className="text-left text-[11px] uppercase tracking-wide text-[#8a948d]">
                   {/* Five columns so it fits the page's main column: who / what for sit under one another, and the
                       VAT split sits under each total — every figure is still on screen, none behind a scrollbar. */}
                   <th className="py-1.5 pr-3 font-semibold">Date · bill no.</th>
@@ -472,24 +472,24 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
               <tbody>
                 {bills.map(b => (
                   <tr key={b.id} className="border-t border-[#f0eee8] align-top">
-                    <td className="py-2 pr-3 whitespace-nowrap text-[#6b6860]">
+                    <td className="py-2 pr-3 whitespace-nowrap text-[#5f6b63]">
                       {fmtDay(b.billDate)}
-                      {b.billRef && <span className="block text-[11px] text-[#9b9890]">{b.billRef}</span>}
+                      {b.billRef && <span className="block text-[11px] text-[#8a948d]">{b.billRef}</span>}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className="font-medium text-[#1a1916]">{b.category}</span>
-                      {b.supplier && <span className="text-[#6b6860]"> · {b.supplier}</span>}
+                      <span className="font-medium text-[#14201a]">{b.category}</span>
+                      {b.supplier && <span className="text-[#5f6b63]"> · {b.supplier}</span>}
                       {taskLabels(b.taskIds) && <span className="block text-xs font-semibold text-[#1a7a5a]">{(b.taskIds ?? []).length > 1 ? 'Tasks' : 'Task'} · {taskLabels(b.taskIds)}</span>}
-                      {b.description && <span className="block text-xs text-[#9b9890]">{b.description}</span>}
+                      {b.description && <span className="block text-xs text-[#8a948d]">{b.description}</span>}
                     </td>
                     <td className="py-2 pr-3 whitespace-nowrap">
                       {b.category === OWN_LABOUR && !b.fileUrl ? (
-                        <span className="text-xs text-[#9b9890]">Own team · no bill</span>
+                        <span className="text-xs text-[#8a948d]">Own team · no bill</span>
                       ) : b.fileUrl ? (
                         <span className="inline-flex items-center gap-2">
                           <a href={b.fileUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[#1a7a5a] hover:underline"><FileText size={13} /> View bill</a>
                           <button type="button" disabled={!!busy} onClick={() => { attachTo.current = b.id; billFileRef.current?.click(); }}
-                            className="text-xs text-[#9b9890] hover:text-[#1a1916] cursor-pointer disabled:opacity-50">{busy === `attach-${b.id}` ? 'Uploading…' : 'Replace'}</button>
+                            className="text-xs text-[#8a948d] hover:text-[#14201a] cursor-pointer disabled:opacity-50">{busy === `attach-${b.id}` ? 'Uploading…' : 'Replace'}</button>
                         </span>
                       ) : (
                         <button type="button" disabled={!!busy} onClick={() => { attachTo.current = b.id; billFileRef.current?.click(); }}
@@ -500,7 +500,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                     </td>
                     <td className="py-2 pr-3 text-right whitespace-nowrap">
                       <span className="font-semibold">{aed(b.amountAed)}</span>
-                      <span className="block text-[11px] text-[#9b9890]">{b.vatAed ? `${aed(b.netAed)} + VAT ${aed(b.vatAed)}` : 'No VAT'}</span>
+                      <span className="block text-[11px] text-[#8a948d]">{b.vatAed ? `${aed(b.netAed)} + VAT ${aed(b.vatAed)}` : 'No VAT'}</span>
                     </td>
                     <td className="py-2 text-right whitespace-nowrap">
                       <button type="button" title="Remove bill" disabled={!!busy}
@@ -509,11 +509,11 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                     </td>
                   </tr>
                 ))}
-                <tr className="border-t-2 border-[#e8e6e0]">
-                  <td colSpan={3} className="py-2.5 pr-3 font-bold text-[#1a1916]">Total cost of this job</td>
+                <tr className="border-t-2 border-[#e4e9e5]">
+                  <td colSpan={3} className="py-2.5 pr-3 font-bold text-[#14201a]">Total cost of this job</td>
                   <td className="py-2.5 pr-3 text-right whitespace-nowrap">
-                    <span className="font-bold text-[#1a1916]">{aed(totalAed ?? 0)}</span>
-                    <span className="block text-[11px] text-[#9b9890]">{vatAed ? `${aed(Math.round(((totalAed ?? 0) - vatAed) * 100) / 100)} + VAT ${aed(vatAed)}` : 'No VAT'}</span>
+                    <span className="font-bold text-[#14201a]">{aed(totalAed ?? 0)}</span>
+                    <span className="block text-[11px] text-[#8a948d]">{vatAed ? `${aed(Math.round(((totalAed ?? 0) - vatAed) * 100) / 100)} + VAT ${aed(vatAed)}` : 'No VAT'}</span>
                   </td>
                   <td />
                 </tr>
@@ -521,59 +521,59 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
             </table>
           </div>
         )}
-        {bills.length === 0 && <p className="text-xs text-[#9b9890] mt-3">No bills recorded yet.</p>}
+        {bills.length === 0 && <p className="text-xs text-[#8a948d] mt-3">No bills recorded yet.</p>}
 
         {adding && (
           <Popup title={bill.category === OWN_LABOUR ? 'Add own team labour' : 'Add a bill'} sub={bill.category === OWN_LABOUR ? 'Your own team has no bill — enter what the labour cost.' : 'What was spent on this job — the total becomes its cost on the unit.'} busy={busy === 'bill'} onClose={closeBill}>
               {tasks.length > 0 && (
                 <div className="mb-3">
-                  <p className="text-xs font-semibold text-[#6b6860]">Which task did it pay for? <span className="font-normal text-[#9b9890]">— one, or several if the bill covers them together</span></p>
+                  <p className="text-xs font-semibold text-[#5f6b63]">Which task did it pay for? <span className="font-normal text-[#8a948d]">— one, or several if the bill covers them together</span></p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {tasks.map(t => {
                       const on = bill.taskIds.includes(t.id);
                       return (
                         <button key={t.id} type="button" onClick={() => toggleBillTask(t.id)}
-                          className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${on ? 'bg-[#e6f7f1] border-[#2e9f82] text-[#1a7a5a]' : 'bg-white border-[#e5e9e6] text-[#6b756f] hover:border-[#cfd6cf]'}`}>
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${on ? 'bg-[#e6f7f1] border-[#047246] text-[#1a7a5a]' : 'bg-white border-[#e5e9e6] text-[#6b756f] hover:border-[#cfd6cf]'}`}>
                           {on && <Check size={12} strokeWidth={3} />}{t.label}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-[#9b9890] mt-1">{bill.taskIds.length === 0 ? 'None ticked — a general bill for the whole job.' : bill.taskIds.length > 1 ? `One bill shared by ${bill.taskIds.length} tasks.` : ''}</p>
+                  <p className="text-[11px] text-[#8a948d] mt-1">{bill.taskIds.length === 0 ? 'None ticked — a general bill for the whole job.' : bill.taskIds.length > 1 ? `One bill shared by ${bill.taskIds.length} tasks.` : ''}</p>
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="text-xs font-semibold text-[#6b6860]">What is it for?
+                <label className="text-xs font-semibold text-[#5f6b63]">What is it for?
                   <select className={field + ' mt-1'} value={bill.category} onChange={e => setBill({ ...bill, category: e.target.value })}>
                     <option value="">Choose a category…</option>
                     {billCategories.map(c => <option key={c} value={c}>{c === OWN_LABOUR ? 'Labour — own team (no bill)' : c}</option>)}
                   </select>
                 </label>
                 {bill.category !== OWN_LABOUR && (
-                  <label className="text-xs font-semibold text-[#6b6860]">Supplier
+                  <label className="text-xs font-semibold text-[#5f6b63]">Supplier
                     <input className={field + ' mt-1'} value={bill.supplier} onChange={e => setBill({ ...bill, supplier: e.target.value })} placeholder="Shop or company" />
                   </label>
                 )}
-                <label className="text-xs font-semibold text-[#6b6860]">{bill.category === OWN_LABOUR ? 'Date' : 'Bill date'}
+                <label className="text-xs font-semibold text-[#5f6b63]">{bill.category === OWN_LABOUR ? 'Date' : 'Bill date'}
                   <input type="date" className={field + ' mt-1'} value={bill.billDate} onChange={e => setBill({ ...bill, billDate: e.target.value })} />
                 </label>
                 {bill.category === OWN_LABOUR ? (
-                  <label className="text-xs font-semibold text-[#6b6860]">Labour cost (AED)
+                  <label className="text-xs font-semibold text-[#5f6b63]">Labour cost (AED)
                     <input type="number" min="0" step="0.01" inputMode="decimal" className={field + ' mt-1'} value={bill.amountAed} onChange={e => setBill({ ...bill, amountAed: e.target.value })} />
                   </label>
                 ) : (
-                  <div className="text-xs font-semibold text-[#6b6860]">Amount on the bill (AED)
-                    <div className="mt-1 font-normal"><AmountWithVat accent="#2e9f82" amount={bill.amountAed} onAmount={v => setBill({ ...bill, amountAed: v })} mode={bill.vatMode} onMode={m => setBill({ ...bill, vatMode: m })} /></div>
+                  <div className="text-xs font-semibold text-[#5f6b63]">Amount on the bill (AED)
+                    <div className="mt-1 font-normal"><AmountWithVat accent="#047246" amount={bill.amountAed} onAmount={v => setBill({ ...bill, amountAed: v })} mode={bill.vatMode} onMode={m => setBill({ ...bill, vatMode: m })} /></div>
                   </div>
                 )}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                 {bill.category !== OWN_LABOUR && (
-                  <label className="text-xs font-semibold text-[#6b6860]">Bill no. <span className="text-[#b91c1c]">*</span>
+                  <label className="text-xs font-semibold text-[#5f6b63]">Bill no. <span className="text-[#b91c1c]">*</span>
                     <input required className={field + ' mt-1'} value={bill.billRef} onChange={e => setBill({ ...bill, billRef: e.target.value })} />
                   </label>
                 )}
-                <label className={`text-xs font-semibold text-[#6b6860] ${bill.category === OWN_LABOUR ? 'sm:col-span-2' : ''}`}>Note — optional
+                <label className={`text-xs font-semibold text-[#5f6b63] ${bill.category === OWN_LABOUR ? 'sm:col-span-2' : ''}`}>Note — optional
                   <input className={field + ' mt-1'} value={bill.description} onChange={e => setBill({ ...bill, description: e.target.value })} placeholder={bill.category === OWN_LABOUR ? 'e.g. 2 painters, 3 days' : 'e.g. 3 rooms, two coats'} />
                 </label>
               </div>
@@ -582,12 +582,12 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
               {bill.category !== OWN_LABOUR && (<>
               <input ref={newBillFileRef} type="file" accept="image/*,application/pdf" hidden onChange={e => { setBillFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
               <div className="mt-3">
-                <p className="text-xs font-semibold text-[#6b6860]">Attach the bill</p>
+                <p className="text-xs font-semibold text-[#5f6b63]">Attach the bill</p>
                 {billFile ? (
-                  <div className="flex items-center justify-between gap-3 mt-1 border border-[#2e9f82] bg-[#e6f7f1] rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 mt-1 border border-[#047246] bg-[#e6f7f1] rounded-xl px-4 py-3">
                     <span className="inline-flex items-center gap-2 text-sm font-semibold text-[#1a7a5a] min-w-0">
                       <FileText size={16} className="shrink-0" /> <span className="truncate">{billFile.name}</span>
-                      <span className="font-normal text-[#6b6860] shrink-0">· {(billFile.size / 1024 / 1024).toFixed(1)} MB</span>
+                      <span className="font-normal text-[#5f6b63] shrink-0">· {(billFile.size / 1024 / 1024).toFixed(1)} MB</span>
                     </span>
                     <span className="flex items-center gap-3 shrink-0">
                       <button type="button" onClick={() => newBillFileRef.current?.click()} className="text-xs font-semibold text-[#1a7a5a] cursor-pointer hover:underline">Change</button>
@@ -596,9 +596,9 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
                   </div>
                 ) : (
                   <button type="button" onClick={() => newBillFileRef.current?.click()}
-                    className="w-full mt-1 flex items-center justify-center gap-2 border-2 border-dashed border-[#cfd6cf] hover:border-[#2e9f82] bg-white rounded-xl px-4 py-5 text-sm font-semibold text-[#1a7a5a] cursor-pointer">
+                    className="w-full mt-1 flex items-center justify-center gap-2 border-2 border-dashed border-[#cfd6cf] hover:border-[#047246] bg-white rounded-xl px-4 py-5 text-sm font-semibold text-[#1a7a5a] cursor-pointer">
                     <Paperclip size={16} /> Choose the bill — photo or PDF
-                    <span className="font-normal text-[#9b9890]">(up to 10 MB · can also be added later)</span>
+                    <span className="font-normal text-[#8a948d]">(up to 10 MB · can also be added later)</span>
                   </button>
                 )}
               </div>
@@ -606,7 +606,7 @@ export function InHouseJobPanel({ url, open, photos, bills, tasks = [], canAddTa
 
               {billErr && <p className="text-xs text-[#b91c1c] mt-3">{billErr}</p>}
               <div className="flex items-center justify-end gap-2 mt-5 pt-4 border-t border-[#eef1ec]">
-                <button type="button" disabled={!!busy} onClick={closeBill} className={btn + ' text-[#6b6860] bg-[#eef1ec]'}>Cancel</button>
+                <button type="button" disabled={!!busy} onClick={closeBill} className={btn + ' text-[#5f6b63] bg-[#eef1ec]'}>Cancel</button>
                 <button type="button" disabled={!!busy} onClick={() => void saveBill()} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>{busy === 'bill' ? 'Saving…' : 'Save bill'}</button>
               </div>
           </Popup>
@@ -648,27 +648,27 @@ function MoveOutPicker({ data, busy, onClose, onAdd }: { data: MoveOutPhotos; bu
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-full flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-[#f1efe9]">
           <div>
-            <h3 className="text-sm font-bold text-[#1a1916]">Move-out report{data.inspectionDate ? ` · ${fmtDay(data.inspectionDate)}` : ''}</h3>
-            <p className="text-xs text-[#6b6860] mt-0.5">The unit&apos;s last condition. Choose the photos of what needs fixing.</p>
+            <h3 className="text-sm font-bold text-[#14201a]">Move-out report{data.inspectionDate ? ` · ${fmtDay(data.inspectionDate)}` : ''}</h3>
+            <p className="text-xs text-[#5f6b63] mt-0.5">The unit&apos;s last condition. Choose the photos of what needs fixing.</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer" aria-label="Close"><X size={16} /></button>
+          <button type="button" onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer" aria-label="Close"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto px-5 py-3 space-y-4">
           {data.items.map((it, i) => (
             <div key={i}>
-              <div className="text-xs font-semibold text-[#1a1916]">{it.label}{it.condition && <span className="font-normal text-[#9b9890]"> · {it.condition}</span>}</div>
+              <div className="text-xs font-semibold text-[#14201a]">{it.label}{it.condition && <span className="font-normal text-[#8a948d]"> · {it.condition}</span>}</div>
               <ul className="flex gap-2 flex-wrap mt-1.5">
                 {it.photos.map(p => {
                   const on = chosen.has(p.photoId);
                   return (
                     <li key={p.photoId}>
                       <button type="button" disabled={p.imported} onClick={() => toggle(p.photoId)} title={p.imported ? 'Already on this job' : on ? 'Selected' : 'Select'}
-                        className={`relative block rounded-xl overflow-hidden border-2 ${on ? 'border-[#2e9f82]' : 'border-transparent'} ${p.imported ? 'opacity-45 cursor-default' : 'cursor-pointer'}`}>
+                        className={`relative block rounded-xl overflow-hidden border-2 ${on ? 'border-[#047246]' : 'border-transparent'} ${p.imported ? 'opacity-45 cursor-default' : 'cursor-pointer'}`}>
                         <img src={p.viewUrl} alt={it.label} className="w-20 h-20 object-cover" />
                         {(on || p.imported) && (
-                          <span className={`absolute top-1 right-1 flex items-center justify-center w-4 h-4 rounded-full text-white ${p.imported ? 'bg-[#9b9890]' : 'bg-[#2e9f82]'}`}><Check size={10} /></span>
+                          <span className={`absolute top-1 right-1 flex items-center justify-center w-4 h-4 rounded-full text-white ${p.imported ? 'bg-[#8a948d]' : 'bg-[#047246]'}`}><Check size={10} /></span>
                         )}
-                        {p.imported && <span className="absolute left-1 bottom-1 text-[9px] font-semibold px-1 rounded bg-white/90 text-[#6b6860]">Added</span>}
+                        {p.imported && <span className="absolute left-1 bottom-1 text-[9px] font-semibold px-1 rounded bg-white/90 text-[#5f6b63]">Added</span>}
                       </button>
                     </li>
                   );
@@ -682,7 +682,7 @@ function MoveOutPicker({ data, busy, onClose, onAdd }: { data: MoveOutPhotos; bu
             {chosen.size === open.length ? 'Clear' : `Select all (${open.length})`}
           </button>
           <span className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className={btn + ' text-[#6b6860] bg-[#eef1ec]'}>Cancel</button>
+            <button type="button" onClick={onClose} className={btn + ' text-[#5f6b63] bg-[#eef1ec]'}>Cancel</button>
             <button type="button" disabled={busy || chosen.size === 0} onClick={() => onAdd([...chosen])} className={btn + ' text-white'} style={{ background: '#1a7a52' }}>
               {busy ? 'Adding…' : `Add ${chosen.size || ''} as before photo${chosen.size === 1 ? '' : 's'}`}
             </button>
@@ -701,10 +701,10 @@ function Popup({ title, sub, busy, onClose, children }: { title: string; sub?: s
       <div role="dialog" aria-modal="true" aria-label={title} className="bg-white rounded-2xl w-full max-w-xl max-h-full flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-[#f1efe9]">
           <div>
-            <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
-            {sub && <p className="text-xs text-[#6b6860] mt-0.5">{sub}</p>}
+            <h3 className="text-sm font-bold text-[#14201a]">{title}</h3>
+            {sub && <p className="text-xs text-[#5f6b63] mt-0.5">{sub}</p>}
           </div>
-          <button type="button" disabled={busy} onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer" aria-label="Close"><X size={16} /></button>
+          <button type="button" disabled={busy} onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer" aria-label="Close"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
       </div>

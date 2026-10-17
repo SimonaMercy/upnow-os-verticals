@@ -3,19 +3,39 @@
  * List / Grid views, reusing the shipped RP portfolio map. Read-only; each
  * property drills through to the admin property detail (SCRUM-588).
  *
- * Row and Grid bucket the portfolio under its owning rental provider — the same
+ * List and Grid bucket the portfolio under its owning rental provider — the same
  * landlord-first outline the all-units browser uses — so "whose building is this"
  * is answered by where the row sits, not by a caption. Map stays flat (one pin
  * per property, owner named in the pin card) and leans on the provider filter.
+ *
+ * Parity with previous page (Genspark kit rebuild):
+ *  - API: GET /admin/properties/browser (array; failure → empty list, as before).
+ *  - Views Row/Grid/Map (now a kit Seg: List / Grid / Map). Map reuses PortfolioMapView
+ *    as-is (same props, heightClass h-[72vh], onViewDetails → /dashboard/admin/properties/:id).
+ *  - Search (building, address, owner, category); rental-provider select with counts.
+ *  - Deep-link drill filters ?category= ?emirate= ?availability=occupied, plus ?rp=;
+ *    "Filtered:" chips with Clear (resets drill + router.replace to the bare route).
+ *  - Owner groups (biggest portfolio first) collapsible; Expand all / Collapse all
+ *    (hidden on map / while searching / with ≤1 group); searching ignores collapse state.
+ *  - Group header: initials avatar, property + unit counts, occupied · % and vacant pills,
+ *    "Provider" link → /dashboard/admin/users/:ownerUserId.
+ *  - Each property → /dashboard/admin/properties/:id (row: labelled "Open" button; grid: card link).
+ *  - Header count line (properties · providers · mapped on map view); Back button (router.back()).
+ *  - Loading / "No properties match" empty state.
+ *  - Added: KPI strip derived from the same list (no new data).
  */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Rows3, LayoutGrid, Map as MapIcon, Building2, Search, MapPin, ExternalLink, ArrowLeft, ChevronDown } from 'lucide-react';
+import { Building2, ChevronDown, MapPin } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { PortfolioMapView } from '@/app/rental-provider/dashboard/portfolio/PortfolioMapModal';
+import {
+  Btn, Card, EmptyRow, Kpi, Kpis, OsPage, PageHead, Pill, ScopeStrip, SearchField, Seg, SkeletonRows, TableWrap, Thumb,
+  humanize, initials,
+} from '@/components/os/kit';
 
 interface AdminProperty {
   id: number; buildingName: string; fullAddress: string | null; spaceCategory: string | null;
@@ -28,12 +48,12 @@ interface OwnerGroup {
   properties: AdminProperty[]; unitCount: number; occupied: number;
 }
 
+type View = 'row' | 'grid' | 'map';
+
 const titleCase = (s: string | null) => (s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—');
-/** Up to two initials for the provider avatar — "Al Nakheel Holdings" → "AN". */
-const initials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '—';
 const ownerLabel = (p: AdminProperty) => p.ownerName ?? (p.rentalProviderId != null ? `RP #${p.rentalProviderId}` : 'Unassigned');
 const ownerKey = (p: AdminProperty) => String(p.rentalProviderId ?? 'none');
+const pctOf = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
 
 /** Bucket the flat property list by owning rental provider, biggest portfolio first. */
 function groupByOwner(list: AdminProperty[]): OwnerGroup[] {
@@ -57,11 +77,22 @@ function groupByOwner(list: AdminProperty[]): OwnerGroup[] {
     .sort((a, b) => b.properties.length - a.properties.length || a.name.localeCompare(b.name));
 }
 
+/** Occupancy as a small bar + "n/m". */
+function OccBar({ occupied, total }: { occupied: number; total: number }) {
+  const pct = pctOf(occupied, total);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
+      <span className="gx-bar" style={{ flex: 1, minWidth: 50 }}><i style={{ width: `${pct}%` }} /></span>
+      <span className="nowrap">{occupied}/{total}</span>
+    </span>
+  );
+}
+
 export default function AdminPropertiesBrowser() {
   const router = useRouter();
   const [props, setProps] = useState<AdminProperty[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'row' | 'grid' | 'map'>('row');
+  const [view, setView] = useState<View>('row');
   const [q, setQ] = useState('');
   const [rp, setRp] = useState<string>('all');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -79,6 +110,7 @@ export default function AdminPropertiesBrowser() {
   // plus ?rp= so an RP's own row anywhere else can land straight on its properties.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot URL filter restore after hydration
     setDrill({
       category: p.get('category') ?? undefined,
       emirate: p.get('emirate') ?? undefined,
@@ -123,143 +155,155 @@ export default function AdminPropertiesBrowser() {
   ].filter(Boolean) as string[];
 
   const withCoords = filtered.filter((p) => p.latitude != null && p.longitude != null).length;
+  const totalUnits = filtered.reduce((s, p) => s + p.unitCount, 0);
+  const totalOcc = filtered.reduce((s, p) => s + p.occupiedCount, 0);
+
+  const toolbar = (
+    <>
+      <SearchField value={q} onChange={setQ} placeholder="Search building, owner, address…" />
+      <select value={rp} onChange={(e) => setRp(e.target.value)} aria-label="Filter by rental provider" className="gx-sel" style={{ minWidth: 220 }}>
+        <option value="all">All rental providers ({owners.length})</option>
+        {owners.map((o) => (
+          <option key={o.key} value={o.key}>{o.name} ({o.properties.length})</option>
+        ))}
+      </select>
+      <span className="sp" />
+      {view !== 'map' && !searching && groups.length > 1 && (
+        <>
+          <Btn size="sm" onClick={() => setCollapsed(new Set())}>Expand all</Btn>
+          <Btn size="sm" onClick={() => setCollapsed(new Set(groups.map((g) => g.key)))}>Collapse all</Btn>
+        </>
+      )}
+      <Seg<View> label="View" value={view} onChange={setView}
+        options={[{ v: 'row', l: 'List' }, { v: 'grid', l: 'Grid' }, { v: 'map', l: 'Map' }]} />
+    </>
+  );
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto">
-      <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4"><ArrowLeft size={16} /> Back</button>
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">All properties</h1>
-          <p className="text-sm text-[#6b6860] mt-1">
-            {filtered.length} properties · {groups.length} rental provider{groups.length === 1 ? '' : 's'}{view === 'map' ? ` · ${withCoords} mapped` : ''}
-          </p>
-        </div>
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-[#f4f3ef]">
-          {([['row', Rows3, 'Row'], ['grid', LayoutGrid, 'Grid'], ['map', MapIcon, 'Map']] as const).map(([v, Icon, label]) => (
-            <button key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${view === v ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#3f3d39]'}`}>
-              <Icon size={15} /> <span>{label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Inventory"
+        title="All properties"
+        lede={`${filtered.length} properties · ${groups.length} rental provider${groups.length === 1 ? '' : 's'}${view === 'map' ? ` · ${withCoords} mapped` : ''}. Read-only — open a property for its units, documents and owner.`}
+        actions={<>
+          <Btn onClick={() => router.back()}>Back</Btn>
+          <Btn href="/dashboard/admin/units">All units</Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Inventory' },
+        { label: 'Provider', value: rp === 'all' ? 'All rental providers' : (owners.find((o) => o.key === rp)?.name ?? rp) },
+        { label: 'View', value: view === 'row' ? 'List' : view === 'grid' ? 'Grid' : 'Map' },
+      ]} />
 
-      <div className="flex items-center gap-3 flex-wrap mb-5">
-        <div className="relative flex-1 min-w-[220px] max-w-md">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search building, owner, address…"
-            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#e8e6e0] text-sm outline-none focus:border-[#2e9f82]" />
-        </div>
-        <select value={rp} onChange={(e) => setRp(e.target.value)} aria-label="Filter by rental provider"
-          className={`min-w-[220px] px-3 py-2 rounded-xl border text-sm font-medium outline-none focus:border-[#2e9f82] ${rp === 'all' ? 'border-[#e8e6e0] text-[#3f3d39] bg-white' : 'border-[#2e9f82] text-[#1a7a5a] bg-[#f3faf7]'}`}>
-          <option value="all">All rental providers ({owners.length})</option>
-          {owners.map((o) => (
-            <option key={o.key} value={o.key}>{o.name} ({o.properties.length})</option>
-          ))}
-        </select>
-        {view !== 'map' && !searching && groups.length > 1 && (
-          <div className="flex items-center gap-2 text-xs font-semibold">
-            <button onClick={() => setCollapsed(new Set())} className="px-3 py-2 rounded-xl border border-[#e8e6e0] text-[#3f3d39] hover:bg-[#faf9f7]">Expand all</button>
-            <button onClick={() => setCollapsed(new Set(groups.map((g) => g.key)))} className="px-3 py-2 rounded-xl border border-[#e8e6e0] text-[#3f3d39] hover:bg-[#faf9f7]">Collapse all</button>
-          </div>
-        )}
-      </div>
+      {!loading && (
+        <Kpis>
+          <Kpi k="Properties" v={filtered.length} d={`${withCoords} with map pins`} />
+          <Kpi k="Rental providers" v={groups.length} />
+          <Kpi k="Units" v={totalUnits} href="/dashboard/admin/units" />
+          <Kpi k="Occupied units" v={`${pctOf(totalOcc, totalUnits)}%`} d={`${totalOcc}/${totalUnits} occupied`} dark />
+        </Kpis>
+      )}
 
       {activeDrill.length > 0 && (
-        <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
-          <span className="text-[#6b6860]">Filtered:</span>
-          {activeDrill.map((d) => (
-            <span key={d} className="px-2.5 py-1 rounded-full bg-[#f0faf6] text-[#1a7a5a] font-medium text-xs">{d}</span>
-          ))}
-          <button onClick={() => { setDrill({}); router.replace('/dashboard/admin/properties'); }} className="text-xs font-semibold text-[#6b6860] hover:text-[#3f3d39] underline">Clear</button>
+        <div className="gx-btn-row" style={{ marginBottom: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Filtered:</span>
+          {activeDrill.map((d) => <Pill key={d} tone="primary">{d}</Pill>)}
+          <Btn size="xs" variant="ghost" onClick={() => { setDrill({}); router.replace('/dashboard/admin/properties'); }}>Clear</Btn>
         </div>
       )}
 
-      {loading ? (
-        <div className="rounded-2xl border border-[#e8e6e0] bg-white p-12 text-center text-[#9b9890]">Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-[#e8e6e0] bg-white p-12 text-center text-[#9b9890]">No properties match.</div>
-      ) : view === 'map' ? (
-        <div className="bg-white rounded-2xl p-2 border border-[#e8e6e0]">
-          <PortfolioMapView
-            properties={filtered.map((p) => ({ id: p.id, buildingName: p.buildingName, latitude: p.latitude, longitude: p.longitude, fullAddress: p.fullAddress, unitCount: p.unitCount, occupiedCount: p.occupiedCount, coverPhotoUrl: p.coverPhotoUrl, spaceCategory: p.spaceCategory ?? undefined, ownerName: ownerLabel(p) }))}
-            heightClass="h-[72vh]"
-            onViewDetails={(id) => router.push(`/dashboard/admin/properties/${id}`)}
-          />
-        </div>
+      {loading || filtered.length === 0 || view === 'map' ? (
+        <TableWrap toolbar={toolbar}>
+          {loading ? (
+            <table className="gx-tbl"><SkeletonRows rows={6} cols={5} /></table>
+          ) : filtered.length === 0 ? (
+            <table className="gx-tbl"><EmptyRow cols={1} title="No properties match." text=" Clear the search, provider or drill filters to see every property." /></table>
+          ) : (
+            <div style={{ padding: 8 }}>
+              <PortfolioMapView
+                properties={filtered.map((p) => ({ id: p.id, buildingName: p.buildingName, latitude: p.latitude, longitude: p.longitude, fullAddress: p.fullAddress, unitCount: p.unitCount, occupiedCount: p.occupiedCount, coverPhotoUrl: p.coverPhotoUrl, spaceCategory: p.spaceCategory ?? undefined, ownerName: ownerLabel(p) }))}
+                heightClass="h-[72vh]"
+                onViewDetails={(id) => router.push(`/dashboard/admin/properties/${id}`)}
+              />
+            </div>
+          )}
+        </TableWrap>
       ) : (
-        <div className="space-y-4">
-          {groups.map((g) => {
-            const open = isOpen(g.key);
-            const pct = g.unitCount > 0 ? Math.round((g.occupied / g.unitCount) * 100) : 0;
-            return (
-              /* ─── Tier 1 · RENTAL PROVIDER — own card, green rail + mint band ───── */
-              <div key={g.key} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden shadow-[0_1px_3px_rgba(26,25,22,0.04)]">
-                <div className={`flex items-center border-l-[3px] border-l-[#2e9f82] bg-[#f3faf7] ${open ? 'border-b border-b-[#e2e9e5]' : ''}`}>
-                  <button onClick={() => toggle(g.key)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left transition hover:bg-[#eaf6f1]">
-                    <ChevronDown size={16} className={`text-[#5d9e8a] shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
-                    <div className="w-10 h-10 rounded-xl bg-[#2e9f82] text-white grid place-items-center shrink-0 text-xs font-bold tracking-wide">{initials(g.name)}</div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.09em] text-[#2e9f82] leading-none mb-1">Rental provider</p>
-                      <p className="text-base font-bold text-[#1a1916] truncate leading-tight">{g.name}</p>
-                      <p className="text-xs text-[#6b6860] mt-1">
-                        {g.properties.length} propert{g.properties.length === 1 ? 'y' : 'ies'} · {g.unitCount} unit{g.unitCount === 1 ? '' : 's'}
-                      </p>
+        <>
+          <div className="gx-tbl-wrap"><div className="gx-tbar" style={{ borderBottom: 0 }}>{toolbar}</div></div>
+          <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+            {groups.map((g) => {
+              const open = isOpen(g.key);
+              const pct = pctOf(g.occupied, g.unitCount);
+              return (
+                <Card
+                  key={g.key}
+                  title={
+                    <button type="button" onClick={() => toggle(g.key)} aria-expanded={open}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left' }}>
+                      <ChevronDown size={15} style={{ transform: open ? undefined : 'rotate(-90deg)', transition: 'transform .15s' }} aria-hidden />
+                      <span className="gx-thumb">{initials(g.name)}</span>
+                      <span>{g.name}</span>
+                    </button>
+                  }
+                  sub={`Rental provider · ${g.properties.length} propert${g.properties.length === 1 ? 'y' : 'ies'} · ${g.unitCount} unit${g.unitCount === 1 ? '' : 's'}`}
+                  right={<>
+                    <Pill tone="amber">{g.occupied} occupied · {pct}%</Pill>
+                    <Pill tone="neutral">{g.unitCount - g.occupied} vacant</Pill>
+                    {g.ownerUserId != null && <Btn size="xs" href={`/dashboard/admin/users/${g.ownerUserId}`}>Provider</Btn>}
+                  </>}
+                >
+                  {open && (view === 'grid' ? (
+                    <div className="gx-pad" style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+                      {g.properties.map((p) => (
+                        <Link key={p.id} href={`/dashboard/admin/properties/${p.id}`} className="gx-card" style={{ display: 'block', overflow: 'hidden', marginBottom: 0 }}>
+                          <div style={{ height: 130, background: 'var(--ms-surface-3)', position: 'relative', display: 'grid', placeItems: 'center' }}>
+                            {p.coverPhotoUrl
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={p.coverPhotoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : <Building2 size={26} style={{ color: 'var(--ms-ink-3)' }} aria-hidden />}
+                            {p.spaceCategory && <span style={{ position: 'absolute', top: 8, left: 8 }}><Pill tone="outline" dot={false}>{titleCase(p.spaceCategory)}</Pill></span>}
+                          </div>
+                          <div style={{ padding: '10px 12px' }}>
+                            <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--ms-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.buildingName}</div>
+                            <div style={{ fontSize: 11, color: 'var(--ms-ink-3)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              <MapPin size={11} aria-hidden /> {p.fullAddress ?? '—'}
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 11.5 }}><OccBar occupied={p.occupiedCount} total={p.unitCount} /></div>
+                          </div>
+                        </Link>
+                      ))}
                     </div>
-                    <div className="hidden sm:flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#fef9eb] text-[#b45309]">{g.occupied} occupied · {pct}%</span>
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#f2f1ec] text-[#6b6860]">{g.unitCount - g.occupied} vacant</span>
+                  ) : (
+                    <div className="gx-tbl-scroll">
+                      <table className="gx-tbl">
+                        <thead><tr><th>Property</th><th>Category</th><th className="num">Units</th><th>Occupancy</th><th className="act"><span className="sr-only">Actions</span></th></tr></thead>
+                        <tbody>
+                          {g.properties.map((p) => (
+                            <tr key={p.id} className="click" onClick={() => router.push(`/dashboard/admin/properties/${p.id}`)}>
+                              <td>
+                                <div className="gx-cell">
+                                  <Thumb text={p.buildingName} src={p.coverPhotoUrl} />
+                                  <span><span className="strong">{p.buildingName}</span><span className="sub">{p.fullAddress ?? '—'}</span></span>
+                                </div>
+                              </td>
+                              <td>{p.spaceCategory ? <Pill tone="outline" dot={false}>{humanize(p.spaceCategory)}</Pill> : '—'}</td>
+                              <td className="num">{p.unitCount}</td>
+                              <td><OccBar occupied={p.occupiedCount} total={p.unitCount} /></td>
+                              <td className="act" onClick={(e) => e.stopPropagation()}><Btn size="xs" href={`/dashboard/admin/properties/${p.id}`}>Open</Btn></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  </button>
-                  {g.ownerUserId != null && (
-                    <Link href={`/dashboard/admin/users/${g.ownerUserId}`}
-                      className="mr-4 ml-2 shrink-0 rounded-lg border border-[#cfe6dd] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#1a7a5a] hover:bg-[#f0faf6]">
-                      Provider
-                    </Link>
-                  )}
-                </div>
-
-                {open && (view === 'grid' ? (
-                  /* ─── Tier 2 · PROPERTIES — photo cards on a tinted tray ────────── */
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-[#faf9f7] p-4">
-                    {g.properties.map((p) => (
-                      <Link key={p.id} href={`/dashboard/admin/properties/${p.id}`} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden hover:shadow-md transition group">
-                        <div className="h-36 bg-[#f4f3ef] relative">
-                          {p.coverPhotoUrl ? <img src={p.coverPhotoUrl} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full grid place-items-center text-[#c4c2bc]"><Building2 size={28} /></div>}
-                          {p.spaceCategory && <span className="absolute top-2 left-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white/90 text-[#3f3d39]">{titleCase(p.spaceCategory)}</span>}
-                        </div>
-                        <div className="p-4">
-                          <p className="font-semibold text-[#1a1916] truncate group-hover:text-[#1a7a5a]">{p.buildingName}</p>
-                          <p className="text-xs text-[#6b6860] truncate flex items-center gap-1 mt-0.5"><MapPin size={11} /> {p.fullAddress ?? '—'}</p>
-                          <p className="mt-3 text-xs font-medium text-[#3f3d39]">{p.occupiedCount}/{p.unitCount} units</p>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  /* ─── Tier 2 · PROPERTIES — rows hung off a tree rail ───────────── */
-                  <div className="ml-6 border-l border-[#e8e6e0] divide-y divide-[#f4f2ee] bg-white">
-                    {g.properties.map((p) => (
-                      <Link key={p.id} href={`/dashboard/admin/properties/${p.id}`} className="flex items-center gap-4 p-4 hover:bg-[#faf9f7] transition">
-                        <div className="w-14 h-14 rounded-xl bg-[#f4f3ef] overflow-hidden shrink-0 grid place-items-center text-[#c4c2bc]">
-                          {p.coverPhotoUrl ? <img src={p.coverPhotoUrl} alt="" className="w-full h-full object-cover" /> : <Building2 size={20} />}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-[#1a1916] truncate">{p.buildingName}</p>
-                          <p className="text-xs text-[#6b6860] truncate">{p.fullAddress ?? '—'}</p>
-                          {p.spaceCategory && <p className="text-[11px] text-[#9b9890] mt-0.5">{titleCase(p.spaceCategory)}</p>}
-                        </div>
-                        <span className="text-sm font-medium text-[#3f3d39] shrink-0">{p.occupiedCount}/{p.unitCount} units</span>
-                        <ExternalLink size={14} className="text-[#c4c2bc] shrink-0" />
-                      </Link>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
+                  ))}
+                </Card>
+              );
+            })}
+          </div>
+        </>
       )}
-    </div>
+    </OsPage>
   );
 }

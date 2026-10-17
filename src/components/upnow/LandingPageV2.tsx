@@ -596,14 +596,14 @@ function Hero({
               <div className="lbl">{mode === 'spaces' ? 'Budget' : 'When'}</div>
               {mode === 'spaces' ? (
                 <div className="l-budget-display">
-                  <span style={{ color: budgetSel.min === '' && budgetSel.max === '' ? '#6b7a74' : '#0e1a16' }}>
+                  <span style={{ color: budgetSel.min === '' && budgetSel.max === '' ? '#5f6b63' : '#14201a' }}>
                     {budgetSel.label}
                   </span>
                   <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
                 </div>
               ) : (
                 <div className="l-budget-display">
-                  <span style={{ color: whenSel.value === '' ? '#6b7a74' : '#0e1a16' }}>
+                  <span style={{ color: whenSel.value === '' ? '#5f6b63' : '#14201a' }}>
                     {whenSel.label}
                   </span>
                   <ChevronDown size={13} style={{ color: '#9ca3af', flexShrink: 0 }} />
@@ -651,7 +651,7 @@ function Hero({
                 >
                   <span>{b.label}</span>
                   {budgetSel.label === b.label && (
-                    <Check size={13} style={{ marginLeft: 'auto', color: '#2e9f82', flexShrink: 0 }} />
+                    <Check size={13} style={{ marginLeft: 'auto', color: '#047246', flexShrink: 0 }} />
                   )}
                 </button>
               ))}
@@ -671,7 +671,7 @@ function Hero({
                 >
                   <span>{w.label}</span>
                   {whenSel.label === w.label && (
-                    <Check size={13} style={{ marginLeft: 'auto', color: '#2e9f82', flexShrink: 0 }} />
+                    <Check size={13} style={{ marginLeft: 'auto', color: '#047246', flexShrink: 0 }} />
                   )}
                 </button>
               ))}

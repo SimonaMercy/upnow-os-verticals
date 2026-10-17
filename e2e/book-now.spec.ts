@@ -134,7 +134,7 @@ test.describe('Book Now — InquireModal', () => {
     await openBookNow(page);
     const monthly = page.getByRole('button', { name: 'Monthly', exact: true });
     await monthly.click();
-    await expect(monthly).toHaveClass(/border-\[#2e9f82\]/);
+    await expect(monthly).toHaveClass(/border-\[#047246\]/);
   });
 
   // ── 4. Close button ────────────────────────────────────────────────────────

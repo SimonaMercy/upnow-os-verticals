@@ -51,14 +51,14 @@ Font.register({
 Font.registerHyphenationCallback((w) => [w]);
 
 // App color theme — matches the dashboard chrome (--color-primary etc.).
-const INK = '#1a1916';        // --ink (warm near-black) — body text
-const HEADER = '#2e9f82';     // --color-primary — header band (same as app header/buttons)
+const INK = '#14201a';        // --ink (warm near-black) — body text
+const HEADER = '#047246';     // --color-primary — header band (same as app header/buttons)
 const HEADER_SUB = '#e3f5ee'; // light tint — secondary text on the band
-const ACCENT = '#1a5a4a';     // --color-primary-dark — base rule
-const ACCENT_DK = '#1a5a4a';  // --color-primary-dark — amount + total
-const MUTE = '#9b9890';       // --mute (warm gray) — labels
-const LINE = '#e8e6e0';       // --mist-strong — borders
-const TINT = '#d8f2e8';       // --color-primary-light — total card bg
+const ACCENT = '#0f4f36';     // --color-primary-dark — base rule
+const ACCENT_DK = '#0f4f36';  // --color-primary-dark — amount + total
+const MUTE = '#8a948d';       // --mute (warm gray) — labels
+const LINE = '#e4e9e5';       // --mist-strong — borders
+const TINT = '#d8efe3';       // --color-primary-light — total card bg
 const NAVY = INK; // keep references working
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -884,10 +884,10 @@ function pillFor(label: string): { bg: string; fg: string } {
     case 'Receipt':
     case 'Cleared':
     case 'Collected (PDC)':
-    case 'PDCs Collected': return { bg: '#d8f2e8', fg: '#1a5a4a' }; // --color-primary-light / -dark
+    case 'PDCs Collected': return { bg: '#d8efe3', fg: '#0f4f36' }; // --color-primary-light / -dark
     case 'Bounced': return { bg: '#fdede7', fg: '#9a3520' };        // --brick-soft / --brick-deep
     case 'Void': return { bg: '#fdecea', fg: '#b3261e' };           // voided receipt
-    case 'Cancelled': return { bg: '#f0ede8', fg: '#6b6860' };      // --mist / warm gray
+    case 'Cancelled': return { bg: '#f0ede8', fg: '#5f6b63' };      // --mist / warm gray
     default: return { bg: '#fff7ed', fg: '#c2410c' };              // --saffron-soft / --saffron-deep (Pending)
   }
 }
@@ -1248,8 +1248,8 @@ export default function PaymentReceiptViewer({ contract, kind, selectedId, selec
 // Pass `trigger` to supply your own single control instead of the default pair —
 // the viewer it opens already carries its own "⬇ Download PDF", so one control is
 // enough where a surface wants ONE view-and-download affordance per document.
-const RCPT_VIEW_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#2e9f82', color: '#fff', border: 'none' };
-const RCPT_DL_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#fff', color: '#2e9f82', border: '1px solid #cfe9e0', textDecoration: 'none' };
+const RCPT_VIEW_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#047246', color: '#fff', border: 'none' };
+const RCPT_DL_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#fff', color: '#047246', border: '1px solid #cfe9e0', textDecoration: 'none' };
 
 export function ReceiptButtons({ contract, trigger }: {
   contract: ReceiptContract;

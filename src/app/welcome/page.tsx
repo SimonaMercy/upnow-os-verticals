@@ -134,7 +134,7 @@ export default function WelcomePage() {
             fontSize: 11, fontWeight: 700, color: 'var(--jade-deep, #1f6655)',
             textTransform: 'uppercase', letterSpacing: '0.12em', margin: 0,
           }}>Welcome to UpNow</p>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: 'var(--ink, #1a1916)', margin: 0, letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: 'var(--ink, #14201a)', margin: 0, letterSpacing: '-0.02em', lineHeight: 1.2 }}>
             Add your documents now — book in seconds later.
           </h1>
           <p style={{ fontSize: 14, color: 'var(--ink-2, #4a4944)', margin: 0, lineHeight: 1.5 }}>
@@ -150,7 +150,7 @@ export default function WelcomePage() {
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
             {done} of {total} uploaded
           </span>
-          <span style={{ fontSize: 11, fontWeight: 600, color: allDone ? 'var(--jade-deep, #1f6655)' : 'var(--mute, #9b9890)' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: allDone ? 'var(--jade-deep, #1f6655)' : 'var(--mute, #8a948d)' }}>
             {allDone ? 'All set — landlord will review on first booking' : 'Optional — you can skip and add later'}
           </span>
         </div>
@@ -182,7 +182,7 @@ export default function WelcomePage() {
           <Link
             href="/"
             data-testid="kyc-skip"
-            style={{ fontSize: 13, fontWeight: 600, color: 'var(--mute, #9b9890)', textDecoration: 'none' }}
+            style={{ fontSize: 13, fontWeight: 600, color: 'var(--mute, #8a948d)', textDecoration: 'none' }}
           >
             Skip for now
           </Link>
@@ -192,7 +192,7 @@ export default function WelcomePage() {
             onClick={() => router.push('/')}
             style={{
               padding: '12px 24px', borderRadius: 12, border: 'none',
-              background: allDone ? 'var(--jade-deep, #1f6655)' : 'var(--ink, #1a1916)',
+              background: allDone ? 'var(--jade-deep, #1f6655)' : 'var(--ink, #14201a)',
               color: 'var(--paper, #fff)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
             }}
           >
@@ -217,8 +217,8 @@ function KycCard({ req, uploaded, busy, onPick }: {
     <label style={{
       display: 'flex', alignItems: 'center', gap: 12,
       padding: '12px 14px', borderRadius: 12,
-      background: done ? 'rgba(46,159,130,0.08)' : 'var(--paper, #fff)',
-      border: `1px solid ${done ? 'rgba(46,159,130,0.35)' : 'var(--mist-strong, #d6d4ce)'}`,
+      background: done ? 'rgba(4,114,70,0.08)' : 'var(--paper, #fff)',
+      border: `1px solid ${done ? 'rgba(4,114,70,0.35)' : 'var(--mist-strong, #d6d4ce)'}`,
       cursor: busy ? 'progress' : 'pointer',
     }}>
       <input
@@ -234,15 +234,15 @@ function KycCard({ req, uploaded, busy, onPick }: {
         width: 32, height: 32, borderRadius: 8, flexShrink: 0,
         display: 'grid', placeItems: 'center',
         background: done ? 'var(--jade-deep, #1f6655)' : 'var(--mist, #ede9e3)',
-        color: done ? 'var(--paper, #fff)' : 'var(--mute, #9b9890)',
+        color: done ? 'var(--paper, #fff)' : 'var(--mute, #8a948d)',
         fontSize: 14, fontWeight: 700,
       }}>
         {done ? '✓' : '+'}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink, #1a1916)', margin: 0 }}>{req.label}</p>
+        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink, #14201a)', margin: 0 }}>{req.label}</p>
         {req.hint && (
-          <p style={{ fontSize: 11, color: 'var(--mute, #9b9890)', margin: '2px 0 0', lineHeight: 1.4 }}>
+          <p style={{ fontSize: 11, color: 'var(--mute, #8a948d)', margin: '2px 0 0', lineHeight: 1.4 }}>
             {req.hint}
           </p>
         )}

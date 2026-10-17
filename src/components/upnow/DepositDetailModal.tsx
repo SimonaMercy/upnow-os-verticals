@@ -38,7 +38,7 @@ const STATUS_LABELS: Record<DepositStatus, string> = {
   held: 'Held', returned: 'Returned', partial_return: 'Partial Return', forfeited: 'Forfeited',
 };
 const STATUS_STYLE: Record<DepositStatus, string> = {
-  held: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  held: 'bg-[#d8efe3] text-[#1a7a5a]',
   returned: 'bg-[#dbeafe] text-[#1e40af]',
   partial_return: 'bg-[#fef3c7] text-[#92400e]',
   forfeited: 'bg-[#fee2e2] text-[#b91c1c]',
@@ -109,17 +109,17 @@ function SettlementBlock({ deposit, detail, links }: { deposit: DepositRow; deta
 
   // No settlement record yet — mirror the deposit's outcome / settle CTA.
   const outcomeLine = (
-    <p className="text-xs text-[#6b6860] mt-0.5">
+    <p className="text-xs text-[#5f6b63] mt-0.5">
       Refunded {fmtAed(deposit.settledRefundAmount ?? 0)} · deducted {fmtAed(deposit.settledDeductionAmount ?? 0)}{deposit.settledOn ? ` · ${deposit.settledOn}` : ''}
     </p>
   );
   if (deposit.status !== 'held') {
     return (
-      <div className="border border-[#e8e6e0] rounded-xl p-3">
-        <p className="text-sm font-semibold text-[#1a1916]">{STATUS_LABELS[deposit.status] ?? deposit.status}</p>
+      <div className="border border-[#e4e9e5] rounded-xl p-3">
+        <p className="text-sm font-semibold text-[#14201a]">{STATUS_LABELS[deposit.status] ?? deposit.status}</p>
         {outcomeLine}
         {links?.settlement && settleHref != null && deposit.id.startsWith('sd_') && (
-          <a href={links.settlement(settleHref)} className="text-xs text-[#2e9f82] font-medium hover:underline mt-1 inline-flex items-center gap-1">
+          <a href={links.settlement(settleHref)} className="text-xs text-[#047246] font-medium hover:underline mt-1 inline-flex items-center gap-1">
             <ExternalLink size={11} /> Open settlement
           </a>
         )}
@@ -128,21 +128,21 @@ function SettlementBlock({ deposit, detail, links }: { deposit: DepositRow; deta
   }
   if (deposit.id.startsWith('sd_') && settleHref != null) {
     return (
-      <div className="border border-[#e8e6e0] rounded-xl p-3">
-        <p className="text-xs text-[#6b6860] mb-2.5">Not settled yet. Settle this deposit on the lease&rsquo;s move-out settlement — capture the refund vs. deduction with itemised charges and the customer&rsquo;s agreement, so the deposit and your reports stay in sync.</p>
+      <div className="border border-[#e4e9e5] rounded-xl p-3">
+        <p className="text-xs text-[#5f6b63] mb-2.5">Not settled yet. Settle this deposit on the lease&rsquo;s move-out settlement — capture the refund vs. deduction with itemised charges and the customer&rsquo;s agreement, so the deposit and your reports stay in sync.</p>
         {links?.settlement ? (
-          <a href={links.settlement(settleHref)} className="inline-flex items-center justify-center gap-1.5 w-full bg-[#2e9f82] text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-[#28886f]">
+          <a href={links.settlement(settleHref)} className="inline-flex items-center justify-center gap-1.5 w-full bg-[#047246] text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-[#28886f]">
             Settle deposit <ExternalLink size={13} />
           </a>
         ) : (
-          <p className="text-[11px] text-[#9b9890]">Settlement is managed by the landlord.</p>
+          <p className="text-[11px] text-[#8a948d]">Settlement is managed by the landlord.</p>
         )}
       </div>
     );
   }
   return (
-    <div className="bg-[#f4f3ef] rounded-xl p-3">
-      <p className="text-xs text-[#6b6860]">This deposit is recorded as a payment — its status follows the cheque (cleared / bounced) and isn&rsquo;t settled separately.</p>
+    <div className="bg-[#eef1ef] rounded-xl p-3">
+      <p className="text-xs text-[#5f6b63]">This deposit is recorded as a payment — its status follows the cheque (cleared / bounced) and isn&rsquo;t settled separately.</p>
     </div>
   );
 }
@@ -199,24 +199,24 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={dismiss}>
       <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-[#fbfbf9] shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e4e9e5] bg-white">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h2 className="text-lg font-bold text-[#1a1916] truncate">Deposit detail</h2>
-              <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-0.5 ${STATUS_STYLE[deposit.status] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
+              <h2 className="text-lg font-bold text-[#14201a] truncate">Deposit detail</h2>
+              <span className={`inline-flex items-center rounded-full text-[11px] font-semibold px-2.5 py-0.5 ${STATUS_STYLE[deposit.status] ?? 'bg-[#eef1ef] text-[#5f6b63]'}`}>
                 {STATUS_LABELS[deposit.status] ?? deposit.status}
               </span>
             </div>
-            <p className="text-xs text-[#9b9890] font-mono mt-0.5">{deposit.depositRef} · {deposit.tenant} · {deposit.unit}</p>
+            <p className="text-xs text-[#8a948d] font-mono mt-0.5">{deposit.depositRef} · {deposit.tenant} · {deposit.unit}</p>
           </div>
-          <button onClick={dismiss} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1.5 rounded-lg hover:bg-[#f4f3ef]"><X size={18} /></button>
+          <button onClick={dismiss} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer p-1.5 rounded-lg hover:bg-[#eef1ef]"><X size={18} /></button>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* Main details — one compact horizontal row card (listing row-view style) */}
           <div className="flex items-center gap-4 px-4 py-3.5 bg-white rounded-2xl border border-[#f0ede8]" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-            <div className="shrink-0 w-11 h-11 rounded-xl bg-[#d8f2e8] grid place-items-center text-[#1a7a5a]">
+            <div className="shrink-0 w-11 h-11 rounded-xl bg-[#d8efe3] grid place-items-center text-[#1a7a5a]">
               <Wallet size={20} />
             </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 min-w-0 flex-1">
@@ -230,13 +230,13 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
               {deposit.recordedDate && <DetailCol label="Recorded" value={deposit.recordedDate} />}
             </div>
             <div className="flex flex-col items-end justify-center shrink-0 pl-2">
-              <span className="font-bold text-lg text-[#2e9f82] whitespace-nowrap">{fmtAed(deposit.amount)}</span>
-              <span className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">Cheque amount</span>
+              <span className="font-bold text-lg text-[#047246] whitespace-nowrap">{fmtAed(deposit.amount)}</span>
+              <span className="text-[10px] text-[#8a948d] font-medium uppercase tracking-wide">Cheque amount</span>
             </div>
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-[#2e9f82]" /></div>
+            <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-[#047246]" /></div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
               <AlertCircle size={22} className="text-[#b91c1c]" />
@@ -254,7 +254,7 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
               <div className="bg-white rounded-2xl border border-[#f0ede8] p-4">
                 <SectionTitle icon={<Receipt size={15} />}>Deposit documents</SectionTitle>
                 {canAttach && (
-                  <p className="text-[11px] text-[#9b9890] -mt-1 mb-3">Missing a document? Attach it here — it’s saved to the deposit and shows on the contract too.</p>
+                  <p className="text-[11px] text-[#8a948d] -mt-1 mb-3">Missing a document? Attach it here — it’s saved to the deposit and shows on the contract too.</p>
                 )}
                 <div className="grid sm:grid-cols-3 gap-4">
                   <DocsBucket title="Cheque copy" docs={detail.documents.cheque} empty="No cheque copy uploaded."
@@ -265,7 +265,7 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
                     empty="No receipt uploaded."
                     onAttach={canAttach ? f => handleAttach('deposit_receipt', f) : undefined}
                     action={receiptHref ? (
-                      <a href={receiptHref} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1">
+                      <a href={receiptHref} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#047246] font-medium hover:underline inline-flex items-center gap-1">
                         <ExternalLink size={11} /> View / print the system receipt
                       </a>
                     ) : undefined}
@@ -284,12 +284,12 @@ export default function DepositDetailModal({ deposit, loadDetail, onClose, links
               {deposit.notes && (
                 <div className="bg-white rounded-2xl border border-[#f0ede8] p-4">
                   <SectionTitle icon={<FileText size={15} />}>Notes</SectionTitle>
-                  <p className="text-sm text-[#3d3b35] whitespace-pre-wrap">{deposit.notes}</p>
+                  <p className="text-sm text-[#46534c] whitespace-pre-wrap">{deposit.notes}</p>
                 </div>
               )}
 
               {links?.contract && deposit.contractId != null && (
-                <a href={links.contract(deposit.contractId)} className="inline-flex items-center gap-2 text-sm font-semibold text-[#2e9f82] hover:underline">
+                <a href={links.contract(deposit.contractId)} className="inline-flex items-center gap-2 text-sm font-semibold text-[#047246] hover:underline">
                   <ExternalLink size={14} /> Open contract
                 </a>
               )}

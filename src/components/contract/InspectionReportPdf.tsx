@@ -36,35 +36,35 @@ export interface InspectionPdfData {
 // browser and fail the whole PDF. Drawn signatures are data-URLs.
 const isImg = (s: string | null | undefined): s is string => typeof s === 'string' && s.startsWith('data:');
 const COND: Record<Condition, string> = { G: 'Good', F: 'Fair', D: 'Damaged', '': '—' };
-const COND_COLOR: Record<Condition, string> = { G: '#1a7a5a', F: '#9a6a12', D: '#b42318', '': '#9b9890' };
+const COND_COLOR: Record<Condition, string> = { G: '#1a7a5a', F: '#9a6a12', D: '#b42318', '': '#8a948d' };
 const fmt = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 const NAVY = '#1a3c6e';
 const s = StyleSheet.create({
-  page: { paddingTop: 34, paddingBottom: 44, paddingHorizontal: 38, fontSize: 9.5, color: '#1a1916', fontFamily: 'Helvetica' },
+  page: { paddingTop: 34, paddingBottom: 44, paddingHorizontal: 38, fontSize: 9.5, color: '#14201a', fontFamily: 'Helvetica' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: `2px solid ${NAVY}`, paddingBottom: 8 },
   h1: { fontSize: 15, fontFamily: 'Helvetica-Bold', color: NAVY },
-  sub: { fontSize: 9, color: '#6b6860', marginTop: 2 },
+  sub: { fontSize: 9, color: '#5f6b63', marginTop: 2 },
   metaRow: { flexDirection: 'row', marginTop: 12, gap: 18, flexWrap: 'wrap' },
   metaCol: { width: '30%' },
-  metaLabel: { fontSize: 7.5, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.5 },
+  metaLabel: { fontSize: 7.5, color: '#8a948d', textTransform: 'uppercase', letterSpacing: 0.5 },
   metaVal: { fontSize: 9.5, fontFamily: 'Helvetica-Bold', marginTop: 1 },
   sectionTitle: { fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: NAVY, marginTop: 16, marginBottom: 5, borderBottom: '1px solid #e3e0d9', paddingBottom: 3 },
   areaName: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginTop: 10, marginBottom: 3 },
-  thead: { flexDirection: 'row', backgroundColor: '#f4f3ef', paddingVertical: 3, paddingHorizontal: 4 },
-  th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#6b6860', textTransform: 'uppercase' },
+  thead: { flexDirection: 'row', backgroundColor: '#eef1ef', paddingVertical: 3, paddingHorizontal: 4 },
+  th: { fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: '#5f6b63', textTransform: 'uppercase' },
   trow: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 4, borderBottom: '0.5px solid #f0ede7' },
   cItem: { flexGrow: 1, width: '46%' },
   cCond: { width: '18%' },
-  cRem: { width: '36%', color: '#6b6860' },
-  remark: { fontSize: 8.5, color: '#6b6860', marginTop: 2, fontStyle: 'italic' },
+  cRem: { width: '36%', color: '#5f6b63' },
+  remark: { fontSize: 8.5, color: '#5f6b63', marginTop: 2, fontStyle: 'italic' },
   util: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2.5, borderBottom: '0.5px solid #f0ede7' },
-  muted: { fontSize: 8.5, color: '#6b6860' },
-  bullet: { fontSize: 8.5, color: '#6b6860', marginBottom: 1 },
+  muted: { fontSize: 8.5, color: '#5f6b63' },
+  bullet: { fontSize: 8.5, color: '#5f6b63', marginBottom: 1 },
   sigRow: { flexDirection: 'row', gap: 40, marginTop: 28 },
   sigCol: { flexGrow: 1 },
   sigImg: { height: 42, marginBottom: 4, objectFit: 'contain' },
-  sigLine: { borderTop: '1px solid #1a1916', paddingTop: 3, fontSize: 8.5, color: '#6b6860' },
+  sigLine: { borderTop: '1px solid #14201a', paddingTop: 3, fontSize: 8.5, color: '#5f6b63' },
 });
 
 export default function InspectionReportPdf({ data }: { data: InspectionPdfData }) {
@@ -103,8 +103,8 @@ export default function InspectionReportPdf({ data }: { data: InspectionPdfData 
             {area.items.map((it, ii) => (
               <View key={ii} style={s.trow}>
                 <Text style={s.cItem}>{it.name}{it.photoCount ? `  (${it.photoCount} photo${it.photoCount > 1 ? 's' : ''})` : ''}</Text>
-                <Text style={[s.cCond, { color: COND_COLOR[it.inCondition] ?? '#9b9890' }]}>{COND[it.inCondition] ?? '—'}</Text>
-                {isOut ? <Text style={[s.cCond, { color: COND_COLOR[it.outCondition] ?? '#9b9890' }]}>{COND[it.outCondition] ?? '—'}</Text> : null}
+                <Text style={[s.cCond, { color: COND_COLOR[it.inCondition] ?? '#8a948d' }]}>{COND[it.inCondition] ?? '—'}</Text>
+                {isOut ? <Text style={[s.cCond, { color: COND_COLOR[it.outCondition] ?? '#8a948d' }]}>{COND[it.outCondition] ?? '—'}</Text> : null}
                 <Text style={s.cRem}></Text>
               </View>
             ))}

@@ -26,7 +26,7 @@ const fmtDay = (d: string) => new Date(d).toLocaleDateString('en-AE', { timeZone
 
 function Tick({ on }: { on: boolean }) {
   return (
-    <span className={`mt-0.5 flex items-center justify-center w-[18px] h-[18px] rounded-[5px] border shrink-0 ${on ? 'bg-[#2e9f82] border-[#2e9f82] text-white' : 'border-[#cfd6cf] bg-white'}`}>
+    <span className={`mt-0.5 flex items-center justify-center w-[18px] h-[18px] rounded-[5px] border shrink-0 ${on ? 'bg-[#047246] border-[#047246] text-white' : 'border-[#cfd6cf] bg-white'}`}>
       {on && <Check size={12} strokeWidth={3} />}
     </span>
   );
@@ -81,7 +81,7 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(20,30,25,.45)' }} onClick={() => !busy && onClose()}>
       <div onClick={e => e.stopPropagation()} className="bg-white rounded-[18px] w-full max-w-[560px] max-h-full flex flex-col shadow-[0_20px_60px_rgba(0,0,0,.18)]">
         <div className="px-6 pt-6 pb-3">
-          <div className="text-[17px] font-extrabold text-[#1a1916]">Start restoration — Unit {unit.unitNumber}</div>
+          <div className="text-[17px] font-extrabold text-[#14201a]">Start restoration — Unit {unit.unitNumber}</div>
           <div className="text-[12.5px] text-[#6b756f] mt-1">
             {!plan && !loadErr ? 'Reading the last move-out form…'
               : plan?.moveOut ? <>The task list comes from the move-out form{plan.moveOut.inspectionDate ? ` of ${fmtDay(plan.moveOut.inspectionDate)}` : ''}{found ? ` — ${found} thing${found === 1 ? '' : 's'} to fix, ticked below` : ''}. The team marks each task done and files its bills against it.</>
@@ -101,9 +101,9 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
                     <button type="button" onClick={() => toggle(t.key)} className="w-full flex items-start gap-3 px-3.5 py-2.5 text-left cursor-pointer hover:bg-[#fafbfa]">
                       <Tick on={chosen.has(t.key)} />
                       <span className="min-w-0 flex-1">
-                        <span className="text-sm font-semibold text-[#1a1916]">{t.label}</span>
+                        <span className="text-sm font-semibold text-[#14201a]">{t.label}</span>
                         {t.findings.length === 0
-                          ? <span className="block text-xs text-[#9b9890] mt-0.5">Nothing found at move-out</span>
+                          ? <span className="block text-xs text-[#8a948d] mt-0.5">Nothing found at move-out</span>
                           : (
                             <span className="block mt-1 space-y-0.5">
                               {t.findings.map((f, i) => (
@@ -130,7 +130,7 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
                   const on = chosen.has(t.key);
                   return (
                     <button key={t.key} type="button" onClick={() => toggle(t.key)}
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${on ? 'bg-[#e6f7f1] border-[#2e9f82] text-[#1a7a5a]' : 'bg-white border-[#e5e9e6] text-[#6b756f] hover:border-[#cfd6cf]'}`}>
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer ${on ? 'bg-[#e6f7f1] border-[#047246] text-[#1a7a5a]' : 'bg-white border-[#e5e9e6] text-[#6b756f] hover:border-[#cfd6cf]'}`}>
                       {on && <Check size={12} strokeWidth={3} />}{t.label}
                     </button>
                   );
@@ -140,13 +140,13 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
           )}
 
           {estimate > 0 && (
-            <div className="flex justify-between text-xs font-semibold text-[#1a1916] mt-3 px-1">
+            <div className="flex justify-between text-xs font-semibold text-[#14201a] mt-3 px-1">
               <span>Estimate from the move-out form</span><span>{aed(estimate)}</span>
             </div>
           )}
 
           {photoCount > 0 && (
-            <label className="flex items-center gap-2 text-xs text-[#1a1916] mt-3 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-[#14201a] mt-3 cursor-pointer">
               <input type="checkbox" checked={withPhotos} onChange={e => setWithPhotos(e.target.checked)} />
               Add the move-out photos as before photos ({photoCount})
             </label>
@@ -155,7 +155,7 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
           <label className="block text-xs font-bold text-[#6b756f] mt-4">Notes — optional
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
               placeholder="Anything else before the next customer moves in"
-              className="block w-full mt-1.5 border border-[#e5e9e6] rounded-[10px] px-3 py-2.5 text-sm font-normal resize-y focus:outline-none focus:border-[#2e9f82]" />
+              className="block w-full mt-1.5 border border-[#e5e9e6] rounded-[10px] px-3 py-2.5 text-sm font-normal resize-y focus:outline-none focus:border-[#047246]" />
           </label>
           {err && <p className="text-xs text-[#b91c1c] mt-2">{err}</p>}
         </div>
@@ -163,7 +163,7 @@ export function StartRestorationDialog({ unit, maintBase, maintQ, onClose, onSta
         <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-[#eef1ec]">
           <button type="button" disabled={busy} onClick={onClose} className="text-[13px] font-bold text-[#6b756f] bg-[#eef1ec] px-4 py-2.5 rounded-[10px] cursor-pointer">Cancel</button>
           <button type="button" disabled={busy || !plan || picked.length === 0} onClick={submit}
-            className="text-[13px] font-bold text-white bg-[#2e9f82] px-4 py-2.5 rounded-[10px] cursor-pointer disabled:opacity-50">
+            className="text-[13px] font-bold text-white bg-[#047246] px-4 py-2.5 rounded-[10px] cursor-pointer disabled:opacity-50">
             {busy ? 'Starting…' : picked.length ? `Start restoration · ${picked.length} task${picked.length === 1 ? '' : 's'}` : 'Start restoration'}
           </button>
         </div>

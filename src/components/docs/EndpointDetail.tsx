@@ -13,7 +13,7 @@ function SectionCard({ title, badge, children }: { title: string; badge?: string
   return (
     <div style={{
       backgroundColor: '#ffffff',
-      border: '1px solid #e8e6e0',
+      border: '1px solid #e4e9e5',
       borderRadius: 12,
       overflow: 'hidden',
       marginBottom: 16,
@@ -21,10 +21,10 @@ function SectionCard({ title, badge, children }: { title: string; badge?: string
       <div style={{
         padding: '11px 20px',
         borderBottom: '1px solid #f0f0f0',
-        backgroundColor: '#fafaf8',
+        backgroundColor: '#f6f8f6',
         fontWeight: 700,
         fontSize: 12,
-        color: '#3d3b35',
+        color: '#46534c',
         letterSpacing: '0.06em',
         textTransform: 'uppercase',
         display: 'flex',
@@ -34,7 +34,7 @@ function SectionCard({ title, badge, children }: { title: string; badge?: string
         {title}
         {badge && (
           <span style={{
-            backgroundColor: '#f0faf6', color: '#2e9f82',
+            backgroundColor: '#eef7f2', color: '#047246',
             fontSize: 10, padding: '1px 6px', borderRadius: 99, fontWeight: 600,
             textTransform: 'none', letterSpacing: 0,
           }}>
@@ -73,39 +73,39 @@ export function EndpointDetail({ endpoint, spec }: Props) {
   return (
     <div style={{ maxWidth: 840, paddingBlock: 32, paddingInline: 32 }}>
       {/* Breadcrumb — product group › tag › operation */}
-      <div style={{ fontSize: 12, color: '#9b9890', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{ fontSize: 12, color: '#8a948d', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         {group && (
           <>
-            <span style={{ fontWeight: 700, color: '#6b6860' }}>{group}</span>
+            <span style={{ fontWeight: 700, color: '#5f6b63' }}>{group}</span>
             <span>›</span>
           </>
         )}
         <span>{tagLabel(endpoint.tag)}</span>
         <span>›</span>
-        <span style={{ color: '#6b6860' }}>{operation.operationId ?? path}</span>
+        <span style={{ color: '#5f6b63' }}>{operation.operationId ?? path}</span>
       </div>
 
       {/* What this tag covers, straight from the spec's tag description */}
       {tagDescription && (
-        <p style={{ fontSize: 12.5, color: '#9b9890', margin: '0 0 10px', lineHeight: 1.6 }}>
+        <p style={{ fontSize: 12.5, color: '#8a948d', margin: '0 0 10px', lineHeight: 1.6 }}>
           {tagDescription}
         </p>
       )}
 
       {/* Title */}
-      <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1a1916', margin: '0 0 14px', lineHeight: 1.2 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 800, color: '#14201a', margin: '0 0 14px', lineHeight: 1.2 }}>
         {operation.summary ?? path}
       </h1>
 
       {/* Method + path bar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        backgroundColor: '#f6f8fa', border: '1px solid #e8e6e0',
+        backgroundColor: '#f6f8fa', border: '1px solid #e4e9e5',
         borderRadius: 9, padding: '9px 14px', marginBottom: 16,
       }}>
         <MethodBadge method={method} size="lg" />
         <code style={{
-          fontSize: 14, fontFamily: 'monospace', color: '#1a1916',
+          fontSize: 14, fontFamily: 'monospace', color: '#14201a',
           flex: 1, wordBreak: 'break-all', lineHeight: 1.5,
         }}>
           {path}
@@ -113,9 +113,9 @@ export function EndpointDetail({ endpoint, spec }: Props) {
         <button
           onClick={copyPath}
           style={{
-            background: 'none', border: '1px solid #e8e6e0', borderRadius: 6,
+            background: 'none', border: '1px solid #e4e9e5', borderRadius: 6,
             padding: '4px 10px', cursor: 'pointer', fontSize: 11,
-            color: copied ? '#15803d' : '#6b6860', fontWeight: 600,
+            color: copied ? '#15803d' : '#5f6b63', fontWeight: 600,
             transition: 'color 0.1s',
           }}
         >
@@ -149,7 +149,7 @@ export function EndpointDetail({ endpoint, spec }: Props) {
       {operation.description && (
         <Markdown
           text={operation.description}
-          style={{ fontSize: 15, color: '#3d3b35', lineHeight: 1.75, marginBottom: 20 }}
+          style={{ fontSize: 15, color: '#46534c', lineHeight: 1.75, marginBottom: 20 }}
         />
       )}
 
@@ -175,9 +175,9 @@ export function EndpointDetail({ endpoint, spec }: Props) {
       )}
 
       {/* Footer */}
-      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e8e6e0', display: 'flex', gap: 16, alignItems: 'center' }}>
+      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #e4e9e5', display: 'flex', gap: 16, alignItems: 'center' }}>
         {operation.operationId && (
-          <span style={{ fontSize: 12, color: '#9b9890', fontFamily: 'monospace' }}>
+          <span style={{ fontSize: 12, color: '#8a948d', fontFamily: 'monospace' }}>
             {operation.operationId}
           </span>
         )}

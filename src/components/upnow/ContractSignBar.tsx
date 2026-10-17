@@ -69,7 +69,7 @@ export function ContractSignBar({
 
   const body = (
     <>
-      {reviewNote && <p style={{ fontSize: 12.5, color: '#6b6860', margin: '0 0 10px' }}>{reviewNote}</p>}
+      {reviewNote && <p style={{ fontSize: 12.5, color: '#5f6b63', margin: '0 0 10px' }}>{reviewNote}</p>}
       <SignatureBlock
         signerRole={signerRole}
         signerName={signerName}
@@ -90,16 +90,16 @@ export function ContractSignBar({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#ecf7f1', border: '1px solid #bfe3d6', borderRadius: 16, padding: '14px 18px' }}>
           <CheckCircle2 size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1a1916' }}>Signed as {signerRole}</div>
-            {signerName && <div style={{ fontSize: 12, color: '#6b6860' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>}
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#14201a' }}>Signed as {signerRole}</div>
+            {signerName && <div style={{ fontSize: 12, color: '#5f6b63' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>}
           </div>
         </div>
       );
     }
     return (
       <div style={{ background: '#fff', border: '1px solid #e3e0d9', borderRadius: 16, padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 15, fontWeight: 800, color: '#1a1916', marginBottom: 12 }}>
-          <PenLine size={16} style={{ color: '#2e9f82' }} /> Sign as {signerRole}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 15, fontWeight: 800, color: '#14201a', marginBottom: 12 }}>
+          <PenLine size={16} style={{ color: '#047246' }} /> Sign as {signerRole}
         </div>
         {body}
       </div>
@@ -124,8 +124,8 @@ export function ContractSignBar({
             padding: 16, maxHeight: '80vh', overflowY: 'auto',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 14, fontWeight: 800, color: '#1a1916' }}>Sign as {signerRole}</span>
-              <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
+              <span style={{ fontSize: 14, fontWeight: 800, color: '#14201a' }}>Sign as {signerRole}</span>
+              <button onClick={() => setOpen(false)} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#8a948d', padding: 4 }}><X size={18} /></button>
             </div>
             {body}
           </div>
@@ -147,18 +147,18 @@ export function ContractSignBar({
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1916', display: 'flex', alignItems: 'center', gap: 7 }}>
-            {signed ? <CheckCircle2 size={16} style={{ color: '#16a34a' }} /> : <PenLine size={16} style={{ color: '#2e9f82' }} />}
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#14201a', display: 'flex', alignItems: 'center', gap: 7 }}>
+            {signed ? <CheckCircle2 size={16} style={{ color: '#16a34a' }} /> : <PenLine size={16} style={{ color: '#047246' }} />}
             {signed ? `Signed as ${signerRole}` : `Sign as ${signerRole}`}
           </div>
           {signerName && (
-            <div style={{ fontSize: 11.5, color: '#6b6860', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>
+            <div style={{ fontSize: 11.5, color: '#5f6b63', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>
           )}
         </div>
         {!signed && (
           <button
             onClick={() => setOpen(o => !o)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#2e9f82', color: '#fff', border: 0, borderRadius: 10, padding: '10px 20px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#047246', color: '#fff', border: 0, borderRadius: 10, padding: '10px 20px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
             <PenLine size={15} /> {open ? 'Hide' : `Sign as ${signerRole}`}
           </button>

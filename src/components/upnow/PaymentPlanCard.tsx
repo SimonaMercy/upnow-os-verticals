@@ -29,7 +29,7 @@ function Meta({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
     <div>
-      <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 13, fontWeight: 650, color: '#1c1b17' }}>{value}</div>
     </div>
   );
@@ -82,21 +82,21 @@ export function PaymentPlanCard({ plan, rows, refLabel, planRefNo, contractType,
       {/* Header */}
       <div style={{ padding: '16px 16px 14px', borderBottom: '1px solid #efece6' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.01em', color: '#1a5a4a' }}>Payment Summary</div>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.01em', color: '#0f4f36' }}>Payment Summary</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {headerAction}
             {pill && <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: pill.bg, color: pill.fg, whiteSpace: 'nowrap' }}>{pill.label}</span>}
           </div>
         </div>
         {(refLabel || planRefNo) && (
-          <div style={{ fontSize: 12, color: '#6b6860', marginTop: 3 }}>
+          <div style={{ fontSize: 12, color: '#5f6b63', marginTop: 3 }}>
             {refLabel ? `Contract ${refLabel}` : null}
-            {planRefNo && <>{refLabel ? ' · ' : ''}Plan ref <span style={{ fontWeight: 700, color: '#1a5a4a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{planRefNo}</span></>}
+            {planRefNo && <>{refLabel ? ' · ' : ''}Plan ref <span style={{ fontWeight: 700, color: '#0f4f36', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{planRefNo}</span></>}
           </div>
         )}
         {landlordName && (
           <div style={{ marginTop: 12, paddingBottom: 10, borderBottom: '1px solid #f0ece4' }}>
-            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', marginBottom: 2 }}>Landlord</div>
+            <div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d', marginBottom: 2 }}>Landlord</div>
             <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '-.01em', color: '#1c1b17' }}>{landlordName}</div>
           </div>
         )}

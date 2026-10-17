@@ -17,15 +17,15 @@ export function ParamTable({ parameters, spec }: Props) {
   if (!parameters.length) return null;
 
   return (
-    <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #e8e6e0' }}>
+    <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #e4e9e5' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ backgroundColor: '#f6f8fa' }}>
             {['Name', 'Location', 'Type', 'Required', 'Description'].map(h => (
               <th key={h} style={{
                 textAlign: 'left', padding: '8px 14px',
-                borderBottom: '1px solid #e8e6e0',
-                fontSize: 11, fontWeight: 700, color: '#6b6860',
+                borderBottom: '1px solid #e4e9e5',
+                fontSize: 11, fontWeight: 700, color: '#5f6b63',
                 textTransform: 'uppercase', letterSpacing: '0.06em',
                 whiteSpace: 'nowrap',
               }}>
@@ -36,7 +36,7 @@ export function ParamTable({ parameters, spec }: Props) {
         </thead>
         <tbody>
           {parameters.map((p, i) => {
-            const inStyle = IN_STYLES[p.in] ?? { bg: '#f6f8fa', text: '#6b6860' };
+            const inStyle = IN_STYLES[p.in] ?? { bg: '#f6f8fa', text: '#5f6b63' };
             // A `$ref`'d parameter schema (an enum query param, typically) has no
             // `type` of its own — resolve it so the column is not a dash.
             const schema = p.schema ? resolveSchema(p.schema, spec) : undefined;
@@ -47,8 +47,8 @@ export function ParamTable({ parameters, spec }: Props) {
             const isLast = i === parameters.length - 1;
 
             return (
-              <tr key={i} style={{ borderBottom: isLast ? 'none' : '1px solid #f4f3ef' }}>
-                <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontWeight: 600, color: '#1a1916', whiteSpace: 'nowrap' }}>
+              <tr key={i} style={{ borderBottom: isLast ? 'none' : '1px solid #eef1ef' }}>
+                <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontWeight: 600, color: '#14201a', whiteSpace: 'nowrap' }}>
                   {p.name}
                 </td>
                 <td style={{ padding: '10px 14px' }}>
@@ -66,23 +66,23 @@ export function ParamTable({ parameters, spec }: Props) {
                 <td style={{ padding: '10px 14px' }}>
                   {p.required
                     ? <span style={{ color: '#b91c1c', fontWeight: 700, fontSize: 12 }}>Yes</span>
-                    : <span style={{ color: '#9b9890', fontSize: 12 }}>No</span>}
+                    : <span style={{ color: '#8a948d', fontSize: 12 }}>No</span>}
                 </td>
-                <td style={{ padding: '10px 14px', color: '#6b6860', maxWidth: 320 }}>
+                <td style={{ padding: '10px 14px', color: '#5f6b63', maxWidth: 320 }}>
                   <span>{p.description ?? <span style={{ color: '#c4c2bc', fontStyle: 'italic' }}>—</span>}</span>
                   {schema?.enum && (
-                    <div style={{ marginTop: 4, fontSize: 11, color: '#6b6860' }}>
+                    <div style={{ marginTop: 4, fontSize: 11, color: '#5f6b63' }}>
                       {schema.enum.map(v => (
-                        <code key={String(v)} style={{ backgroundColor: '#f4f3ef', padding: '1px 5px', borderRadius: 3, marginRight: 4 }}>
+                        <code key={String(v)} style={{ backgroundColor: '#eef1ef', padding: '1px 5px', borderRadius: 3, marginRight: 4 }}>
                           {JSON.stringify(v)}
                         </code>
                       ))}
                     </div>
                   )}
                   {p.example !== undefined && (
-                    <div style={{ marginTop: 3, fontSize: 11, color: '#9b9890' }}>
+                    <div style={{ marginTop: 3, fontSize: 11, color: '#8a948d' }}>
                       e.g.{' '}
-                      <code style={{ backgroundColor: '#f4f3ef', padding: '1px 5px', borderRadius: 3 }}>
+                      <code style={{ backgroundColor: '#eef1ef', padding: '1px 5px', borderRadius: 3 }}>
                         {JSON.stringify(p.example)}
                       </code>
                     </div>

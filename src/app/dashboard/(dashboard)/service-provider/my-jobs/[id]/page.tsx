@@ -91,10 +91,10 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
   };
 
   if (err && !job) return <div className="max-w-3xl mx-auto px-4 py-6"><p className="text-sm text-[#b91c1c]">{err}</p></div>;
-  if (!job) return <div className="max-w-3xl mx-auto px-4 py-6"><p className="text-sm text-[#9b9890]">Loading…</p></div>;
+  if (!job) return <div className="max-w-3xl mx-auto px-4 py-6"><p className="text-sm text-[#8a948d]">Loading…</p></div>;
 
-  const card = 'rounded-xl border border-[#e8e6e0] bg-white p-4 mt-4';
-  const field = 'border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white';
+  const card = 'rounded-xl border border-[#e4e9e5] bg-white p-4 mt-4';
+  const field = 'border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 text-[12.5px] bg-white';
   const shot = (k: string) => job.photos.filter(p => p.kind === k);
   const closed = !!job.closedAt;
   // A restoration's description opens with an auto-written "Tasks: …" line —
@@ -103,18 +103,18 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
-      <Link href="/dashboard/service-provider/my-jobs" className="text-[12px] text-[#6b6860] inline-flex items-center gap-1 hover:text-[#1a1916]">
+      <Link href="/dashboard/service-provider/my-jobs" className="text-[12px] text-[#5f6b63] inline-flex items-center gap-1 hover:text-[#14201a]">
         <ArrowLeft size={13} /> My jobs
       </Link>
 
       <div className="mt-2">
         <p className="text-[11px] text-[#8a8f8c]">{job.ref}</p>
-        <h1 className="text-[19px] font-bold tracking-[-.01em] text-[#1a1916]">{job.title}</h1>
+        <h1 className="text-[19px] font-bold tracking-[-.01em] text-[#14201a]">{job.title}</h1>
         <p className="text-[12px] text-[#5b615e] mt-1 flex items-center gap-1 flex-wrap">
           {job.category && <span>{job.category.name}</span>}
           {job.where && <><span>·</span><MapPin size={11} /> {job.where}</>}
         </p>
-        {job.address && <p className="text-[11px] text-[#9b9890] mt-0.5">{job.address}</p>}
+        {job.address && <p className="text-[11px] text-[#8a948d] mt-0.5">{job.address}</p>}
       </div>
 
       {/* What was reported — on most jobs the ONLY instruction the crew gets
@@ -125,7 +125,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
           <h2 className="text-[11px] font-bold uppercase tracking-wide text-[#8a5a00] flex items-center gap-1.5">
             <ClipboardList size={12} /> What was reported
           </h2>
-          <p className="text-[15px] leading-relaxed font-medium text-[#1a1916] mt-1.5 whitespace-pre-wrap">{reported}</p>
+          <p className="text-[15px] leading-relaxed font-medium text-[#14201a] mt-1.5 whitespace-pre-wrap">{reported}</p>
         </div>
       )}
 
@@ -143,8 +143,8 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                   className="flex items-start gap-2 text-left w-full disabled:opacity-60"
                 >
                   {t.doneAt ? <CheckSquare size={16} className="text-[#15803d] mt-[1px] shrink-0" />
-                            : <Square size={16} className="text-[#9b9890] mt-[1px] shrink-0" />}
-                  <span className={`text-sm font-semibold ${t.doneAt ? 'text-[#9b9890] line-through' : 'text-[#1c1f1d]'}`}>{t.label}</span>
+                            : <Square size={16} className="text-[#8a948d] mt-[1px] shrink-0" />}
+                  <span className={`text-sm font-semibold ${t.doneAt ? 'text-[#8a948d] line-through' : 'text-[#1c1f1d]'}`}>{t.label}</span>
                 </button>
                 {t.findings.length > 0 && (
                   <ul className="mt-1.5 ml-6 space-y-1.5">
@@ -155,8 +155,8 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                           className="flex items-start gap-2 text-left w-full disabled:opacity-60"
                         >
                           {f.doneAt ? <CheckSquare size={13} className="text-[#15803d] mt-[2px] shrink-0" />
-                                    : <Square size={13} className="text-[#9b9890] mt-[2px] shrink-0" />}
-                          <span className={`text-[12.5px] ${f.doneAt ? 'text-[#9b9890] line-through' : 'text-[#3d423f]'}`}>{f.label}</span>
+                                    : <Square size={13} className="text-[#8a948d] mt-[2px] shrink-0" />}
+                          <span className={`text-[12.5px] ${f.doneAt ? 'text-[#8a948d] line-through' : 'text-[#3d423f]'}`}>{f.label}</span>
                         </button>
                       </li>
                     ))}
@@ -180,7 +180,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
             )}
           </div>
           {shot(kind).length === 0
-            ? <p className="text-[11.5px] text-[#9b9890] mt-2">None yet.</p>
+            ? <p className="text-[11.5px] text-[#8a948d] mt-2">None yet.</p>
             : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
                 {shot(kind).map((p, k) => (
@@ -188,7 +188,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                     {/* Tap to open — the same viewer the landlord's job page uses, with the caption. */}
                     <button type="button" title={p.caption ?? (isVideoUrl(p.viewUrl) ? 'Play video' : 'View photo')} className="block w-full cursor-pointer"
                       onClick={() => setGallery({ photos: shot(kind).map(r => ({ id: r.id, url: r.viewUrl, caption: r.caption ?? `${kind === 'before' ? 'Before' : 'After'} ${isVideoUrl(r.viewUrl) ? 'video' : 'photo'}` })), start: k })}>
-                      <MediaThumb url={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e8e6e0] hover:opacity-90" />
+                      <MediaThumb url={p.viewUrl} alt={p.caption ?? `${kind} photo`} className="w-full h-20 object-cover rounded-lg border border-[#e4e9e5] hover:opacity-90" />
                     </button>
                     {!closed && p.mine && (
                       <button
@@ -222,7 +222,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
         </div>
 
         {job.bills.length === 0 && !adding && (
-          <p className="text-[11.5px] text-[#9b9890] mt-2">Nothing recorded yet. Add what you spent — materials, a sub-contractor, a delivery.</p>
+          <p className="text-[11.5px] text-[#8a948d] mt-2">Nothing recorded yet. Add what you spent — materials, a sub-contractor, a delivery.</p>
         )}
 
         {job.bills.length > 0 && (
@@ -231,9 +231,9 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
               <li key={b.id} className="py-2 flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-[13px] font-semibold text-[#1c1f1d]">{b.category}</p>
-                  <p className="text-[11px] text-[#6b6860]">
+                  <p className="text-[11px] text-[#5f6b63]">
                     {[b.supplier, b.billRef, b.billDate].filter(Boolean).join(' · ') || '—'}
-                    {!b.mine && <span className="text-[#9b9890]"> · entered by your landlord</span>}
+                    {!b.mine && <span className="text-[#8a948d]"> · entered by your landlord</span>}
                   </p>
                   {b.fileUrl && (
                     <a href={b.fileUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[#1a7a5a] font-semibold inline-flex items-center gap-1 mt-0.5">
@@ -242,7 +242,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[13px] font-bold text-[#1a1916]">AED {b.amountAed.toLocaleString('en-AE')}</p>
+                  <p className="text-[13px] font-bold text-[#14201a]">AED {b.amountAed.toLocaleString('en-AE')}</p>
                   {b.mine && !closed && (
                     <div className="flex items-center gap-2 justify-end mt-0.5">
                       <label className="text-[10.5px] text-[#1a7a5a] font-semibold cursor-pointer">
@@ -269,8 +269,8 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
               </li>
             ))}
             <li className="pt-2 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890]">Total</span>
-              <span className="text-[14px] font-bold text-[#1a1916]">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d]">Total</span>
+              <span className="text-[14px] font-bold text-[#14201a]">
                 AED {job.bills.reduce((n, b) => n + b.amountAed, 0).toLocaleString('en-AE')}
               </span>
             </li>
@@ -318,7 +318,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
               >
                 {busy === 'bill' ? 'Saving…' : 'Save bill'}
               </button>
-              <button type="button" onClick={() => setAdding(false)} className="text-[12px] text-[#9b9890] cursor-pointer">Cancel</button>
+              <button type="button" onClick={() => setAdding(false)} className="text-[12px] text-[#8a948d] cursor-pointer">Cancel</button>
             </div>
           </div>
         )}
@@ -328,7 +328,7 @@ export default function CrewJobPage({ params }: { params: Promise<{ id: string }
       <div className={card}>
         <h2 className="text-[14px] font-bold text-[#1c1f1d] flex items-center gap-1.5"><MessageSquare size={14} /> Comments</h2>
         {job.comments.length === 0
-          ? <p className="text-[11.5px] text-[#9b9890] mt-2">No comments yet.</p>
+          ? <p className="text-[11.5px] text-[#8a948d] mt-2">No comments yet.</p>
           : (
             <ul className="mt-3 space-y-2.5">
               {job.comments.map(c => (

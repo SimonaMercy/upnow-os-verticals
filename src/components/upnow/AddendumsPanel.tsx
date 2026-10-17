@@ -30,7 +30,7 @@ import { type AddendumTerms, hasAddendumTerms } from '@/lib/addendumTerms';
 
 const AddendumTermsPreview = dynamic(() => import('@/components/contract/AddendumTermsPreview'), {
   ssr: false,
-  loading: () => <div className="h-[420px] grid place-items-center text-[#9b9890] text-sm"><Loader2 size={15} className="animate-spin" /></div>,
+  loading: () => <div className="h-[420px] grid place-items-center text-[#8a948d] text-sm"><Loader2 size={15} className="animate-spin" /></div>,
 });
 
 interface Addendum {
@@ -111,13 +111,13 @@ export function AddendumsPanel({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden">
       <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
         <div className="flex items-center gap-2.5">
-          <FileSignature size={16} className="text-[#2e9f82]" />
+          <FileSignature size={16} className="text-[#047246]" />
           <div>
-            <p className="text-sm font-bold text-[#1a1916]">Addendums</p>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">
+            <p className="text-sm font-bold text-[#14201a]">Addendums</p>
+            <p className="text-[11px] text-[#8a948d] mt-0.5">
               {role === 'landlord'
                 ? canAttach
                   ? 'Attach additional terms — locked once contract is issued.'
@@ -129,7 +129,7 @@ export function AddendumsPanel({
         {canAttach && (
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2e9f82] text-white text-xs font-semibold hover:bg-[#27896f]"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#047246] text-white text-xs font-semibold hover:bg-[#27896f]"
           >
             <Plus size={13} /> Attach
           </button>
@@ -143,18 +143,18 @@ export function AddendumsPanel({
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-8 justify-center text-[#6b6860]">
+        <div className="flex items-center gap-2 py-8 justify-center text-[#5f6b63]">
           <Loader2 size={16} className="animate-spin" /> <span className="text-xs">Loading…</span>
         </div>
       ) : addendums.length === 0 ? (
         <div className="px-5 py-10 text-center">
           <FileText size={28} className="mx-auto text-[#c9c7c1] mb-2" />
-          <p className="text-xs text-[#9b9890]">
+          <p className="text-xs text-[#8a948d]">
             {canAttach ? 'No addendums attached yet — click Attach to add one.' : 'No addendums attached.'}
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-[#f4f3ef]">
+        <div className="divide-y divide-[#eef1ef]">
           {addendums.map(a => (
             <AddendumRow
               key={a.id}
@@ -208,10 +208,10 @@ function AddendumRow({
     <div className="px-5 py-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-2.5 min-w-0 flex-1">
-          {isText ? <FileType2 size={18} className="text-[#2e9f82] mt-0.5 shrink-0" /> : <FileText size={18} className="text-[#2e9f82] mt-0.5 shrink-0" />}
+          {isText ? <FileType2 size={18} className="text-[#047246] mt-0.5 shrink-0" /> : <FileText size={18} className="text-[#047246] mt-0.5 shrink-0" />}
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-[#1a1916]">{a.name}</p>
-            <p className="text-[11px] text-[#9b9890] mt-0.5">
+            <p className="text-sm font-semibold text-[#14201a]">{a.name}</p>
+            <p className="text-[11px] text-[#8a948d] mt-0.5">
               {fileTypeLabel} · Attached {new Date(a.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
             </p>
           </div>
@@ -219,7 +219,7 @@ function AddendumRow({
         <div className="flex items-center gap-2 shrink-0">
           <button type="button"
             onClick={() => isText ? setShowTerms(s => !s) : openDocViewer({ fileUrl: a.fileUrl || '', caption: a.name, mimeType: a.mimeType || undefined })}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#2e9f82] hover:bg-[#f0faf6] border border-[#c5e8df] cursor-pointer">
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-[#047246] hover:bg-[#eef7f2] border border-[#c5e8df] cursor-pointer">
             <ExternalLink size={11} /> View
           </button>
           {canDelete && (
@@ -279,7 +279,7 @@ function SigStatusCell({
 }) {
   if (sig) {
     return (
-      <div className="rounded-lg border border-[#c5e8df] bg-[#f0faf6] px-3 py-2">
+      <div className="rounded-lg border border-[#c5e8df] bg-[#eef7f2] px-3 py-2">
         <p className="text-[9px] font-bold text-[#1a7a5a] uppercase tracking-wide mb-1">{label}</p>
         <div className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -288,22 +288,22 @@ function SigStatusCell({
             <p className="text-[10px] font-semibold text-[#1a7a5a] flex items-center gap-1">
               <CheckCircle2 size={10} /> Signed
             </p>
-            {signedAt && <p className="text-[9px] text-[#6b6860]">{new Date(signedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' })}</p>}
+            {signedAt && <p className="text-[9px] text-[#5f6b63]">{new Date(signedAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short' })}</p>}
           </div>
         </div>
       </div>
     );
   }
   return (
-    <div className="rounded-lg border border-dashed border-[#e8e6e0] px-3 py-2">
-      <p className="text-[9px] font-bold text-[#9b9890] uppercase tracking-wide mb-1">{label}</p>
+    <div className="rounded-lg border border-dashed border-[#e4e9e5] px-3 py-2">
+      <p className="text-[9px] font-bold text-[#8a948d] uppercase tracking-wide mb-1">{label}</p>
       {onSign ? (
         <button onClick={onSign}
-          className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:underline">
+          className="flex items-center gap-1.5 text-xs font-semibold text-[#047246] hover:underline">
           <FileSignature size={12} /> Sign now
         </button>
       ) : (
-        <p className="text-[11px] text-[#9b9890] flex items-center gap-1">
+        <p className="text-[11px] text-[#8a948d] flex items-center gap-1">
           <Lock size={10} /> Awaiting
         </p>
       )}
@@ -389,20 +389,20 @@ function AttachAddendumModal({
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6e0]">
-          <h3 className="text-base font-bold text-[#1a1916]">Attach addendum</h3>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1"><X size={18} /></button>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e4e9e5]">
+          <h3 className="text-base font-bold text-[#14201a]">Attach addendum</h3>
+          <button onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] p-1"><X size={18} /></button>
         </div>
 
         {/* Mode tabs */}
         <div className="px-5 pt-4">
-          <div className="flex gap-1 bg-[#f4f3ef] rounded-xl p-1">
+          <div className="flex gap-1 bg-[#eef1ef] rounded-xl p-1">
             <button onClick={() => setMode('template')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${mode === 'template' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860]'}`}>
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${mode === 'template' ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63]'}`}>
               From template
             </button>
             <button onClick={() => setMode('upload')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${mode === 'upload' ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860]'}`}>
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${mode === 'upload' ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63]'}`}>
               One-off upload
             </button>
           </div>
@@ -411,7 +411,7 @@ function AttachAddendumModal({
         <div className="p-5 space-y-4">
           {mode === 'template' ? (
             loadingTpls ? (
-              <div className="flex items-center gap-2 py-6 justify-center text-[#6b6860]">
+              <div className="flex items-center gap-2 py-6 justify-center text-[#5f6b63]">
                 <Loader2 size={14} className="animate-spin" /> <span className="text-xs">Loading templates…</span>
               </div>
             ) : templates.length === 0 ? (
@@ -424,13 +424,13 @@ function AttachAddendumModal({
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {templates.map(t => (
                   <label key={t.id}
-                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${selectedTpl === t.id ? 'border-[#2e9f82] bg-[#f0faf6]' : 'border-[#e8e6e0] hover:bg-[#fafaf8]'}`}>
+                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${selectedTpl === t.id ? 'border-[#047246] bg-[#eef7f2]' : 'border-[#e4e9e5] hover:bg-[#f6f8f6]'}`}>
                     <input type="radio" name="tpl" checked={selectedTpl === t.id}
                       onChange={() => setSelectedTpl(t.id)}
-                      className="mt-0.5 accent-[#2e9f82]" />
+                      className="mt-0.5 accent-[#047246]" />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-[#1a1916]">{t.name}</p>
-                      {t.description && <p className="text-xs text-[#9b9890] mt-0.5">{t.description}</p>}
+                      <p className="text-sm font-semibold text-[#14201a]">{t.name}</p>
+                      {t.description && <p className="text-xs text-[#8a948d] mt-0.5">{t.description}</p>}
                     </div>
                   </label>
                 ))}
@@ -439,18 +439,18 @@ function AttachAddendumModal({
           ) : (
             <>
               <div>
-                <label className="text-xs font-semibold text-[#6b6860] block mb-1.5">Name</label>
+                <label className="text-xs font-semibold text-[#5f6b63] block mb-1.5">Name</label>
                 <input type="text" value={name} onChange={e => setName(e.target.value)}
                   placeholder="e.g. Parking spot allocation"
-                  className="w-full px-3 py-2 rounded-xl border border-[#e8e6e0] text-sm focus:outline-none focus:border-[#2e9f82]" />
+                  className="w-full px-3 py-2 rounded-xl border border-[#e4e9e5] text-sm focus:outline-none focus:border-[#047246]" />
               </div>
               <div>
-                <label className="text-xs font-semibold text-[#6b6860] block mb-1.5">File (PDF or DOCX)</label>
+                <label className="text-xs font-semibold text-[#5f6b63] block mb-1.5">File (PDF or DOCX)</label>
                 <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   className="hidden"
                   onChange={e => setFile(e.target.files?.[0] ?? null)} />
                 <button onClick={() => fileRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed border-[#e8e6e0] text-sm text-[#6b6860] hover:border-[#2e9f82] hover:bg-[#f0faf6]">
+                  className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed border-[#e4e9e5] text-sm text-[#5f6b63] hover:border-[#047246] hover:bg-[#eef7f2]">
                   <UploadCloud size={16} />
                   {file ? file.name : 'Click to choose file'}
                 </button>
@@ -461,11 +461,11 @@ function AttachAddendumModal({
           {err && <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-2"><AlertCircle size={12} /> {err}</div>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#e8e6e0] bg-[#fafaf8]">
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#e4e9e5] bg-[#f6f8f6]">
           <button onClick={onClose} disabled={busy}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-white">Cancel</button>
+            className="px-4 py-2 rounded-xl text-sm font-medium text-[#5f6b63] hover:bg-white">Cancel</button>
           <button onClick={submit} disabled={busy}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-50">
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             {busy ? 'Attaching…' : 'Attach'}
           </button>
@@ -504,7 +504,7 @@ function SignAddendumModal({
     const r = cvs.getBoundingClientRect();
     cvs.width = r.width * ratio; cvs.height = r.height * ratio;
     const ctx = cvs.getContext('2d'); if (!ctx) return;
-    ctx.scale(ratio, ratio); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a1916';
+    ctx.scale(ratio, ratio); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#14201a';
   }, []);
 
   function getPos(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -538,18 +538,18 @@ function SignAddendumModal({
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl max-w-md w-full shadow-xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e8e6e0]">
-          <h3 className="text-base font-bold text-[#1a1916]">Sign — {a.name}</h3>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] p-1"><X size={18} /></button>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#e4e9e5]">
+          <h3 className="text-base font-bold text-[#14201a]">Sign — {a.name}</h3>
+          <button onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] p-1"><X size={18} /></button>
         </div>
         <div className="p-5 space-y-3">
           <button type="button"
             onClick={() => isText ? setShowTerms(s => !s) : openDocViewer({ fileUrl: a.fileUrl || '', caption: a.name, mimeType: a.mimeType || undefined })}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#f0faf6] text-xs font-semibold text-[#2e9f82] hover:bg-[#e0f4ec] cursor-pointer">
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-[#c5e8df] bg-[#eef7f2] text-xs font-semibold text-[#047246] hover:bg-[#e0f4ec] cursor-pointer">
             <ExternalLink size={12} /> {isText ? (showTerms ? 'Hide terms' : 'Review terms') : 'Open addendum to review'}
           </button>
           {isText && showTerms && a.terms && (
-            <div className="rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-3 max-h-56 overflow-y-auto space-y-2">
+            <div className="rounded-xl border border-[#e4e9e5] bg-[#f6f8f6] p-3 max-h-56 overflow-y-auto space-y-2">
               {a.terms.en.length > 0 && (
                 <ol className="list-decimal list-inside space-y-1 text-[11px] text-[#3a3833]">
                   {a.terms.en.map((l, i) => <li key={i}>{l}</li>)}
@@ -560,28 +560,28 @@ function SignAddendumModal({
                   {a.terms.ar.map((l, i) => <li key={i}>{l}</li>)}
                 </ol>
               )}
-              <p className="text-[10px] text-[#9b9890] pt-1 border-t border-[#e8e6e0]">A tenant &amp; landlord signature block is included in the final document.</p>
+              <p className="text-[10px] text-[#8a948d] pt-1 border-t border-[#e4e9e5]">A tenant &amp; landlord signature block is included in the final document.</p>
             </div>
           )}
-          <p className="text-xs text-[#6b6860]">Draw your signature in the box below.</p>
+          <p className="text-xs text-[#5f6b63]">Draw your signature in the box below.</p>
           <canvas ref={canvasRef}
-            className="w-full h-32 rounded-xl border-2 border-dashed border-[#d8d6d0] bg-[#fafaf8] touch-none cursor-crosshair"
+            className="w-full h-32 rounded-xl border-2 border-dashed border-[#d8d6d0] bg-[#f6f8f6] touch-none cursor-crosshair"
             onPointerDown={e => { e.preventDefault(); drawing.current = true; const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }}
             onPointerMove={e => { if (!drawing.current) return; const ctx = canvasRef.current?.getContext('2d'); if (!ctx) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }}
             onPointerUp={() => { if (!drawing.current) return; drawing.current = false; setSig(canvasRef.current?.toDataURL('image/png') ?? null); }}
             onPointerLeave={() => { if (!drawing.current) return; drawing.current = false; setSig(canvasRef.current?.toDataURL('image/png') ?? null); }}
           />
           <div className="flex justify-between items-center">
-            <button onClick={clearSig} className="flex items-center gap-1 text-xs text-[#6b6860] hover:text-[#1a1916]"><RotateCcw size={11} /> Clear</button>
+            <button onClick={clearSig} className="flex items-center gap-1 text-xs text-[#5f6b63] hover:text-[#14201a]"><RotateCcw size={11} /> Clear</button>
             {sig && <span className="text-[10px] text-[#16a34a] font-semibold">✓ Captured</span>}
           </div>
           {err && <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-2"><AlertCircle size={12} /> {err}</div>}
         </div>
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#e8e6e0] bg-[#fafaf8]">
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[#e4e9e5] bg-[#f6f8f6]">
           <button onClick={onClose} disabled={busy}
-            className="px-4 py-2 rounded-xl text-sm font-medium text-[#6b6860] hover:bg-white">Cancel</button>
+            className="px-4 py-2 rounded-xl text-sm font-medium text-[#5f6b63] hover:bg-white">Cancel</button>
           <button onClick={submit} disabled={busy || !sig}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-50">
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#27896f] disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <FileSignature size={14} />}
             {busy ? 'Signing…' : 'Sign addendum'}
           </button>

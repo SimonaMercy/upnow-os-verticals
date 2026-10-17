@@ -135,11 +135,11 @@ export default function DataExports({ manager }: { manager?: { rp: number } } = 
   return (
     <section className="mb-9">
       <div className="flex items-baseline gap-2.5 mb-1">
-        <span className="w-6 h-6 rounded-lg bg-[#f0faf6] flex items-center justify-center self-center">
-          <FileSpreadsheet size={13} className="text-[#2e9f82]" />
+        <span className="w-6 h-6 rounded-lg bg-[#eef7f2] flex items-center justify-center self-center">
+          <FileSpreadsheet size={13} className="text-[#047246]" />
         </span>
-        <h2 className="text-sm font-bold text-[#1a1916]">Data Exports</h2>
-        <span className="text-xs text-[#9b9890]">
+        <h2 className="text-sm font-bold text-[#14201a]">Data Exports</h2>
+        <span className="text-xs text-[#8a948d]">
           Download full datasets as Excel — incomplete rows highlighted · {scopeLabel}
         </span>
       </div>
@@ -159,15 +159,15 @@ export default function DataExports({ manager }: { manager?: { rp: number } } = 
               key={def.key}
               onClick={() => run(def)}
               disabled={!!busy}
-              className="group text-left bg-white rounded-2xl border border-[#e8e6e0] p-5 shadow-sm hover:border-[#2e9f82] hover:shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              className="group text-left bg-white rounded-2xl border border-[#e4e9e5] p-5 shadow-sm hover:border-[#047246] hover:shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#f0faf6] flex items-center justify-center shrink-0 group-hover:bg-[#2e9f82] transition-colors">
-                  <def.Icon size={18} className="text-[#2e9f82] group-hover:text-white transition-colors" />
+                <div className="w-10 h-10 rounded-xl bg-[#eef7f2] flex items-center justify-center shrink-0 group-hover:bg-[#047246] transition-colors">
+                  <def.Icon size={18} className="text-[#047246] group-hover:text-white transition-colors" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-bold text-[#1a1916] leading-tight">{def.title}</h3>
-                  <p className="text-xs text-[#6b6860] mt-1 line-clamp-2">{def.description}</p>
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#2e9f82] mt-2.5">
+                  <h3 className="text-sm font-bold text-[#14201a] leading-tight">{def.title}</h3>
+                  <p className="text-xs text-[#5f6b63] mt-1 line-clamp-2">{def.description}</p>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#047246] mt-2.5">
                     {loading ? (
                       <><Loader2 size={13} className="animate-spin" /> Preparing…</>
                     ) : (

@@ -60,7 +60,7 @@ export function HeroSection() {
     <section
       className="relative"
       style={{
-        background: 'linear-gradient(180deg, #f0faf6 0%, var(--base-100) 100%)',
+        background: 'linear-gradient(180deg, #eef7f2 0%, var(--base-100) 100%)',
         paddingBlock: '96px 80px',
       }}
     >
@@ -95,7 +95,7 @@ export function HeroSection() {
               style={{
                 backgroundColor: 'var(--white)',
                 borderRadius: 20,
-                boxShadow: '0 4px 24px -4px rgba(46,159,130,0.14)',
+                boxShadow: '0 4px 24px -4px rgba(4,114,70,0.14)',
                 padding: '20px 24px',
               }}
             >
@@ -264,7 +264,7 @@ export function HeroSection() {
                 flexDirection: 'column',
                 alignItems: 'center',
                 textAlign: 'center',
-                boxShadow: '0 8px 40px -8px rgba(46,159,130,0.18)',
+                boxShadow: '0 8px 40px -8px rgba(4,114,70,0.18)',
               }}
             >
               <div
@@ -272,7 +272,7 @@ export function HeroSection() {
                 style={{
                   width: 80, height: 80, borderRadius: '50%',
                   backgroundColor: 'var(--white)',
-                  boxShadow: '0 4px 20px -4px rgba(46,159,130,0.2)',
+                  boxShadow: '0 4px 20px -4px rgba(4,114,70,0.2)',
                   marginBottom: 28,
                 }}
               >

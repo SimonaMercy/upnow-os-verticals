@@ -91,9 +91,9 @@ function Ref({ href, children }: { href?: string; children: ReactNode }) {
   if (!href) return <>{children}</>;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer"
-      className="group/ref inline-flex items-center gap-1 underline decoration-dotted decoration-[#cfd8d3] underline-offset-2 hover:text-[#2e9f82] hover:decoration-[#2e9f82] cursor-pointer">
+      className="group/ref inline-flex items-center gap-1 underline decoration-dotted decoration-[#cfd8d3] underline-offset-2 hover:text-[#047246] hover:decoration-[#047246] cursor-pointer">
       {children}
-      <ExternalLink size={10} className="opacity-0 group-hover/ref:opacity-100 text-[#2e9f82] shrink-0" />
+      <ExternalLink size={10} className="opacity-0 group-hover/ref:opacity-100 text-[#047246] shrink-0" />
     </a>
   );
 }
@@ -101,8 +101,8 @@ function Ref({ href, children }: { href?: string; children: ReactNode }) {
 function SecHead({ n, title }: { n: string; title: string }) {
   return (
     <div className="flex items-center gap-2 mb-3">
-      <span className="w-6 h-6 rounded-md bg-[#2e9f82] text-white text-xs font-extrabold flex items-center justify-center shrink-0">{n}</span>
-      <h3 className="text-[13px] font-extrabold uppercase tracking-wide text-[#1a1916]">{title}</h3>
+      <span className="w-6 h-6 rounded-md bg-[#047246] text-white text-xs font-extrabold flex items-center justify-center shrink-0">{n}</span>
+      <h3 className="text-[13px] font-extrabold uppercase tracking-wide text-[#14201a]">{title}</h3>
     </div>
   );
 }
@@ -115,7 +115,7 @@ function SubTable({ tag, title, rows, total, hasDates }: { tag: string; title: s
     <table className="w-full text-[12px] mb-4">
       <tbody>
         <tr><td colSpan={hasDates ? 3 : 2} className="py-1.5 px-2.5 bg-[#eef7f3] text-[11px] font-bold uppercase tracking-wide text-[#1a7a5a]">{tag}. {title}</td></tr>
-        <tr className="text-[#9b9890] text-[10px] uppercase tracking-wide">
+        <tr className="text-[#8a948d] text-[10px] uppercase tracking-wide">
           <th className="text-left font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Description</th>
           {hasDates && <th className="text-left font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Date</th>}
           <th className="text-right font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Amount (AED)</th>
@@ -123,7 +123,7 @@ function SubTable({ tag, title, rows, total, hasDates }: { tag: string; title: s
         {rows.map((r, i) => (
           <tr key={i} className="border-b border-[#f4f2ee]">
             <td className="py-2 px-2.5"><Ref href={r.href}>{r.label}</Ref></td>
-            {hasDates && <td className="py-2 px-2.5 text-[#9b9890]">{fmtDate(r.date)}</td>}
+            {hasDates && <td className="py-2 px-2.5 text-[#8a948d]">{fmtDate(r.date)}</td>}
             <td className="py-2 px-2.5 text-right tabular-nums">{nf.format(r.amount ?? 0)}</td>
           </tr>
         ))}
@@ -191,12 +191,12 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
   const showDepositSection = restorationRows.length > 0 || refundableRows.length > 0;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden text-[#1a1916]">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden text-[#14201a]">
       <div className="px-7 py-6 sm:px-9">
         {/* Header */}
-        <div className="flex items-center justify-between border-b-2 border-[#2e9f82] pb-4 mb-6">
+        <div className="flex items-center justify-between border-b-2 border-[#047246] pb-4 mb-6">
           <h2 className="text-[22px] font-extrabold">Tenant Final Settlement</h2>
-          {hasLinks && <span className="text-[10.5px] text-[#9b9890] italic hidden sm:flex items-center gap-1"><ExternalLink size={11} className="text-[#2e9f82]" /> underlined values link to their source record</span>}
+          {hasLinks && <span className="text-[10.5px] text-[#8a948d] italic hidden sm:flex items-center gap-1"><ExternalLink size={11} className="text-[#047246]" /> underlined values link to their source record</span>}
         </div>
 
         {/* Tenant details + result card */}
@@ -205,7 +205,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
             <div className="flex items-center justify-between">
               <SecHead n="i" title="Tenant & Contract Details" />
               {links?.contract && (
-                <a href={links.contract} target="_blank" rel="noopener noreferrer" className="text-[11px] font-semibold text-[#2e9f82] hover:underline inline-flex items-center gap-1 mb-3">
+                <a href={links.contract} target="_blank" rel="noopener noreferrer" className="text-[11px] font-semibold text-[#047246] hover:underline inline-flex items-center gap-1 mb-3">
                   <ExternalLink size={11} /> View contract
                 </a>
               )}
@@ -222,7 +222,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
                 ...(c.actualMoveOutDate ? [['Actual Move-out Date', fmtDate(c.actualMoveOutDate)] as [string, string]] : []),
               ].map(([k, v]) => (
                 <div key={k} className="flex flex-col gap-0.5">
-                  <span className="text-[11px] text-[#9b9890]">{k}</span>
+                  <span className="text-[11px] text-[#8a948d]">{k}</span>
                   <span className={`text-[12.5px] font-semibold ${v === '—' ? 'text-[#b9b6ae]' : ''}`}>{v}</span>
                 </div>
               ))}
@@ -230,15 +230,15 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
           </div>
           <div className={`rounded-xl p-5 border ${owe ? 'bg-[#fdf1f1] border-[#eaa6a6]' : 'bg-[#eef7f3] border-[#c5e8df]'}`}>
             <div className="flex items-start justify-between">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-[#6b6860]">Final Settlement Result</div>
+              <div className="text-[11px] font-bold uppercase tracking-wide text-[#5f6b63]">Final Settlement Result</div>
               <Wallet size={26} className={owe ? 'text-[#e2b4b4]' : 'text-[#bfe3d5]'} />
             </div>
-            <div className="text-[13px] text-[#6b6860] mt-1 font-semibold">{resultLabel}</div>
+            <div className="text-[13px] text-[#5f6b63] mt-1 font-semibold">{resultLabel}</div>
             <div className={`text-[30px] font-extrabold mt-1 ${owe ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'}`}>AED {nf.format(Math.abs(data.balance))}</div>
-            <div className="text-[11px] text-[#9b9890] mt-2">
+            <div className="text-[11px] text-[#8a948d] mt-2">
               {owe ? 'Balance collected from the tenant after all charges.' : 'Security deposit refundable after all deductions.'}
             </div>
-            {data.settlementDate && <div className="text-[11px] text-[#6b6860] mt-3 pt-2 border-t border-black/5">Settlement Date: <span className="font-semibold">{fmtLong(data.settlementDate)}</span></div>}
+            {data.settlementDate && <div className="text-[11px] text-[#5f6b63] mt-3 pt-2 border-t border-black/5">Settlement Date: <span className="font-semibold">{fmtLong(data.settlementDate)}</span></div>}
           </div>
         </div>
 
@@ -249,7 +249,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] border-collapse">
                 <thead>
-                  <tr className="text-[#9b9890] text-[10.5px] uppercase tracking-wide">
+                  <tr className="text-[#8a948d] text-[10.5px] uppercase tracking-wide">
                     <th className="text-left font-semibold py-2 px-2.5 bg-[#fafbfc] border-b border-[#eceae4]">Description</th>
                     <th className="text-left font-semibold py-2 px-2.5 bg-[#fafbfc] border-b border-[#eceae4]">Date</th>
                     <th className="text-right font-semibold py-2 px-2.5 bg-[#fafbfc] border-b border-[#eceae4]">Amount (AED)</th>
@@ -305,7 +305,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
               <SecHead n="4" title="Final Balance Summary" />
               <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="text-[#9b9890] text-[10px] uppercase tracking-wide">
+                  <tr className="text-[#8a948d] text-[10px] uppercase tracking-wide">
                     <th className="text-left font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Category</th>
                     <th className="text-right font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Amount (AED)</th>
                   </tr>
@@ -313,7 +313,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
                 <tbody>
                   {finalRows.map((row, i) => (
                     <tr key={i} className="border-b border-[#f4f2ee]">
-                      <td className="py-2 px-2.5"><Ref href={row.href}>{row.label}</Ref>{row.note ? <span className="block text-[10.5px] text-[#9b9890] italic">{row.note}</span> : null}</td>
+                      <td className="py-2 px-2.5"><Ref href={row.href}>{row.label}</Ref>{row.note ? <span className="block text-[10.5px] text-[#8a948d] italic">{row.note}</span> : null}</td>
                       <td className={`py-2 px-2.5 text-right tabular-nums ${row.owed ? 'text-[#b91c1c]' : ''}`}>{nf.format(Math.abs(row.amount))}{row.owed ? ' (owed)' : ''}</td>
                     </tr>
                   ))}
@@ -329,7 +329,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
               <section>
                 <SecHead n="+" title="Payments Received from Tenant" />
                 <table className="w-full text-[12px]">
-                  <thead><tr className="text-[#9b9890] text-[10px] uppercase tracking-wide">
+                  <thead><tr className="text-[#8a948d] text-[10px] uppercase tracking-wide">
                     <th className="text-right font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Amount</th>
                     <th className="text-left font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Method</th>
                     <th className="text-left font-semibold py-1.5 px-2.5 border-b border-[#eceae4]">Reference</th>
@@ -354,7 +354,7 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
               <SecHead n="5" title="Notes" />
               {data.notes
                 ? <p className="text-[12px] text-[#4b4a45] whitespace-pre-wrap">{data.notes}</p>
-                : <ul className="text-[11.5px] text-[#6b6860] list-disc pl-5 space-y-1">
+                : <ul className="text-[11.5px] text-[#5f6b63] list-disc pl-5 space-y-1">
                     <li>All calculations are based on confirmed invoices and rent records.</li>
                     <li>Any additional damages after move-out inspection may be charged separately.</li>
                     <li>Security deposit refund is subject to final inspection clearance.</li>
@@ -381,16 +381,16 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
         <section className="mt-8 pt-6 border-t border-[#eceae4]">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#f2faf6] flex items-center justify-center shrink-0"><Building2 size={18} className="text-[#2e9f82]" /></div>
-              <div className="flex-1 text-[12px] text-[#6b6860]">
+              <div className="w-10 h-10 rounded-full bg-[#f2faf6] flex items-center justify-center shrink-0"><Building2 size={18} className="text-[#047246]" /></div>
+              <div className="flex-1 text-[12px] text-[#5f6b63]">
                 <div className="flex items-baseline gap-2">Property Manager: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
                 <div className="flex items-baseline gap-2 mt-4">Signature: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
                 <div className="flex items-baseline gap-2 mt-4">Date: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#f2faf6] flex items-center justify-center shrink-0"><User size={18} className="text-[#2e9f82]" /></div>
-              <div className="flex-1 text-[12px] text-[#6b6860]">
+              <div className="w-10 h-10 rounded-full bg-[#f2faf6] flex items-center justify-center shrink-0"><User size={18} className="text-[#047246]" /></div>
+              <div className="flex-1 text-[12px] text-[#5f6b63]">
                 <div className="flex items-baseline gap-2">Tenant Name: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
                 <div className="flex items-baseline gap-2 mt-4">Signature: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
                 <div className="flex items-baseline gap-2 mt-4">Date: <span className="flex-1 border-b border-dotted border-[#b9b6ae]" /></div>
@@ -400,8 +400,8 @@ export default function TenantFinalSettlementDoc({ data, links }: { data: TFSDoc
         </section>
       </div>
 
-      <div className="px-7 py-3 sm:px-9 border-t border-[#eceae4] bg-[#fafbfc] text-[10.5px] text-[#9b9890]">
-        <span className="font-semibold text-[#6b6860]">Note:</span> This statement is for settlement purposes only and does not constitute a waiver of any rights or obligations under the tenancy agreement.
+      <div className="px-7 py-3 sm:px-9 border-t border-[#eceae4] bg-[#fafbfc] text-[10.5px] text-[#8a948d]">
+        <span className="font-semibold text-[#5f6b63]">Note:</span> This statement is for settlement purposes only and does not constitute a waiver of any rights or obligations under the tenancy agreement.
       </div>
     </div>
   );

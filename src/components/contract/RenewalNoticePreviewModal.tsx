@@ -89,7 +89,7 @@ export default function RenewalNoticePreviewModal({
     <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm overflow-y-auto"
          onClick={() => { if (!sending) onClose(); }}>
       <div className="max-w-4xl mx-auto my-6 px-4" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-[#2e9f82] text-white rounded-t-2xl px-5 py-3 shadow-lg">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 bg-[#047246] text-white rounded-t-2xl px-5 py-3 shadow-lg">
           <div className="min-w-0">
             <div className="text-sm font-bold truncate">Review the renewal notice</div>
             <div className="text-[11px] text-white/70">This is exactly what the customer will receive</div>
@@ -185,7 +185,7 @@ export default function RenewalNoticePreviewModal({
                   Cancel
                 </button>
                 <button onClick={send} disabled={sending || !preview.to}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#268a71] disabled:opacity-60">
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#047246] hover:bg-[#268a71] disabled:opacity-60">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                   {sending ? 'Sending…' : preview.deliveryBlocked ? 'Mark as sent (no email)' : preview.resendOf ? 'Send again to customer' : 'Confirm and send to customer'}
                 </button>

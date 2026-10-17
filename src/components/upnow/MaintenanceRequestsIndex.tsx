@@ -352,7 +352,7 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not raise the request.'); setBusy(false); }
   };
 
-  const field = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2.5 text-sm bg-white text-[#1a1916] focus:outline-none focus:border-[#2e9f82] focus:ring-2 focus:ring-[#2e9f82]/15';
+  const field = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2.5 text-sm bg-white text-[#14201a] focus:outline-none focus:border-[#047246] focus:ring-2 focus:ring-[#047246]/15';
   const label = 'block text-[12px] font-semibold text-[#4a4842] mb-1';
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(26,25,22,0.45)' }}>
@@ -360,10 +360,10 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
         onSubmit={e => { e.preventDefault(); if (!busy) void submit(); }}>
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-[#f0eee8]">
           <div>
-            <h2 className="text-lg font-bold text-[#1a1916]">New maintenance request</h2>
-            <p className="text-[12.5px] text-[#9b9890] mt-0.5">Raised on your side — a unit, a common area or a building system; it routes through the same pipeline as a customer request.</p>
+            <h2 className="text-lg font-bold text-[#14201a]">New maintenance request</h2>
+            <p className="text-[12.5px] text-[#8a948d] mt-0.5">Raised on your side — a unit, a common area or a building system; it routes through the same pipeline as a customer request.</p>
           </div>
-          <button type="button" onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer mt-1" aria-label="Close"><X size={18} /></button>
+          <button type="button" onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer mt-1" aria-label="Close"><X size={18} /></button>
         </div>
 
         <div className="px-6 py-5 grid gap-4">
@@ -376,11 +376,11 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
               value={propertyId} onPick={id => setPropertyId(id)} />
             {/* 0268 — the building form drives places + categories; derived, overridable */}
             {propertyId !== '' && profile && (
-              <p className="text-[11.5px] text-[#6b6860] mt-1.5 flex items-center gap-1.5 flex-wrap">
-                <span className="font-semibold text-[#1a1916]">{profile.formLabel}</span>
-                <span className="text-[#9b9890]">{profile.override ? '· set by you' : '· from its units'}{profile.floors != null ? ` · ${profile.floors} floor${profile.floors === 1 ? '' : 's'}` : ''}</span>
+              <p className="text-[11.5px] text-[#5f6b63] mt-1.5 flex items-center gap-1.5 flex-wrap">
+                <span className="font-semibold text-[#14201a]">{profile.formLabel}</span>
+                <span className="text-[#8a948d]">{profile.override ? '· set by you' : '· from its units'}{profile.floors != null ? ` · ${profile.floors} floor${profile.floors === 1 ? '' : 's'}` : ''}</span>
                 {changingForm ? (
-                  <select className="border border-[#e8e6e0] rounded-md px-1.5 py-0.5 text-[11.5px] bg-white" value={profile.override ?? ''} autoFocus
+                  <select className="border border-[#e4e9e5] rounded-md px-1.5 py-0.5 text-[11.5px] bg-white" value={profile.override ?? ''} autoFocus
                     onChange={e => void setForm(e.target.value)} onBlur={() => setChangingForm(false)}>
                     <option value="">Derived — {profile.forms.find(f => f.key === profile.derivedForm)?.label ?? profile.derivedForm}</option>
                     {profile.forms.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -394,16 +394,16 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
 
           <div>
             <span className={label}>Where <span className="text-[#d4553f]">*</span></span>
-            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[#f4f3ef]" role="radiogroup" aria-label="Where is the work">
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-[#eef1ef]" role="radiogroup" aria-label="Where is the work">
               {(['unit', 'common_area', 'building_system'] as MaintenanceScope[]).map(k => (
                 <button key={k} type="button" role="radio" aria-checked={scope === k}
                   onClick={() => { setScope(k); setPlaceDetail(''); setCategoryId(''); }}
-                  className={`h-9 rounded-lg text-[12.5px] font-semibold cursor-pointer transition ${scope === k ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860] hover:text-[#1a1916]'}`}>
+                  className={`h-9 rounded-lg text-[12.5px] font-semibold cursor-pointer transition ${scope === k ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63] hover:text-[#14201a]'}`}>
                   {scopeLabel(k)}
                 </button>
               ))}
             </div>
-            <p className="text-[11.5px] text-[#9b9890] mt-1.5">{scopeHint(scope)}</p>
+            <p className="text-[11.5px] text-[#8a948d] mt-1.5">{scopeHint(scope)}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -414,7 +414,7 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
                   placeholder={propertyId === '' ? 'Property first' : units == null ? 'Loading…' : 'Type to search…'}
                   options={propertyId === '' ? [] : units?.map(u => ({ id: u.id, label: unitLabel(u) })) ?? null}
                   value={unitId} onPick={id => setUnitId(id)} />
-                <p className="text-[11.5px] text-[#9b9890] mt-1">Occupied or vacant — a vacant unit routes straight to your provider.</p>
+                <p className="text-[11.5px] text-[#8a948d] mt-1">Occupied or vacant — a vacant unit routes straight to your provider.</p>
               </div>
             ) : (
               <div>
@@ -434,7 +434,7 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
           </div>
           {scope !== 'unit' && (
             <div>
-              <label className={label} htmlFor="nr-place-detail">Exactly where <span className="font-normal text-[#9b9890]">(optional)</span></label>
+              <label className={label} htmlFor="nr-place-detail">Exactly where <span className="font-normal text-[#8a948d]">(optional)</span></label>
               <input id="nr-place-detail" className={field} placeholder={scope === 'common_area' ? 'e.g. 3rd floor, near lift B' : 'e.g. Panel 2, ground floor'}
                 value={placeDetail} onChange={e => setPlaceDetail(e.target.value)} maxLength={60} />
             </div>
@@ -477,11 +477,11 @@ function NewRequestModal({ base, rp, detailHref, onClose }: {
 
         <div className="px-6 py-4 border-t border-[#f0eee8] flex items-center justify-end gap-2">
           <button type="button" onClick={onClose}
-            className="h-10 px-4 rounded-xl text-sm font-semibold text-[#6b6860] border border-[#e8e6e0] bg-white hover:border-[#c9c6be] cursor-pointer">
+            className="h-10 px-4 rounded-xl text-sm font-semibold text-[#5f6b63] border border-[#e4e9e5] bg-white hover:border-[#c9c6be] cursor-pointer">
             Cancel
           </button>
           <button type="submit" disabled={busy}
-            className="h-10 px-5 rounded-xl text-sm font-bold text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+            className="h-10 px-5 rounded-xl text-sm font-bold text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
             {busy ? 'Raising…' : 'Raise request'}
           </button>
         </div>
@@ -523,16 +523,16 @@ function SearchPick({ id, options, value, onPick, placeholder, disabled, fieldCl
         autoComplete="off"
       />
       {open && !disabled && (
-        <ul className="absolute z-10 left-0 right-0 mt-1 max-h-52 overflow-y-auto bg-white border border-[#e8e6e0] rounded-xl shadow-lg py-1">
+        <ul className="absolute z-10 left-0 right-0 mt-1 max-h-52 overflow-y-auto bg-white border border-[#e4e9e5] rounded-xl shadow-lg py-1">
           {options == null ? (
-            <li className="px-3 py-2 text-sm text-[#9b9890]">Loading…</li>
+            <li className="px-3 py-2 text-sm text-[#8a948d]">Loading…</li>
           ) : filtered.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-[#9b9890]">No match.</li>
+            <li className="px-3 py-2 text-sm text-[#8a948d]">No match.</li>
           ) : filtered.map(o => (
             <li key={o.id}>
               <button
                 type="button"
-                className={`w-full text-left px-3 py-2 text-sm cursor-pointer hover:bg-[#f4f3ef] ${o.id === value ? 'font-semibold text-[#1a7a5a]' : 'text-[#1a1916]'}`}
+                className={`w-full text-left px-3 py-2 text-sm cursor-pointer hover:bg-[#eef1ef] ${o.id === value ? 'font-semibold text-[#1a7a5a]' : 'text-[#14201a]'}`}
                 onMouseDown={e => { e.preventDefault(); onPick(o.id); setQ(''); setOpen(false); }}
               >
                 {o.label}

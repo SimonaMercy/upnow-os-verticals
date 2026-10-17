@@ -81,18 +81,18 @@ export default function OfferReceiptModal({
       <div style={{ position: 'relative', background: '#fff', borderRadius: 16, boxShadow: '0 24px 60px -24px rgba(26,23,20,.5)', width: '100%', maxWidth: 540, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, padding: '16px 18px', borderBottom: '1px solid #ece9e3' }}>
           <div>
-            <p style={{ fontSize: 15, fontWeight: 800, color: '#1a1916', margin: 0 }}>{title}</p>
-            <p style={{ fontSize: 12, color: '#9b9890', margin: '2px 0 0' }}>
+            <p style={{ fontSize: 15, fontWeight: 800, color: '#14201a', margin: 0 }}>{title}</p>
+            <p style={{ fontSize: 12, color: '#8a948d', margin: '2px 0 0' }}>
               {subtitle}{contractRef ? ` · ${contractRef}` : ''}{plan.issuedAt ? ` · ${fmtD(plan.issuedAt)}` : ''}
             </p>
           </div>
-          <button type="button" onClick={dismiss} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#9b9890', padding: 4 }}><X size={18} /></button>
+          <button type="button" onClick={dismiss} aria-label="Close" style={{ background: 'none', border: 0, cursor: 'pointer', color: '#8a948d', padding: 4 }}><X size={18} /></button>
         </div>
 
         {/* Cost breakdown */}
         <div style={{ padding: '14px 18px', display: 'grid', gap: 6 }}>
           {plan.originalRentFils != null && (plan.discountFils ?? 0) > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#9b9890' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#8a948d' }}>
               <span>Listed rent</span>
               <span style={{ textDecoration: 'line-through' }}>{aed(plan.originalRentFils)}</span>
             </div>
@@ -113,19 +113,19 @@ export default function OfferReceiptModal({
         {/* Cheque schedule */}
         {items.length > 0 && (
           <div style={{ borderTop: '1px solid #ece9e3' }}>
-            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: 0, padding: '12px 18px 6px' }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d', margin: 0, padding: '12px 18px 6px' }}>
               Payment schedule · {plan.installmentCount} installment{plan.installmentCount === 1 ? '' : 's'}
             </p>
             <div style={{ padding: '0 12px 14px', display: 'grid', gap: 4 }}>
               {items.map((it, i) => (
-                <div key={it.index ?? i} style={{ display: 'grid', gridTemplateColumns: '26px 1fr auto auto', gap: 10, alignItems: 'center', padding: '9px 8px', borderTop: i === 0 ? 'none' : '1px solid #f4f3ef' }}>
-                  <span style={{ fontSize: 12, color: '#9b9890', fontWeight: 600 }}>#{i + 1}</span>
+                <div key={it.index ?? i} style={{ display: 'grid', gridTemplateColumns: '26px 1fr auto auto', gap: 10, alignItems: 'center', padding: '9px 8px', borderTop: i === 0 ? 'none' : '1px solid #eef1ef' }}>
+                  <span style={{ fontSize: 12, color: '#8a948d', fontWeight: 600 }}>#{i + 1}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: '#1a1916' }}>{it.description ?? `Payment ${i + 1}`}</div>
-                    <div style={{ fontSize: 11, color: '#9b9890' }}>{fmtD(it.dueDate)}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#14201a' }}>{it.description ?? `Payment ${i + 1}`}</div>
+                    <div style={{ fontSize: 11, color: '#8a948d' }}>{fmtD(it.dueDate)}</div>
                   </div>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: '#1a1916', fontVariantNumeric: 'tabular-nums' }}>{aed(it.amountFils)}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999, background: '#f1efe9', color: '#6b6860', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: '#14201a', fontVariantNumeric: 'tabular-nums' }}>{aed(it.amountFils)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999, background: '#f1efe9', color: '#5f6b63', textTransform: 'uppercase', letterSpacing: '.04em' }}>
                     {TYPE_LABEL[it.type ?? 'installment'] ?? 'Rent'}
                   </span>
                 </div>

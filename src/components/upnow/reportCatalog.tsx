@@ -81,9 +81,9 @@ export function BasisNote({ slug, className = '' }: { slug: string; className?: 
   const b = REPORT_BASIS[slug];
   if (!b) return null;
   return (
-    <div className={`text-xs text-[#6b6860] ${className}`}>
+    <div className={`text-xs text-[#5f6b63] ${className}`}>
       <p>
-        <span className="font-medium text-[#3d3b35]">How this is measured:</span>{' '}
+        <span className="font-medium text-[#46534c]">How this is measured:</span>{' '}
         {b.scope} · {b.period} · {b.status}
       </p>
       {b.differsFrom && <p className="mt-0.5 italic">{b.differsFrom}</p>}

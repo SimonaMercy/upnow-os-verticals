@@ -151,26 +151,26 @@ export function PropertyPhotos({
         <div>
           {grid ? (
             <>
-              <p className="text-[13px] font-bold text-[#1a1916]">{count} / {MAX} photos added</p>
-              <p className="text-[11.5px] text-[#9b9890] mt-0.5">
+              <p className="text-[13px] font-bold text-[#14201a]">{count} / {MAX} photos added</p>
+              <p className="text-[11.5px] text-[#8a948d] mt-0.5">
                 {count === 0 ? `Add up to ${MAX} — at least 4 recommended.` : 'First photo is the cover · drag thumbnails to reorder.'}
               </p>
             </>
           ) : (
-            <p className="text-xs font-medium text-[#6b6860]">
+            <p className="text-xs font-medium text-[#5f6b63]">
               Property Photos
-              <span className="text-[#9b9890] font-normal ml-1">({count}/{MAX})</span>
-              {count > 1 && <span className="text-[#9b9890] font-normal ml-2">· drag to set cover</span>}
+              <span className="text-[#8a948d] font-normal ml-1">({count}/{MAX})</span>
+              {count > 1 && <span className="text-[#8a948d] font-normal ml-2">· drag to set cover</span>}
             </p>
           )}
         </div>
         <div className="flex items-center gap-2">
-          {busy && <Loader2 size={13} className="animate-spin text-[#2e9f82]" />}
+          {busy && <Loader2 size={13} className="animate-spin text-[#047246]" />}
           {count > 0 && count < MAX && (
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="flex items-center gap-1 text-xs text-[#2e9f82] font-semibold hover:text-[#1f6655] cursor-pointer"
+              className="flex items-center gap-1 text-xs text-[#047246] font-semibold hover:text-[#1f6655] cursor-pointer"
             >
               <ImagePlus size={13} /> Add Photos
             </button>
@@ -181,8 +181,8 @@ export function PropertyPhotos({
       {error && <p className="text-[11px] text-[#b91c1c] mb-2">{error}</p>}
 
       {loading ? (
-        <div className="w-full flex items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5">
-          <Loader2 size={18} className="animate-spin text-[#2e9f82]" />
+        <div className="w-full flex items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-5">
+          <Loader2 size={18} className="animate-spin text-[#047246]" />
         </div>
       ) : count === 0 ? (
         grid ? (
@@ -193,16 +193,16 @@ export function PropertyPhotos({
           >
             <span className="w-[46px] h-[46px] rounded-xl bg-white border border-[#e7ebe6] text-[#1a7a5a] flex items-center justify-center"><Camera size={22} /></span>
             <span className="text-sm font-bold text-[#3a443d]">Click to add photos</span>
-            <span className="text-[11.5px] text-[#9b9890]">JPEG, PNG or WebP · up to {MAX} per property</span>
+            <span className="text-[11.5px] text-[#8a948d]">JPEG, PNG or WebP · up to {MAX} per property</span>
           </button>
         ) : (
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-5 hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
+            className="w-full flex flex-col items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-5 hover:border-[#047246] hover:bg-[#f0fdf8] transition-colors cursor-pointer"
           >
             <Camera size={22} className="text-[#c8c6c0] mb-1.5" />
-            <span className="text-xs text-[#9b9890]">Click to add photos</span>
+            <span className="text-xs text-[#8a948d]">Click to add photos</span>
           </button>
         )
       ) : grid ? (
@@ -223,8 +223,8 @@ export function PropertyPhotos({
               onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null); }}
               className={`relative aspect-[4/3] rounded-xl overflow-hidden border group select-none transition-all
                 ${dragOverIdx === idx && dragIdxRef.current !== idx
-                  ? 'border-[#2e9f82] ring-2 ring-[#2e9f82]'
-                  : idx === 0 ? 'border-[#2e9f82]' : 'border-[#dfe6df]'}
+                  ? 'border-[#047246] ring-2 ring-[#047246]'
+                  : idx === 0 ? 'border-[#047246]' : 'border-[#dfe6df]'}
               `}
               style={{ cursor: 'grab' }}
             >
@@ -249,7 +249,7 @@ export function PropertyPhotos({
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="aspect-[4/3] rounded-xl border-[1.5px] border-dashed border-[#cdd5cf] bg-[#f6f8f5] flex flex-col items-center justify-center gap-1.5 text-[#9aa39c] hover:bg-[#f0f4ee] hover:border-[#2e9f82] cursor-pointer transition-colors"
+              className="aspect-[4/3] rounded-xl border-[1.5px] border-dashed border-[#cdd5cf] bg-[#f6f8f5] flex flex-col items-center justify-center gap-1.5 text-[#9aa39c] hover:bg-[#f0f4ee] hover:border-[#047246] cursor-pointer transition-colors"
             >
               <Plus size={20} />
               <span className="text-[11px] font-semibold">Add more</span>
@@ -275,13 +275,13 @@ export function PropertyPhotos({
               className={`relative rounded-lg overflow-hidden border group transition-all select-none
                 ${idx === 0 ? 'w-24 h-24' : 'w-20 h-20'}
                 ${dragOverIdx === idx && dragIdxRef.current !== idx
-                  ? 'border-[#2e9f82] ring-2 ring-[#2e9f82] scale-105'
-                  : idx === 0 ? 'border-[#2e9f82]' : 'border-[#e8e6e0]'}
+                  ? 'border-[#047246] ring-2 ring-[#047246] scale-105'
+                  : idx === 0 ? 'border-[#047246]' : 'border-[#e4e9e5]'}
               `}
               style={{ cursor: 'grab' }}
             >
               {idx === 0 && (
-                <div className="absolute bottom-0 left-0 right-0 bg-[#2e9f82] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
+                <div className="absolute bottom-0 left-0 right-0 bg-[#047246] text-white text-[9px] font-bold text-center py-0.5 z-10 leading-tight">
                   COVER
                 </div>
               )}
@@ -302,7 +302,7 @@ export function PropertyPhotos({
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e8e6e0] flex items-center justify-center cursor-pointer hover:border-[#2e9f82] hover:bg-[#f0fdf8] transition-colors"
+              className="w-20 h-20 rounded-lg border-2 border-dashed border-[#e4e9e5] flex items-center justify-center cursor-pointer hover:border-[#047246] hover:bg-[#f0fdf8] transition-colors"
             >
               <Plus size={16} className="text-[#c8c6c0]" />
             </button>
@@ -310,7 +310,7 @@ export function PropertyPhotos({
         </div>
       )}
 
-      <p className="text-[10px] text-[#9b9890] mt-2">
+      <p className="text-[10px] text-[#8a948d] mt-2">
         JPEG, PNG or WebP · up to {MAX} per property · drag thumbnails to reorder · first image is the cover.
       </p>
     </div>

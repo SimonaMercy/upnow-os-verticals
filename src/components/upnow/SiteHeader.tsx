@@ -82,13 +82,13 @@ export function SiteHeader() {
                   <button
                     onClick={() => setAvatarOpen(!avatarOpen)}
                     className="flex items-center gap-2 rounded-full py-1.5 pl-3 pr-1.5 hover:shadow-md transition-all cursor-pointer"
-                    style={{ border: '1px solid #e8ece9', background: 'white' }}
+                    style={{ border: '1px solid #e4e9e5', background: 'white' }}
                   >
-                    <Menu size={16} style={{ color: '#6b7a74' }} />
+                    <Menu size={16} style={{ color: '#5f6b63' }} />
                     <div
                       style={{
                         width: 32, height: 32, borderRadius: '50%',
-                        backgroundColor: '#2e9f82', color: 'white',
+                        backgroundColor: '#047246', color: 'white',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 13, fontWeight: 700,
                       }}
@@ -111,19 +111,19 @@ export function SiteHeader() {
                           href={item.href}
                           onClick={() => setAvatarOpen(false)}
                           className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-sm"
-                          style={{ color: '#36433d' }}
+                          style={{ color: '#46534c' }}
                         >
-                          <item.icon size={16} style={{ color: '#6b7a74' }} />
+                          <item.icon size={16} style={{ color: '#5f6b63' }} />
                           {item.label}
                         </Link>
                       ))}
-                      <div style={{ borderTop: '1px solid #e8ece9', margin: '4px 0' }} />
+                      <div style={{ borderTop: '1px solid #e4e9e5', margin: '4px 0' }} />
                       <button
                         onClick={signOut}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 transition-colors text-sm text-left"
-                        style={{ color: '#36433d' }}
+                        style={{ color: '#46534c' }}
                       >
-                        <LogOut size={16} style={{ color: '#6b7a74' }} />
+                        <LogOut size={16} style={{ color: '#5f6b63' }} />
                         Log out
                       </button>
                     </div>
@@ -135,7 +135,7 @@ export function SiteHeader() {
                     href={user?.role ? dashboardPath(user.role) : '/dashboard'}
                     style={{
                       padding: '10px 16px', borderRadius: 999,
-                      backgroundColor: '#2e9f82', color: 'white',
+                      backgroundColor: '#047246', color: 'white',
                       fontSize: 14, fontWeight: 600, textDecoration: 'none',
                     }}
                   >
@@ -144,7 +144,7 @@ export function SiteHeader() {
                   <button
                     onClick={signOut}
                     className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg transition-colors hover:bg-gray-50"
-                    style={{ color: '#36433d' }}
+                    style={{ color: '#46534c' }}
                   >
                     <LogOut size={16} />
                     Sign out
@@ -157,7 +157,7 @@ export function SiteHeader() {
                   onClick={() => setAuthMode('signin')}
                   style={{
                     padding: '10px 16px', borderRadius: 999,
-                    border: '1.5px solid #e8ece9', color: '#0e1a16',
+                    border: '1.5px solid #e4e9e5', color: '#14201a',
                     fontSize: 14, fontWeight: 600, cursor: 'pointer',
                     backgroundColor: 'transparent', fontFamily: 'inherit',
                   }}
@@ -168,7 +168,7 @@ export function SiteHeader() {
                   onClick={() => setAuthMode('signup')}
                   style={{
                     padding: '10px 16px', borderRadius: 999, border: 'none',
-                    backgroundColor: '#2e9f82', color: 'white',
+                    backgroundColor: '#047246', color: 'white',
                     fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
                   }}
                 >
@@ -181,7 +181,7 @@ export function SiteHeader() {
           {/* Mobile hamburger */}
           <button
             className="md:hidden"
-            style={{ color: '#36433d', background: 'none', border: 'none', cursor: 'pointer' }}
+            style={{ color: '#46534c', background: 'none', border: 'none', cursor: 'pointer' }}
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
           >
@@ -209,7 +209,7 @@ export function SiteHeader() {
           >
             <button
               onClick={() => setDrawerOpen(false)}
-              style={{ alignSelf: 'flex-end', marginBottom: 24, color: '#36433d', background: 'none', border: 'none', cursor: 'pointer' }}
+              style={{ alignSelf: 'flex-end', marginBottom: 24, color: '#46534c', background: 'none', border: 'none', cursor: 'pointer' }}
             >
               <X size={24} />
             </button>
@@ -220,7 +220,7 @@ export function SiteHeader() {
                     href={user?.role ? dashboardPath(user.role) : '/dashboard'}
                     onClick={() => setDrawerOpen(false)}
                     style={{
-                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82',
+                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#047246',
                       color: 'white', fontWeight: 600, textAlign: 'center', textDecoration: 'none',
                     }}
                   >
@@ -229,8 +229,8 @@ export function SiteHeader() {
                   <button
                     onClick={() => { setDrawerOpen(false); signOut(); }}
                     style={{
-                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e8ece9',
-                      backgroundColor: 'white', color: '#36433d', fontWeight: 600, cursor: 'pointer',
+                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e4e9e5',
+                      backgroundColor: 'white', color: '#46534c', fontWeight: 600, cursor: 'pointer',
                       fontFamily: 'inherit',
                     }}
                   >
@@ -242,7 +242,7 @@ export function SiteHeader() {
                   <button
                     onClick={() => { setDrawerOpen(false); setAuthMode('signup'); }}
                     style={{
-                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#2e9f82', border: 'none',
+                      padding: '12px 16px', borderRadius: 999, backgroundColor: '#047246', border: 'none',
                       color: 'white', fontWeight: 600, textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
                     }}
                   >
@@ -251,8 +251,8 @@ export function SiteHeader() {
                   <button
                     onClick={() => { setDrawerOpen(false); setAuthMode('signin'); }}
                     style={{
-                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e8ece9',
-                      backgroundColor: 'white', color: '#36433d', fontWeight: 600,
+                      padding: '12px 16px', borderRadius: 999, border: '1px solid #e4e9e5',
+                      backgroundColor: 'white', color: '#46534c', fontWeight: 600,
                       textAlign: 'center', cursor: 'pointer', fontFamily: 'inherit',
                     }}
                   >

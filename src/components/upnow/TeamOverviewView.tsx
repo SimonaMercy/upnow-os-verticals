@@ -130,19 +130,19 @@ interface Payload {
 
 // ── Tokens (the dashboard's) ────────────────────────────────────────────────
 
-const JADE = '#2e9f82', AMBER = '#b45309', PURPLE = '#8250df';
+const JADE = '#047246', AMBER = '#b45309', PURPLE = '#8250df';
 /** Step colours in journey order — jade → blue → amber → purple → rose → teal…, cycling. */
 /** One hue per team member, by roster id — the same person keeps the same colour everywhere on the page. */
-const PERSON_COLORS = ['#2e9f82', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490'];
+const PERSON_COLORS = ['#047246', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490'];
 /** The Operations tabs, in the board's own order, as the step table's groups
  *  (owner, 15 Sep 2026: "group them as per the tabs we have in operations"). */
 const STEP_GROUPS: Array<[string, string]> = [
   ['lead', 'Lead'], ['new', 'New Lease'], ['renewal', 'Renewal'], ['terminated', 'Terminated'],
   ['maintenance', 'Maintenance'], ['amc', 'AMC'], ['breach', 'Breach'], ['legal', 'Legal'], ['other', 'Other'],
 ];
-const STEP_COLORS = ['#2e9f82', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490', '#16a34a', '#7c3aed', '#b45309', '#2563eb', '#be185d', '#0f766e', '#9333ea', '#dc2626', '#4f46e5', '#65a30d'];
+const STEP_COLORS = ['#047246', '#1e5fae', '#e8a020', '#8250df', '#c2410c', '#0e7490', '#16a34a', '#7c3aed', '#b45309', '#2563eb', '#be185d', '#0f766e', '#9333ea', '#dc2626', '#4f46e5', '#65a30d'];
 const GRID = '#f0ede8';
-const TICK = { fontSize: 11, fill: '#9b9890' } as const;
+const TICK = { fontSize: 11, fill: '#8a948d' } as const;
 const POLL_MS = 30_000;
 /** Mirrors `WORK_LOG_FROM` on the server — where the work log starts. Used only
  *  to word the page; every figure is cut server-side. */
@@ -503,10 +503,12 @@ function RangePicker({ range, onChange, open, setOpen }: {
 
 // ── The page ────────────────────────────────────────────────────────────────
 
-export function TeamOverviewView({ endpoint, manageHref, reportsHref, operationsHref, leadsHref: leadsHrefProp }: {
+export function TeamOverviewView({ endpoint, manageHref, reportsHref, operationsHref, leadsHref: leadsHrefProp, embedded = false }: {
   endpoint: string; manageHref: string; reportsHref: string; operationsHref: string;
   /** Leads page of the same portal — defaults to the Operations href's sibling. */
   leadsHref?: string;
+  /** The host page renders its own heading (OS PageHead): hide the title block, keep the controls. */
+  embedded?: boolean;
 }) {
   const leadsHref = leadsHrefProp ?? operationsHref.replace(/\/operations(\?.*)?$/, '/leads$1');
   /** ONE filter for the whole page: a from–to range. The presets are shortcuts
@@ -621,10 +623,10 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
   const T = data?.targets;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className={embedded ? 'px-[22px] pb-6 max-w-[1420px]' : 'p-6 max-w-7xl mx-auto'}>
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-5 flex-wrap">
-        <div>
+      <div className={`flex items-start gap-4 mb-5 flex-wrap ${embedded ? 'justify-end' : 'justify-between'}`}>
+        <div className={embedded ? 'hidden' : undefined}>
           <h1 className="text-2xl font-bold text-[var(--neutral-900)]">Team</h1>
           <p className="mt-1 text-sm text-[var(--neutral-500)]">
             Live overview of your team — what they are doing, and the tasks they closed{' '}
@@ -981,7 +983,7 @@ export function TeamOverviewView({ endpoint, manageHref, reportsHref, operations
                     <CartesianGrid stroke={GRID} vertical={false} />
                     <XAxis dataKey="x" tick={TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={18} />
                     <YAxis tick={TICK} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e8e6e0', fontSize: 12 }}
+                    <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e4e9e5', fontSize: 12 }}
                       formatter={(v, name, item) => {
                         const uid = String(name).replace(/^a/, '');
                         const row = item?.payload as Record<string, number> | undefined;
@@ -1090,7 +1092,7 @@ function StepDonut({ steps, team, person, where, ownerUserId, onDrill, operation
               <Pie data={data.filter((d) => d.value > 0)} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={1.5} stroke="#fff" strokeWidth={1} isAnimationActive={false}>
                 {data.filter((d) => d.value > 0).map((d) => <Cell key={d.key} fill={d.color} />)}
               </Pie>
-              <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e8e6e0', fontSize: 12 }}
+              <Tooltip contentStyle={{ borderRadius: 10, border: '1px solid #e4e9e5', fontSize: 12 }}
                 formatter={(v, _n, item) => {
                   const s = item?.payload as StepRow | undefined;
                   return [`${nfmt(Number(v))}${person === 'all' && s ? ` · ${whoDid(s)}` : ''}`, s?.label ?? ''];

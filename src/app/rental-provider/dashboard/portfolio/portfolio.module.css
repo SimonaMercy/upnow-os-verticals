@@ -1,18 +1,18 @@
 /* UpNow RP Portfolio — kyc-v3 sibling design. */
 
 .app {
-  --green:    #2e9f82;
+  --green:    #047246;
   --green-d:  #1a7a5a;
-  --green-t:  #d8f2e8;
+  --green-t:  #d8efe3;
   --green-t2: #ebf8f2;
-  --ink:    #1a1916;
-  --ink-2:  #3d3b35;
-  --ink-3:  #6b6860;
-  --mute:   #9b9890;
+  --ink:    #14201a;
+  --ink-2:  #46534c;
+  --ink-3:  #5f6b63;
+  --mute:   #8a948d;
   --mute-2: #b0ae9a;
-  --line:    #e8e6e0;
+  --line:    #e4e9e5;
   --line-2:  #f0eeea;
-  --paper:   #f4f3ef;
+  --paper:   #eef1ef;
   --paper-2: #ebe9e3;
   --warn-bg:  #fef3c7;
   --warn-fg:  #92400e;

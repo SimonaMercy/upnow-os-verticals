@@ -1,14 +1,34 @@
 'use client';
 
+/**
+ * Admin › People › Register provider — create a pre-activated Rental Provider or
+ * Service Provider account on behalf of a partner.
+ *
+ * Parity with previous page (every item kept, same validation and payload):
+ *  - react-hook-form + zod: role (rental_provider | service_provider, default
+ *    rental_provider), email, name (2–100), phone (optional, /^\+?[1-9]\d{6,14}$/ or
+ *    empty), entityType (individual | company, default individual), companyName
+ *    (≤255; required via superRefine when entityType = company).
+ *  - Provider type picker (Rental Provider "Landlords, agencies, brokers" / Service
+ *    Provider "Maintenance, cleaning, etc.") and entity type picker (Individual /
+ *    Company with descriptions) — now kit chips (aria-pressed) writing the same fields.
+ *  - Company name field shown only for company accounts.
+ *  - POST /api/admin/accounts/provider { ...data, phone|companyName: value || undefined }.
+ *  - Success banner then router.push('/dashboard/admin/kyc') after 1.8 s; server error
+ *    shown inline. Submit label "Register Rental Provider / Service Provider",
+ *    "Creating…" while submitting. "Back" → /dashboard/admin/accounts.
+ *  - No permission gate on the previous page — none added.
+ *  - Now kit Field + gx-inp; same ids, autocomplete hints and placeholders.
+ */
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, UserPlus, Building2, Wrench } from 'lucide-react';
+import { ArrowLeft, Building2, UserPlus, Wrench } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
 import { apiPost } from '@/lib/api';
+import { Btn, Callout, Card, Field, OsPage, PageHead } from '@/components/os/kit';
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -37,35 +57,14 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
-// ─── Field helper ─────────────────────────────────────────────────────────────
-
-function Field({
-  label,
-  required,
-  error,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-neutral-700)' }}>
-        {label} {required && <span style={{ color: 'var(--color-error)' }}>*</span>}
-      </label>
-      {children}
-      {error && <p className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>}
-    </div>
-  );
-}
-
-const inputCls = 'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none transition-colors';
-const inputStyle = (hasErr: boolean) => ({
-  borderColor: hasErr ? 'var(--color-error)' : 'var(--color-base-200)',
-  color: 'var(--color-neutral-900)',
-});
+const ROLE_OPTIONS = [
+  { value: 'rental_provider', label: 'Rental Provider', Icon: Building2, desc: 'Landlords, agencies, brokers' },
+  { value: 'service_provider', label: 'Service Provider', Icon: Wrench, desc: 'Maintenance, cleaning, etc.' },
+] as const;
+const ENTITY_OPTIONS = [
+  { value: 'individual', label: 'Individual', desc: 'Natural person / sole owner' },
+  { value: 'company', label: 'Company', desc: 'LLC, PJSC, brokerage, etc.' },
+] as const;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -78,6 +77,7 @@ export default function NewProviderAccountPage() {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -102,135 +102,80 @@ export default function NewProviderAccountPage() {
     }
   }
 
+  const roleDesc = ROLE_OPTIONS.find((o) => o.value === role)?.desc;
+  const entityDesc = ENTITY_OPTIONS.find((o) => o.value === entityType)?.desc;
+
   return (
-    <DashboardPage
-      title="Register Provider"
-      subtitle="Create a pre-activated Rental Provider or Service Provider account on behalf of a partner."
-      actions={
-        <Link
-          href="/dashboard/admin/accounts"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-          style={{ color: 'var(--color-neutral-600)', backgroundColor: 'var(--color-base-100)' }}
-        >
-          <ArrowLeft size={14} /> Back
-        </Link>
-      }
-    >
-      <div className="max-w-lg">
-        {success && (
-          <div className="rounded-xl p-4 mb-6 text-sm font-medium"
-            style={{ backgroundColor: 'var(--color-primary-50)', color: 'var(--color-primary)' }}>
-            Account created successfully. Redirecting to Profile Verification…
-          </div>
-        )}
-        {serverError && (
-          <div className="rounded-xl p-4 mb-6 text-sm font-medium"
-            style={{ backgroundColor: '#fef2f2', color: 'var(--color-error)' }}>
-            {serverError}
-          </div>
-        )}
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › People"
+        title="Register provider"
+        lede="Create a pre-activated Rental Provider or Service Provider account on behalf of a partner. They still pass Gate 1 business verification in Profile Verification."
+        actions={<Btn href="/dashboard/admin/accounts"><ArrowLeft size={13} aria-hidden /> Back</Btn>}
+      />
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+      <div style={{ maxWidth: 560 }}>
+        {success && <div style={{ marginBottom: 12 }}><Callout>Account created successfully. Redirecting to Profile Verification…</Callout></div>}
+        {serverError && <div style={{ marginBottom: 12 }}><Callout tone="bad">{serverError}</Callout></div>}
 
-          {/* Role selector */}
-          <div>
-            <p className="block text-sm font-medium mb-2" style={{ color: 'var(--color-neutral-700)' }}>
-              Provider type <span style={{ color: 'var(--color-error)' }}>*</span>
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {([
-                { value: 'rental_provider', label: 'Rental Provider', Icon: Building2, desc: 'Landlords, agencies, brokers' },
-                { value: 'service_provider', label: 'Service Provider', Icon: Wrench, desc: 'Maintenance, cleaning, etc.' },
-              ] as const).map(({ value, label, Icon, desc }) => {
-                const active = role === value;
-                return (
-                  <label key={value}
-                    className="flex flex-col gap-1.5 p-4 rounded-xl border-2 cursor-pointer transition-colors"
-                    style={{
-                      borderColor: active ? 'var(--color-primary)' : 'var(--color-base-200)',
-                      backgroundColor: active ? 'var(--color-primary-50)' : '#fff',
-                    }}>
-                    <input type="radio" value={value} {...register('role')} className="sr-only" />
-                    <div className="flex items-center gap-2">
-                      <Icon size={15} style={{ color: active ? 'var(--color-primary)' : 'var(--color-neutral-500)' }} />
-                      <span className="text-sm font-medium" style={{ color: active ? 'var(--color-primary)' : 'var(--color-neutral-800)' }}>
-                        {label}
-                      </span>
-                    </div>
-                    <span className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{desc}</span>
-                  </label>
-                );
-              })}
+        <form onSubmit={handleSubmit(onSubmit)} noValidate style={{ display: 'grid', gap: 14 }}>
+          <Card title="Provider type *" pad>
+            <div className="gx-chips" role="group" aria-label="Provider type">
+              {ROLE_OPTIONS.map(({ value, label, Icon }) => (
+                <button key={value} type="button" className="gx-chip" aria-pressed={role === value}
+                  onClick={() => setValue('role', value, { shouldDirty: true })}>
+                  <Icon size={12} aria-hidden style={{ verticalAlign: '-2px', marginRight: 4 }} />{label}
+                </button>
+              ))}
             </div>
-          </div>
+            {roleDesc && <div className="gx-hint">{roleDesc}</div>}
+          </Card>
 
-          {/* Account info */}
-          <div className="bg-white rounded-2xl p-5 space-y-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
-            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-neutral-400)' }}>Account Info</p>
-
-            <Field label="Email address" required error={errors.email?.message}>
-              <input id="email" type="email" autoComplete="off" {...register('email')}
-                className={inputCls} style={inputStyle(!!errors.email)} placeholder="provider@company.ae" />
+          <Card title="Account info" pad>
+            <Field label="Email address *" htmlFor="email" error={errors.email?.message}>
+              <input id="email" type="email" autoComplete="off" className="gx-inp" placeholder="provider@company.ae"
+                aria-invalid={!!errors.email} {...register('email')} />
             </Field>
-
-            <Field label="Full name" required error={errors.name?.message}>
-              <input id="name" type="text" autoComplete="off" {...register('name')}
-                className={inputCls} style={inputStyle(!!errors.name)} placeholder="Ahmad Al Mansouri" />
+            <Field label="Full name *" htmlFor="name" error={errors.name?.message}>
+              <input id="name" type="text" autoComplete="off" className="gx-inp" placeholder="Ahmad Al Mansouri"
+                aria-invalid={!!errors.name} {...register('name')} />
             </Field>
-
-            <Field label="Phone number" error={errors.phone?.message}>
-              <input id="phone" type="tel" autoComplete="tel" {...register('phone')}
-                className={inputCls} style={inputStyle(!!errors.phone)} placeholder="+971501234567 (optional)" />
+            <Field label="Phone number" htmlFor="phone" error={errors.phone?.message}>
+              <input id="phone" type="tel" autoComplete="tel" className="gx-inp" placeholder="+971501234567 (optional)"
+                aria-invalid={!!errors.phone} {...register('phone')} />
             </Field>
-          </div>
+          </Card>
 
-          {/* Entity type */}
-          <div className="bg-white rounded-2xl p-5 space-y-4" style={{ boxShadow: 'var(--shadow-sm)' }}>
-            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-neutral-400)' }}>Entity Type</p>
-
-            <div className="grid grid-cols-2 gap-3">
-              {([
-                { value: 'individual', label: 'Individual', desc: 'Natural person / sole owner' },
-                { value: 'company',    label: 'Company',    desc: 'LLC, PJSC, brokerage, etc.' },
-              ] as const).map(({ value, label, desc }) => {
-                const active = entityType === value;
-                return (
-                  <label key={value}
-                    className="flex flex-col gap-1 p-3.5 rounded-xl border-2 cursor-pointer transition-colors"
-                    style={{
-                      borderColor: active ? 'var(--color-primary)' : 'var(--color-base-200)',
-                      backgroundColor: active ? 'var(--color-primary-50)' : '#fff',
-                    }}>
-                    <input type="radio" value={value} {...register('entityType')} className="sr-only" />
-                    <span className="text-sm font-medium" style={{ color: active ? 'var(--color-primary)' : 'var(--color-neutral-800)' }}>
-                      {label}
-                    </span>
-                    <span className="text-xs" style={{ color: 'var(--color-neutral-500)' }}>{desc}</span>
-                  </label>
-                );
-              })}
+          <Card title="Entity type" pad>
+            <div className="gx-form-row">
+              <div className="gx-chips" role="group" aria-label="Entity type">
+                {ENTITY_OPTIONS.map(({ value, label }) => (
+                  <button key={value} type="button" className="gx-chip" aria-pressed={entityType === value}
+                    onClick={() => setValue('entityType', value, { shouldDirty: true })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {entityDesc && <div className="gx-hint">{entityDesc}</div>}
             </div>
 
             {entityType === 'company' && (
-              <Field label="Company name" required error={errors.companyName?.message}>
-                <input id="companyName" type="text" {...register('companyName')}
-                  className={inputCls} style={inputStyle(!!errors.companyName)}
-                  placeholder="Al Mansouri Real Estate LLC" />
+              <Field label="Company name *" htmlFor="companyName" error={errors.companyName?.message}>
+                <input id="companyName" type="text" className="gx-inp" placeholder="Al Mansouri Real Estate LLC"
+                  aria-invalid={!!errors.companyName} {...register('companyName')} />
               </Field>
             )}
-          </div>
+          </Card>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-opacity disabled:opacity-60"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            <UserPlus size={16} />
-            {isSubmitting ? 'Creating…' : `Register ${role === 'rental_provider' ? 'Rental Provider' : 'Service Provider'}`}
-          </button>
+          <div className="gx-btn-row" style={{ justifyContent: 'flex-end' }}>
+            <Btn href="/dashboard/admin/accounts">Cancel</Btn>
+            <Btn type="submit" variant="primary" disabled={isSubmitting || success}>
+              <UserPlus size={13} aria-hidden />
+              {isSubmitting ? 'Creating…' : `Register ${role === 'rental_provider' ? 'Rental Provider' : 'Service Provider'}`}
+            </Btn>
+          </div>
         </form>
       </div>
-    </DashboardPage>
+    </OsPage>
   );
 }

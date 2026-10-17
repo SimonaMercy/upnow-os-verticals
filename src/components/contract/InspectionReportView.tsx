@@ -170,7 +170,7 @@ export function InspectionReportView({
           ['Inspected By', editable && onInspectorName
             ? <input value={meta.inspectorName} placeholder="Inspector name"
                 onChange={(e) => onInspectorName(e.target.value)} aria-label="Inspected by"
-                style={{ font: 'inherit', fontWeight: 600, color: '#1a1916', border: '1px solid #e8e6e0', borderRadius: 6, padding: '2px 6px', width: '100%', minWidth: 0, background: '#fff' }} />
+                style={{ font: 'inherit', fontWeight: 600, color: '#14201a', border: '1px solid #e4e9e5', borderRadius: 6, padding: '2px 6px', width: '100%', minWidth: 0, background: '#fff' }} />
             : (meta.inspectorName || '—')],
           ['Role', meta.inspectorRole || 'Property Representative'],
         ]} />
@@ -209,7 +209,7 @@ export function InspectionReportView({
             {editable && categories.length === 0 && (
               <tr>
                 <td colSpan={totalCols}>
-                  <div style={{ padding: '22px 8px', textAlign: 'center', color: '#9b9890', fontSize: 13 }}>
+                  <div style={{ padding: '22px 8px', textAlign: 'center', color: '#8a948d', fontSize: 13 }}>
                     No components yet. Use <b>Add Additional Category</b> above to build this {isMoveIn ? 'move-in' : 'move-out'} inspection from the restoration list.
                   </div>
                 </td>
@@ -430,7 +430,7 @@ function ItemPhotos({ item, editable, uploading, onAdd, onRemove }: {
             onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) onAdd(fs); if (inputRef.current) inputRef.current.value = ''; }} />
           <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()}
             title="Attach photos to this item"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px', fontSize: 11, fontWeight: 600, color: '#6b6860', background: '#fff', border: '1px dashed #c8c6be', borderRadius: 6, cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.6 : 1 }}>
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 28, padding: '0 8px', fontSize: 11, fontWeight: 600, color: '#5f6b63', background: '#fff', border: '1px dashed #c8c6be', borderRadius: 6, cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.6 : 1 }}>
             {uploading ? <Loader2 size={12} className="animate-spin" /> : <Camera size={13} />}
             <span>{uploading ? 'Uploading…' : (photos.length ? 'Add' : 'Add photo')}</span>
           </button>
@@ -488,9 +488,9 @@ function ReportPhotos({ photos, onAdd, onRemove, uploading, progress }: {
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 padding: '14px 12px', borderRadius: 10, cursor: uploading ? 'default' : 'pointer',
-                border: `1px dashed ${dragOver ? '#2e9f82' : '#c8c6be'}`,
-                background: dragOver ? '#f0faf6' : '#fbfcfb',
-                color: '#6b6860', fontSize: 12.5, fontWeight: 600, opacity: uploading ? 0.7 : 1,
+                border: `1px dashed ${dragOver ? '#047246' : '#c8c6be'}`,
+                background: dragOver ? '#eef7f2' : '#fbfcfb',
+                color: '#5f6b63', fontSize: 12.5, fontWeight: 600, opacity: uploading ? 0.7 : 1,
               }}>
               {uploading ? <Loader2 size={15} className="animate-spin" /> : <Camera size={15} />}
               <span>
@@ -527,7 +527,7 @@ function PhotoThumb({ photo, onOpen, removable, onRemove }: {
   const src = displayInspectionPhotoUrl(photo.url);
   const caption = photo.caption || 'Inspection photo';
   return (
-    <span style={{ position: 'relative', width: 76, height: 76, borderRadius: 8, overflow: 'hidden', border: '1px solid #e8e6e0', background: '#f4f3ef', flexShrink: 0 }}>
+    <span style={{ position: 'relative', width: 76, height: 76, borderRadius: 8, overflow: 'hidden', border: '1px solid #e4e9e5', background: '#eef1ef', flexShrink: 0 }}>
       {/* Click the thumbnail to open the gallery preview on this photo. */}
       <button type="button" onClick={onOpen}
         title="Click to view full photo" aria-label={`View full photo — ${caption}`}
@@ -565,7 +565,7 @@ function PhotoThumb({ photo, onOpen, removable, onRemove }: {
 function AddComponentButton({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', fontSize: 11.5, fontWeight: 600, color: '#2e9f82', background: '#f0faf6', border: '1px dashed #cfe8df', borderRadius: 7, cursor: 'pointer' }}>
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px', fontSize: 11.5, fontWeight: 600, color: '#047246', background: '#eef7f2', border: '1px dashed #cfe8df', borderRadius: 7, cursor: 'pointer' }}>
       <Plus size={13} /> Add sub-category / component
     </button>
   );
@@ -589,7 +589,7 @@ function EditableDateBox({ icon, k, value, onChange }: { icon: ReactNode; k: str
       <div>
         <div className={s.k}>{k}</div>
         <input type="date" value={value} onChange={(e) => onChange(e.target.value)}
-          style={{ font: 'inherit', fontWeight: 700, color: '#1a1916', border: 'none', background: 'transparent', padding: 0, width: '100%', cursor: 'pointer' }} />
+          style={{ font: 'inherit', fontWeight: 700, color: '#14201a', border: 'none', background: 'transparent', padding: 0, width: '100%', cursor: 'pointer' }} />
       </div>
     </div>
   );

@@ -1,9 +1,9 @@
 const TRACKS = {
   services: {
     label: 'For Services',
-    color: '#2e9f82',
-    bg: '#f0faf6',
-    border: '#d8f2e8',
+    color: '#047246',
+    bg: '#eef7f2',
+    border: '#d8efe3',
     emoji: '⚡',
     steps: [
       { num: '01', title: 'Pick a service',      desc: 'Browse 200+ services with fixed price or inspection-based quotes.' },
@@ -31,11 +31,11 @@ export function LandingHow() {
       <div className="container">
 
         <div style={{ textAlign: 'center', marginBottom: 52 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: '#2e9f82', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>How it works</p>
-          <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#1a1916', letterSpacing: '-0.025em', margin: '0 0 10px', lineHeight: 1.1 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: '#047246', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>How it works</p>
+          <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#14201a', letterSpacing: '-0.025em', margin: '0 0 10px', lineHeight: 1.1 }}>
             Simple, from start to finish.
           </h2>
-          <p style={{ fontSize: 15, color: '#6b6860', maxWidth: 400, marginInline: 'auto', lineHeight: 1.6, margin: '0 auto' }}>
+          <p style={{ fontSize: 15, color: '#5f6b63', maxWidth: 400, marginInline: 'auto', lineHeight: 1.6, margin: '0 auto' }}>
             A streamlined experience — whether you need a service or a space.
           </p>
         </div>
@@ -67,8 +67,8 @@ export function LandingHow() {
                     </div>
                     {/* Text */}
                     <div style={{ paddingTop: 6, paddingBottom: i < 2 ? 0 : 0 }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: '#1a1916', margin: '0 0 4px' }}>{title}</p>
-                      <p style={{ fontSize: 13, color: '#6b6860', lineHeight: 1.6, margin: 0, paddingBottom: i < 2 ? 24 : 0 }}>{desc}</p>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: '#14201a', margin: '0 0 4px' }}>{title}</p>
+                      <p style={{ fontSize: 13, color: '#5f6b63', lineHeight: 1.6, margin: 0, paddingBottom: i < 2 ? 24 : 0 }}>{desc}</p>
                     </div>
                   </div>
                 ))}

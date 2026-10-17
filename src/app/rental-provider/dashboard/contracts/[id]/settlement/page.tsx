@@ -1,19 +1,75 @@
 'use client';
 
+/**
+ * Operations › Long-term leases › Final settlement — Genspark OS rebuild of the
+ * end-of-lease settlement worksheet + RENTAL FINAL SETTLEMENT statement.
+ * Re-exported unchanged by /dashboard/manager/contracts/[id]/settlement and by
+ * /prototype/os/rp/contracts/[id]/settlement (paths are derived from the URL).
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - GET /api/contracts/:id (property / unit / customer name, landlord id → manager
+ *    permission, tenant id → signing link, termination.method === 'direct').
+ *  - GET /api/contracts/:id/settlement → apply() (lines, payments, caps, rules,
+ *    stamps, refund payout, signatures, statement). Standard rows are prefilled under
+ *    empty sections on a draft (utilities, property charges, §5 types) and the
+ *    untouched prefills are dropped on save — unchanged.
+ *  - PATCH /api/contracts/:id/settlement {depositHeld, notes, moveoutDateOverride, lines} — Save draft.
+ *  - PATCH …/settlement (+rpSignature) on a draft, or PATCH …/settlement/sign {rpSignature}
+ *    once sent — SignatureBlock (REUSED) "Sign settlement"; signed state shows the
+ *    stored rpSignatoryName.
+ *  - POST …/settlement/reseed {section} (after a save) — "Re-seed from source" per section.
+ *  - PATCH …/settlement/payments {payments[]} — "Save payments"; proof is mandatory per
+ *    payment (client guard + scroll to the card, error shown inside the card).
+ *  - POST …/settlement/send (after save) — "Send to customer".
+ *  - POST …/settlement/unsend — "Reopen to edit" while sent.
+ *  - POST …/settlement/paid {allowGaps, refund?} / {allowOutstanding, allowGaps} — refund
+ *    payout dialog (method, paid-on date, reference + proof required when a refund is due,
+ *    optional on a zero-balance close) and "Close with balance owed"; then stores the
+ *    Final Settlement PDF via storeContractPdf (best-effort). Direct-close (customer
+ *    vacated) saves the draft first, exactly as before.
+ *  - POST /api/portal/generate {purpose:'settlement', signerRole:'tenant'} — customer
+ *    no-login signing link (generate, auto-copy, Copy, Open) while sent.
+ *  - Evidence uploads (scan modal → POST /api/documents/upload-url → PUT → POST /api/documents,
+ *    ownerType tenancy_contract, category payment, 15 MB cap) on charge lines, payments
+ *    received and the refund payout; attachment chips link /api/documents/:docId/file;
+ *    remove attachment.
+ *  - Charge sections §3 Utilities / §4 Property charges / §5 Additional (type select:
+ *    Breach / Overstay / Early Termination / Dispute / Admin) / §7 Rent & adjustments:
+ *    add amount, description, amount, discount (only when the section cap > 0), net,
+ *    remove; one-click configured penalties + administrative charges; discount guard
+ *    (≤ line and ≤ section cap %) before save/sign.
+ *  - Links: source lease of a bounced-cheque line (…/contracts/:id/v2), move-out report
+ *    (…/contracts/:id/inspection/v2?type=move_out), Back (?from=… or the lease record,
+ *    "Back to operations" when from Operations).
+ *  - Worksheet / Statement toggle; Statement renders RentalFinalSettlementDoc (REUSED);
+ *    Download PDF (RentalFinalSettlementPdf via @react-pdf, same object as the statement).
+ *  - Maths unchanged: amounts are AED decimals as the API returns them (NOT fils);
+ *    rowNet = max(0, amount − discount); balance = round2(deposit − Σnet + Σpayments);
+ *    refund threshold ±0.005 exactly as before.
+ *  - Manager permission: canSettleDeposits on the acting landlord gates Save / Send /
+ *    Reopen / Sign / Mark paid / signing link (RP owners always may).
+ *  - Status banners: paid (method / ref / date / proof), agreed, sent; error; "Saved." tick.
+ *  - New (read-only, from the same data): settlement progress Flow, deposit / charges /
+ *    payments / balance KPIs, "money held" note. A failed settlement load now shows a
+ *    retry callout (previously silent).
+ */
+
 import { useState, useEffect, useCallback, useRef, createElement } from 'react';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import { useManagerPermissions } from '@/contexts/ManagerPermissionsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
-import Link from 'next/link';
 import {
-  ArrowLeft, Plus, Trash2, Save, Send, CheckCircle, Loader2, AlertCircle,
-  Wallet, BadgeCheck, Banknote, Coins, Download, PencilLine, FileText, RefreshCw, Paperclip, X, ExternalLink,
+  ArrowLeft, Plus, Save, Send, Loader2, Banknote, Download, PencilLine, FileText, RefreshCw, Paperclip, X, ExternalLink,
 } from 'lucide-react';
 import { type TFSContract, type TFSRent } from '@/components/contract/TenantFinalSettlementDoc';
 import RentalFinalSettlementDoc, { type RFSData } from '@/components/contract/RentalFinalSettlementDoc';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
 import { useDocumentScanner } from '@/components/upnow/DocumentScanModal';
+import {
+  OsPage, PageHead, ScopeStrip, Card, Kpis, Kpi, Pill, Btn, TableWrap, Seg, Callout, Evid, Flow, Field,
+  type Tone,
+} from '@/components/os/kit';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +112,7 @@ interface ApiSettlement {
   statement?: ApiStatement;
 }
 
-interface ContractMeta { property: string; unit: string; tenantName: string }
+interface ContractMeta { property: string; unit: string; tenantName: string; ref: string }
 interface LineAttachment { name: string; fileUrl?: string; s3Key?: string; docId?: number }
 interface Row {
   key: string; label: string; amount: string; type: LineType; category: LineCategory;
@@ -77,11 +133,11 @@ function fmtDateTime(d: string | null) {
 }
 const rowNet = (r: Row) => Math.max(0, (Math.max(0, Number(r.amount) || 0)) - Math.max(0, Number(r.discount) || 0));
 
-const STATUS_META: Record<SettlementStatus, { label: string; cls: string }> = {
-  draft:  { label: 'Draft',            cls: 'bg-[#f4f3ef] text-[#6b6860]' },
-  sent:   { label: 'Sent to customer', cls: 'bg-[#fff7ed] text-[#9a3412]' },
-  agreed: { label: 'Customer agreed',  cls: 'bg-[#eef7f3] text-[#1a7a5a]' },
-  paid:   { label: 'Refund paid',      cls: 'bg-[#2e9f82] text-white' },
+const STATUS_META: Record<SettlementStatus, { label: string; tone: Tone }> = {
+  draft:  { label: 'Draft',            tone: 'neutral' },
+  sent:   { label: 'Sent to customer', tone: 'amber' },
+  agreed: { label: 'Customer agreed',  tone: 'primary' },
+  paid:   { label: 'Refund paid',      tone: 'dark' },
 };
 
 // The CEO "RENTAL FINAL SETTLEMENT" sections — RP adds amounts under each.
@@ -135,19 +191,18 @@ function CustomerSigningLink({ tenantId, contractId }: { tenantId: number; contr
   };
   if (state === 'done' && link) {
     return (
-      <div className="flex items-center gap-1.5 w-full max-w-lg">
-        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#fdba74] bg-white text-[#1a1916] min-w-0" />
-        <button type="button" onClick={copy} className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white">{copied ? 'Copied ✓' : 'Copy'}</button>
-        <a href={link} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] text-[#6b6860] flex items-center gap-1"><ExternalLink size={12} /> Open</a>
-      </div>
+      <span className="gx-btn-row" style={{ flex: 1, minWidth: 260, maxWidth: 520 }}>
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()} aria-label="Customer signing link"
+          className="gx-inp" style={{ flex: 1, minWidth: 0, height: 28, fontSize: 11 }} />
+        <Btn size="sm" variant="primary" onClick={copy}>{copied ? 'Copied ✓' : 'Copy'}</Btn>
+        <a href={link} target="_blank" rel="noreferrer" className="gx-btn sm"><ExternalLink size={12} aria-hidden /> Open</a>
+      </span>
     );
   }
   return (
-    <button type="button" onClick={gen} disabled={state === 'loading'}
-      className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-[#9a3412] border border-[#fdba74] rounded-full px-3 py-1.5 hover:bg-[#ffedd5] disabled:opacity-60">
-      <Send size={12} /> {state === 'loading' ? 'Generating…' : state === 'error' ? 'Retry' : 'Get customer signing link'}
-    </button>
+    <Btn size="sm" variant="amber" onClick={() => void gen()} disabled={state === 'loading'}>
+      <Send size={12} aria-hidden /> {state === 'loading' ? 'Generating…' : state === 'error' ? 'Retry' : 'Get customer signing link'}
+    </Btn>
   );
 }
 
@@ -214,6 +269,9 @@ export default function SettlementPage() {
   const [savedTick, setSavedTick] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Settlement fetch failed — shown as a retry callout (the worksheet still renders,
+  // exactly as before, so nothing that worked is taken away).
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Manager may finalize the settlement only with canSettleDeposits on this
   // landlord; RP owners always may. Hides Save/Send/Mark-paid when not allowed.
@@ -280,6 +338,7 @@ export default function SettlementPage() {
           property: c.property?.buildingName ?? c.unit?.property?.buildingName ?? '',
           unit: c.unit?.number ?? c.unit?.unitNumber ?? '',
           tenantName: c.tenant?.companyName || c.tenant?.name || '',
+          ref: c.ref ?? '',
         });
         setLandlordId(c.landlord?.id ?? null);
         setTenantId(c.tenant?.id ?? null);
@@ -289,9 +348,11 @@ export default function SettlementPage() {
         const s = await sRes.json() as ApiSettlement;
         if (s) apply(s);
       }
-    } finally { setLoading(false); }
+      setLoadFailed(!sRes.ok);
+    } catch { setLoadFailed(true); } finally { setLoading(false); }
   }, [contractId, apply]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount
   useEffect(() => { void load(); }, [load]);
 
   const depositNum = Math.max(0, Number(deposit) || 0);
@@ -355,6 +416,7 @@ export default function SettlementPage() {
     if (file.size > 15 * 1024 * 1024) { setError('File must be under 15 MB.'); return null; }
     setError(null);
     try {
+      // eslint-disable-next-line react-hooks/purity -- runs in an upload handler, never during render
       const docKey = `settlement_evidence_${Date.now()}`;
       const urlRes = await fetch('/api/documents/upload-url', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -617,503 +679,512 @@ export default function SettlementPage() {
     } catch { setError('Could not generate the settlement PDF. Please try again.'); }
     finally { setDownloading(false); }
   }
+  const sm = STATUS_META[status];
+  const refLabel = meta?.ref || rfs?.contract.contractNo || `CID-${contractId}`;
+  const placeLine = meta
+    ? [meta.property ? `${meta.property}${meta.unit ? ` — Unit ${meta.unit}` : ''}` : (meta.unit ? `Unit ${meta.unit}` : ''), meta.tenantName].filter(Boolean).join(' · ')
+    : '';
+  const head = (
+    <PageHead
+      eyebrow="Operations › Long-term leases"
+      title={<>Final settlement · {refLabel}</>}
+      lede={<>{placeLine ? <>{placeLine}. </> : null}The security deposit held for the customer, what is deducted from it and the refund — the statement the customer reviews and signs before the lease closes.</>}
+      actions={<>
+        <Btn href={backHref}><ArrowLeft size={13} aria-hidden /> {backLabel}</Btn>
+        {!loading && (
+          <Seg<'worksheet' | 'statement'> value={view} onChange={setView} label="Settlement view"
+            options={[
+              { v: 'worksheet', l: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><PencilLine size={12} aria-hidden /> Worksheet</span> },
+              { v: 'statement', l: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><FileText size={12} aria-hidden /> Statement</span> },
+            ]} />
+        )}
+        <Btn onClick={() => void downloadSettlementPdf()} disabled={!statement || downloading}>
+          {downloading ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Download size={13} aria-hidden />} Download PDF
+        </Btn>
+      </>}
+    />
+  );
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen"><Loader2 className="animate-spin text-[#2e9f82]" size={28} /></div>;
+    return (
+      <OsPage>
+        {head}
+        <Card pad><div aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+          {[70, 45, 60, 35].map((w, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${w}%` }} />)}
+        </div></Card>
+      </OsPage>
+    );
   }
 
-  const sm = STATUS_META[status];
+  const flowCurrent = status === 'draft' ? 0 : status === 'sent' ? 1 : status === 'agreed' ? 2 : 4;
+  const balanceLabel = balance > 0 ? 'Net refund to customer' : balance < 0 ? 'Amount payable by customer' : 'Settled in full';
+  const attChip = (a: LineAttachment, i: number, onRemove?: () => void) => (
+    <span key={i} className="gx-pill outline" style={{ gap: 4 }}>
+      <Paperclip size={10} aria-hidden />
+      {a.docId
+        ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: 'underline' }}>{a.name}</a>
+        : <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</span>}
+      {onRemove && (
+        <button type="button" onClick={onRemove} aria-label={`Remove attachment ${a.name}`} title="Remove attachment"
+          style={{ border: 0, background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex' }}><X size={11} aria-hidden /></button>
+      )}
+    </span>
+  );
+  const attachBtn = (label: string, onFile: (f: File) => void, title?: string) => (
+    <label className="gx-btn xs" title={title} style={{ cursor: 'pointer' }}>
+      <Paperclip size={11} aria-hidden /> {label}
+      <input type="file" className="hidden" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = ''; }} />
+    </label>
+  );
 
   return (
-    <div className={`${view === 'statement' ? 'max-w-5xl' : 'max-w-4xl'} mx-auto px-4 py-8 space-y-5 transition-[max-width]`}>
+    <OsPage>
       {scannerModal}
-      {/* Topbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-          <ArrowLeft size={15} /> {backLabel}
-        </Link>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-full border border-[#e8e6e0] p-0.5 text-xs font-semibold">
-            <button type="button" onClick={() => setView('worksheet')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors ${view === 'worksheet' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
-              <PencilLine size={13} /> Worksheet
-            </button>
-            <button type="button" onClick={() => setView('statement')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors ${view === 'statement' ? 'bg-[#2e9f82] text-white' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}>
-              <FileText size={13} /> Statement
-            </button>
-          </div>
-          <button type="button" onClick={downloadSettlementPdf} disabled={!statement || downloading}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60">
-            {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download PDF
-          </button>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${sm.cls}`}>{sm.label}</span>
-        </div>
-      </div>
+      {head}
 
-      {/* Title */}
-      <div>
-        <h1 className="text-2xl font-bold text-[#1a1916] flex items-center gap-2"><Wallet size={22} className="text-[#2e9f82]" /> Final Settlement</h1>
-        {meta && <p className="text-sm text-[#9b9890] mt-0.5">{meta.property}{meta.unit ? ` — Unit ${meta.unit}` : ''}{meta.tenantName ? ` · ${meta.tenantName}` : ''} · Contract #{contractId}</p>}
-      </div>
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Operations' },
+        { label: 'Vertical', value: 'Long-term leases' },
+        { label: 'Contract', value: refLabel },
+        { label: 'Settlement', value: <Pill tone={sm.tone}>{sm.label}</Pill> },
+        ...(isDirect ? [{ label: 'Close', value: 'Direct — customer vacated' }] : []),
+        ...(!canSettle ? [{ label: 'Access', value: <Pill tone="neutral">View only</Pill> }] : []),
+      ]} />
+
+      {loadFailed && (
+        <Callout tone="bad" title="Couldn’t load the settlement.">
+          The figures below may be incomplete. <Btn size="xs" onClick={() => void load()}>Try again</Btn>
+        </Callout>
+      )}
 
       {/* Status banners */}
       {status === 'paid' && (
-        <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-          <CheckCircle size={15} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <div><p className="font-semibold text-[#1a7a5a]">Refund paid — settlement closed</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">
-              Marked paid {fmtDateTime(stamps.paidAt)}.
-              {refundInfo.method ? ` Paid by ${METHOD_LABELS[refundInfo.method]}` : ''}
-              {refundInfo.reference ? ` · ref ${refundInfo.reference}` : ''}
-              {refundInfo.paidOn ? ` · on ${refundInfo.paidOn}` : ''}
-            </p>
-            {(refundInfo.attachments?.length ?? 0) > 0 && (
-              <div className="flex items-center gap-2 flex-wrap mt-1.5">
-                {(refundInfo.attachments ?? []).map((a, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#1a7a5a] bg-white/70 border border-[#c5e8df] rounded-full px-2 py-0.5">
-                    <Paperclip size={10} />
-                    {a.docId
-                      ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[160px] truncate hover:underline">{a.name}</a>
-                      : <span className="max-w-[160px] truncate">{a.name}</span>}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <Callout title="Refund paid — settlement closed.">
+          Marked paid {fmtDateTime(stamps.paidAt)}.
+          {refundInfo.method ? ` Paid by ${METHOD_LABELS[refundInfo.method]}` : ''}
+          {refundInfo.reference ? ` · ref ${refundInfo.reference}` : ''}
+          {refundInfo.paidOn ? ` · on ${refundInfo.paidOn}` : ''}
+          {(refundInfo.attachments?.length ?? 0) > 0 && (
+            <div className="gx-chips" style={{ marginTop: 6 }}>{(refundInfo.attachments ?? []).map((a, i) => attChip(a, i))}</div>
+          )}
+        </Callout>
       )}
       {status === 'agreed' && (
-        <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3">
-          <CheckCircle size={15} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <div><p className="font-semibold text-[#1a7a5a]">Customer agreed to the settlement</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">Agreed {fmtDateTime(stamps.agreedAt)}. Pay out the refund, then mark it paid.</p></div>
-        </div>
+        <Callout title="Customer agreed to the settlement.">Agreed {fmtDateTime(stamps.agreedAt)}. Pay out the refund, then mark it paid.</Callout>
       )}
       {status === 'sent' && (
-        <div className="bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-4 py-3 space-y-2.5">
-          <div className="flex items-start gap-3 text-sm">
-            <AlertCircle size={15} className="text-[#c2410c] shrink-0 mt-0.5" />
-            <div className="flex-1"><p className="font-semibold text-[#9a3412]">Awaiting customer agreement</p>
-              <p className="text-xs text-[#c2410c] mt-0.5">Sent {fmtDateTime(stamps.sentAt)} — locked for editing until the customer agrees. Reopen to make changes.</p></div>
-            {canSettle && (
-              <button onClick={() => void reopenToDraft()} disabled={acting !== null}
-                className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-[#9a3412] border border-[#fdba74] rounded-full px-3 py-1.5 hover:bg-[#ffedd5] disabled:opacity-60">
-                {acting === 'unsend' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Reopen to edit
-              </button>
-            )}
-          </div>
-          {/* No-login signing link — RP shares it (e.g. WhatsApp) so the customer
-              reviews & signs the settlement without an account. */}
-          {canSettle && tenantId != null && contractId && (
-            <div className="flex items-center gap-2 flex-wrap pl-[27px]">
-              <span className="text-xs font-medium text-[#9a3412] shrink-0">Or send a no-login link to review &amp; sign:</span>
-              <CustomerSigningLink tenantId={tenantId} contractId={contractId} />
+        <Callout tone="warn" title="Awaiting customer agreement.">
+          Sent {fmtDateTime(stamps.sentAt)} — locked for editing until the customer agrees. Reopen to make changes.
+          {canSettle && (
+            <div className="gx-btn-row" style={{ marginTop: 8 }}>
+              <Btn size="sm" variant="amber" onClick={() => void reopenToDraft()} disabled={acting !== null}>
+                {acting === 'unsend' ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RefreshCw size={12} aria-hidden />} Reopen to edit
+              </Btn>
+              {/* No-login signing link — the RP shares it (e.g. WhatsApp) so the
+                  customer reviews & signs the settlement without an account. */}
+              {tenantId != null && contractId && (<>
+                <span style={{ fontSize: 11.5 }}>Or send a no-login link to review &amp; sign:</span>
+                <CustomerSigningLink tenantId={tenantId} contractId={contractId} />
+              </>)}
             </div>
           )}
-        </div>
+        </Callout>
       )}
-      {error && <div className="flex items-start gap-2 text-sm text-[#dc2626] bg-[#fef2f2] rounded-xl px-4 py-3 whitespace-pre-line"><AlertCircle size={15} className="shrink-0 mt-0.5" /> {error}</div>}
-      {savedTick && !error && <div className="flex items-center gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3"><CheckCircle size={15} className="text-[#2e9f82]" /> <span className="font-semibold text-[#1a7a5a]">Saved.</span></div>}
+      {error && <Callout tone="bad"><span style={{ whiteSpace: 'pre-line' }}>{error}</span></Callout>}
+      {savedTick && !error && <Callout title="Saved.">Your changes are stored on this settlement.</Callout>}
+
+      <div style={{ marginTop: 14 }}>
+        <Kpis>
+          <Kpi k="Deposit held" v={aed(depositNum)} d="Money held for the customer, not money earned" />
+          <Kpi k="Charges (net)" v={aed(sumLines)} d={sumDiscounts > 0 ? `after ${aed(sumDiscounts)} discounts` : 'deducted from the deposit'} />
+          <Kpi k="Payments received" v={aed(sumPayments)} d="collected from the customer" />
+          <Kpi k={balanceLabel} v={aed(Math.abs(balance))} d={balance < 0 ? 'charges exceed the deposit' : status === 'paid' ? 'closed' : 'to settle'} dark />
+        </Kpis>
+      </div>
+
+      <Card title="Settlement progress" sub={isDirect ? 'Customer has vacated — the refund can be recorded and the lease closed directly.' : 'Prepare → customer agrees → refund paid'}>
+        <div className="gx-pad">
+          <Flow current={flowCurrent} steps={[
+            { t: 'Draft prepared', s: 'worksheet & signature' },
+            { t: 'Sent to customer', s: stamps.sentAt ? fmtDateTime(stamps.sentAt) : 'review & sign' },
+            { t: 'Customer agreed', s: stamps.agreedAt ? fmtDateTime(stamps.agreedAt) : 'signed statement' },
+            { t: 'Refund paid', s: stamps.paidAt ? fmtDateTime(stamps.paidAt) : 'settlement closed' },
+          ]} />
+        </div>
+      </Card>
 
       {view === 'worksheet' && (<>
-      {/* Deposit + move-out date */}
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 grid sm:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <label className="block text-[11px] font-semibold text-[#9b9890] uppercase tracking-wide">Security deposit held</label>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-[#6b6860]">AED</span>
-            <input type="number" min={0} step="0.01" value={deposit} disabled={locked} onChange={e => setDeposit(e.target.value)}
-              className="flex-1 text-lg font-bold text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <label className="block text-[11px] font-semibold text-[#9b9890] uppercase tracking-wide">Move-out date</label>
-          <input type="date" value={moveOut ? String(moveOut).slice(0, 10) : ''} disabled={locked} onChange={e => setMoveOut(e.target.value)}
-            className="w-full text-sm font-semibold text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-          <p className="text-[11px] text-[#9b9890]">Rent accrues to this date. Set it when no termination date is on file.</p>
-        </div>
-      </div>
-
-      {/* CEO sections — add amounts under each (two-up on wider screens) */}
-      <div className="grid md:grid-cols-2 gap-4 items-start">
-      {SECTIONS.map(sec => {
-        const secRows = rows.filter(r => sec.cats.includes(r.category));
-        const secNet = secRows.reduce((a, r) => a + rowNet(r), 0);
-        const cap = capFor(sec);
-        return (
-          <div key={sec.id} className="bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-[#2e9f82] text-white text-[11px] font-bold">{sec.num}</span>
-                {sec.title}
-              </h2>
-              {secNet > 0 && <span className="text-sm font-bold text-[#1a1916] tabular-nums">{aed(secNet)}</span>}
+        {/* Deposit + move-out date */}
+        <div style={{ marginTop: 14 }}>
+          <Card title="Deposit & move-out" sub="Deposits are money held, not money moved — the refund is what is left after the charges below.">
+            <div className="gx-pad gx-two">
+              <Field label="Security deposit held (AED)" htmlFor="st-deposit">
+                <input id="st-deposit" className="gx-inp" type="number" min={0} step="0.01" value={deposit} disabled={locked}
+                  onChange={e => setDeposit(e.target.value)} style={{ width: '100%', fontWeight: 700 }} />
+              </Field>
+              <Field label="Move-out date" htmlFor="st-moveout" hint="Rent accrues to this date. Set it when no termination date is on file.">
+                <input id="st-moveout" className="gx-inp" type="date" value={moveOut ? String(moveOut).slice(0, 10) : ''} disabled={locked}
+                  onChange={e => setMoveOut(e.target.value)} style={{ width: '100%' }} />
+              </Field>
             </div>
-            <p className="text-[11px] text-[#9b9890] -mt-1">{sec.hint}</p>
+          </Card>
+        </div>
 
-            {secRows.length > 0 && (
-              <div>
-                {/* Inline line items — one row each: description · amount · discount · attach · remove */}
-                {secRows.map(r => {
-                  const gross = Math.max(0, Number(r.amount) || 0);
-                  const disc = Math.max(0, Number(r.discount) || 0);
-                  return (
-                    <div key={r.key} className="border-b border-[#f4f2ee] last:border-b-0 py-1.5">
-                      <div className="flex items-center gap-1.5">
-                        {sec.id === 'additional' && !locked && (
-                          <select value={ADDITIONAL_CATS.some(a => a.value === r.category) ? r.category : 'dispute'}
-                            onChange={e => updateRow(r.key, { category: e.target.value as LineCategory })}
-                            title="Charge type"
-                            className="shrink-0 w-[104px] text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-lg px-1 py-1 bg-white focus:outline-none focus:border-[#2e9f82]">
-                            {ADDITIONAL_CATS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-                          </select>
-                        )}
-                        <input type="text" value={r.label} disabled={locked} placeholder="Description"
-                          onChange={e => updateRow(r.key, { label: e.target.value })}
-                          className="flex-1 min-w-0 text-[13px] text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1 focus:outline-none focus:border-[#2e9f82] disabled:border-transparent disabled:bg-transparent disabled:px-0" />
-                        <span className="text-[10px] text-[#9b9890]">AED</span>
-                        <input type="number" min={0} step="0.01" value={r.amount} disabled={locked} placeholder="0"
-                          onChange={e => updateRow(r.key, { amount: e.target.value })}
-                          className="w-[80px] text-[13px] text-right text-[#1a1916] border border-[#e8e6e0] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[#2e9f82] disabled:border-transparent disabled:bg-transparent" />
-                        {!locked && cap > 0 && (
-                          <input type="number" min={0} step="0.01" value={r.discount} placeholder="disc" title="Discount (AED)"
-                            onChange={e => updateRow(r.key, { discount: e.target.value })}
-                            className="w-[58px] text-xs text-right text-[#b45309] border border-[#e8e6e0] rounded-lg px-1.5 py-1 focus:outline-none focus:border-[#2e9f82]" />
-                        )}
-                        {!locked && (
-                          <label className="text-[#9b9890] hover:text-[#2e9f82] cursor-pointer shrink-0" title="Attach document">
-                            <Paperclip size={14} />
-                            <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToLine(r.key, f); e.currentTarget.value = ''; }} />
-                          </label>
-                        )}
-                        {!locked && <button type="button" onClick={() => removeRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] shrink-0" title="Remove"><Trash2 size={14} /></button>}
-                      </div>
-                      {(disc > 0 || (r.attachments?.length ?? 0) > 0 || !!r.sourceContractId || !!r.inspectionContractId) && (
-                        <div className="flex items-center gap-2 flex-wrap pl-1 pt-1">
-                          {disc > 0 && <span className="text-[11px] text-[#6b6860]">Net <span className="font-semibold tabular-nums">{aed(Math.max(0, gross - disc))}</span></span>}
-                          {r.sourceContractId && (
-                            <a href={contractHref(r.sourceContractId)} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] hover:underline" title="Open the lease that holds this cheque">
-                              <ExternalLink size={10} /> {r.sourceContractNo ?? `contract #${r.sourceContractId}`}
-                            </a>
+        {/* CEO sections — add amounts under each */}
+        {SECTIONS.map(sec => {
+          const secRows = rows.filter(r => sec.cats.includes(r.category));
+          const secNet = secRows.reduce((a, r) => a + rowNet(r), 0);
+          const cap = capFor(sec);
+          const showType = sec.id === 'additional' && !locked;
+          const showDisc = !locked && cap > 0;
+          const cols = 4 + (showType ? 1 : 0) + (showDisc ? 1 : 0) + (!locked ? 1 : 0);
+          const penalties = available.filter(p => !rows.some(r => r.label === p.label));
+          const admins = adminRules.filter(p => !rows.some(r => r.label === p.label));
+          return (
+            <div key={sec.id} style={{ marginTop: 14 }}>
+              <TableWrap toolbar={<>
+                <span className="gx-pill dark" style={{ minWidth: 22, justifyContent: 'center' }}>§{sec.num}</span>
+                <span style={{ minWidth: 0 }}>
+                  <b style={{ fontSize: 13 }}>{sec.title}</b>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--ms-ink-3)' }}>{sec.hint}{showDisc ? ` · discount up to ${cap}%` : ''}</span>
+                </span>
+                <span className="sp" />
+                {secNet > 0 && <b style={{ fontVariantNumeric: 'tabular-nums' }}>{aed(secNet)}</b>}
+                {!locked && <Btn size="sm" onClick={() => addRow(sec.addCat, sec.addType)}><Plus size={12} aria-hidden /> Add amount</Btn>}
+                {!locked && sec.reseed && (
+                  <Btn size="sm" onClick={() => void reseed(sec.reseed!)} disabled={reseeding !== null || saving}>
+                    {reseeding === sec.reseed ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RefreshCw size={12} aria-hidden />} Re-seed from source
+                  </Btn>
+                )}
+              </>}>
+                <table className="gx-tbl">
+                  <thead><tr>
+                    {showType && <th style={{ width: 130 }}>Type</th>}
+                    <th>Description</th>
+                    <th className="num" style={{ width: 120 }}>Amount (AED)</th>
+                    {showDisc && <th className="num" style={{ width: 100 }}>Discount</th>}
+                    <th className="num" style={{ width: 110 }}>Net</th>
+                    <th>Evidence</th>
+                    {!locked && <th className="act" style={{ width: 90 }}>Action</th>}
+                  </tr></thead>
+                  <tbody>
+                    {secRows.length === 0 && (
+                      <tr><td colSpan={cols}><span style={{ color: 'var(--ms-ink-3)' }}>{locked ? 'None.' : 'No amounts yet — use “Add amount”.'}</span></td></tr>
+                    )}
+                    {secRows.map(r => {
+                      const gross = Math.max(0, Number(r.amount) || 0);
+                      const disc = Math.max(0, Number(r.discount) || 0);
+                      return (
+                        <tr key={r.key}>
+                          {showType && (
+                            <td>
+                              <select className="gx-sel" aria-label="Charge type" value={ADDITIONAL_CATS.some(a => a.value === r.category) ? r.category : 'dispute'}
+                                onChange={e => updateRow(r.key, { category: e.target.value as LineCategory })} style={{ width: '100%', height: 28 }}>
+                                {ADDITIONAL_CATS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                              </select>
+                            </td>
                           )}
-                          {r.inspectionContractId && (
-                            <a href={moveOutReportHref(r.inspectionContractId)} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-[#2e9f82] hover:underline" title="Open the move-out inspection report">
-                              <ExternalLink size={10} /> Move-out report
-                            </a>
+                          <td className="strong">
+                            {locked ? (r.label || '—') : (
+                              <input className="gx-inp" type="text" value={r.label} placeholder="Description" aria-label="Description"
+                                onChange={e => updateRow(r.key, { label: e.target.value })} style={{ width: '100%', height: 28 }} />
+                            )}
+                          </td>
+                          <td className="num">
+                            {locked ? aed(gross) : (
+                              <input className="gx-inp" type="number" min={0} step="0.01" value={r.amount} placeholder="0" aria-label={`Amount for ${r.label || 'line'}`}
+                                onChange={e => updateRow(r.key, { amount: e.target.value })} style={{ width: 104, height: 28, textAlign: 'right' }} />
+                            )}
+                          </td>
+                          {showDisc && (
+                            <td className="num">
+                              <input className="gx-inp" type="number" min={0} step="0.01" value={r.discount} placeholder="0" aria-label={`Discount for ${r.label || 'line'}`} title="Discount (AED)"
+                                onChange={e => updateRow(r.key, { discount: e.target.value })} style={{ width: 84, height: 28, textAlign: 'right', color: 'var(--ms-amber-text)' }} />
+                            </td>
                           )}
-                          {(r.attachments ?? []).map((a, i) => (
-                            <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
-                              <Paperclip size={10} className="text-[#9b9890]" />
-                              {a.docId
-                                ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[120px] truncate hover:underline">{a.name}</a>
-                                : <span className="max-w-[120px] truncate">{a.name}</span>}
-                              {!locked && <button type="button" onClick={() => removeAttachment(r.key, i)} className="text-[#c8c6be] hover:text-[#ef4444]"><X size={11} /></button>}
-                            </span>
+                          <td className="num strong">{aed(Math.max(0, gross - disc))}{disc > 0 && <span className="sub">less {aed(disc)}</span>}</td>
+                          <td>
+                            <div className="gx-chips" style={{ alignItems: 'center' }}>
+                              {r.sourceContractId && (
+                                <a href={contractHref(r.sourceContractId)} target="_blank" rel="noreferrer" className="gx-btn xs" title="Open the lease that holds this cheque">
+                                  <ExternalLink size={10} aria-hidden /> {r.sourceContractNo ?? `contract #${r.sourceContractId}`}
+                                </a>
+                              )}
+                              {r.inspectionContractId && (
+                                <a href={moveOutReportHref(r.inspectionContractId)} target="_blank" rel="noreferrer" className="gx-btn xs" title="Open the move-out inspection report">
+                                  <ExternalLink size={10} aria-hidden /> Move-out report
+                                </a>
+                              )}
+                              {(r.attachments ?? []).map((a, i) => attChip(a, i, locked ? undefined : () => removeAttachment(r.key, i)))}
+                              {!locked && attachBtn('Attach', f => void attachToLine(r.key, f), 'Attach document')}
+                              {locked && !r.sourceContractId && !r.inspectionContractId && !(r.attachments?.length) && <span style={{ color: 'var(--ms-ink-3)' }}>—</span>}
+                            </div>
+                          </td>
+                          {!locked && <td className="act"><Btn size="xs" variant="danger" onClick={() => removeRow(r.key)}>Remove</Btn></td>}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {/* §5 — one-click configured penalties + admin charges */}
+                {sec.id === 'additional' && !locked && (penalties.length > 0 || admins.length > 0) && (
+                  <div className="gx-pad" style={{ borderTop: '1px solid var(--ms-surface-3)', display: 'grid', gap: 8 }}>
+                    {penalties.length > 0 && (
+                      <div>
+                        <div className="gx-lb">Configured penalties (Settings → Fee Rules)</div>
+                        <div className="gx-chips">
+                          {penalties.map(p => (
+                            <button key={p.key} type="button" className="gx-chip" onClick={() => addPenalty(p.key, p.label, p.amount)}>
+                              + {p.label} · AED {p.amount.toLocaleString('en-AE')}
+                            </button>
                           ))}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
+                    {admins.length > 0 && (
+                      <div>
+                        <div className="gx-lb">Administrative charges</div>
+                        <div className="gx-chips">
+                          {admins.map(p => (
+                            <button key={p.key} type="button" className="gx-chip" onClick={() => addAdmin(p.label, p.amount)}>
+                              + {p.label} · AED {p.amount.toLocaleString('en-AE')}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </TableWrap>
+            </div>
+          );
+        })}
+
+        {/* Payments received from the customer */}
+        <div ref={payCardRef} style={{ marginTop: 14 }}>
+          <TableWrap toolbar={<>
+            <span style={{ minWidth: 0 }}>
+              <b style={{ fontSize: 13 }}>Payments received</b>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--ms-ink-3)' }}>
+                Money the customer pays you — e.g. when penalties or damages exceed the held deposit. Proof of payment (receipt / transfer slip) is required on every payment.
+              </span>
+            </span>
+            <span className="sp" />
+            {!payLocked && <Btn size="sm" onClick={addPayRow}><Plus size={12} aria-hidden /> Add payment</Btn>}
+            {!payLocked && (
+              <Btn size="sm" onClick={() => void savePayments()} disabled={savingPayments || acting !== null}>
+                {savingPayments ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Save size={12} aria-hidden />} Save payments
+              </Btn>
+            )}
+          </>}>
+            <table className="gx-tbl">
+              <thead><tr>
+                <th className="num" style={{ width: 130 }}>Amount (AED)</th><th style={{ width: 140 }}>Method</th><th style={{ width: 150 }}>Received on</th>
+                <th>Reference</th><th>Proof</th>{!payLocked && <th className="act" style={{ width: 90 }}>Action</th>}
+              </tr></thead>
+              <tbody>
+                {payRows.length === 0 && (
+                  <tr><td colSpan={payLocked ? 5 : 6}><span style={{ color: 'var(--ms-ink-3)' }}>{payLocked ? 'No payments recorded.' : 'No payments yet — use “Add payment” if the customer paid you directly.'}</span></td></tr>
+                )}
+                {payRows.map(r => {
+                  const missingProof = !!payError && Number(r.amount) > 0 && !(r.attachments?.length);
+                  const bg = missingProof ? { background: 'var(--ms-danger-bg)' } : undefined;
+                  return (
+                    <tr key={r.key}>
+                      <td className="num" style={bg}>
+                        <input className="gx-inp" type="number" min={0} step="0.01" value={r.amount} disabled={payLocked} placeholder="0" aria-label="Payment amount (AED)"
+                          onChange={e => updatePayRow(r.key, { amount: e.target.value })} style={{ width: 110, height: 28, textAlign: 'right' }} />
+                      </td>
+                      <td style={bg}>
+                        <select className="gx-sel" value={r.method} disabled={payLocked} aria-label="Payment method"
+                          onChange={e => updatePayRow(r.key, { method: e.target.value as PayMethod })} style={{ width: '100%', height: 28 }}>
+                          {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
+                        </select>
+                      </td>
+                      <td style={bg}>
+                        <input className="gx-inp" type="date" value={r.receivedOn} disabled={payLocked} aria-label="Received on"
+                          onChange={e => updatePayRow(r.key, { receivedOn: e.target.value })} style={{ width: '100%', height: 28 }} />
+                      </td>
+                      <td style={bg}>
+                        <input className="gx-inp" type="text" value={r.reference} disabled={payLocked} placeholder="Cheque no, transfer ref — optional" aria-label="Payment reference"
+                          onChange={e => updatePayRow(r.key, { reference: e.target.value })} style={{ width: '100%', height: 28 }} />
+                      </td>
+                      <td style={bg}>
+                        <div className="gx-chips" style={{ alignItems: 'center' }}>
+                          {(r.attachments ?? []).map((a, i) => attChip(a, i, payLocked ? undefined : () => removePayAttachment(r.key, i)))}
+                          {!payLocked && attachBtn(r.attachments?.length ? 'Attach more' : 'Attach proof', f => void attachToPayment(r.key, f), 'Attach proof of payment (receipt, transfer slip)')}
+                          {missingProof && <Pill tone="danger">Proof required</Pill>}
+                        </div>
+                      </td>
+                      {!payLocked && <td className="act" style={bg}><Btn size="xs" variant="danger" onClick={() => removePayRow(r.key)}>Remove</Btn></td>}
+                    </tr>
                   );
                 })}
-              </div>
-            )}
-
-            {!locked && (
-              <div className="flex items-center gap-3 pt-0.5 flex-wrap">
-                <button type="button" onClick={() => addRow(sec.addCat, sec.addType)} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75"><Plus size={13} /> Add amount</button>
-                {sec.reseed && (
-                  <button type="button" onClick={() => void reseed(sec.reseed!)} disabled={reseeding !== null || saving}
-                    className="flex items-center gap-1.5 text-xs font-medium text-[#6b6860] hover:text-[#2e9f82] disabled:opacity-50">
-                    {reseeding === sec.reseed ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-seed from source
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* §5 — one-click configured penalties + admin charges */}
-            {sec.id === 'additional' && !locked && (available.length > 0 || adminRules.length > 0) && (
-              <div className="pt-2 mt-1 border-t border-[#f0ede8] space-y-2">
-                {available.filter(p => !rows.some(r => r.label === p.label)).length > 0 && (
-                  <div>
-                    <p className="text-[11px] text-[#9b9890] mb-1.5">Configured penalties (Settings → Fee Rules):</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {available.filter(p => !rows.some(r => r.label === p.label)).map(p => (
-                        <button key={p.key} type="button" onClick={() => addPenalty(p.key, p.label, p.amount)}
-                          className="flex items-center gap-1 text-[11px] font-medium text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-1 hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors">
-                          <Plus size={11} /> {p.label} · AED {p.amount.toLocaleString('en-AE')}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {adminRules.filter(p => !rows.some(r => r.label === p.label)).length > 0 && (
-                  <div>
-                    <p className="text-[11px] text-[#9b9890] mb-1.5">Administrative charges:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {adminRules.filter(p => !rows.some(r => r.label === p.label)).map(p => (
-                        <button key={p.key} type="button" onClick={() => addAdmin(p.label, p.amount)}
-                          className="flex items-center gap-1 text-[11px] font-medium text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-1 hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors">
-                          <Plus size={11} /> {p.label} · AED {p.amount.toLocaleString('en-AE')}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {secRows.length === 0 && locked && <p className="text-xs text-[#9b9890]">None.</p>}
-          </div>
-        );
-      })}
-      </div>
-
-      {/* Payments received from the customer */}
-      <div ref={payCardRef} className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><Coins size={15} className="text-[#2e9f82]" /> Payments received</h2>
-          <span className="text-xs text-[#9b9890]">collected from the customer</span>
+              </tbody>
+            </table>
+            {payError && <div className="gx-pad"><Callout tone="bad">{payError}</Callout></div>}
+          </TableWrap>
         </div>
-        <p className="text-xs text-[#9b9890]">Money the customer pays you — e.g. when penalties or damages exceed the held deposit. Proof of payment (receipt / transfer slip) is required on every payment.</p>
-        {payRows.length > 0 && (
-          <div className="space-y-2">
-            {payRows.map(r => (
-              <div key={r.key} className={`rounded-xl border p-2.5 space-y-2 ${payError && Number(r.amount) > 0 && !(r.attachments?.length) ? 'border-[#fca5a5] bg-[#fef2f2]' : 'border-[#eceae4]'}`}>
-                <div className="grid grid-cols-[1fr_140px_150px_auto] gap-2 items-center">
-                  <div className="flex items-center gap-1">
-                    <span className="text-[11px] text-[#9b9890]">AED</span>
-                    <input type="number" min={0} step="0.01" value={r.amount} disabled={payLocked} placeholder="0"
-                      onChange={e => updatePayRow(r.key, { amount: e.target.value })}
-                      className="w-full text-sm text-[#1a1916] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-                  </div>
-                  <select value={r.method} disabled={payLocked} onChange={e => updatePayRow(r.key, { method: e.target.value as PayMethod })}
-                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] bg-white">
-                    {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
-                  </select>
-                  <input type="date" value={r.receivedOn} disabled={payLocked} onChange={e => updatePayRow(r.key, { receivedOn: e.target.value })}
-                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6] bg-white" />
-                  {!payLocked
-                    ? (
-                      <div className="flex items-center gap-1.5">
-                        <label className="text-[#9b9890] hover:text-[#2e9f82] cursor-pointer shrink-0" title="Attach proof of payment (receipt, transfer slip)">
-                          <Paperclip size={14} />
-                          <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToPayment(r.key, f); e.currentTarget.value = ''; }} />
-                        </label>
-                        <button type="button" onClick={() => removePayRow(r.key)} className="text-[#c8c6be] hover:text-[#ef4444] transition-colors"><Trash2 size={15} /></button>
-                      </div>
-                    )
-                    : <span className="w-[15px]" />}
-                </div>
-                <input type="text" value={r.reference} disabled={payLocked} placeholder="Reference (cheque no, transfer ref) — optional"
-                  onChange={e => updatePayRow(r.key, { reference: e.target.value })}
-                  className="w-full text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f9f8f6]" />
-                {(r.attachments?.length ?? 0) > 0 && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {(r.attachments ?? []).map((a, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
-                        <Paperclip size={10} className="text-[#9b9890]" />
-                        {a.docId
-                          ? <a href={`/api/documents/${a.docId}/file`} target="_blank" rel="noreferrer" className="max-w-[140px] truncate hover:underline">{a.name}</a>
-                          : <span className="max-w-[140px] truncate">{a.name}</span>}
-                        {!payLocked && (
-                          <button type="button" onClick={() => removePayAttachment(r.key, i)} className="text-[#c8c6be] hover:text-[#ef4444]" title="Remove attachment"><X size={10} /></button>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {payError && (
-          <div className="flex items-start gap-2 text-xs text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-lg px-3 py-2">
-            <AlertCircle size={13} className="shrink-0 mt-0.5" /> {payError}
-          </div>
-        )}
-        {!payLocked && (
-          <div className="flex items-center justify-between pt-1">
-            <button type="button" onClick={addPayRow} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75"><Plus size={13} /> Add payment</button>
-            <button type="button" onClick={() => void savePayments()} disabled={savingPayments || acting !== null}
-              className="flex items-center gap-1.5 text-xs font-semibold text-[#1a1916] border border-[#e8e6e0] rounded-full px-3 py-1.5 hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
-              {savingPayments ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save payments
-            </button>
-          </div>
-        )}
-        {payRows.length === 0 && payLocked && <p className="text-xs text-[#9b9890]">No payments recorded.</p>}
-      </div>
 
-      {/* Settlement summary (§6 + §7) */}
-      <div className="bg-[#f0faf6] rounded-2xl border border-[#c5e8df] p-5 space-y-2">
-        <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Deposit held</span><span className="font-semibold text-[#1a1916] tabular-nums">{aed(depositNum)}</span></div>
-        <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Less charges (net of discounts)</span><span className="font-semibold text-[#b91c1c] tabular-nums">− {aed(sumLines)}</span></div>
-        {sumDiscounts > 0 && (
-          <div className="flex items-center justify-between text-xs"><span className="text-[#9b9890]">Discounts applied</span><span className="font-medium text-[#b45309] tabular-nums">{aed(sumDiscounts)}</span></div>
-        )}
-        {sumPayments > 0 && (
-          <div className="flex items-center justify-between text-sm"><span className="text-[#6b6860]">Plus payments received</span><span className="font-semibold text-[#1a7a5a] tabular-nums">+ {aed(sumPayments)}</span></div>
-        )}
-        <div className="flex items-center justify-between border-t border-[#c5e8df] pt-2 mt-1">
-          <span className="text-sm font-bold text-[#1a7a5a]">
-            {balance > 0 ? 'Net refund to customer' : balance < 0 ? 'Amount payable by customer' : 'Settled in full'}
-          </span>
-          <span className={`text-xl font-bold tabular-nums ${balance < 0 ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'}`}>{aed(Math.abs(balance))}</span>
-        </div>
-        {balance < 0 && <p className="text-xs text-[#b91c1c]">Charges exceed the deposit — record the {aed(Math.abs(balance))} the customer owes under “Payments received”, or close with it kept as a receivable.</p>}
-      </div>
-
-      {/* Notes */}
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
-        <label className="block text-sm font-semibold text-[#1a1916] mb-2">Notes <span className="text-[#9b9890] font-normal text-xs">visible to the customer</span></label>
-        <textarea value={notes} disabled={locked} onChange={e => setNotes(e.target.value)} rows={3}
-          placeholder="Explain the deductions, deposit handling, refund method…"
-          className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] resize-none disabled:bg-[#f9f8f6] disabled:text-[#6b6860]" />
-      </div>
-
-      {/* Settlement signature — a final settlement is signed BY the person operating
-          it (the acting manager or the logged-in RP owner), NOT the landlord/POA.
-          Available until the settlement is paid, so the RP/manager can sign AFTER
-          the customer (signing order is not enforced). */}
-      {status !== 'paid' && canSettle && (
-        sig.rp ? (
-          <div className="bg-[#f0faf6] border border-[#c5e8df] rounded-2xl p-4 flex items-center gap-3">
-            <BadgeCheck size={18} className="text-[#2e9f82] shrink-0" />
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-[#1a1916]">Signed</p>
-              {/* Show who ACTUALLY signed (the stored §9 signatory — the acting
-                  manager or RP owner captured at sign time), never the current
-                  viewer. Opening as the landlord must not relabel the signer. */}
-              <p className="text-xs text-[#6b6860]">{statement?.contract?.rpSignatoryName || 'Authorised signatory'}</p>
+        {/* Settlement summary (§6 + §7) + notes */}
+        <div className="gx-cols gx-cols-2e" style={{ marginTop: 14 }}>
+          <Card title="Settlement summary" sub="§6 + §7 of the final settlement">
+            <table className="gx-tbl">
+              <tbody>
+                <tr><td>Deposit held</td><td className="num strong">{aed(depositNum)}</td></tr>
+                <tr><td>Less charges (net of discounts)</td><td className="num strong" style={{ color: 'var(--ms-danger)' }}>− {aed(sumLines)}</td></tr>
+                {sumDiscounts > 0 && <tr><td>Discounts applied</td><td className="num" style={{ color: 'var(--ms-amber-text)' }}>{aed(sumDiscounts)}</td></tr>}
+                {sumPayments > 0 && <tr><td>Plus payments received</td><td className="num strong" style={{ color: 'var(--ms-primary-dark)' }}>+ {aed(sumPayments)}</td></tr>}
+                <tr>
+                  <td className="strong" style={{ fontSize: 13 }}>{balanceLabel}</td>
+                  <td className="num" style={{ fontSize: 17, fontWeight: 800, color: balance < 0 ? 'var(--ms-danger)' : 'var(--ms-primary-dark)' }}>{aed(Math.abs(balance))}</td>
+                </tr>
+              </tbody>
+            </table>
+            {balance < 0 && (
+              <div className="gx-pad"><Evid tone="bad">Charges exceed the deposit — record the {aed(Math.abs(balance))} the customer owes under “Payments received”, or close with it kept as a receivable.</Evid></div>
+            )}
+          </Card>
+          <Card title="Notes" sub="Visible to the customer">
+            <div className="gx-pad">
+              <textarea className="gx-ta" value={notes} disabled={locked} onChange={e => setNotes(e.target.value)} rows={4} aria-label="Settlement notes (visible to the customer)"
+                placeholder="Explain the deductions, deposit handling, refund method…" style={{ width: '100%' }} />
             </div>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
-            <h3 className="text-sm font-bold text-[#1a1916] mb-1">Sign the settlement statement</h3>
-            <p className="text-xs text-[#6b6860] mb-3">Add your signature to the final settlement before sending it to the customer.</p>
-            <SignatureBlock
-              signerRole="Rental Provider / Property Manager"
-              signerName={authUser?.name || ''}
-              onBehalfOf={null}
-              defaultName={authUser?.name || ''}
-              termsText="I have reviewed and approve this final settlement statement."
-              submitLabel="Sign settlement"
-              alreadySigned={false}
-              onSign={signSettlement}
-            />
-          </div>
-        )
-      )}
+          </Card>
+        </div>
 
-      {/* Actions */}
-      {isDirect && status === 'draft' && (
-        <p className="text-xs text-[#6b6860]">Customer has vacated — you can record the refund and close the lease directly.</p>
-      )}
-      <div className="flex flex-wrap items-start justify-end gap-3 pb-10">
-        {!locked && canSettle && (
-          <>
-            <button onClick={() => void save()} disabled={saving || acting !== null}
-              className="mr-auto flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60 transition-colors">
-              {saving && acting === null ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save draft
-            </button>
-            <button onClick={() => void sendToCustomer()} disabled={saving || acting !== null}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-              {acting === 'send' ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send to customer
-            </button>
-          </>
-        )}
-        {canSettle && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
-          <div className="flex flex-col items-end gap-1.5">
-            {/* Closing always opens the payout dialog: mandatory reference+proof
-                when a refund is due; optional closing record when the deposit was
-                fully applied (balance 0 — e.g. 4,000 held, 4,000 deducted). */}
-            <button onClick={() => setRefundOpen(o => !o)} disabled={acting !== null || balance < -0.005}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-              {acting === 'paid' ? <Loader2 size={14} className="animate-spin" /> : <Banknote size={14} />}
-              {balance > 0 ? 'Mark refund paid' : 'Mark settled & close'}
-            </button>
-            {refundOpen && balance > -0.005 && (
-              <div className="w-[340px] bg-white rounded-2xl border border-[#e8e6e0] p-4 space-y-2.5 text-left shadow-sm">
-                <p className="text-sm font-semibold text-[#1a1916]">{balance > 0 ? `Refund payout — ${aed(balance)}` : 'Close settlement — deposit fully applied'}</p>
-                {balance <= 0 && (
-                  <p className="text-[11px] text-[#9b9890] m-0">The charges consumed the whole deposit — no refund is due. You can still record a reference and attach proof of the closure (optional).</p>
-                )}
-                <div className="grid grid-cols-2 gap-2">
-                  <select value={refundDraft.method} onChange={e => setRefundDraft(d => ({ ...d, method: e.target.value as PayMethod }))}
-                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] bg-white">
-                    {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
-                  </select>
-                  <input type="date" value={refundDraft.paidOn} onChange={e => setRefundDraft(d => ({ ...d, paidOn: e.target.value }))}
-                    className="text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#2e9f82] bg-white" />
+        {/* Settlement signature — signed BY the person operating it (the acting
+            manager or the logged-in RP owner), NOT the landlord/POA. Available
+            until the settlement is paid, so the RP/manager can sign AFTER the
+            customer (signing order is not enforced). */}
+        {status !== 'paid' && canSettle && (
+          <div style={{ marginTop: 14 }}>
+            {sig.rp ? (
+              // Who ACTUALLY signed (the stored §9 signatory), never the current viewer.
+              <Callout title="Signed.">{statement?.contract?.rpSignatoryName || 'Authorised signatory'}</Callout>
+            ) : (
+              <Card title="Sign the settlement statement" sub="Add your signature to the final settlement before sending it to the customer.">
+                <div className="gx-pad">
+                  <SignatureBlock
+                    signerRole="Rental Provider / Property Manager"
+                    signerName={authUser?.name || ''}
+                    onBehalfOf={null}
+                    defaultName={authUser?.name || ''}
+                    termsText="I have reviewed and approve this final settlement statement."
+                    submitLabel="Sign settlement"
+                    alreadySigned={false}
+                    onSign={signSettlement}
+                  />
                 </div>
-                <input type="text" value={refundDraft.reference} placeholder={`Reference (transfer ref, cheque no) — ${balance > 0 ? 'required' : 'optional'}`}
-                  onChange={e => setRefundDraft(d => ({ ...d, reference: e.target.value }))}
-                  className="w-full text-xs text-[#6b6860] border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-[#2e9f82]" />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] cursor-pointer hover:opacity-75">
-                    <Paperclip size={12} /> Attach proof of payment{balance > 0 ? ' (required)' : ''}
-                    <input type="file" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void attachToRefund(f); e.currentTarget.value = ''; }} />
-                  </label>
-                  {refundDraft.attachments.map((a, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 text-[11px] text-[#4a4842] bg-[#f4f3ef] rounded-full pl-2 pr-1 py-0.5">
-                      <Paperclip size={10} className="text-[#9b9890]" />
-                      <span className="max-w-[120px] truncate">{a.name}</span>
-                      <button type="button" onClick={() => setRefundDraft(d => ({ ...d, attachments: d.attachments.filter((_, j) => j !== i) }))} className="text-[#c8c6be] hover:text-[#ef4444]"><X size={10} /></button>
-                    </span>
-                  ))}
-                </div>
-                {/* Reference + proof are mandatory only when money is returned —
-                    mirrors the backend guard in markSettlementPaid. */}
-                {balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0) && (
-                  <p className="text-[11px] text-[#b45309] m-0">A payment reference and a proof attachment are required to close.</p>
-                )}
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  <button type="button" onClick={() => setRefundOpen(false)} className="text-xs font-medium text-[#6b6860] px-3 py-1.5 rounded-full border border-[#e8e6e0] hover:bg-[#f4f3ef]">Cancel</button>
-                  <button type="button" disabled={acting !== null || (balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0))}
-                    onClick={() => {
-                      // Only persist a payout record when something was actually
-                      // entered — a bare zero-balance close stores nothing.
-                      const hasPayout = !!refundDraft.reference.trim() || refundDraft.attachments.length > 0 || !!refundDraft.paidOn;
-                      void markPaid({
-                        allowGaps: true,
-                        ...(hasPayout ? { refund: { method: refundDraft.method, reference: refundDraft.reference.trim() || null, paidOn: refundDraft.paidOn || null, attachments: refundDraft.attachments.length ? refundDraft.attachments : null } } : {}),
-                      });
-                    }}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-white bg-[#1a7a5a] hover:bg-[#155f47] rounded-full px-4 py-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
-                    {acting === 'paid' ? <Loader2 size={12} className="animate-spin" /> : <BadgeCheck size={12} />} {balance > 0 ? 'Confirm refund paid' : 'Close settlement'}
-                  </button>
-                </div>
-              </div>
-            )}
-            {balance < -0.005 && (
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-xs text-[#b91c1c]">Record the {aed(Math.abs(balance))} still owed, or:</span>
-                <button onClick={() => void markPaid({ allowOutstanding: true, allowGaps: true })} disabled={acting !== null}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-[#b91c1c] border border-[#fecaca] rounded-full px-3 py-1.5 hover:bg-[#fef2f2] disabled:opacity-60">
-                  Close with balance owed →
-                </button>
-              </div>
+              </Card>
             )}
           </div>
         )}
-        {status === 'paid' && (
-          <div className="flex items-center gap-2 text-sm font-semibold text-[#1a7a5a]"><BadgeCheck size={16} /> Settlement complete</div>
-        )}
-      </div>
+
+        {/* Actions */}
+        <div style={{ marginTop: 14 }}>
+          <Card title="Close the settlement" sub={
+            status === 'paid' ? 'Settlement complete.'
+              : !canSettle ? 'You can view this settlement; settling deposits needs the “Settle deposits” permission for this landlord.'
+              : isDirect && status === 'draft' ? 'Customer has vacated — you can record the refund and close the lease directly.'
+              : status === 'draft' ? 'Save as you go, then send the statement to the customer to agree and sign.'
+              : 'Pay out the refund, then record it here to close the lease.'
+          }>
+            <div className="gx-pad" style={{ display: 'grid', gap: 12 }}>
+              <div className="gx-btn-row">
+                {!locked && canSettle && (<>
+                  <Btn onClick={() => void save()} disabled={saving || acting !== null}>
+                    {saving && acting === null ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Save size={13} aria-hidden />} Save draft
+                  </Btn>
+                  <Btn variant="primary" onClick={() => void sendToCustomer()} disabled={saving || acting !== null}>
+                    {acting === 'send' ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Send size={13} aria-hidden />} Send to customer
+                  </Btn>
+                </>)}
+                {canSettle && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (<>
+                  {/* Closing always opens the payout form: mandatory reference+proof
+                      when a refund is due; optional closing record when the deposit
+                      was fully applied (balance 0 — e.g. 4,000 held, 4,000 deducted). */}
+                  <Btn variant="primary" onClick={() => setRefundOpen(o => !o)} disabled={acting !== null || balance < -0.005}>
+                    {acting === 'paid' ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Banknote size={13} aria-hidden />}
+                    {balance > 0 ? 'Mark refund paid' : 'Mark settled & close'}
+                  </Btn>
+                  {balance < -0.005 && (<>
+                    <span style={{ fontSize: 11.5, color: 'var(--ms-danger)' }}>Record the {aed(Math.abs(balance))} still owed, or:</span>
+                    <Btn variant="danger" onClick={() => void markPaid({ allowOutstanding: true, allowGaps: true })} disabled={acting !== null}>
+                      Close with balance owed
+                    </Btn>
+                  </>)}
+                </>)}
+                {status === 'paid' && <Pill tone="primary">Settlement complete</Pill>}
+              </div>
+
+              {canSettle && refundOpen && balance > -0.005 && (status === 'sent' || status === 'agreed' || (isDirect && status === 'draft')) && (
+                <div className="gx-card" style={{ boxShadow: 'none', maxWidth: 560 }}>
+                  <div className="gx-card-hd">
+                    <div>
+                      <h3>{balance > 0 ? `Refund payout — ${aed(balance)}` : 'Close settlement — deposit fully applied'}</h3>
+                      {balance <= 0 && <div className="sub">The charges consumed the whole deposit — no refund is due. You can still record a reference and attach proof of the closure (optional).</div>}
+                    </div>
+                  </div>
+                  <div className="gx-pad">
+                    <div className="gx-two">
+                      <Field label="Method" htmlFor="st-ref-method">
+                        <select id="st-ref-method" className="gx-sel" value={refundDraft.method} onChange={e => setRefundDraft(d => ({ ...d, method: e.target.value as PayMethod }))} style={{ width: '100%' }}>
+                          {(Object.keys(METHOD_LABELS) as PayMethod[]).map(m => <option key={m} value={m}>{METHOD_LABELS[m]}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Paid on" htmlFor="st-ref-date">
+                        <input id="st-ref-date" className="gx-inp" type="date" value={refundDraft.paidOn} onChange={e => setRefundDraft(d => ({ ...d, paidOn: e.target.value }))} style={{ width: '100%' }} />
+                      </Field>
+                    </div>
+                    <Field label={`Reference — ${balance > 0 ? 'required' : 'optional'}`} htmlFor="st-ref-ref">
+                      <input id="st-ref-ref" className="gx-inp" type="text" value={refundDraft.reference} placeholder="Transfer ref, cheque no"
+                        onChange={e => setRefundDraft(d => ({ ...d, reference: e.target.value }))} style={{ width: '100%' }} />
+                    </Field>
+                    <div className="gx-chips" style={{ alignItems: 'center' }}>
+                      {attachBtn(`Attach proof of payment${balance > 0 ? ' (required)' : ''}`, f => void attachToRefund(f))}
+                      {refundDraft.attachments.map((a, i) => attChip(a, i, () => setRefundDraft(d => ({ ...d, attachments: d.attachments.filter((_, j) => j !== i) }))))}
+                    </div>
+                    {/* Reference + proof are mandatory only when money is returned —
+                        mirrors the backend guard in markSettlementPaid. */}
+                    {balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0) && (
+                      <div className="gx-hint" style={{ color: 'var(--ms-amber-text)', marginTop: 8 }}>A payment reference and a proof attachment are required to close.</div>
+                    )}
+                    <div className="gx-btn-row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+                      <Btn onClick={() => setRefundOpen(false)}>Cancel</Btn>
+                      <Btn variant="primary" disabled={acting !== null || (balance > 0 && (!refundDraft.reference.trim() || refundDraft.attachments.length === 0))}
+                        onClick={() => {
+                          // Only persist a payout record when something was actually
+                          // entered — a bare zero-balance close stores nothing.
+                          const hasPayout = !!refundDraft.reference.trim() || refundDraft.attachments.length > 0 || !!refundDraft.paidOn;
+                          void markPaid({
+                            allowGaps: true,
+                            ...(hasPayout ? { refund: { method: refundDraft.method, reference: refundDraft.reference.trim() || null, paidOn: refundDraft.paidOn || null, attachments: refundDraft.attachments.length ? refundDraft.attachments : null } } : {}),
+                          });
+                        }}>
+                        {acting === 'paid' && <Loader2 size={13} className="animate-spin" aria-hidden />} {balance > 0 ? 'Confirm refund paid' : 'Close settlement'}
+                      </Btn>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
       </>)}
 
       {/* Statement view — the RENTAL FINAL SETTLEMENT document (9-section CEO form).
           The on-screen design; Download PDF renders the matching vector PDF. */}
       {view === 'statement' && (
-        rfs ? (
-          <RentalFinalSettlementDoc data={rfs} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
-        ) : (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-8 text-center text-sm text-[#9b9890]">
-            <Loader2 className="animate-spin inline mr-2" size={16} /> Preparing statement…
-          </div>
-        )
+        <div style={{ marginTop: 14 }}>
+          {rfs ? (
+            <RentalFinalSettlementDoc data={rfs} contractHref={contractHref} moveOutReportHref={moveOutReportHref} />
+          ) : (
+            <Card pad><span style={{ color: 'var(--ms-ink-3)' }}><Loader2 size={14} className="animate-spin" aria-hidden style={{ display: 'inline', marginRight: 6 }} /> Preparing statement…</span></Card>
+          )}
+        </div>
       )}
-    </div>
+    </OsPage>
   );
 }

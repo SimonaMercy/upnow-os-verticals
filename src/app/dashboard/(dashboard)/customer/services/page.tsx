@@ -17,6 +17,10 @@ import { uploadBookingPhoto } from '@/lib/bookingEvidence';
 import { TechnicianTrackerMap } from '@/components/upnow/TechnicianTrackerMap';
 import { ReschedulePanel } from '@/components/upnow/ReschedulePanel';
 import { DisputeThreadPanel } from '@/components/upnow/DisputeThreadPanel';
+import { ServiceStatusStepper } from '@/components/upnow/ServiceStatusStepper';
+import { serviceStatusView, isQuoteMode, TONE_COLORS } from '@/lib/homeServices/statusView';
+import { guaranteeView } from '@/lib/homeServices/copy';
+import { buildBookAgain, resolveServiceCode, saveBookAgain, type RebookSource } from '@/lib/homeServices/bookAgain';
 
 interface TimelineStep { key: string; label: string; at: string | null; done: boolean }
 /** Why money came back (SP-259) — from GET /bookings/:id. */
@@ -40,11 +44,25 @@ interface BookingRow {
   customerSignedOff?: boolean;
   /** SP-190 · open reschedule proposal, if any. */
   pendingReschedule?: { id: number; proposedByRole: string; toScheduledAt: string } | null;
-  template?: { name?: string | null } | null;
-  variant?: { name?: string | null } | null;
   /** Landlord-routed maintenance jobs carry these (src/maintenance). */
   source?: 'marketplace' | 'rp_maintenance' | null;
   payer?: 'customer' | 'rental_provider' | null;
+  /** Latest quote, when the list payload carries it (otherwise fetched for open quote bookings). */
+  quote?: { status?: string | null } | null;
+  /** Provider attached to a quote callout, when the payload says so. */
+  serviceProviderId?: number | null;
+  providerName?: string | null;
+  // Book again (read defensively — the list payload may or may not carry these).
+  templateId?: number | null;
+  template?: { id?: number | null; code?: string | null; name?: string | null } | null;
+  variantId?: number | null;
+  variant?: { id?: number | null; name?: string | null } | null;
+  quantity?: number | null;
+  addonIds?: number[] | null;
+  addressLat?: number | string | null;
+  addressLng?: number | string | null;
+  emirate?: string | null;
+  notes?: string | null;
 }
 /** My Services is the customer's MONEY: marketplace bookings and chargeable
  *  maintenance jobs (their quote to approve, their price to pay). A job the
@@ -53,15 +71,8 @@ interface BookingRow {
  *  page only. */
 const isMine = (b: BookingRow) => !(b.source === 'rp_maintenance' && b.payer === 'rental_provider');
 
-const STATUS_TONES: Record<string, { bg: string; fg: string; label: string }> = {
-  booked:      { bg: '#fef3c7', fg: '#92400e', label: 'Awaiting payment' },
-  confirmed:   { bg: '#d8f2e8', fg: '#1a7a5a', label: 'Confirmed' },
-  assigned:    { bg: '#e0f2fe', fg: '#0369a1', label: 'Professional assigned' },
-  en_route:    { bg: '#e0f2fe', fg: '#0369a1', label: 'On the way' },
-  in_progress: { bg: '#e0e7ff', fg: '#4338ca', label: 'In progress' },
-  completed:   { bg: '#d8f2e8', fg: '#1a7a5a', label: 'Completed' },
-  cancelled:   { bg: '#fee2e2', fg: '#991b1b', label: 'Cancelled' },
-};
+/* Status labels come from serviceStatusView (src/lib/homeServices/statusView.ts):
+   status × pricing mode × quote state — shared with the provider's job page. */
 
 const REFUND_REASON_LABELS: Record<string, string> = {
   customer_cancelled: 'you cancelled the booking',
@@ -123,10 +134,24 @@ export default function CustomerServicesPage() {
       .then((rows: Array<{ id: number; bookingId: number | null; status: string }>) =>
         setDisputeByBooking(Object.fromEntries((Array.isArray(rows) ? rows : []).filter((d) => d.bookingId != null).map((d) => [d.bookingId as number, { id: d.id, status: d.status }]))))
       .catch(() => setDisputeByBooking({}));
+  // A quote booking's label depends on its quote (inspection requested vs
+  // quote ready vs declined) — fetch the quote for the ones still open.
+  const loadOpenQuotes = (rows: BookingRow[]) => {
+    for (const b of rows) {
+      if (!isQuoteMode(b.pricingMode) || b.status !== 'booked' || b.quote) continue;
+      void fetch(`/api/bookings/${b.id}/quote`, { credentials: 'include' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((q: Quote | null) => setQuotes((prev) => ({ ...prev, [b.id]: q })))
+        .catch(() => setQuotes((prev) => ({ ...prev, [b.id]: null })));
+    }
+  };
   const load = () =>
     fetch('/api/bookings', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: BookingRow[] | { data?: BookingRow[] }) => { setBookings((Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])).filter(isMine)); void loadDisputes(); })
+      .then((d: BookingRow[] | { data?: BookingRow[] }) => {
+        const rows = (Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])).filter(isMine);
+        setBookings(rows); void loadDisputes(); loadOpenQuotes(rows);
+      })
       .catch(() => setBookings([]));
 
   const loadReviews = () =>
@@ -150,7 +175,7 @@ export default function CustomerServicesPage() {
         setMediaMap((prev) => ({ ...prev, [id]: d.media ?? { problem: [], before: [], after: [] } }));
       } catch { /* detail stays collapsed-empty */ }
     }
-    if (row?.pricingMode === 'quote' && quotes[id] === undefined) {
+    if (isQuoteMode(row?.pricingMode) && quotes[id] === undefined) {
       try {
         const q = await fetch(`/api/bookings/${id}/quote`, { credentials: 'include' }).then((r) => (r.ok ? r.json() : null));
         setQuotes((prev) => ({ ...prev, [id]: q }));
@@ -290,6 +315,27 @@ export default function CustomerServicesPage() {
     }
   };
 
+  /** Book again (stop-gap for recurring): same options + address, fresh date. */
+  const [rebooking, setRebooking] = useState<number | null>(null);
+  const bookAgain = async (b: BookingRow) => {
+    setRebooking(b.id);
+    setError(null);
+    try {
+      const [detail, catalog] = await Promise.all([
+        fetch(`/api/bookings/${b.id}`, { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch('/api/catalog/public').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      const src = { ...(b as RebookSource), ...((detail?.booking ?? detail ?? {}) as Partial<RebookSource>), id: b.id } as RebookSource;
+      const code = resolveServiceCode(src, catalog);
+      if (!code) throw new Error('This service is no longer offered — browse similar services instead.');
+      saveBookAgain(buildBookAgain(src, code));
+      router.push(`/services/book/${encodeURIComponent(code)}?again=1`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start a new booking');
+      setRebooking(null);
+    }
+  };
+
   const signOff = async (id: number) => {
     setSigningOff(id);
     setError(null);
@@ -343,7 +389,7 @@ export default function CustomerServicesPage() {
             ? 'Maintenance requests on your leases — what your landlord covers, what is yours to confirm, and where each one stands.'
             : 'Your home-service bookings — track progress, or cancel while it\u2019s free.'}
         </p>
-        <div className="inline-flex items-center gap-1 mt-3 p-1 rounded-xl" style={{ background: 'var(--color-base-100, #f4f3ef)' }}>
+        <div className="inline-flex items-center gap-1 mt-3 p-1 rounded-xl" style={{ background: 'var(--color-base-100, #eef1ef)' }}>
           {tabBtn('bookings', 'Bookings')}{tabBtn('maintenance', 'Maintenance')}
         </div>
       </div>
@@ -396,7 +442,20 @@ export default function CustomerServicesPage() {
       ) : (
         <div className="space-y-3">
           {bookings.map((b) => {
-            const tone = STATUS_TONES[b.status] ?? STATUS_TONES.booked;
+            const quoteRow = quotes[b.id] ?? b.quote ?? null;
+            const view = serviceStatusView({
+              status: b.status,
+              pricingMode: b.pricingMode,
+              quoteStatus: quoteRow?.status ?? null,
+              customerSignedOff: b.customerSignedOff,
+              reviewed: Boolean(reviews[b.id]),
+              refundReasonCode: refunds[b.id]?.reasonCode ?? null,
+              providerAttached: b.serviceProviderId != null || Boolean(b.providerName),
+            });
+            const tone = { ...TONE_COLORS[view.tone], label: view.label };
+            const completedAt = (timeline[b.id] ?? []).find((s) => s.key === 'completed' && s.done)?.at ?? null;
+            const guarantee = guaranteeView(completedAt, new Date());
+            const paidish = b.totalAmount != null && Number(b.totalAmount) > 0 && ['confirmed', 'assigned', 'en_route', 'in_progress', 'completed', 'dispute'].includes(b.status);
             const open = openId === b.id;
             const cancellable = ['booked', 'confirmed', 'assigned'].includes(b.status);
             // The crew is due and hasn't started — the customer may report a no-show once the grace window opens.
@@ -418,7 +477,7 @@ export default function CustomerServicesPage() {
                     </div>
                   </div>
                   <span className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--color-neutral-900)' }}>
-                    {b.totalAmount != null ? `AED ${fmtAed(b.totalAmount)}` : 'Quote'}
+                    {b.totalAmount != null ? `AED ${fmtAed(b.totalAmount)}` : (isQuoteMode(b.pricingMode) ? 'Quote pending' : '—')}
                   </span>
                   <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ background: tone.bg, color: tone.fg }}>
                     {tone.label}
@@ -452,6 +511,9 @@ export default function CustomerServicesPage() {
                         />
                       </div>
                     )}
+                    <div className="mt-4 rounded-xl border px-3.5 py-3" style={{ borderColor: 'var(--color-base-200)' }}>
+                      <ServiceStatusStepper view={view} />
+                    </div>
                     <div className="mt-4 space-y-2.5">
                       {(timeline[b.id] ?? []).map((s) => (
                         <div key={s.key} className="flex items-center gap-3">
@@ -664,13 +726,60 @@ export default function CustomerServicesPage() {
                         )}
                         <button
                           type="button"
-                          onClick={() => { setReportFor(b.id); setReportTitle(''); setReportBody(''); }}
+                          disabled={rebooking === b.id}
+                          onClick={() => void bookAgain(b)}
                           className="text-xs font-semibold px-3.5 py-2 rounded-lg border"
-                          style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+                          style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)', opacity: rebooking === b.id ? 0.6 : 1 }}
                         >
-                          Report an issue
+                          {rebooking === b.id ? 'Opening…' : 'Book again'}
+                        </button>
+                        {paidish && (
+                          <Link
+                            href={`/dashboard/customer/services/${b.id}/receipt`}
+                            className="text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                            style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+                          >
+                            View receipt
+                          </Link>
+                        )}
+                      </div>
+                    )}
+                    {b.status === 'completed' && (
+                      <div className="mt-3 rounded-xl border px-3.5 py-3 flex items-center gap-3 flex-wrap" style={{ borderColor: guarantee.active ? '#bfe3cf' : 'var(--color-base-200)', background: guarantee.active ? '#f1faf5' : '#fafaf9' }}>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-semibold" style={{ color: guarantee.active ? '#1a7a5a' : 'var(--color-neutral-700)' }}>
+                            {guarantee.active
+                              ? `${guarantee.label} — until ${guarantee.until!.toLocaleString('en-AE', { timeZone: 'Asia/Dubai', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                              : 'Something not right with the work?'}
+                          </div>
+                          <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-neutral-500)' }}>
+                            {guarantee.active
+                              ? 'If the work isn\u2019t right, report it and we\u2019ll arrange a re-do with the provider.'
+                              : 'Report it and our team will review it with the provider.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportFor(b.id);
+                            setReportTitle(guarantee.active ? guarantee.reworkTitle : '');
+                            setReportBody(guarantee.active ? 'What needs to be redone: ' : '');
+                          }}
+                          className="text-xs font-semibold px-3.5 py-2 rounded-lg border bg-white"
+                          style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-700)' }}
+                        >
+                          {guarantee.active ? 'Report a problem — request a re-do' : 'Report a problem'}
                         </button>
                       </div>
+                    )}
+                    {paidish && b.status !== 'completed' && (
+                      <Link
+                        href={`/dashboard/customer/services/${b.id}/receipt`}
+                        className="inline-block mt-3 text-xs font-semibold px-3.5 py-2 rounded-lg border"
+                        style={{ borderColor: 'var(--color-base-200)', color: 'var(--color-neutral-600)' }}
+                      >
+                        View receipt
+                      </Link>
                     )}
                     {b.status === 'dispute' && (
                       <p className="mt-4 text-xs" style={{ color: '#92400e' }}>

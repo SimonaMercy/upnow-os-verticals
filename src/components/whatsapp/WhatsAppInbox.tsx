@@ -95,7 +95,7 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
   };
 
   if (error && !lines) return <div className="p-6 text-sm text-[#b42318]">{error}</div>;
-  if (!lines) return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  if (!lines) return <div className="p-6 text-sm text-[#8a948d]">Loading…</div>;
 
   const seen = new Set((list?.items ?? []).map((c) => c.id));
   const chats = [...(list?.items ?? []), ...extra.filter((c) => !seen.has(c.id))];
@@ -107,28 +107,28 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
     <div className="p-4 sm:p-6 max-w-[1500px] mx-auto">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex-1 min-w-[200px]">
-          <h1 className="text-2xl font-bold text-[#1a1916]">WhatsApp</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">
+          <h1 className="text-2xl font-bold text-[#14201a]">WhatsApp</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5">
             {hasLines
               ? <>Conversations on {lines.lines.map((l, i) => <span key={l.id}>{i > 0 ? ' and ' : ''}<strong>{l.label}</strong>{l.phone ? ` (${prettyPhone(l.phone)})` : ''}</span>)}</>
               : 'Conversations with your customers, leads and vendors.'}
           </p>
         </div>
         {lines.canConfigure && (
-          <Link href={SETTINGS_HREF} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer"><Settings2 size={14} /> Numbers</Link>
+          <Link href={SETTINGS_HREF} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer"><Settings2 size={14} /> Numbers</Link>
         )}
         {connected.length > 0 && lines.canSend && (
-          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer"><Plus size={14} /> New message</button>
+          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer"><Plus size={14} /> New message</button>
         )}
       </div>
 
       {!hasLines && (
-        <div className="mb-4 bg-white border border-[#e8e6e0] rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3">
+        <div className="mb-4 bg-white border border-[#e4e9e5] rounded-2xl px-5 py-4 flex flex-wrap items-center gap-3">
           <div className="w-10 h-10 rounded-xl grid place-items-center bg-[#eef9f4] text-[#1a7a5a]"><MessageCircle size={18} /></div>
           <div className="flex-1 min-w-[220px] text-sm text-[#4a4842]">
             {isManager ? 'The landlord has not linked a WhatsApp number yet. Once they do, their conversations appear here.' : 'Link the WhatsApp number your team already uses with customers. Every conversation appears here, and you can answer from the platform.'}
           </div>
-          {lines.canConfigure && <Link href={SETTINGS_HREF} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d]">Link a number in Settings</Link>}
+          {lines.canConfigure && <Link href={SETTINGS_HREF} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d]">Link a number in Settings</Link>}
         </div>
       )}
       {down.map((l) => (
@@ -138,14 +138,14 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
         </div>
       ))}
 
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden lg:grid lg:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-190px)] min-h-[520px]">
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden lg:grid lg:grid-cols-[380px_minmax(0,1fr)] h-[calc(100vh-190px)] min-h-[520px]">
         {/* Conversation list — on a phone it gives way to the open conversation. */}
-        <div className={`flex-col min-h-0 h-full border-r border-[#e8e6e0] ${openId != null ? 'hidden lg:flex' : 'flex'}`}>
-          <div className="p-3 border-b border-[#e8e6e0] space-y-2.5">
+        <div className={`flex-col min-h-0 h-full border-r border-[#e4e9e5] ${openId != null ? 'hidden lg:flex' : 'flex'}`}>
+          <div className="p-3 border-b border-[#e4e9e5] space-y-2.5">
             <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
               <input id="wa-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a name, a number or what was said"
-                className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full border border-[#e4e9e5] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
             </div>
             <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Who the conversation is with">
               {TABS.map((t) => {
@@ -154,19 +154,19 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
                 if (t.key !== 'all' && n === 0 && tab !== t.key) return null;
                 return (
                   <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
-                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border cursor-pointer ${tab === t.key ? 'bg-[#1a1916] text-white border-[#1a1916]' : 'bg-white text-[#4a4842] border-[#e8e6e0] hover:border-[#9b9890]'}`}>
-                    {t.label} <span className={`tabular-nums ${tab === t.key ? 'text-white/70' : 'text-[#9b9890]'}`}>{n}</span>
-                    {unread > 0 && <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border cursor-pointer ${tab === t.key ? 'bg-[#14201a] text-white border-[#14201a]' : 'bg-white text-[#4a4842] border-[#e4e9e5] hover:border-[#8a948d]'}`}>
+                    {t.label} <span className={`tabular-nums ${tab === t.key ? 'text-white/70' : 'text-[#8a948d]'}`}>{n}</span>
+                    {unread > 0 && <span className="min-w-[16px] h-4 px-1 rounded-full bg-[#047246] text-white text-[10px] font-bold grid place-items-center tabular-nums">{unread}</span>}
                   </button>
                 );
               })}
             </div>
             <div className="flex items-center gap-3 text-xs text-[#4a4842]">
               <label htmlFor="wa-unread-only" className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                <input id="wa-unread-only" type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="accent-[#2e9f82]" /> Unread only
+                <input id="wa-unread-only" type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="accent-[#047246]" /> Unread only
               </label>
               {lines.lines.length > 1 && (
-                <select id="wa-line-filter" aria-label="Number" value={lineId ?? ''} onChange={(e) => setLineId(Number(e.target.value) || null)} className="ml-auto border border-[#e8e6e0] rounded-md px-2 py-1 bg-white text-xs focus:outline-none focus:border-[#2e9f82] max-w-[170px]">
+                <select id="wa-line-filter" aria-label="Number" value={lineId ?? ''} onChange={(e) => setLineId(Number(e.target.value) || null)} className="ml-auto border border-[#e4e9e5] rounded-md px-2 py-1 bg-white text-xs focus:outline-none focus:border-[#047246] max-w-[170px]">
                   <option value="">All numbers</option>
                   {lines.lines.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
                 </select>
@@ -175,24 +175,24 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[#f0eee9]">
             {error && <div className="px-4 py-3 text-xs text-[#b42318]">{error}</div>}
-            {list && chats.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#9b9890]">{q || unreadOnly ? 'Nothing matches.' : hasLines ? 'No conversations here yet.' : 'No number is linked yet.'}</div>}
+            {list && chats.length === 0 && <div className="px-4 py-10 text-center text-sm text-[#8a948d]">{q || unreadOnly ? 'Nothing matches.' : hasLines ? 'No conversations here yet.' : 'No number is linked yet.'}</div>}
             {chats.map((c) => (
               <button key={c.id} type="button" onClick={() => setOpenId(c.id)}
                 className={`w-full text-left px-3.5 py-3 flex items-center gap-3 cursor-pointer ${openId === c.id ? 'bg-[#eef9f4]' : 'hover:bg-[#fbfaf8]'}`}>
-                <span className={`w-11 h-11 shrink-0 rounded-full grid place-items-center text-sm font-semibold ${c.kind === 'other' ? 'bg-[#f4f3ef] text-[#6b6860]' : 'bg-[#e8f3ef] text-[#1a7a5a]'}`}>{c.isGroup ? <Users size={17} /> : initials(c.name) || <User size={17} />}</span>
+                <span className={`w-11 h-11 shrink-0 rounded-full grid place-items-center text-sm font-semibold ${c.kind === 'other' ? 'bg-[#eef1ef] text-[#5f6b63]' : 'bg-[#e8f3ef] text-[#1a7a5a]'}`}>{c.isGroup ? <Users size={17} /> : initials(c.name) || <User size={17} />}</span>
                 <span className="flex-1 min-w-0">
                   <span className="flex items-baseline gap-2">
-                    <span className={`text-sm truncate flex-1 ${c.unreadCount > 0 ? 'font-bold text-[#1a1916]' : 'font-medium text-[#2b2a27]'}`}>{c.name}</span>
-                    <span className={`text-[11px] shrink-0 tabular-nums ${c.unreadCount > 0 ? 'text-[#1a7a5a] font-semibold' : 'text-[#9b9890]'}`}>{waListWhen(c.lastMessageAt)}</span>
+                    <span className={`text-sm truncate flex-1 ${c.unreadCount > 0 ? 'font-bold text-[#14201a]' : 'font-medium text-[#2b2a27]'}`}>{c.name}</span>
+                    <span className={`text-[11px] shrink-0 tabular-nums ${c.unreadCount > 0 ? 'text-[#1a7a5a] font-semibold' : 'text-[#8a948d]'}`}>{waListWhen(c.lastMessageAt)}</span>
                   </span>
                   <span className="flex items-center gap-2 mt-0.5">
-                    <span className={`text-xs truncate flex-1 ${c.unreadCount > 0 ? 'text-[#1a1916] font-medium' : 'text-[#6b6860]'}`} dir="auto">{c.lastDirection === 'out' ? 'You: ' : ''}{c.lastSnippet || '—'}</span>
-                    {c.unreadCount > 0 && <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center tabular-nums" aria-label={`${c.unreadCount} unread`}>{c.unreadCount}</span>}
+                    <span className={`text-xs truncate flex-1 ${c.unreadCount > 0 ? 'text-[#14201a] font-medium' : 'text-[#5f6b63]'}`} dir="auto">{c.lastDirection === 'out' ? 'You: ' : ''}{c.lastSnippet || '—'}</span>
+                    {c.unreadCount > 0 && <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-[#047246] text-white text-[10px] font-bold grid place-items-center tabular-nums" aria-label={`${c.unreadCount} unread`}>{c.unreadCount}</span>}
                   </span>
                   {(tab === 'all' || lines.lines.length > 1) && (
                     <span className="flex items-center gap-1.5 mt-1">
                       {tab === 'all' && c.kind !== 'other' && <span className={`text-[9.5px] font-semibold uppercase tracking-wide rounded px-1.5 py-px ${KIND_CHIP[c.kind]}`}>{KIND_LABEL[c.kind]}</span>}
-                      {lines.lines.length > 1 && lineId == null && <span className="text-[10.5px] text-[#9b9890] truncate">{c.lineLabel}</span>}
+                      {lines.lines.length > 1 && lineId == null && <span className="text-[10.5px] text-[#8a948d] truncate">{c.lineLabel}</span>}
                     </span>
                   )}
                 </span>
@@ -200,7 +200,7 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
             ))}
             {list && chats.length < list.total && (
               <div className="p-3 text-center">
-                <button type="button" onClick={() => void more()} disabled={loadingMore} className="text-xs font-medium text-[#1a7a5a] border border-[#e8e6e0] rounded-full px-4 py-1.5 hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">{loadingMore ? 'Loading…' : `Show more (${(list.total - chats.length).toLocaleString('en-GB')} left)`}</button>
+                <button type="button" onClick={() => void more()} disabled={loadingMore} className="text-xs font-medium text-[#1a7a5a] border border-[#e4e9e5] rounded-full px-4 py-1.5 hover:border-[#047246] cursor-pointer disabled:opacity-60">{loadingMore ? 'Loading…' : `Show more (${(list.total - chats.length).toLocaleString('en-GB')} left)`}</button>
               </div>
             )}
           </div>
@@ -213,8 +213,8 @@ export function WhatsAppInbox({ rp, isManager = false }: { rp: Rp; isManager?: b
             <div className="flex-1 grid place-items-center bg-[#fbfaf8]">
               <div className="text-center px-6">
                 <div className="w-14 h-14 rounded-2xl grid place-items-center mx-auto mb-3 bg-[#eef9f4] text-[#1a7a5a]"><MessageCircle size={24} /></div>
-                <p className="text-sm font-semibold text-[#1a1916]">Choose a conversation</p>
-                <p className="text-sm text-[#6b6860] mt-1 max-w-[340px]">Read it, listen to the voice notes or read their transcript, and answer with text, photos, documents or your own voice note.</p>
+                <p className="text-sm font-semibold text-[#14201a]">Choose a conversation</p>
+                <p className="text-sm text-[#5f6b63] mt-1 max-w-[340px]">Read it, listen to the voice notes or read their transcript, and answer with text, photos, documents or your own voice note.</p>
               </div>
             </div>
           )}

@@ -1,17 +1,48 @@
 'use client';
+
+/**
+ * Operations › Long-term leases › Inspection (legacy route) — Genspark OS rebuild.
+ *
+ * Re-exported unchanged by /dashboard/manager/contracts/[id]/inspection and the
+ * /prototype/os/rp bridge. For a logged-in RP / manager this route only forwards
+ * to the v2 category report (/inspection/v2), carrying every query param.
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  - Redirect: non-portal paths router.replace → {base}/inspection/v2?{all params, type
+ *    normalised to move_in|move_out}; base = manager or RP contract route. Kit loading
+ *    state while it hops.
+ *  - Portal path (/portal/<token>/…): the token-scoped legacy checklist workspace:
+ *    GET /api/portal/:token/contracts/:id (or /api/contracts/:id) + GET …/inspection/full?type=
+ *    (or /api/contracts/:id/inspection?type=); move-out seeds outCondition from move-in
+ *    (Good default) and the contract move-out date; draft autosave (PATCH …/inspection
+ *    {type, data, finalize:false}, 1.5 s debounce, retry on error); Submit Inspection
+ *    (finalize:true; top, bottom and mobile sticky buttons); Undo submission & edit
+ *    (POST /api/contracts/:id/inspection/reopen?type=, RP only); customer signing link
+ *    (POST /api/portal/generate {tenantId, contractId, purpose}); counter-sign
+ *    (POST …/inspection/counter-sign or /api/contracts/:id/inspection/sign?type=) via
+ *    SignatureBlock (REUSED), then stored PDF snapshot (storeContractPdf, authed only);
+ *    Download PDF (InspectionReportPdf) and Print (window.print, print-only header);
+ *    areas (rename, add, remove), items (G/F/D condition, custom items, remove),
+ *    per-item photos (presigned upload, image-only, multi), general photos with
+ *    captions, photo gallery tabs (per-area), read-only move-in photos on move-out,
+ *    acknowledgement text, customer + inspector signature panels, status banners.
+ *  - Legal / signing wording keeps "Tenant" (counter-sign banner, acknowledgement,
+ *    report header) per AGENTS.md.
+ *  - New: kit page head / scope strip / sign-off Flow; row removals are labelled
+ *    buttons ("Remove area", "Remove", "Remove photo") instead of bare icons.
+ */
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useState, useEffect, useCallback, useRef, createElement } from 'react';
 import { useParams, useSearchParams, usePathname, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  Plus, Trash2, Save, Printer, Download, ArrowLeft, CheckCircle, Loader2,
-  AlertCircle, RotateCcw, UploadCloud, X, Camera, Paperclip, Images,
-  FileSignature, Send, Receipt, Check,
+  Plus, Save, Printer, Download, ArrowLeft, Loader2,
+  AlertCircle, RotateCcw, Camera, Paperclip, Images, Send,
 } from 'lucide-react';
 import { openDocViewer } from '@/lib/docViewer';
 import { triggerBrowserDownload } from '@/lib/downloadDoc';
 import { SignatureBlock, type SignaturePayload } from '@/components/upnow/SignatureBlock';
+import { OsPage, PageHead, ScopeStrip, Card, Pill, Btn, Callout, Evid, Flow, KV, Field, type Tone } from '@/components/os/kit';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -129,15 +160,6 @@ function displayUrl(u: string | null | undefined): string {
   return (u && freshViewUrls.get(u)) || u || '';
 }
 
-function InfoCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-0.5">{label}</p>
-      <p className="text-sm font-semibold text-[#1a1916]">{value || '—'}</p>
-    </div>
-  );
-}
-
 /** Generate + copy a purpose-scoped tenant portal link (move-in / move-out
  *  inspection signing) right from the inspection workspace. */
 function PortalLinkButton({ tenantId, contractId, purpose, label }: {
@@ -161,20 +183,18 @@ function PortalLinkButton({ tenantId, contractId, purpose, label }: {
   };
   if (state === 'done' && link) {
     return (
-      <div className="mt-2 flex items-center gap-2 print:hidden">
-        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          className="flex-1 text-[11px] px-2 py-1.5 rounded-lg border border-[#e8e6e0] bg-[#fafaf8] text-[#1a1916]" />
-        <button type="button"
-          onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }}
-          className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-[#2e9f82] text-white">{copied ? 'Copied ✓' : 'Copy'}</button>
-      </div>
+      <span className="gx-btn-row print:hidden" style={{ flex: 1, minWidth: 240 }}>
+        <input readOnly value={link} onFocus={e => e.currentTarget.select()} aria-label="Customer signing link"
+          className="gx-inp" style={{ flex: 1, minWidth: 0, height: 28, fontSize: 11 }} />
+        <Btn size="sm" variant="primary"
+          onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ } }}>{copied ? 'Copied ✓' : 'Copy'}</Btn>
+      </span>
     );
   }
   return (
-    <button type="button" onClick={send} disabled={state === 'sending'}
-      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#2e9f82] text-[#2e9f82] disabled:opacity-60 print:hidden">
-      <Send size={12} /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : label}
-    </button>
+    <Btn size="sm" onClick={() => void send()} disabled={state === 'sending'}>
+      <Send size={12} aria-hidden /> {state === 'sending' ? 'Generating…' : state === 'error' ? 'Retry' : label}
+    </Btn>
   );
 }
 
@@ -221,7 +241,7 @@ function makeBlankData(): InspectionData {
 
 function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: Condition) => void }) {
   const opts = [
-    { v: 'G' as Condition, active: 'bg-[#2e9f82] text-white border-transparent' },
+    { v: 'G' as Condition, active: 'bg-[#047246] text-white border-transparent' },
     { v: 'F' as Condition, active: 'bg-[#f59e0b] text-white border-transparent' },
     { v: 'D' as Condition, active: 'bg-[#ef4444] text-white border-transparent' },
   ];
@@ -234,7 +254,7 @@ function ConditionPicker({ value, onChange }: { value: Condition; onChange: (v: 
           onClick={() => onChange(value === o.v ? '' : o.v)}
           className={[
             'w-11 h-11 sm:w-7 sm:h-7 rounded-lg sm:rounded-md text-base sm:text-xs font-bold border transition-all',
-            value === o.v ? o.active : 'border-[#e8e6e0] text-[#9b9890] hover:border-[#c8c6be] bg-white',
+            value === o.v ? o.active : 'border-[#e4e9e5] text-[#8a948d] hover:border-[#c8c6be] bg-white',
           ].join(' ')}
         >
           {o.v}
@@ -256,15 +276,15 @@ function ItemThumbStrip({ attachments, onRemove }: {
   return (
     <div className="flex flex-wrap gap-2">
       {attachments.map(a => (
-        <div key={a.id} className="group relative w-16 h-16 sm:w-14 sm:h-14 rounded-lg border border-[#e8e6e0] overflow-hidden shrink-0 bg-[#f4f3ef]">
+        <div key={a.id} className="group relative w-16 h-16 sm:w-14 sm:h-14 rounded-lg border border-[#e4e9e5] overflow-hidden shrink-0 bg-[#eef1ef]">
           <button type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(a.url), caption: 'Attachment' })} className="block w-full h-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={displayUrl(a.url)} alt="attachment" className="w-full h-full object-cover" />
           </button>
           {onRemove && (
-            <button type="button" onClick={() => onRemove(a.id)} aria-label="Remove photo"
-              className="absolute top-0.5 right-0.5 w-6 h-6 sm:w-5 sm:h-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-              <X size={12} />
+            <button type="button" onClick={() => onRemove(a.id)}
+              className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] font-semibold py-0.5">
+              Remove
             </button>
           )}
         </div>
@@ -345,7 +365,7 @@ function ItemAttachmentButton({
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
         title="Attach photos to this item"
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#c8c6be] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] disabled:opacity-50 transition-colors h-11 px-4 text-xs font-semibold sm:h-8 sm:px-3"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#c8c6be] text-[#5f6b63] hover:border-[#047246] hover:text-[#047246] disabled:opacity-50 transition-colors h-11 px-4 text-xs font-semibold sm:h-8 sm:px-3"
       >
         {uploading
           ? <Loader2 size={15} className="animate-spin" />
@@ -390,11 +410,11 @@ function AreaBlock({
   const isMoveOut = inspType === 'move_out';
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+    <div className="gx-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
+      <div className="flex items-center gap-2 sm:gap-3 px-4 sm:px-5 py-3 bg-[#f6f8f6] border-b border-[#eef1ef]">
         <div className="flex-1 flex items-center gap-2 sm:gap-3 min-w-0">
-          <span className="text-[11px] sm:text-xs font-bold text-[#9b9890] uppercase tracking-wide w-12 sm:w-14 shrink-0">
+          <span className="text-[11px] sm:text-xs font-bold text-[#8a948d] uppercase tracking-wide w-12 sm:w-14 shrink-0">
             Area {areaIndex + 1}
           </span>
           <input
@@ -402,24 +422,22 @@ function AreaBlock({
             value={area.name}
             onChange={e => onChange({ ...area, name: e.target.value })}
             placeholder="e.g. Bedroom 1, Kitchen…"
-            className="flex-1 min-w-0 text-base sm:text-sm font-semibold text-[#1a1916] bg-transparent border-b border-transparent focus:border-[#2e9f82] focus:outline-none pb-0.5 transition-colors"
+            className="flex-1 min-w-0 text-base sm:text-sm font-semibold text-[#14201a] bg-transparent border-b border-transparent focus:border-[#047246] focus:outline-none pb-0.5 transition-colors"
           />
         </div>
         {canRemove && !isLocked && (
-          <button type="button" onClick={onRemove} aria-label="Remove area" className="text-[#9b9890] hover:text-[#ef4444] transition-colors shrink-0 p-1.5 -m-1.5">
-            <Trash2 size={16} />
-          </button>
+          <Btn size="xs" variant="danger" onClick={onRemove}>Remove area</Btn>
         )}
       </div>
 
       {/* Items table */}
       <div className="px-4 sm:px-5 pt-3 pb-2">
         {/* Column header — desktop only; on mobile each row is self-describing */}
-        <div className="hidden sm:grid gap-2 mb-2 pb-1.5 border-b border-[#f4f3ef] grid-cols-[1fr_6rem_7rem_1.5rem]">
-          <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide">Item</span>
-          <span className="text-[10px] font-semibold text-[#2e9f82] uppercase tracking-wide text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
-          <span className="text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide text-center">Attach</span>
-          <span />
+        <div className="hidden sm:grid gap-2 mb-2 pb-1.5 border-b border-[#eef1ef] grid-cols-[1fr_6rem_7rem_4.5rem]">
+          <span className="text-[10px] font-semibold text-[#8a948d] uppercase tracking-wide">Item</span>
+          <span className="text-[10px] font-semibold text-[#047246] uppercase tracking-wide text-center">{isMoveOut ? 'Move-Out' : 'Condition'}</span>
+          <span className="text-[10px] font-semibold text-[#8a948d] uppercase tracking-wide text-center">Attach</span>
+          <span className="text-[10px] font-semibold text-[#8a948d] uppercase tracking-wide text-center">Action</span>
         </div>
 
         {area.items.map(item => {
@@ -432,7 +450,7 @@ function AreaBlock({
             // wrapping onto its own row beneath. Every direct child is an explicit
             // grid cell (no display:contents) so locked/empty states can't drop a
             // cell and shift the columns.
-            className="flex flex-col gap-3 py-3 border-b border-[#f9f8f6] last:border-0 sm:gap-2 sm:py-1.5 sm:items-center sm:grid sm:grid-cols-[1fr_6rem_7rem_1.5rem]"
+            className="flex flex-col gap-3 py-3 border-b border-[#f9f8f6] last:border-0 sm:gap-2 sm:py-1.5 sm:items-center sm:grid sm:grid-cols-[1fr_6rem_7rem_4.5rem]"
           >
             {/* Item name */}
             <div className="min-w-0">
@@ -442,10 +460,10 @@ function AreaBlock({
                   value={item.name}
                   onChange={e => updateItem(item.id, { name: e.target.value })}
                   placeholder="Item name…"
-                  className="w-full text-base sm:text-sm text-[#1a1916] border-b border-dashed border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none bg-transparent pb-0.5"
+                  className="w-full text-base sm:text-sm text-[#14201a] border-b border-dashed border-[#e4e9e5] focus:border-[#047246] focus:outline-none bg-transparent pb-0.5"
                 />
               ) : (
-                <span className="text-[15px] sm:text-sm font-medium text-[#1a1916]">{item.name}</span>
+                <span className="text-[15px] sm:text-sm font-medium text-[#14201a]">{item.name}</span>
               )}
             </div>
 
@@ -453,22 +471,19 @@ function AreaBlock({
                 Move-out edits `outCondition` (pre-filled from the move-in
                 baseline on load); move-in edits `inCondition`. */}
             <div className="flex items-center gap-3 sm:justify-center">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-16 shrink-0 sm:hidden">Condition</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d] w-16 shrink-0 sm:hidden">Condition</span>
               <ConditionPicker
                 value={isMoveOut ? item.outCondition : item.inCondition}
                 onChange={v => !isLocked && updateItem(item.id, isMoveOut ? { outCondition: v } : { inCondition: v })}
               />
               {item.isCustom && !isLocked && (
-                <button type="button" onClick={() => removeItem(item.id)} aria-label="Remove item"
-                  className="ml-auto sm:hidden text-[#c8c6be] hover:text-[#ef4444] transition-colors p-2 -m-2">
-                  <Trash2 size={16} />
-                </button>
+                <span className="ml-auto sm:hidden"><Btn size="xs" variant="danger" onClick={() => removeItem(item.id)}>Remove</Btn></span>
               )}
             </div>
 
             {/* Attach control */}
             <div className="flex items-center gap-3 sm:justify-center">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#9b9890] w-16 shrink-0 sm:hidden">Photos</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#8a948d] w-16 shrink-0 sm:hidden">Photos</span>
               {!isLocked ? (
                 <ItemAttachmentButton
                   contractId={contractId}
@@ -479,18 +494,16 @@ function AreaBlock({
                   inspType={inspType}
                 />
               ) : (
-                <span className="text-xs text-[#9b9890] sm:hidden">
+                <span className="text-xs text-[#8a948d] sm:hidden">
                   {itemPhotos.length ? `${itemPhotos.length} photo${itemPhotos.length > 1 ? 's' : ''}` : 'No photos'}
                 </span>
               )}
             </div>
 
             {/* Custom-item delete — desktop grid cell only */}
-            <div className="hidden sm:flex sm:justify-center sm:w-6">
+            <div className="hidden sm:flex sm:justify-center">
               {item.isCustom && !isLocked && (
-                <button type="button" onClick={() => removeItem(item.id)} aria-label="Remove item" className="text-[#c8c6be] hover:text-[#ef4444] transition-colors p-1 -m-1">
-                  <Trash2 size={14} />
-                </button>
+                <Btn size="xs" variant="danger" onClick={() => removeItem(item.id)}>Remove</Btn>
               )}
             </div>
 
@@ -508,7 +521,7 @@ function AreaBlock({
         })}
 
         {!isLocked && (
-          <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:opacity-75 mt-3 mb-1 transition-opacity">
+          <button type="button" onClick={addItem} className="flex items-center gap-1.5 text-xs font-semibold text-[#047246] hover:opacity-75 mt-3 mb-1 transition-opacity">
             <Plus size={12} /> Add item
           </button>
         )}
@@ -516,13 +529,13 @@ function AreaBlock({
 
       {/* Remarks */}
       <div className="px-4 sm:px-5 pb-4">
-        <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1">Remarks</label>
+        <label className="block text-[10px] font-semibold text-[#8a948d] uppercase tracking-wide mb-1">Remarks</label>
         <textarea
           value={area.remarks}
           onChange={e => onChange({ ...area, remarks: e.target.value })}
           placeholder="Notes, damages, or specific observations for this area…"
           rows={2}
-          className="w-full text-base sm:text-sm text-[#1a1916] border border-[#e8e6e0] rounded-xl px-3 py-2 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none bg-[#fafaf8]"
+          className="w-full text-base sm:text-sm text-[#14201a] border border-[#e4e9e5] rounded-xl px-3 py-2 focus:outline-none focus:border-[#047246] transition-colors resize-none bg-[#f6f8f6]"
         />
       </div>
     </div>
@@ -595,10 +608,10 @@ function PhotosSection({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4">
+    <div className="gx-card p-5 space-y-4">
       <div>
-        <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-          <Camera size={14} className="text-[#2e9f82]" /> {heading}
+        <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-1.5">
+          <Camera size={14} className="text-[#047246]" /> {heading}
           {isMoveIn && <span className="ml-1.5 text-[#ef4444] text-xs font-normal">* recommended</span>}
         </h2>
       </div>
@@ -606,19 +619,19 @@ function PhotosSection({
       {photos.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {photos.map(p => (
-            <div key={p.id} className="relative group rounded-xl overflow-hidden border border-[#e8e6e0] bg-[#f4f3ef]">
+            <div key={p.id} className="relative group rounded-xl overflow-hidden border border-[#e4e9e5] bg-[#eef1ef]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={displayUrl(p.url)} alt={p.caption || 'Inspection photo'} className="w-full h-32 object-cover" />
               {!disabled && (
-                <button type="button" onClick={() => onChange(photos.filter(x => x.id !== p.id))} aria-label="Remove photo"
-                  className="absolute top-1.5 right-1.5 w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity hover:bg-red-600 print:hidden">
-                  <X size={13} />
+                <button type="button" onClick={() => onChange(photos.filter(x => x.id !== p.id))}
+                  className="absolute top-1.5 right-1.5 rounded-md bg-black/60 text-white text-[10.5px] font-semibold px-2 py-1 hover:bg-red-600 print:hidden">
+                  Remove photo
                 </button>
               )}
               <input type="text" value={p.caption} readOnly={disabled} disabled={disabled}
                 onChange={e => onChange(photos.map(x => x.id === p.id ? { ...x, caption: e.target.value } : x))}
                 placeholder={disabled ? '' : 'Caption (e.g. living room)'}
-                className="w-full text-xs sm:text-[10px] px-2 py-1.5 sm:py-1 border-t border-[#e8e6e0] focus:outline-none focus:bg-[#f0faf6] bg-white disabled:bg-[#f4f3ef] disabled:text-[#6b6860]"
+                className="w-full text-xs sm:text-[10px] px-2 py-1.5 sm:py-1 border-t border-[#e4e9e5] focus:outline-none focus:bg-[#eef7f2] bg-white disabled:bg-[#eef1ef] disabled:text-[#5f6b63]"
               />
             </div>
           ))}
@@ -635,7 +648,7 @@ function PhotosSection({
             }}
           />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-2 w-full justify-center py-4 sm:py-3 rounded-xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] active:border-[#2e9f82] active:text-[#2e9f82] disabled:opacity-50 transition-colors print:hidden">
+            className="flex items-center gap-2 w-full justify-center py-4 sm:py-3 rounded-xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#8a948d] hover:border-[#047246] hover:text-[#047246] active:border-[#047246] active:text-[#047246] disabled:opacity-50 transition-colors print:hidden">
             {uploading ? <><Loader2 size={16} className="animate-spin" /> Uploading…</> : <><Camera size={16} /> {photos.length === 0 ? `Add ${heading.toLowerCase()}` : 'Add more photos'}</>}
           </button>
           {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
@@ -676,21 +689,21 @@ function PhotoGallery({ areas, globalPhotos }: { areas: InspectionArea[]; global
     : (areaTabs.find(a => a.id === activeTab)?.attachments ?? []).map(a => ({ id: a.id, url: a.url, caption: a.itemName }));
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4">
-      <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-        <Images size={14} className="text-[#2e9f82]" /> Photo Gallery
-        <span className="text-xs font-normal text-[#9b9890] ml-1">(RP view — per-item attachments not shown to tenant)</span>
+    <div className="gx-card p-5 space-y-4">
+      <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-1.5">
+        <Images size={14} className="text-[#047246]" /> Photo Gallery
+        <span className="text-xs font-normal text-[#8a948d] ml-1">(RP view — per-item attachments not shown to tenant)</span>
       </h2>
 
       {/* Tabs */}
-      <div className="flex gap-2 flex-wrap border-b border-[#f4f3ef] pb-2">
+      <div className="flex gap-2 flex-wrap border-b border-[#eef1ef] pb-2">
         {tabs.map(tab => (
           <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
             className={[
               'px-3 py-1 rounded-full text-xs font-semibold transition-colors',
               activeTab === tab.id
-                ? 'bg-[#2e9f82] text-white'
-                : 'bg-[#f4f3ef] text-[#6b6860] hover:bg-[#e8f9f4] hover:text-[#2e9f82]',
+                ? 'bg-[#047246] text-white'
+                : 'bg-[#eef1ef] text-[#5f6b63] hover:bg-[#e8f9f4] hover:text-[#047246]',
             ].join(' ')}>
             {tab.label}
           </button>
@@ -698,15 +711,15 @@ function PhotoGallery({ areas, globalPhotos }: { areas: InspectionArea[]; global
       </div>
 
       {displayed.length === 0 ? (
-        <p className="text-xs text-[#9b9890]">No photos in this tab.</p>
+        <p className="text-xs text-[#8a948d]">No photos in this tab.</p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {displayed.map(p => (
             <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(p.url), caption: p.caption })}
-              className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
+              className="block w-full text-left rounded-xl overflow-hidden border border-[#e4e9e5] hover:border-[#047246] transition-colors cursor-pointer">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={displayUrl(p.url)} alt={p.caption || 'photo'} className="w-full h-32 object-cover" />
-              {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
+              {p.caption && <p className="text-[10px] text-[#5f6b63] px-2 py-1 truncate">{p.caption}</p>}
             </button>
           ))}
         </div>
@@ -721,7 +734,7 @@ function LegendChip({ letter, label, color }: { letter: string; label: string; c
   return (
     <span className="inline-flex items-center gap-1.5 text-xs">
       <span className={`w-6 h-6 rounded-md text-xs font-bold flex items-center justify-center text-white ${color}`}>{letter}</span>
-      <span className="text-[#6b6860]">{label}</span>
+      <span className="text-[#5f6b63]">{label}</span>
     </span>
   );
 }
@@ -755,7 +768,14 @@ export default function InspectionPage() {
     router.replace(`${base}/inspection/v2?${q.toString()}`);
   }, [isPortal, params, searchParams, pathname, router]);
   if (!isPortal) {
-    return <div className="flex items-center justify-center h-[60vh] text-[#9b9890]"><Loader2 className="animate-spin mr-2" /> Opening inspection…</div>;
+    return (
+      <OsPage>
+        <PageHead eyebrow="Operations › Long-term leases" title={<>Inspection · CID-{params?.id}</>} lede="Opening the inspection report…" />
+        <Card pad><div aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+          {[60, 40, 50].map((w, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${w}%` }} />)}
+        </div></Card>
+      </OsPage>
+    );
   }
   return <InspectionWorkspace />;
 }
@@ -883,6 +903,7 @@ function InspectionWorkspace() {
     }
   }, [contractId, inspType]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount
   useEffect(() => { void load(); }, [load]);
   // Keep the autosave snapshot current without touching the ref during render.
   useEffect(() => { dataRef.current = data; }, [data]);
@@ -1064,201 +1085,174 @@ function InspectionWorkspace() {
     }
   }
 
+  const refLabel = `CID-${contractId}`;
+  const eyebrow = portalToken ? 'Inspection report' : 'Operations › Long-term leases';
+  const titleNode = <>{title} · {refLabel}</>;
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="animate-spin text-[#2e9f82]" size={28} />
-      </div>
+      <OsPage>
+        <PageHead eyebrow={eyebrow} title={titleNode} lede="Loading the inspection checklist…" />
+        <Card pad><div aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+          {[70, 45, 60, 35].map((w, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${w}%` }} />)}
+        </div></Card>
+      </OsPage>
     );
   }
 
+  const status: { label: string; tone: Tone } = fullySigned
+    ? { label: 'Fully signed', tone: 'primary' }
+    : tenantSigned ? { label: 'Customer signed — counter-sign', tone: 'amber' }
+    : formLocked ? { label: 'Submitted — awaiting customer', tone: 'info' }
+    : { label: 'Draft', tone: 'neutral' };
+  const flowCurrent = fullySigned ? 4 : tenantSigned ? 3 : formLocked ? 2 : 0;
+  const fmtStamp = (d: string) => new Date(d).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const submitBtn = (
+    <Btn variant="primary" onClick={() => void handleSave()} disabled={saving}>
+      {saving ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Save size={13} aria-hidden />}
+      {saving ? 'Saving…' : 'Submit Inspection'}
+    </Btn>
+  );
+
   return (
-    <div className="max-w-3xl mx-auto px-4 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom,0px))] sm:py-8 space-y-6 print:px-0 print:py-0 print:pb-0">
+    <OsPage className="pb-[calc(7rem+env(safe-area-inset-bottom,0px))] sm:pb-[60px] print:p-0">
+      <div className="print:hidden">
+        <PageHead
+          eyebrow={eyebrow}
+          title={titleNode}
+          lede={meta ? <>{meta.property}{meta.unit ? ` — Unit ${meta.unit}` : ''}{meta.tenantName ? ` · ${meta.tenantName}` : ''}. Room-by-room condition (Good / Fair / Damaged), photos and notes, signed by both parties.</> : undefined}
+          actions={<>
+            {/* Inspector links have nowhere to go "back" to — no link, so it doesn't loop. */}
+            {!portalToken && <Btn href={backHref}><ArrowLeft size={13} aria-hidden /> {backLabel}</Btn>}
+            {/* Draft autosave status — reassures the inspector their work is saved
+                as they go, so leaving before Submit won't lose photos/conditions. */}
+            {!formLocked && autosaveState === 'error' && (
+              <Btn variant="danger" onClick={() => void saveDraft()}><AlertCircle size={13} aria-hidden /> Couldn’t save — retry</Btn>
+            )}
+            {!formLocked && autosaveState === 'saving' && <Pill tone="neutral">Saving…</Pill>}
+            {!formLocked && autosaveState === 'saved' && <Pill tone="primary">Draft saved</Pill>}
+            <Btn onClick={() => window.print()}><Printer size={13} aria-hidden /> Print</Btn>
+            {meta && <Btn onClick={() => void downloadInspectionPdf()}><Download size={13} aria-hidden /> Download PDF</Btn>}
+            {!formLocked && <span className="hidden sm:inline-flex">{submitBtn}</span>}
+          </>}
+        />
 
-      {/* Topbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap print:hidden">
-        <div className="flex items-center gap-3 min-w-0">
-          {/* Inspector links have nowhere to go "back" to (the contract page just
-              redirects here) — drop the link so it doesn't loop. */}
-          {portalToken ? null : (
-            <Link href={backHref} className="flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] transition-colors">
-              <ArrowLeft size={15} /> {backLabel}
-            </Link>
-          )}
-          {/* Draft autosave status — reassures the inspector their work is saved as
-              they go, so leaving before tapping Submit won't lose photos/conditions. */}
-          {!formLocked && autosaveState !== 'idle' && (
-            autosaveState === 'error' ? (
-              <button type="button" onClick={() => void saveDraft()} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#dc2626]">
-                <AlertCircle size={12} /> Couldn’t save — retry
-              </button>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#9b9890]">
-                {autosaveState === 'saving'
-                  ? <><Loader2 size={12} className="animate-spin" /> Saving…</>
-                  : <><CheckCircle size={12} className="text-[#2e9f82]" /> Draft saved</>}
-              </span>
-            )
-          )}
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
-            <Printer size={14} /> Print
-          </button>
-          {meta && (
-            <button onClick={downloadInspectionPdf} className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
-              <Download size={14} /> Download PDF
-            </button>
-          )}
-          {!formLocked && (
-            <button onClick={handleSave} disabled={saving}
-              className="hidden sm:flex items-center gap-2 px-5 py-2 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? 'Saving…' : 'Submit Inspection'}
-            </button>
-          )}
-        </div>
+        <ScopeStrip items={[
+          ...(portalToken ? [{ label: 'Access', value: 'Inspector link' }] : [
+            { label: 'Workspace', value: 'Operations' },
+            { label: 'Vertical', value: 'Long-term leases' },
+          ]),
+          { label: 'Contract', value: refLabel },
+          { label: 'Inspection', value: isMoveIn ? 'Move-in' : 'Move-out' },
+          { label: 'Status', value: <Pill tone={status.tone}>{status.label}</Pill> },
+        ]} />
       </div>
-
-      {/* Title */}
-      <div>
-        <h1 className="text-2xl font-bold text-[#1a1916]">{title} Checklist</h1>
-        {meta && (
-          <p className="text-sm text-[#9b9890] mt-0.5">
-            {meta.property}{meta.unit ? ` — Unit ${meta.unit}` : ''} · Contract #{contractId}
-          </p>
-        )}
-      </div>
-
-      {/* Printable report header — tenant, property + key dates */}
-      {meta && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
-          <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#f4f3ef]">
-            <h2 className="text-base font-bold text-[#1a1916]">{title} Report</h2>
-            <span className="text-xs text-[#9b9890]">Contract #{contractId}</span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
-            <InfoCell label="Tenant name" value={meta.tenantName} />
-            <InfoCell label="Tenant mobile" value={meta.tenantPhone} />
-            <InfoCell label={`${title} date`} value={fmtDate(data.inspectionDate ?? data.reportGeneratedDate)} />
-            <InfoCell label="Building" value={meta.property} />
-            <InfoCell label="Unit no." value={meta.unit} />
-            <InfoCell label="Inspector" value={data.inspectorName} />
-            <InfoCell label="Handover date" value={fmtDate(meta.moveInDate)} />
-            <InfoCell label="Contract end date" value={fmtDate(meta.contractEndDate)} />
-          </div>
-        </div>
-      )}
 
       {/* Status banners */}
-      {fullySigned && (
-        <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 print:hidden">
-          <CheckCircle size={14} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-[#1a7a5a]">Inspection fully signed — tenancy activated ✓</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">Both parties have signed. The tenancy contract is now active.</p>
-          </div>
-        </div>
-      )}
-      {!fullySigned && tenantSigned && (
-        <div className="flex items-start gap-2 text-sm bg-[#fff7ed] border border-[#fed7aa] rounded-xl px-4 py-3 print:hidden">
-          <AlertCircle size={14} className="text-[#c2410c] shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-[#9a3412]">Tenant has signed — your counter-signature required</p>
-            <p className="text-xs text-[#c2410c] mt-0.5">Sign below to counter-sign and automatically activate the tenancy.</p>
-          </div>
-        </div>
-      )}
-      {!tenantSigned && formLocked && (
-        <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 print:hidden">
-          <CheckCircle size={14} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <p className="font-semibold text-[#1a7a5a]">Inspection submitted — awaiting customer counter-signature</p>
-            <p className="text-xs text-[#1a7a5a] mt-0.5">
-              {portalToken
-                ? `The customer signs this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal — you can counter-sign here once they do.`
-                : `Send the tenant a secure link to sign this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal. You can counter-sign once they do.`}
-            </p>
-            {!portalToken && meta?.tenantId && contractId && (
-              <PortalLinkButton
-                tenantId={meta.tenantId}
-                contractId={Number(contractId)}
-                purpose={inspType}
-                label={`Send ${isMoveIn ? 'move-in' : 'move-out'} signing link`}
-              />
-            )}
-            {/* Reopen for editing — only while the customer hasn't signed. */}
+      <div className="print:hidden" style={{ display: 'grid', gap: 10 }}>
+        {fullySigned && (
+          <Callout title="Inspection fully signed — tenancy activated ✓">Both parties have signed. The tenancy contract is now active.</Callout>
+        )}
+        {!fullySigned && tenantSigned && (
+          <Callout tone="warn" title="Tenant has signed — your counter-signature required.">Sign below to counter-sign and automatically activate the tenancy.</Callout>
+        )}
+        {!tenantSigned && formLocked && (
+          <Callout title="Inspection submitted — awaiting customer counter-signature.">
+            {portalToken
+              ? `The customer signs this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal — you can counter-sign here once they do.`
+              : `Send the tenant a secure link to sign this ${isMoveIn ? 'move-in' : 'move-out'} inspection from their portal. You can counter-sign once they do.`}
             {!portalToken && (
-              <button type="button" onClick={handleReopen} disabled={reopening}
-                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-white border border-[#c2410c] text-[#c2410c] disabled:opacity-60 print:hidden">
-                {reopening ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                Undo submission &amp; edit
-              </button>
+              <div className="gx-btn-row" style={{ marginTop: 8 }}>
+                {meta?.tenantId && contractId && (
+                  <PortalLinkButton
+                    tenantId={meta.tenantId}
+                    contractId={Number(contractId)}
+                    purpose={inspType}
+                    label={`Send ${isMoveIn ? 'move-in' : 'move-out'} signing link`}
+                  />
+                )}
+                {/* Reopen for editing — only while the customer hasn't signed. */}
+                <Btn size="sm" variant="amber" onClick={() => void handleReopen()} disabled={reopening}>
+                  {reopening ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <RotateCcw size={12} aria-hidden />} Undo submission &amp; edit
+                </Btn>
+              </div>
             )}
+          </Callout>
+        )}
+        {saved && !formLocked && <Callout title="Inspection saved successfully." >Your checklist is stored.</Callout>}
+        {error && <Callout tone="bad">{error}</Callout>}
+      </div>
+
+      <div className="print:hidden" style={{ marginTop: 14 }}>
+        <Card title="Sign-off" sub={isMoveIn ? 'The counter-signature activates the tenancy.' : 'The signed move-out checklist supports the final settlement.'}>
+          <div className="gx-pad">
+            <Flow current={flowCurrent} steps={[
+              { t: 'Fill the checklist', s: 'conditions, photos, notes' },
+              { t: 'Submit', s: data.rpSubmittedAt ? fmtDate(data.rpSubmittedAt) : 'locks the form' },
+              { t: 'Customer signs', s: data.tenantSignedAt ? fmtDate(data.tenantSignedAt) : 'from their portal' },
+              { t: 'Counter-sign', s: data.rpCounterSignedAt ? fmtDate(data.rpCounterSignedAt) : 'inspector' },
+            ]} />
           </div>
-        </div>
-      )}
-      {saved && !formLocked && (
-        <div className="flex items-start gap-2 text-sm bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-3 print:hidden">
-          <CheckCircle size={14} className="text-[#2e9f82] shrink-0 mt-0.5" />
-          <p className="font-semibold text-[#1a7a5a]">Inspection saved successfully.</p>
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center gap-2 text-sm text-[#dc2626] bg-[#fef2f2] rounded-xl px-4 py-3 print:hidden">
-          <AlertCircle size={14} /> {error}
+        </Card>
+      </div>
+
+      {/* Printable report header — customer, property + key dates */}
+      {meta && (
+        <div style={{ marginTop: 14 }}>
+          <Card title={`${title} Report`} right={<span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Contract #{contractId}</span>}>
+            <div className="gx-pad">
+              <KV items={[
+                { k: 'Tenant name', v: meta.tenantName || '—' },
+                { k: 'Tenant mobile', v: meta.tenantPhone || '—' },
+                { k: `${title} date`, v: fmtDate(data.inspectionDate ?? data.reportGeneratedDate) },
+                { k: 'Building', v: meta.property || '—' },
+                { k: 'Unit no.', v: meta.unit || '—' },
+                { k: 'Inspector', v: data.inspectorName || '—' },
+                { k: 'Handover date', v: fmtDate(meta.moveInDate) },
+                { k: 'Contract end date', v: fmtDate(meta.contractEndDate) },
+              ]} />
+            </div>
+          </Card>
         </div>
       )}
 
-      {/* Form (locked when RP has submitted) */}
-      {/* Disabled while submitting too, so no edit can slip in (and re-arm an
-          autosave) during the finalize request before the form locks. */}
-      <fieldset disabled={formLocked || saving} className={`space-y-6 ${formLocked ? 'opacity-95' : ''}`}>
+      {/* Form (locked when RP has submitted). Disabled while submitting too, so no
+          edit can slip in (and re-arm an autosave) during the finalize request. */}
+      <fieldset disabled={formLocked || saving} className={`space-y-4 ${formLocked ? 'opacity-95' : ''}`} style={{ marginTop: 14, border: 0, padding: 0, minWidth: 0 }}>
 
         {/* Legend */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-[#f9f8f6] rounded-xl px-4 py-3 print:bg-white print:border print:border-gray-200">
-          <span className="text-xs font-semibold text-[#6b6860] uppercase tracking-wide">Condition:</span>
-          <LegendChip letter="G" label="Good"    color="bg-[#2e9f82]" />
+        <div className="gx-scope" style={{ marginBottom: 0 }}>
+          <span className="sl">Condition</span>
+          <LegendChip letter="G" label="Good"    color="bg-[#047246]" />
           <LegendChip letter="F" label="Fair"    color="bg-[#f59e0b]" />
           <LegendChip letter="D" label="Damaged" color="bg-[#ef4444]" />
         </div>
 
-        {/* Header info — editable inspection fields (tenant/property shown in the report header above) */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 print:hidden">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">{isMoveIn ? 'Move-In Date' : 'Move-Out Date'}</label>
-              <input type="date" value={data.moveInDate}
-                onChange={e => updateData(d => ({ ...d, moveInDate: e.target.value }))}
-                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
-              />
+        {/* Editable inspection fields (customer/property shown in the report header above) */}
+        <div className="print:hidden">
+          <Card title="Inspection details">
+            <div className="gx-pad gx-two">
+              <Field label={isMoveIn ? 'Move-In Date' : 'Move-Out Date'} htmlFor="li-date">
+                <input id="li-date" className="gx-inp" type="date" value={data.moveInDate} style={{ width: '100%' }}
+                  onChange={e => updateData(d => ({ ...d, moveInDate: e.target.value }))} />
+              </Field>
+              <Field label="Inspector Name" htmlFor="li-inspector">
+                <input id="li-inspector" className="gx-inp" type="text" value={data.inspectorName} placeholder="Inspector full name" style={{ width: '100%' }}
+                  onChange={e => updateData(d => ({ ...d, inspectorName: e.target.value }))} />
+              </Field>
+              <Field label="Report Generated Date" htmlFor="li-generated">
+                <input id="li-generated" className="gx-inp" type="date" value={data.reportGeneratedDate} style={{ width: '100%' }}
+                  onChange={e => updateData(d => ({ ...d, reportGeneratedDate: e.target.value }))} />
+              </Field>
+              {/* Inspection date is auto-set when the RP counter-signs — read-only if set */}
+              {data.inspectionDate && (
+                <Field label="Inspection Date" htmlFor="li-inspected">
+                  <input id="li-inspected" className="gx-inp" type="text" disabled style={{ width: '100%' }}
+                    value={new Date(data.inspectionDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} />
+                </Field>
+              )}
             </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Inspector Name</label>
-              <input type="text" value={data.inspectorName}
-                onChange={e => updateData(d => ({ ...d, inspectorName: e.target.value }))}
-                placeholder="Inspector full name"
-                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">
-                Report Generated Date
-              </label>
-              <input type="date" value={data.reportGeneratedDate}
-                onChange={e => updateData(d => ({ ...d, reportGeneratedDate: e.target.value }))}
-                className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-3 py-2.5 sm:py-2 focus:outline-none focus:border-[#2e9f82] transition-colors"
-              />
-            </div>
-            {/* Inspection date is auto-set when RP counter-signs — shown read-only if set */}
-            {data.inspectionDate && (
-              <div>
-                <label className="block text-[10px] font-semibold text-[#9b9890] uppercase tracking-wide mb-1.5">Inspection Date</label>
-                <input type="text" value={new Date(data.inspectionDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })} disabled
-                  className="w-full text-sm border border-[#e8e6e0] rounded-xl px-3 py-2 bg-[#f9f8f6] text-[#6b6860]" />
-              </div>
-            )}
-          </div>
+          </Card>
         </div>
 
         {/* Areas */}
@@ -1281,147 +1275,109 @@ function InspectionWorkspace() {
           ))}
 
           {!formLocked && (
-            <button type="button"
-              onClick={() => updateData(d => ({ ...d, areas: [...d.areas, makeDefaultArea(d.areas.length + 1)] }))}
-              className="flex items-center gap-2 w-full justify-center py-3 rounded-2xl border-2 border-dashed border-[#d8d6d0] text-sm font-semibold text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors print:hidden">
-              <Plus size={15} /> Add area
-            </button>
+            <div className="print:hidden">
+              <Btn onClick={() => updateData(d => ({ ...d, areas: [...d.areas, makeDefaultArea(d.areas.length + 1)] }))}>
+                <Plus size={13} aria-hidden /> Add area
+              </Btn>
+            </div>
           )}
         </div>
 
         {/* General notes */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5">
-          <label className="block text-sm font-semibold text-[#1a1916] mb-3">
-            General Notes
-            <span className="text-[#9b9890] font-normal text-xs ml-2">meter readings, key handover, damages, etc.</span>
-          </label>
-          <textarea value={data.generalNotes}
-            onChange={e => updateData(d => ({ ...d, generalNotes: e.target.value }))}
-            placeholder="Overall observations, utility meter readings, keys handed over…"
-            rows={3}
-            className="w-full text-base sm:text-sm border border-[#e8e6e0] rounded-xl px-4 py-3 focus:outline-none focus:border-[#2e9f82] transition-colors resize-none"
-          />
-        </div>
-
-        {/* Bottom submit bar — hidden on mobile (the sticky bar carries it there) */}
-        {!formLocked && (
-          <div className="hidden sm:flex justify-end pt-2 pb-8 print:hidden">
-            <button onClick={handleSave} disabled={saving}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? 'Saving…' : 'Submit Inspection'}
-            </button>
+        <Card title="General Notes" sub="meter readings, key handover, damages, etc.">
+          <div className="gx-pad">
+            <textarea className="gx-ta" value={data.generalNotes} rows={3} style={{ width: '100%' }} aria-label="General notes"
+              onChange={e => updateData(d => ({ ...d, generalNotes: e.target.value }))}
+              placeholder="Overall observations, utility meter readings, keys handed over…" />
           </div>
-        )}
+        </Card>
 
+        {/* Bottom submit — hidden on mobile (the sticky bar carries it there) */}
+        {!formLocked && (
+          <div className="hidden sm:flex justify-end print:hidden">{submitBtn}</div>
+        )}
       </fieldset>
 
       {/* ── Photo Gallery (after form) ───────────────────────────────────── */}
-      <PhotoGallery areas={data.areas} globalPhotos={data.photos} />
+      <div style={{ marginTop: 14 }}><PhotoGallery areas={data.areas} globalPhotos={data.photos} /></div>
 
       {/* Acknowledgement — both parties confirm the recorded condition before signing */}
-      <div className="bg-[#fafaf8] border border-[#f0efe9] rounded-2xl p-4 text-xs text-[#4b4b46] leading-relaxed">
-        {isMoveIn
-          ? `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together and that the condition recorded above accurately reflects its state at handover / move-in.`
-          : `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together at move-out and that the condition recorded above accurately reflects its state. Any damages or outstanding dues noted may be deducted from the security deposit as part of the final settlement.`}
+      <div style={{ marginTop: 14 }}>
+        <Evid>
+          {isMoveIn
+            ? `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together and that the condition recorded above accurately reflects its state at handover / move-in.`
+            : `The tenant and rental provider confirm that ${meta?.unit ? `Unit ${meta.unit}` : 'the unit'}${meta?.property ? ` at ${meta.property}` : ''} was inspected together at move-out and that the condition recorded above accurately reflects its state. Any damages or outstanding dues noted may be deducted from the security deposit as part of the final settlement.`}
+        </Evid>
       </div>
 
       {/* ── Signature row: Customer Signature | Inspector Signature ─────────
-           Customer column: always shown (placeholder until tenant signs).
-           Inspector column: sig pad when awaiting counter-sign, image once done.
-           Stacks on mobile so each pad is wide enough to actually sign. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-        {/* Customer Signature */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-3">
-          <div>
-            <h2 className="text-sm font-bold text-[#1a1916]">Customer Signature</h2>
-            <p className="text-xs text-[#9b9890] mt-0.5">Signed from the tenant portal.</p>
-          </div>
-          {data.tenantSig ? (
-            <div className="rounded-xl border border-[#c5e8df] bg-[#f0faf6] p-3 space-y-1">
-              <div className="bg-white rounded-lg border border-[#e8e6e0] p-2 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.tenantSig} alt="Customer signature" className="max-h-28 object-contain" />
+           Customer column: placeholder until the customer signs. Inspector column:
+           sig pad when awaiting counter-sign, image once done. */}
+      <div className="gx-cols gx-cols-2e" style={{ marginTop: 14 }}>
+        <Card title="Customer Signature" sub="Signed from the customer portal.">
+          <div className="gx-pad">
+            {data.tenantSig ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ border: '1px solid var(--ms-border)', borderRadius: 8, padding: 8, display: 'flex', justifyContent: 'center', background: '#fff' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={data.tenantSig} alt="Customer signature" style={{ maxHeight: 112, objectFit: 'contain' }} />
+                </div>
+                {data.tenantSignedAt && <Pill tone="primary">Signed {fmtStamp(data.tenantSignedAt)}</Pill>}
               </div>
-              {data.tenantSignedAt && (
-                <p className="text-[10px] text-[#1a7a5a] flex items-center gap-1">
-                  <CheckCircle size={10} /> Signed {new Date(data.tenantSignedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-[#d8d6d0] bg-[#fafaf8] px-3 py-8 text-center">
-              <p className="text-[11px] text-[#9b9890]">Awaiting customer signature.</p>
-            </div>
-          )}
-        </div>
-
-        {/* Inspector Signature */}
-        <div className={`bg-white rounded-2xl border p-5 space-y-3 ${fullySigned ? 'border-[#c5e8df]' : tenantSigned ? 'border-[#fed7aa]' : 'border-[#e8e6e0]'}`}>
-          <div>
-            <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-              <FileSignature size={14} className="text-[#2e9f82]" /> Inspector Signature
-            </h2>
-            <p className="text-xs text-[#9b9890] mt-0.5">
-              {fullySigned ? 'Inspection counter-signed — tenancy activated.' : tenantSigned ? 'Sign to counter-sign and activate the tenancy.' : 'Available once the customer has signed.'}
-            </p>
+            ) : (
+              <div className="gx-empty"><b>Awaiting customer signature.</b></div>
+            )}
           </div>
+        </Card>
 
-          {fullySigned && data.rpCounterSig ? (
-            <div className="rounded-xl border border-[#c5e8df] bg-[#f0faf6] p-3 space-y-1">
-              <div className="bg-white rounded-lg border border-[#e8e6e0] p-2 flex justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={data.rpCounterSig} alt="Inspector signature" className="max-h-28 object-contain" />
+        <Card title="Inspector Signature" sub={fullySigned ? 'Inspection counter-signed — tenancy activated.' : tenantSigned ? 'Sign to counter-sign and activate the tenancy.' : 'Available once the customer has signed.'}>
+          <div className="gx-pad">
+            {fullySigned && data.rpCounterSig ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ border: '1px solid var(--ms-border)', borderRadius: 8, padding: 8, display: 'flex', justifyContent: 'center', background: '#fff' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={data.rpCounterSig} alt="Inspector signature" style={{ maxHeight: 112, objectFit: 'contain' }} />
+                </div>
+                {data.rpCounterSignedAt && <Pill tone="primary">Counter-signed {fmtStamp(data.rpCounterSignedAt)}</Pill>}
               </div>
-              {data.rpCounterSignedAt && (
-                <p className="text-[10px] text-[#1a7a5a] flex items-center gap-1">
-                  <CheckCircle size={10} /> Counter-signed {new Date(data.rpCounterSignedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-            </div>
-          ) : tenantSigned && !fullySigned ? (
-            <SignatureBlock
-              signerRole="Inspector"
-              signerName={data.inspectorName?.trim() || 'Inspection Manager'}
-              onBehalfOf="the rental provider"
-              defaultName={data.inspectorName?.trim() || ''}
-              termsText={`I confirm the condition recorded in this ${inspType === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
-              submitLabel="Sign & Activate Tenancy"
-              alreadySigned={false}
-              onSign={handleCounterSign}
-            />
-          ) : (
-            <div className="rounded-xl border border-dashed border-[#d8d6d0] bg-[#fafaf8] px-3 py-8 text-center">
-              <p className="text-[11px] text-[#9b9890]">Awaiting customer signature first.</p>
-            </div>
-          )}
-        </div>
-
+            ) : tenantSigned && !fullySigned ? (
+              <SignatureBlock
+                signerRole="Inspector"
+                signerName={data.inspectorName?.trim() || 'Inspection Manager'}
+                onBehalfOf="the rental provider"
+                defaultName={data.inspectorName?.trim() || ''}
+                termsText={`I confirm the condition recorded in this ${inspType === 'move_out' ? 'move-out' : 'move-in'} inspection is accurate.`}
+                submitLabel="Sign & Activate Tenancy"
+                alreadySigned={false}
+                onSign={handleCounterSign}
+              />
+            ) : (
+              <div className="gx-empty"><b>Awaiting customer signature first.</b></div>
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* ── Move-in photos (reference) — move-out only, read-only ────────── */}
       {!isMoveIn && (data.moveInPhotos?.length ?? 0) > 0 && (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 space-y-4 print:hidden">
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5">
-            <Images size={14} className="text-[#9b9890]" /> Move-In Photos
-            <span className="ml-1.5 text-[#9b9890] text-xs font-normal">reference · read-only</span>
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {data.moveInPhotos!.map(p => (
-              <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(p.url), caption: p.caption })}
-                className="block w-full text-left rounded-xl overflow-hidden border border-[#e8e6e0] hover:border-[#2e9f82] transition-colors cursor-pointer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={displayUrl(p.url)} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
-                {p.caption && <p className="text-[10px] text-[#6b6860] px-2 py-1 truncate">{p.caption}</p>}
-              </button>
-            ))}
-          </div>
+        <div className="print:hidden" style={{ marginTop: 14 }}>
+          <Card title="Move-In Photos" sub="reference · read-only">
+            <div className="gx-pad grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {data.moveInPhotos!.map(p => (
+                <button key={p.id} type="button" onClick={() => openDocViewer({ fileUrl: displayUrl(p.url), caption: p.caption })}
+                  className="block w-full text-left rounded-xl overflow-hidden border border-[#e4e9e5] hover:border-[#047246] transition-colors cursor-pointer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={displayUrl(p.url)} alt={p.caption || 'Move-in photo'} className="w-full h-32 object-cover" />
+                  {p.caption && <p className="text-[10px] text-[#5f6b63] px-2 py-1 truncate">{p.caption}</p>}
+                </button>
+              ))}
+            </div>
+          </Card>
         </div>
       )}
 
-      {/* ── Move-In Photos — screen only, hidden in print ────────────────── */}
-      <div className="print:hidden">
+      {/* ── Inspection photos — screen only, hidden in print ─────────────── */}
+      <div className="print:hidden" style={{ marginTop: 14 }}>
         <PhotosSection
           contractId={Number(contractId)}
           inspType={inspType}
@@ -1433,18 +1389,17 @@ function InspectionWorkspace() {
         />
       </div>
 
-      {/* ── Sticky submit (mobile only) — keeps the primary action reachable
-           on a long, scrolling form without hunting for the button. ───────── */}
+      {/* ── Sticky submit (mobile only) — keeps the primary action reachable on a
+           long, scrolling form without hunting for the button. ───────────── */}
       {!formLocked && (
         <div className="fixed inset-x-0 bottom-0 z-30 sm:hidden print:hidden bg-white shadow-[0_-4px_16px_rgba(0,0,0,0.08)] px-4 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)]">
-          <button onClick={handleSave} disabled={saving}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white bg-[#2e9f82] active:bg-[#267a65] disabled:opacity-60 transition-colors">
+          <button type="button" onClick={handleSave} disabled={saving}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white bg-[#047246] active:bg-[#267a65] disabled:opacity-60 transition-colors">
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
             {saving ? 'Saving…' : 'Submit Inspection'}
           </button>
         </div>
       )}
-
-    </div>
+    </OsPage>
   );
 }

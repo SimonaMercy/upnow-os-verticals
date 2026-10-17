@@ -142,34 +142,34 @@ export function LeaseRevenueByYearReport({
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5 print:mb-3">
         <div>
           {onBack ? (
-            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </button>
           ) : (
-            <Link href={back} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <Link href={back} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </Link>
           )}
           <h1 className="text-2xl font-bold text-[#26241f] flex items-center gap-2">
-            <TrendingUp size={22} className="text-[#2e9f82]" /> Lease Revenue by Year
+            <TrendingUp size={22} className="text-[#047246]" /> Lease Revenue by Year
           </h1>
-          <p className="text-sm text-[#6b6860] mt-1 max-w-2xl">
+          <p className="text-sm text-[#5f6b63] mt-1 max-w-2xl">
             Each lease&rsquo;s rent split across the calendar years its term actually covers — driven by the
             lease period, not the signing date. Whole calendar months only; a month-aligned annual lease
             allocates its full rent.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-50">
+          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246] disabled:opacity-50">
             <Download size={15} /> CSV
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
             <Printer size={15} /> Print
           </button>
         </div>
       </div>
 
-      {loading && <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
+      {loading && <div className="flex items-center gap-2 text-[#5f6b63] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
       {error && !loading && <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>}
 
       {data && !loading && (
@@ -186,7 +186,7 @@ export function LeaseRevenueByYearReport({
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-[#6b6860] border-b border-[#e8e6e0]">
+                  <tr className="text-left text-[#5f6b63] border-b border-[#e4e9e5]">
                     <th className="py-2.5 pr-4 font-medium">Lease started</th>
                     <th className="py-2.5 px-4 font-medium text-right">Units</th>
                     <th className="py-2.5 pl-4 font-medium text-right">Annual Rent</th>
@@ -196,7 +196,7 @@ export function LeaseRevenueByYearReport({
                   {data.summaryByYear.map(s => (
                     <tr key={s.year} className="border-b border-[#f1efe9]">
                       <td className="py-2.5 pr-4 font-medium text-[#26241f]">{s.year}</td>
-                      <td className="py-2.5 px-4 text-right tabular-nums text-[#3d3b35]">{s.units}</td>
+                      <td className="py-2.5 px-4 text-right tabular-nums text-[#46534c]">{s.units}</td>
                       <td className="py-2.5 pl-4 text-right tabular-nums text-[#26241f]">{fmtAed(s.annualRentFils)}</td>
                     </tr>
                   ))}
@@ -216,7 +216,7 @@ export function LeaseRevenueByYearReport({
             <div className="overflow-x-auto">
               <table className="w-full text-sm whitespace-nowrap">
                 <thead>
-                  <tr className="text-left text-[#6b6860] border-b border-[#e8e6e0]">
+                  <tr className="text-left text-[#5f6b63] border-b border-[#e4e9e5]">
                     <th className="py-2.5 pr-4 font-medium">Customer</th>
                     <th className="py-2.5 px-3 font-medium">Unit</th>
                     <th className="py-2.5 px-3 font-medium">Term</th>
@@ -227,16 +227,16 @@ export function LeaseRevenueByYearReport({
                   {data.leases.map(l => (
                     <tr key={l.contractId} className="border-b border-[#f1efe9] hover:bg-[#f7f6f2] group">
                       <td className="py-2.5 pr-4">
-                        <Link href={`${contractsBase}/${l.contractId}`} className="font-medium text-[#26241f] group-hover:text-[#2e9f82]">
+                        <Link href={`${contractsBase}/${l.contractId}`} className="font-medium text-[#26241f] group-hover:text-[#047246]">
                           {l.tenantName ?? l.contractRef}
                         </Link>
                         {l.isRenewal && <div className="mt-0.5"><Badge tone="info"><RefreshCw size={10} /> Renewal</Badge></div>}
                       </td>
-                      <td className="py-2.5 px-3 text-[#3d3b35]">
+                      <td className="py-2.5 px-3 text-[#46534c]">
                         {l.unitLabel ?? '—'}
                         {l.buildingName && <div className="text-xs text-[#8a8780]">{l.buildingName}</div>}
                       </td>
-                      <td className="py-2.5 px-3 text-[#6b6860] text-xs">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
+                      <td className="py-2.5 px-3 text-[#5f6b63] text-xs">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</td>
                       <td className="py-2.5 pl-3 text-right tabular-nums font-semibold text-[#26241f]">{fmtNum(l.annualRentFils)}</td>
                     </tr>
                   ))}
@@ -254,8 +254,8 @@ export function LeaseRevenueByYearReport({
 /* ── small presentational helpers ──────────────────────────────────────────── */
 function Kpi({ label, value, sub, Icon, tone }: { label: string; value: string; sub?: string; Icon: React.ComponentType<{ size?: number; className?: string }>; tone?: 'warn' }) {
   return (
-    <div className={`rounded-2xl border p-4 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-[#e8e6e0] bg-white'}`}>
-      <div className="flex items-center gap-1.5 text-xs text-[#6b6860]"><Icon size={13} /> {label}</div>
+    <div className={`rounded-2xl border p-4 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-[#e4e9e5] bg-white'}`}>
+      <div className="flex items-center gap-1.5 text-xs text-[#5f6b63]"><Icon size={13} /> {label}</div>
       <div className="text-xl font-bold text-[#26241f] mt-1 tabular-nums">{value}</div>
       {sub && <div className="text-xs text-[#8a8780] mt-0.5">{sub}</div>}
     </div>
@@ -263,7 +263,7 @@ function Kpi({ label, value, sub, Icon, tone }: { label: string; value: string; 
 }
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4 sm:p-5 mb-6">
+    <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4 sm:p-5 mb-6">
       <div className="mb-3">
         <div className="text-base font-semibold text-[#26241f]">{title}</div>
         {subtitle && <div className="text-xs text-[#8a8780] mt-0.5">{subtitle}</div>}
@@ -275,6 +275,6 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
 function Badge({ tone, children, title }: { tone: 'info' | 'warn' | 'muted'; children: React.ReactNode; title?: string }) {
   const cls = tone === 'warn' ? 'bg-amber-100 text-amber-800'
     : tone === 'info' ? 'bg-[#e6f4ef] text-[#1a7a5a]'
-    : 'bg-[#f4f3ef] text-[#8a8780]';
+    : 'bg-[#eef1ef] text-[#8a8780]';
   return <span title={title} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium ${cls}`}>{children}</span>;
 }

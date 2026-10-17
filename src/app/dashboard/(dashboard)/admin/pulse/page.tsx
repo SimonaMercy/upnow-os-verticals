@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/set-state-in-effect -- fetch-on-change effects (pre-existing pattern on this page) */
 
 /**
  * Platform Pulse — the cross-provider login dashboard (SCRUM: admin login
@@ -37,6 +38,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { apiGet } from '@/lib/api';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 import DirhamSign from '@/components/ui/DirhamSign';
+import { AdminGates } from './_gates';
 
 /* ── Payload ── */
 interface QueueItem {
@@ -174,17 +176,17 @@ const FUNNEL_WINDOWS = [30, 90, 180, 365];
 const funnelWindowLabel = (d: number) =>
   d % 365 === 0 ? `Last ${d / 365 === 1 ? '12 months' : `${d / 365} years`}` : `Last ${d} days`;
 
-const JADE = '#2e9f82', BLUE = '#1e5fae', AMBER = '#b45309', PURPLE = '#8250df';
-const GRAY = '#6b6860', RED = '#b91c1c';
+const JADE = '#047246', BLUE = '#1e5fae', AMBER = '#b45309', PURPLE = '#8250df';
+const GRAY = '#5f6b63', RED = '#b91c1c';
 const CAT = [JADE, BLUE, AMBER, PURPLE];
-const HEAT = ['#f4f3ef', '#dbe7f6', '#b9d1ec', '#8fb4de', '#5f92cc', '#3a6fb0', '#274e85'];
+const HEAT = ['#eef1ef', '#dbe7f6', '#b9d1ec', '#8fb4de', '#5f92cc', '#3a6fb0', '#274e85'];
 /** ISO weekday order (Mon-first), matching EXTRACT(ISODOW) from the heatmap query. */
 const DAY_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 /** `YYYY-MM-DD` → "8 Aug". Parsed as UTC so the label can't slip a day. */
 const dayTick = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
-const TICK = { fontSize: 11, fill: '#9b9890' };
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e4e9e5', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
+const TICK = { fontSize: 11, fill: '#8a948d' };
 
 function fmtAED(aed: number | null | undefined): string {
   if (aed == null) return '—';
@@ -232,7 +234,7 @@ const dateTimeLabel = (d: string | null) => (d
  * a glance. `null` means no logged activity at all, which is not "quiet lately".
  */
 const sinceLabel = (d: string | null) => {
-  if (!d) return <span className="text-[#9b9890]">Never</span>;
+  if (!d) return <span className="text-[#8a948d]">Never</span>;
   // CALENDAR days, not elapsed hours: 22 hours ago can still be yesterday, and
   // "Today" sitting above a date of 7 Aug reads as a bug.
   const midnight = (t: Date) => new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
@@ -243,8 +245,8 @@ const sinceLabel = (d: string | null) => {
     : `${Math.floor(days / 365)}y ago`;
   return (
     <span className="flex flex-col items-end leading-tight">
-      <span className={days >= 30 ? 'text-[#b45309] font-semibold' : 'text-[#1a1916]'}>{ago}</span>
-      <span className="text-[10px] text-[#9b9890] whitespace-nowrap">{dateTimeLabel(d)}</span>
+      <span className={days >= 30 ? 'text-[#b45309] font-semibold' : 'text-[#14201a]'}>{ago}</span>
+      <span className="text-[10px] text-[#8a948d] whitespace-nowrap">{dateTimeLabel(d)}</span>
     </span>
   );
 };
@@ -274,12 +276,12 @@ function KpiTile({ icon: Icon, label, value, sub, tone = 'neutral', href }: {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string; value: string; sub?: string; tone?: 'neutral' | 'good' | 'bad' | 'warn'; href?: string;
 }) {
-  const vc = tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#1a1916]';
+  const vc = tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#14201a]';
   const body = (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5 h-full hover:border-[#d4d2cc] transition-colors">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold"><Icon size={12} /> {label}</div>
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3.5 h-full hover:border-[#d4d2cc] transition-colors">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold"><Icon size={12} /> {label}</div>
       <p className={`text-xl font-bold mt-1.5 leading-none tabular-nums ${vc}`}>{value}</p>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
+      {sub && <p className="text-[11px] text-[#8a948d] mt-1.5">{sub}</p>}
     </div>
   );
   return href ? <Link href={href}>{body}</Link> : body;
@@ -293,35 +295,35 @@ function ChartCard({ title, sub, children, href, hint, id, action }: {
   const inner = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
+        <h3 className="text-sm font-bold text-[#14201a]">{title}</h3>
         {action}
-        {(href || hint) && <span className="flex items-center gap-0.5 text-[10px] font-semibold text-[#9b9890] whitespace-nowrap">{hint ?? 'View'} <ArrowUpRight size={12} /></span>}
+        {(href || hint) && <span className="flex items-center gap-0.5 text-[10px] font-semibold text-[#8a948d] whitespace-nowrap">{hint ?? 'View'} <ArrowUpRight size={12} /></span>}
       </div>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-1">{sub}</p>}
+      {sub && <p className="text-[11px] text-[#8a948d] mt-0.5 mb-1">{sub}</p>}
       <div className="mt-2">{children}</div>
     </>
   );
   return href ? (
-    <Link id={id} href={href} className="block bg-white rounded-2xl border border-[#e8e6e0] p-4 hover:border-[#d4d2cc] transition-colors">{inner}</Link>
+    <Link id={id} href={href} className="block bg-white rounded-2xl border border-[#e4e9e5] p-4 hover:border-[#d4d2cc] transition-colors">{inner}</Link>
   ) : (
-    <div id={id} className="bg-white rounded-2xl border border-[#e8e6e0] p-4">{inner}</div>
+    <div id={id} className="bg-white rounded-2xl border border-[#e4e9e5] p-4">{inner}</div>
   );
 }
 function SectionHead({ no, q, id }: { no: string; q: string; id: string }) {
   return (
     <div id={id} className="flex items-baseline gap-3 mt-8 mb-3 pt-4 border-t border-[#e0ded8] scroll-mt-20">
       <span className="text-[10px] font-bold uppercase tracking-wider text-[#1e5fae]">{no}</span>
-      <h2 className="text-[15px] font-bold text-[#1a1916]">{q}</h2>
+      <h2 className="text-[15px] font-bold text-[#14201a]">{q}</h2>
     </div>
   );
 }
 function Meter({ pct, tone = BLUE, width = 'w-24' }: { pct: number; tone?: string; width?: string }) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span className={`${width} h-1.5 rounded-full bg-[#e8e6e0] overflow-hidden inline-block`}>
+      <span className={`${width} h-1.5 rounded-full bg-[#e4e9e5] overflow-hidden inline-block`}>
         <span className="h-full rounded-full block" style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: tone }} />
       </span>
-      <span className="text-[12px] text-[#6b6860] tabular-nums">{pct}%</span>
+      <span className="text-[12px] text-[#5f6b63] tabular-nums">{pct}%</span>
     </span>
   );
 }
@@ -333,7 +335,7 @@ function StatusDot({ tone, label }: { tone: string; label: string }) {
   );
 }
 function EmptyChart({ text, h = 180 }: { text: string; h?: number }) {
-  return <div style={{ height: h }} className="flex items-center justify-center text-center text-[12px] text-[#9b9890] px-4">{text}</div>;
+  return <div style={{ height: h }} className="flex items-center justify-center text-center text-[12px] text-[#8a948d] px-4">{text}</div>;
 }
 
 /* ── System status — the header chip + expanding panel from the mockup ─────────
@@ -367,13 +369,13 @@ const SVC: Record<SvcState, { color: string; label: string; height: string }> = 
   degraded:     { color: '#fab219', label: 'Degraded',       height: '55%' },
   down:         { color: '#d03b3b', label: 'Outage',         height: '28%' },
   unconfigured: { color: '#c9c6bf', label: 'Not configured', height: '18%' },
-  nodata:       { color: '#e8e6e0', label: 'No data',        height: '12%' },
+  nodata:       { color: '#e4e9e5', label: 'No data',        height: '12%' },
 };
 const SVC_BANNER: Record<PlatformStatusPayload['overall'], { text: string; tone: string; bg: string }> = {
   operational: { text: 'All systems operational', tone: '#0ca30c', bg: '#f1f9f1' },
   degraded:    { text: 'Degraded performance',    tone: '#b07c05', bg: '#fdf6e7' },
   down:        { text: 'Service disruption',      tone: '#d03b3b', bg: '#fcf1f1' },
-  nodata:      { text: 'No checks recorded yet',  tone: '#6b6860', bg: '#f4f3ef' },
+  nodata:      { text: 'No checks recorded yet',  tone: '#5f6b63', bg: '#eef1ef' },
 };
 
 /** Platform-wide uptime across the window: clean probes ÷ probes that could run. */
@@ -428,20 +430,20 @@ function ProviderSelect({ providers, value, onChange, color }: {
     <div className="relative" ref={ref}>
       <button type="button" onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu" aria-expanded={open}
-        className="flex items-center gap-2 w-[260px] text-[12px] rounded-lg border border-[#e8e6e0]
+        className="flex items-center gap-2 w-[260px] text-[12px] rounded-lg border border-[#e4e9e5]
                    bg-white px-3 py-2 text-left hover:border-[#d4d2cc] transition-colors">
         {selected && (
           <span className="w-2 h-2 rounded-full inline-block shrink-0"
             style={{ background: color.get(selected.rpId) }} aria-hidden />
         )}
-        <span className="flex-1 truncate font-semibold text-[#1a1916]">
+        <span className="flex-1 truncate font-semibold text-[#14201a]">
           {selected ? selected.name : 'All rental providers'}
         </span>
-        <ChevronDown size={14} className="text-[#9b9890] shrink-0" aria-hidden />
+        <ChevronDown size={14} className="text-[#8a948d] shrink-0" aria-hidden />
       </button>
 
       {open && (
-        <div role="menu" className="absolute z-30 mt-1 w-[260px] bg-white border border-[#e8e6e0]
+        <div role="menu" className="absolute z-30 mt-1 w-[260px] bg-white border border-[#e4e9e5]
                                     rounded-xl shadow-lg py-1 max-h-72 overflow-auto">
           {options.map((o) => {
             const active = o.id === value;
@@ -449,7 +451,7 @@ function ProviderSelect({ providers, value, onChange, color }: {
               <button key={String(o.id)} type="button" role="menuitemradio" aria-checked={active}
                 onClick={() => { onChange(o.id); setOpen(false); }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left transition-colors
-                            hover:bg-[#fafaf8] ${active ? 'font-semibold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                            hover:bg-[#f6f8f6] ${active ? 'font-semibold text-[#14201a]' : 'text-[#5f6b63]'}`}>
                 <span className="w-2 h-2 rounded-full inline-block shrink-0"
                   style={{ background: o.id == null ? 'transparent' : color.get(o.id) }} aria-hidden />
                 <span className="flex-1 truncate">{o.name}</span>
@@ -472,11 +474,11 @@ function StatusChip({ status, open, onToggle }: {
   const up = svcUptime(status);
   return (
     <button onClick={onToggle} aria-expanded={open} aria-controls="pulse-health-panel"
-      className="flex items-center gap-1.5 text-[11px] font-semibold text-[#6b6860] border border-[#e8e6e0]
+      className="flex items-center gap-1.5 text-[11px] font-semibold text-[#5f6b63] border border-[#e4e9e5]
                  bg-white rounded-full px-3 py-1.5 hover:border-[#d4d2cc] transition-colors">
       <span className="w-2 h-2 rounded-full inline-block" style={{ background: b.tone }} aria-hidden />
       {bad.length ? `${b.text} — ${bad.map((c) => c.label).join(', ')}` : b.text}
-      {up != null && <span className="text-[#9b9890] font-normal">· {up}% ({status.windowDays}d)</span>}
+      {up != null && <span className="text-[#8a948d] font-normal">· {up}% ({status.windowDays}d)</span>}
       {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
     </button>
   );
@@ -486,14 +488,14 @@ function StatusPanel({ status }: { status: PlatformStatusPayload }) {
   const b = SVC_BANNER[status.overall];
   const bad = status.components.filter((c) => c.status === 'degraded' || c.status === 'down');
   return (
-    <div id="pulse-health-panel" className="bg-white rounded-2xl border border-[#e8e6e0] p-4 mt-3">
+    <div id="pulse-health-panel" className="bg-white rounded-2xl border border-[#e4e9e5] p-4 mt-3">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-[#1a1916]">System status</h3>
-        <Link href="/dashboard/admin/status" className="flex items-center gap-0.5 text-[10px] font-semibold text-[#9b9890] whitespace-nowrap hover:text-[#1a1916]">
+        <h3 className="text-sm font-bold text-[#14201a]">System status</h3>
+        <Link href="/dashboard/admin/status" className="flex items-center gap-0.5 text-[10px] font-semibold text-[#8a948d] whitespace-nowrap hover:text-[#14201a]">
           Full status page <ArrowUpRight size={12} />
         </Link>
       </div>
-      <p className="text-[11px] text-[#9b9890] mt-0.5">
+      <p className="text-[11px] text-[#8a948d] mt-0.5">
         Per-component uptime over the last {status.windowDays} days — probed every {status.probeIntervalMinutes} minutes
       </p>
 
@@ -505,7 +507,7 @@ function StatusPanel({ status }: { status: PlatformStatusPayload }) {
             {b.text}{bad.length ? ` — ${bad.map((c) => c.label).join(', ')}` : ''}
           </strong>
           {bad.length > 0 && (
-            <div className="text-[11px] text-[#6b6860] mt-0.5">
+            <div className="text-[11px] text-[#5f6b63] mt-0.5">
               Check this before reading a business metric as a provider problem — a broken
               notification path inflates &ldquo;no action yet&rdquo; renewals.
             </div>
@@ -517,9 +519,9 @@ function StatusPanel({ status }: { status: PlatformStatusPayload }) {
         {status.components.map((c) => (
           <div key={c.key} className="py-2.5">
             <div className="flex items-center justify-between gap-3 mb-1.5">
-              <span className="text-[12px] font-semibold text-[#1a1916] truncate">{c.label}</span>
+              <span className="text-[12px] font-semibold text-[#14201a] truncate">{c.label}</span>
               <span className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] tabular-nums text-[#6b6860]">
+                <span className="text-[11px] tabular-nums text-[#5f6b63]">
                   {c.uptimePct != null ? `${c.uptimePct}% uptime` : 'no checks yet'}
                 </span>
                 <span className="text-[10px] font-semibold whitespace-nowrap"
@@ -559,19 +561,19 @@ function MarketTooltip({ active, payload, label }: {
   const annual = row['Annual rent'] == null ? null : Number(row['Annual rent']);
   const leases = Number(row.leases) || 0;
   return (
-    <div className="rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 shadow-[0_4px_12px_rgba(0,0,0,0.08)]">
-      <p className="text-[11px] font-bold text-[#1a1916]">{String(label)}</p>
-      <p className="text-[11px] text-[#6b6860]">{leases} lease{leases === 1 ? '' : 's'} started</p>
-      <p className="text-[11px] text-[#6b6860] flex items-center gap-1.5 mt-1">
+    <div className="rounded-xl border border-[#e4e9e5] bg-white px-3 py-2 shadow-[0_4px_12px_rgba(0,0,0,0.08)]">
+      <p className="text-[11px] font-bold text-[#14201a]">{String(label)}</p>
+      <p className="text-[11px] text-[#5f6b63]">{leases} lease{leases === 1 ? '' : 's'} started</p>
+      <p className="text-[11px] text-[#5f6b63] flex items-center gap-1.5 mt-1">
         <span className="w-2 h-2 rounded-full inline-block" style={{ background: AMBER }} />
         Market rent <span className="tabular-nums ml-auto pl-3">{market == null ? '—' : fmtAED(market)}</span>
       </p>
-      <p className="text-[11px] text-[#6b6860] flex items-center gap-1.5">
+      <p className="text-[11px] text-[#5f6b63] flex items-center gap-1.5">
         <span className="w-2 h-2 rounded-full inline-block" style={{ background: BLUE }} />
         Annual rent <span className="tabular-nums ml-auto pl-3">{annual == null ? '—' : fmtAED(annual)}</span>
       </p>
       {row.gapPct != null && market != null && annual != null && (
-        <p className="text-[11px] font-semibold text-[#1a1916] mt-1 pt-1 border-t border-[#f0ede8] tabular-nums">
+        <p className="text-[11px] font-semibold text-[#14201a] mt-1 pt-1 border-t border-[#f0ede8] tabular-nums">
           {fmtAED(market - annual)} under asking · {String(row.gapPct)}%
         </p>
       )}
@@ -596,12 +598,12 @@ function CashTooltip({ active, payload, label, series }: {
   const atRisk = Number(row.atRisk) || 0;
   const cheques = Number(row.cheques) || 0;
   return (
-    <div className="rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 shadow-[0_4px_12px_rgba(0,0,0,0.08)]">
-      <p className="text-[11px] font-bold text-[#1a1916]">{String(label)}</p>
-      <p className="text-[13px] font-bold text-[#1a1916] tabular-nums">{fmtAED(total)}</p>
-      <p className="text-[11px] text-[#6b6860]">{cheques} cheque{cheques === 1 ? '' : 's'}</p>
+    <div className="rounded-xl border border-[#e4e9e5] bg-white px-3 py-2 shadow-[0_4px_12px_rgba(0,0,0,0.08)]">
+      <p className="text-[11px] font-bold text-[#14201a]">{String(label)}</p>
+      <p className="text-[13px] font-bold text-[#14201a] tabular-nums">{fmtAED(total)}</p>
+      <p className="text-[11px] text-[#5f6b63]">{cheques} cheque{cheques === 1 ? '' : 's'}</p>
       {series.length > 1 && series.map((s) => (
-        <p key={s.rpId} className="text-[11px] text-[#6b6860] flex items-center gap-1.5 mt-0.5">
+        <p key={s.rpId} className="text-[11px] text-[#5f6b63] flex items-center gap-1.5 mt-0.5">
           <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ background: s.color }} />
           {s.name} <span className="tabular-nums ml-auto pl-3">{fmtAED(Number(row[`rp${s.rpId}`]) || 0)}</span>
         </p>
@@ -628,10 +630,10 @@ function HBars({ rows, height, color = BLUE, fmt = (v: number) => String(v), lab
     <ResponsiveContainer width="100%" height={h}>
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 96, left: 8, bottom: 0 }}>
         <XAxis type="number" hide />
-        <YAxis type="category" dataKey="name" width={labelWidth} tick={{ fontSize: 11, fill: '#6b6860' }} axisLine={false} tickLine={false} />
-        <Tooltip formatter={(v: unknown) => [fmt(Number(v)), ''] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+        <YAxis type="category" dataKey="name" width={labelWidth} tick={{ fontSize: 11, fill: '#5f6b63' }} axisLine={false} tickLine={false} />
+        <Tooltip formatter={(v: unknown) => [fmt(Number(v)), ''] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
         <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
-          <LabelList dataKey="label" position="right" style={{ fontSize: 11, fill: '#3d3b35' }} />
+          <LabelList dataKey="label" position="right" style={{ fontSize: 11, fill: '#46534c' }} />
           {data.map((r, i) => <Cell key={i} fill={r.color ?? color} />)}
         </Bar>
       </BarChart>
@@ -684,7 +686,7 @@ function MoveOutReasonsCard({ mo }: { mo: Pulse['customers']['moveOuts'] }) {
       ) : (
         <>
           <HBars rows={rows} labelWidth={178} fmt={(v) => `${v} move-out${v === 1 ? '' : 's'}`} />
-          <p className="text-[11px] text-[#9b9890] mt-2">
+          <p className="text-[11px] text-[#8a948d] mt-2">
             {mo.codedRatePct < 50 ? (
               <>
                 Most exits still carry no reason — the code is captured at the move-out itself, so the picture fills in
@@ -775,33 +777,33 @@ function LeadChannelsCard({ funnel, windowLabel }: { funnel: Funnel; windowLabel
             fmt={(v) => `${v} lead${v === 1 ? '' : 's'}`} />
           <div className="border-t border-[#f0ede8] mt-2 pt-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1">
-              <span className="text-[11px] text-[#6b6860] tabular-nums">
+              <span className="text-[11px] text-[#5f6b63] tabular-nums">
                 <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: JADE }} />
-                Marketplace-originated <span className="font-semibold text-[#1a1916]">{pct(portal)}%</span>
+                Marketplace-originated <span className="font-semibold text-[#14201a]">{pct(portal)}%</span>
               </span>
-              <span className="text-[11px] text-[#6b6860] tabular-nums">
+              <span className="text-[11px] text-[#5f6b63] tabular-nums">
                 <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: BLUE }} />
-                Provider-brought <span className="font-semibold text-[#1a1916]">{pct(total - portal - unknown)}%</span>
+                Provider-brought <span className="font-semibold text-[#14201a]">{pct(total - portal - unknown)}%</span>
               </span>
               {unknown > 0 && (
-                <span className="text-[11px] text-[#6b6860] tabular-nums">
+                <span className="text-[11px] text-[#5f6b63] tabular-nums">
                   <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle border border-[#d4d2cc]" style={{ background: '#f0ede8' }} />
-                  Unattributed <span className="font-semibold text-[#1a1916]">{pct(unknown)}%</span>
+                  Unattributed <span className="font-semibold text-[#14201a]">{pct(unknown)}%</span>
                 </span>
               )}
             </div>
             {convChips.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#9b9890] w-full">Converted to a lease</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#8a948d] w-full">Converted to a lease</span>
                 {convChips.map((c) => (
-                  <span key={c.source} className="text-[11px] text-[#6b6860] tabular-nums">
-                    <span className="font-semibold text-[#1a1916]">{c.converted}</span>
-                    <span className="text-[#9b9890]">/{c.leads}</span> {c.label}
+                  <span key={c.source} className="text-[11px] text-[#5f6b63] tabular-nums">
+                    <span className="font-semibold text-[#14201a]">{c.converted}</span>
+                    <span className="text-[#8a948d]">/{c.leads}</span> {c.label}
                   </span>
                 ))}
               </div>
             )}
-            <p className="text-[11px] text-[#9b9890] mt-1.5">
+            <p className="text-[11px] text-[#8a948d] mt-1.5">
               The marketplace stamps its own enquiries; every other channel is what the provider picked when logging the
               lead, so a channel missing from this chart means nobody recorded it — not that it sent no one. Most leases
               never pass through a lead at all, so read this as demand reaching the platform, not as the leasing funnel.
@@ -829,6 +831,7 @@ export default function PlatformPulsePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openQueue, setOpenQueue] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   // Leasing-funnel window. `null` = whatever the page payload came with, so the
   // card renders on first paint without a second round trip. The override carries
   // the provider it was fetched for, so a scope change discards it by comparison
@@ -859,7 +862,7 @@ export default function PlatformPulsePage() {
       .catch((e) => { if (!stale) setError((e as Error).message); })
       .finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [rpFilter]);
+  }, [rpFilter, reloadNonce]);
 
   // Funnel window: fetch ONLY this card, not the whole ~40-query payload. Runs
   // for the provider too, so a chosen window survives a scope change instead of
@@ -1055,20 +1058,38 @@ export default function PlatformPulsePage() {
     return { grid, max, byDay, byHour, total, peak, busiestDay, quietestDay, busiestHour, core };
   }, [data]);
 
-  if (!allowed) return <p className="p-8 text-sm text-[#9b9890]">Admin access required.</p>;
+  if (!allowed) return <p className="p-8 text-sm text-[#8a948d]">Admin access required.</p>;
+  // Genspark Admin Overview head (three gates). Rendered OUTSIDE the legacy Tailwind body below on purpose:
+  // the kit's scoped resets (.gx p / h3 / a / button) would otherwise restyle every existing Pulse card.
+  const gatesHead = (
+    <div className="gx" style={{ padding: '20px 24px 0', maxWidth: 1280, margin: '0 auto' }}>
+      <AdminGates actions={<span style={{ color: '#5f6b63' }}><StatusChip status={status} open={statusOpen} onToggle={() => setStatusOpen((o) => !o)} /></span>} />
+    </div>
+  );
   if (loading && !data) {
     return (
+      <>
+      {gatesHead}
       <div className="p-6 max-w-7xl mx-auto">
         <div className="animate-pulse space-y-3">
-          <div className="h-7 w-56 bg-[#e8e6e0] rounded" />
-          <div className="h-20 bg-[#f4f3ef] rounded-2xl" />
-          <div className="grid grid-cols-4 gap-3">{[...Array(8)].map((_, i) => <div key={i} className="h-24 bg-[#f4f3ef] rounded-2xl" />)}</div>
+          <div className="h-7 w-56 bg-[#e4e9e5] rounded" />
+          <div className="h-20 bg-[#eef1ef] rounded-2xl" />
+          <div className="grid grid-cols-4 gap-3">{[...Array(8)].map((_, i) => <div key={i} className="h-24 bg-[#eef1ef] rounded-2xl" />)}</div>
         </div>
       </div>
+      </>
     );
   }
   if (error || !data) {
-    return <div className="p-8 text-sm text-[#b91c1c]">Couldn&apos;t load Platform Pulse{error ? ` — ${error}` : ''}.</div>;
+    return (
+      <>
+        {gatesHead}
+        <div className="p-8 text-sm text-[#b91c1c]">
+          Couldn&apos;t load Platform Pulse{error ? ` — ${error}` : ''}.{' '}
+          <button type="button" onClick={() => setReloadNonce((n) => n + 1)} className="underline font-semibold">Try again</button>
+        </div>
+      </>
+    );
   }
 
   const { topline: tl, kpis: k } = data;
@@ -1100,27 +1121,24 @@ export default function PlatformPulsePage() {
     { label: 'e-signed in-app', v: funnel.eSigned },
   ];
   const signal = (d: number | null) =>
-    d == null ? <span className="text-[12px] text-[#9b9890]">—</span>
+    d == null ? <span className="text-[12px] text-[#8a948d]">—</span>
     : d <= -15 ? <StatusDot tone={AMBER} label={'Disengaging'} />
     : d < 0 ? <StatusDot tone={GRAY} label={'Softening'} />
     : <StatusDot tone={'#1a7a5a'} label={'Stable'} />;
 
   return (
+    <>
+    {gatesHead}
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
+      {/* Header — the page title + system-status chip now live in the Genspark head above (AdminGates).
+          No "Live activity" shortcut: /dashboard/admin/activity is parked `hidden: true` in the nav rail,
+          so a link here would be the only door into a page the product has deliberately closed. */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-[#1a1916]">Platform Pulse</h1>
-          <p className="text-[12px] text-[#9b9890] mt-0.5">
+          <h2 className="text-[15px] font-bold text-[#14201a]">Platform pulse</h2>
+          <p className="text-[12px] text-[#8a948d] mt-0.5">
             What the platform sees at login — portfolio-wide across all rental providers
           </p>
-        </div>
-        {/* No "Live activity" shortcut: /dashboard/admin/activity is parked
-            `hidden: true` in the nav rail, so a link here would be the only
-            door into a page the product has deliberately closed. Same reason
-            the Activity and Risk board hints are gone from the cards below. */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <StatusChip status={status} open={statusOpen} onToggle={() => setStatusOpen((o) => !o)} />
         </div>
       </div>
 
@@ -1130,11 +1148,11 @@ export default function PlatformPulsePage() {
       {/* Provider filter */}
       <div className="flex items-center gap-2 mt-4 flex-wrap">
         <ProviderSelect providers={data.providers} value={rpFilter} onChange={setRpFilter} color={rpColor} />
-        {loading && <span className="text-[11px] text-[#9b9890]">refreshing…</span>}
+        {loading && <span className="text-[11px] text-[#8a948d]">refreshing…</span>}
       </div>
 
       {/* Asset topline */}
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-3 px-2 py-3 flex flex-wrap">
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-3 px-2 py-3 flex flex-wrap">
         {[
           {
             label: "Who's on the platform",
@@ -1167,13 +1185,13 @@ export default function PlatformPulsePage() {
           },
         ].map((g, gi, arr) => (
           <div key={g.label} className={`flex flex-col gap-1.5 px-4 py-1 flex-1 min-w-[150px] ${gi < arr.length - 1 ? 'border-r border-[#f0ede8]' : ''}`}>
-            <span className="text-[9px] font-bold uppercase tracking-wider text-[#9b9890]">{g.label}</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider text-[#8a948d]">{g.label}</span>
             <div className="flex gap-6">
               {g.cells.map((c) => {
                 const cell = (
                   <span className="flex flex-col">
-                    <span className="text-lg font-bold text-[#1a1916] leading-tight tabular-nums">{c.v}</span>
-                    <span className="text-[11px] text-[#6b6860] whitespace-nowrap">{c.l}</span>
+                    <span className="text-lg font-bold text-[#14201a] leading-tight tabular-nums">{c.v}</span>
+                    <span className="text-[11px] text-[#5f6b63] whitespace-nowrap">{c.l}</span>
                   </span>
                 );
                 return c.href ? <Link key={c.l} href={c.href} className="hover:opacity-70">{cell}</Link> : <span key={c.l}>{cell}</span>;
@@ -1186,19 +1204,19 @@ export default function PlatformPulsePage() {
       {/* KPI grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
         <div className="col-span-2 row-span-2">
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4 h-full flex flex-col justify-center hover:border-[#d4d2cc] transition-colors">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold"><DirhamSign size={12} /> Annual rent (GMV) vs market rent</div>
-            <p className="text-4xl font-bold text-[#1a1916] mt-2 leading-none tabular-nums">{fmtAED(k.arr)}</p>
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] px-5 py-4 h-full flex flex-col justify-center hover:border-[#d4d2cc] transition-colors">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold"><DirhamSign size={12} /> Annual rent (GMV) vs market rent</div>
+            <p className="text-4xl font-bold text-[#14201a] mt-2 leading-none tabular-nums">{fmtAED(k.arr)}</p>
             {/* Market rent is the same stock at asking, so it sits BESIDE the
                 headline rather than replacing it — the pair is the point. */}
             <div className="flex items-baseline gap-2 mt-2">
               <span className="text-[13px] font-semibold text-[#b45309] tabular-nums">{fmtAED(k.marketValue)}</span>
-              <span className="text-[11px] text-[#9b9890]">market rent{k.marketGapPct != null ? ` · let ${k.marketGapPct}% under asking` : ''}</span>
+              <span className="text-[11px] text-[#8a948d]">market rent{k.marketGapPct != null ? ` · let ${k.marketGapPct}% under asking` : ''}</span>
             </div>
-            <p className="text-[12px] text-[#6b6860] mt-3">
+            <p className="text-[12px] text-[#5f6b63] mt-3">
               {k.earningUnits} earning units across {k.earningProviders} provider{k.earningProviders === 1 ? '' : 's'} · platform fees YTD {fmtAED(k.fees.ytdNet)}
             </p>
-            <p className="text-[11px] text-[#9b9890] mt-1">
+            <p className="text-[11px] text-[#8a948d] mt-1">
               Annual rent: one counting lease per unit — active, or post-dated cheques confirmed; expired, terminated and wound-down terms excluded. Market rent: asking price across all {tl.units} units, vacant included.
             </p>
           </div>
@@ -1224,22 +1242,22 @@ export default function PlatformPulsePage() {
       {/* Jump nav */}
       <nav className="flex gap-2 flex-wrap mt-4">
         {[['#sec-growth', '1 · Growth'], ['#sec-money', '2 · Money'], ['#sec-market', '3 · Market'], ['#sec-providers', '4 · Providers'], ['#sec-customers', '5 · Customers'], ['#sec-exposure', '6 · Exposure'], ['#sec-usage', '7 · Usage']].map(([href, label]) => (
-          <a key={href} href={href} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] bg-white rounded-full px-3 py-1 hover:border-[#1e5fae] hover:text-[#1a1916]">{label}</a>
+          <a key={href} href={href} className="text-[11px] text-[#5f6b63] border border-[#e4e9e5] bg-white rounded-full px-3 py-1 hover:border-[#1e5fae] hover:text-[#14201a]">{label}</a>
         ))}
       </nav>
 
       {/* ── 1 · GROWTH ── */}
       <SectionHead id="sec-growth" no="Section 1 · Growth" q="Is the portfolio growing?" />
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 overflow-x-auto">
-        <h3 className="text-sm font-bold text-[#1a1916]">Top rental providers — unit economics</h3>
-        <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4 overflow-x-auto">
+        <h3 className="text-sm font-bold text-[#14201a]">Top rental providers — unit economics</h3>
+        <p className="text-[11px] text-[#8a948d] mt-0.5 mb-2">
           Ranked by contracted rent, against the asking-price roll and how recently anyone touched the account · Page activity counts
           the provider&apos;s owner plus their assigned managers, so a manager working across two
           providers is counted on both
         </p>
         <table className="w-full text-[13px] min-w-[760px]">
           <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+            <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
               <th className="py-1.5 font-semibold">Provider</th>
               {/* Annual rent and Market rent sit side by side — the pair is only
                   meaningful read together, and the same two names are used for
@@ -1257,7 +1275,7 @@ export default function PlatformPulsePage() {
             {data.providerTable.map((p) => (
               <tr key={p.rpId}>
                 <td className="py-2">
-                  <Link href={providerHref(p)} className="text-[#1a1916] hover:underline">
+                  <Link href={providerHref(p)} className="text-[#14201a] hover:underline">
                     <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: rpColor.get(p.rpId) }} />{p.name}
                   </Link>
                 </td>
@@ -1269,9 +1287,9 @@ export default function PlatformPulsePage() {
                   {p.pageViews30 ? (
                     <>
                       {p.pageViews30.toLocaleString()}
-                      <span className="text-[#9b9890] text-[11px]"> · {p.pageViewers30} {p.pageViewers30 === 1 ? 'person' : 'people'}</span>
+                      <span className="text-[#8a948d] text-[11px]"> · {p.pageViewers30} {p.pageViewers30 === 1 ? 'person' : 'people'}</span>
                     </>
-                  ) : <span className="text-[#9b9890]">—</span>}
+                  ) : <span className="text-[#8a948d]">—</span>}
                 </td>
                 <td className="py-2 text-right tabular-nums font-semibold">{p.feePerUnit ? fmtAED(p.feePerUnit) : '—'}</td>
                 <td className="py-2 text-right tabular-nums whitespace-nowrap">{sinceLabel(p.lastActive)}</td>
@@ -1289,7 +1307,7 @@ export default function PlatformPulsePage() {
           {data.providersOps.topManagers.length === 0 ? <EmptyChart text="No manager activity in the last 30 days" h={160} /> : (
             <table className="w-full text-[13px]">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <th className="py-1.5 font-semibold">Manager</th>
                   {/* Actions and Page activity sit together on purpose: writes
                       beside reads is the comparison that tells you whether time
@@ -1303,11 +1321,11 @@ export default function PlatformPulsePage() {
               <tbody className="divide-y divide-[#f0ede8]">
                 {data.providersOps.topManagers.map((m) => (
                   <tr key={m.id}>
-                    <td className="py-2"><Link href={`/dashboard/admin/users/${m.id}`} className="text-[#1a1916] hover:underline">{m.name}</Link></td>
+                    <td className="py-2"><Link href={`/dashboard/admin/users/${m.id}`} className="text-[#14201a] hover:underline">{m.name}</Link></td>
                     <td className="py-2 text-right tabular-nums">{m.actions.toLocaleString()}</td>
-                    <td className="py-2 text-right tabular-nums">{m.pageViews ? m.pageViews.toLocaleString() : <span className="text-[#9b9890]">—</span>}</td>
+                    <td className="py-2 text-right tabular-nums">{m.pageViews ? m.pageViews.toLocaleString() : <span className="text-[#8a948d]">—</span>}</td>
                     <td className="py-2 text-right tabular-nums">{m.landlords}</td>
-                    <td className="py-2 text-right text-[#6b6860]">{dateLabel(m.lastSeen)}</td>
+                    <td className="py-2 text-right text-[#5f6b63]">{dateLabel(m.lastSeen)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1320,7 +1338,7 @@ export default function PlatformPulsePage() {
       <ChartCard title="Provider portfolio — engagement" sub="Leading indicator of a provider quietly leaving: audit-logged actions, last 30 days vs the 30 before">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+            <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
               <th className="py-1.5 font-semibold">Provider</th>
               <th className="py-1.5 font-semibold text-right">Actions 30d</th>
               <th className="py-1.5 font-semibold text-right">Δ vs prior 30d</th>
@@ -1330,9 +1348,9 @@ export default function PlatformPulsePage() {
           <tbody className="divide-y divide-[#f0ede8]">
             {data.providerTable.map((p) => (
               <tr key={p.rpId}>
-                <td className="py-2"><Link href={providerHref(p)} className="text-[#1a1916] hover:underline">{p.name}</Link></td>
+                <td className="py-2"><Link href={providerHref(p)} className="text-[#14201a] hover:underline">{p.name}</Link></td>
                 <td className="py-2 text-right tabular-nums">{p.actions30.toLocaleString()}</td>
-                <td className={`py-2 text-right tabular-nums font-semibold ${p.actionsDeltaPct == null ? 'text-[#9b9890]' : p.actionsDeltaPct < 0 ? 'text-[#b45309]' : 'text-[#1a7a5a]'}`}>
+                <td className={`py-2 text-right tabular-nums font-semibold ${p.actionsDeltaPct == null ? 'text-[#8a948d]' : p.actionsDeltaPct < 0 ? 'text-[#b45309]' : 'text-[#1a7a5a]'}`}>
                   {p.actionsDeltaPct == null ? '—' : `${p.actionsDeltaPct > 0 ? '▲ +' : p.actionsDeltaPct < 0 ? '▼ ' : ''}${p.actionsDeltaPct}%`}
                 </td>
                 <td className="py-2 text-right">{signal(p.actionsDeltaPct)}</td>
@@ -1340,7 +1358,7 @@ export default function PlatformPulsePage() {
             ))}
           </tbody>
         </table>
-        <p className="text-[11px] text-[#9b9890] mt-2">Actions/unit falling + slowing renewals = a provider moving operations off-platform before formally leaving.</p>
+        <p className="text-[11px] text-[#8a948d] mt-2">Actions/unit falling + slowing renewals = a provider moving operations off-platform before formally leaving.</p>
       </ChartCard>
       )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
@@ -1352,10 +1370,10 @@ export default function PlatformPulsePage() {
               <select
                 value={funnel.days}
                 onChange={(e) => setFunnelDays(Number(e.target.value))}
-                className="text-[11px] font-semibold text-[#3d3b35] border border-[#e8e6e0] rounded-full pl-2.5 pr-6 py-1 bg-white hover:border-[#d4d2cc] focus:outline-none focus:border-[#1e5fae] cursor-pointer appearance-none bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%239b9890%22 stroke-width=%223%22><path d=%22M6 9l6 6 6-6%22/></svg>')] bg-no-repeat bg-[right_0.5rem_center] bg-[length:9px_9px]">
+                className="text-[11px] font-semibold text-[#46534c] border border-[#e4e9e5] rounded-full pl-2.5 pr-6 py-1 bg-white hover:border-[#d4d2cc] focus:outline-none focus:border-[#1e5fae] cursor-pointer appearance-none bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%239b9890%22 stroke-width=%223%22><path d=%22M6 9l6 6 6-6%22/></svg>')] bg-no-repeat bg-[right_0.5rem_center] bg-[length:9px_9px]">
                 {FUNNEL_WINDOWS.map((d) => <option key={d} value={d}>{funnelWindowLabel(d)}</option>)}
               </select>
-              {funnelLoading && <span className="text-[10px] text-[#9b9890]">…</span>}
+              {funnelLoading && <span className="text-[10px] text-[#8a948d]">…</span>}
             </label>
           )}>
           <HBars rows={funnelRows} color={BLUE} height={150} labelWidth={120} />
@@ -1364,19 +1382,19 @@ export default function PlatformPulsePage() {
               chart is what stops the stages growing as they descend. */}
           <div className="border-t border-[#f0ede8] mt-2 pt-2">
             {funnel.live > 0 && (<>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-[#9b9890]">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#8a948d]">
               Of the {funnel.live} live · steps completed
             </p>
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
               {funnelChips.map((c) => (
-                <span key={c.label} className="text-[11px] text-[#6b6860] tabular-nums">
-                  <span className="font-semibold text-[#1a1916]">{c.v}</span>
-                  <span className="text-[#9b9890]">/{funnel.live}</span> {c.label}
+                <span key={c.label} className="text-[11px] text-[#5f6b63] tabular-nums">
+                  <span className="font-semibold text-[#14201a]">{c.v}</span>
+                  <span className="text-[#8a948d]">/{funnel.live}</span> {c.label}
                 </span>
               ))}
             </div>
             </>)}
-            <p className="text-[11px] text-[#9b9890] mt-1.5">
+            <p className="text-[11px] text-[#8a948d] mt-1.5">
               {funnel.live > 0 && 'These are not pipeline gates — a lease goes live without them, so they sit beside the funnel rather than under it. '}
               Separately, {funnel.leads} marketplace lead{funnel.leads === 1 ? '' : 's'} came in this window
               {funnel.leads ? ` (${funnel.leadsConverted} converted)` : ''} — most leases are drafted directly by a provider and never pass through a lead.
@@ -1428,7 +1446,7 @@ export default function PlatformPulsePage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
                 <XAxis dataKey="name" tick={TICK} axisLine={false} tickLine={false} />
                 <YAxis tick={TICK} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => aedShort(Number(v))} />
-                <Tooltip formatter={(v: unknown) => [fmtAED(Number(v)), 'Fees'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                <Tooltip formatter={(v: unknown) => [fmtAED(Number(v)), 'Fees'] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
                 <Bar dataKey="value" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={36} />
               </BarChart>
             </ResponsiveContainer>
@@ -1444,13 +1462,13 @@ export default function PlatformPulsePage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
                 <XAxis dataKey="month" tick={{ ...TICK, fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
                 <YAxis tick={TICK} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => aedShort(Number(v))} />
-                <Tooltip content={<CashTooltip series={cashData.series} />} cursor={{ fill: '#fafaf8' }} />
+                <Tooltip content={<CashTooltip series={cashData.series} />} cursor={{ fill: '#f6f8f6' }} />
                 {cashData.series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
                 {/* Same axis, same unit — the monthly average, so a month reads as
                     above or below a typical one instead of only against its peers. */}
                 {cashData.avg > 0 && (
                   <ReferenceLine y={cashData.avg} stroke="#c9c6c0" strokeDasharray="4 4"
-                    label={{ value: `avg ${aedShort(cashData.avg)}`, position: 'insideTopRight', fontSize: 10, fill: '#9b9890' }} />
+                    label={{ value: `avg ${aedShort(cashData.avg)}`, position: 'insideTopRight', fontSize: 10, fill: '#8a948d' }} />
                 )}
                 {cashData.series.map((s, i) => (
                   <Bar key={s.rpId} dataKey={`rp${s.rpId}`} name={s.name} stackId="cash"
@@ -1468,7 +1486,7 @@ export default function PlatformPulsePage() {
             <>
               <table className="w-full text-[13px]">
                 <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
                     <th className="py-1.5 font-semibold">Customer</th>
                     <th className="py-1.5 font-semibold">Next due</th>
                     <th className="py-1.5 font-semibold text-right">Amount</th>
@@ -1480,10 +1498,10 @@ export default function PlatformPulsePage() {
                     <tr key={r.tenantId}>
                       <td className="py-2">
                         {r.userId != null
-                          ? <Link href={`/dashboard/admin/users/${r.userId}`} className="text-[#1a1916] hover:underline">{r.name}</Link>
+                          ? <Link href={`/dashboard/admin/users/${r.userId}`} className="text-[#14201a] hover:underline">{r.name}</Link>
                           : r.name}
                       </td>
-                      <td className="py-2 text-[#6b6860]">{dateLabel(r.nextDue)}</td>
+                      <td className="py-2 text-[#5f6b63]">{dateLabel(r.nextDue)}</td>
                       <td className="py-2 text-right tabular-nums">{fmtAED(r.amount)}</td>
                       <td className="py-2 text-right tabular-nums">{r.priorBounces}</td>
                     </tr>
@@ -1491,7 +1509,7 @@ export default function PlatformPulsePage() {
                 </tbody>
               </table>
               {data.money.pdcAtRisk.more > 0 && (
-                <p className="text-[11px] text-[#9b9890] mt-2">…and {data.money.pdcAtRisk.more} more customer{data.money.pdcAtRisk.more === 1 ? '' : 's'} totalling {fmtAED(data.money.pdcAtRisk.moreAmount)}</p>
+                <p className="text-[11px] text-[#8a948d] mt-2">…and {data.money.pdcAtRisk.more} more customer{data.money.pdcAtRisk.more === 1 ? '' : 's'} totalling {fmtAED(data.money.pdcAtRisk.moreAmount)}</p>
               )}
             </>
           )}
@@ -1506,7 +1524,7 @@ export default function PlatformPulsePage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
                   <XAxis dataKey="name" tick={TICK} axisLine={false} tickLine={false} />
                   <YAxis tick={TICK} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => aedShort(Number(v))} />
-                  <Tooltip formatter={(v: unknown, name) => [fmtAED(Number(v)), String(name)] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                  <Tooltip formatter={(v: unknown, name) => [fmtAED(Number(v)), String(name)] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="Cleared" stackId="c" fill={JADE} maxBarSize={36} />
                   <Bar dataKey="Outstanding" stackId="c" fill={AMBER} radius={[4, 4, 0, 0]} maxBarSize={36} />
@@ -1523,7 +1541,7 @@ export default function PlatformPulsePage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
               <XAxis dataKey="name" tick={TICK} axisLine={false} tickLine={false} />
               <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} width={30} />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Bar dataKey="Renewed" stackId="r" fill={JADE} maxBarSize={36} />
               <Bar dataKey="Notice sent" stackId="r" fill={BLUE} maxBarSize={36} />
@@ -1566,11 +1584,11 @@ export default function PlatformPulsePage() {
         <ChartCard title="Unit mix & rent by type"
           sub={`What ${mixUnits === tl.units ? `the ${tl.units}` : `these ${mixUnits}`} units are — annual rent contracted against the asking-price roll for the same stock`}>
           <div className="flex items-center gap-2 mb-2">
-            <label htmlFor="mix-area" className="text-[11px] text-[#9b9890]">Area</label>
+            <label htmlFor="mix-area" className="text-[11px] text-[#8a948d]">Area</label>
             <select id="mix-area" value={mixArea ?? ''}
               onChange={(e) => setMixArea(e.target.value === '' ? null : e.target.value)}
-              className="text-[12px] rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1.5
-                         text-[#1a1916] font-semibold hover:border-[#d4d2cc] max-w-[220px] truncate">
+              className="text-[12px] rounded-lg border border-[#e4e9e5] bg-white px-2.5 py-1.5
+                         text-[#14201a] font-semibold hover:border-[#d4d2cc] max-w-[220px] truncate">
               <option value="">All areas</option>
               {mixAreas.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
@@ -1578,7 +1596,7 @@ export default function PlatformPulsePage() {
           <div className="overflow-x-auto">
             <table className="w-full text-[13px] min-w-[420px]">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <th className="py-1.5 font-semibold">Type · plan</th>
                   <th className="py-1.5 font-semibold text-right">Units</th>
                   <th className="py-1.5 font-semibold text-right">Occupied</th>
@@ -1594,19 +1612,19 @@ export default function PlatformPulsePage() {
                   const expandable = m.plans.length > 1;
                   return (
                     <Fragment key={m.key}>
-                      <tr className={open ? 'bg-[#fafaf8]' : undefined}>
+                      <tr className={open ? 'bg-[#f6f8f6]' : undefined}>
                         <td className="py-2">
                           <span className="flex items-center gap-1.5">
                             {expandable ? (
                               <button onClick={() => setOpenMixType(open ? null : m.key)}
                                 aria-expanded={open}
-                                className="flex items-center gap-1.5 text-[#1a1916] hover:opacity-70">
-                                {open ? <ChevronUp size={13} className="text-[#9b9890]" /> : <ChevronDown size={13} className="text-[#9b9890]" />}
+                                className="flex items-center gap-1.5 text-[#14201a] hover:opacity-70">
+                                {open ? <ChevronUp size={13} className="text-[#8a948d]" /> : <ChevronDown size={13} className="text-[#8a948d]" />}
                                 {TYPE_LABEL[m.key] ?? m.key}
-                                <span className="text-[10px] text-[#9b9890] font-semibold">{m.plans.length} plans</span>
+                                <span className="text-[10px] text-[#8a948d] font-semibold">{m.plans.length} plans</span>
                               </button>
                             ) : (
-                              <Link href={`/dashboard/admin/units?unitType=${encodeURIComponent(m.key)}`} className="ml-[18px] text-[#1a1916] hover:underline">{TYPE_LABEL[m.key] ?? m.key}</Link>
+                              <Link href={`/dashboard/admin/units?unitType=${encodeURIComponent(m.key)}`} className="ml-[18px] text-[#14201a] hover:underline">{TYPE_LABEL[m.key] ?? m.key}</Link>
                             )}
                           </span>
                         </td>
@@ -1614,16 +1632,16 @@ export default function PlatformPulsePage() {
                         <td className="py-2 text-right tabular-nums">{m.occupied}</td>
                         <td className="py-2 text-right tabular-nums">{m.contracted ? fmtAED(m.contracted) : '—'}</td>
                         <td className="py-2 text-right tabular-nums text-[#b45309]">{m.market ? fmtAED(m.market) : '—'}</td>
-                        <td className="py-2 text-right tabular-nums text-[#6b6860]">{askLabel(m)}</td>
+                        <td className="py-2 text-right tabular-nums text-[#5f6b63]">{askLabel(m)}</td>
                       </tr>
                       {open && m.plans.map((p) => (
-                        <tr key={p.key} className="bg-[#fafaf8]">
-                          <td className="py-1.5 pl-[26px] text-[12px] text-[#3d3b35]">{p.label}</td>
-                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#6b6860]">{p.units}</td>
-                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#6b6860]">{p.occupied}</td>
-                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#6b6860]">{p.contracted ? fmtAED(p.contracted) : '—'}</td>
+                        <tr key={p.key} className="bg-[#f6f8f6]">
+                          <td className="py-1.5 pl-[26px] text-[12px] text-[#46534c]">{p.label}</td>
+                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#5f6b63]">{p.units}</td>
+                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#5f6b63]">{p.occupied}</td>
+                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#5f6b63]">{p.contracted ? fmtAED(p.contracted) : '—'}</td>
                           <td className="py-1.5 text-right tabular-nums text-[12px] text-[#b45309]">{p.market ? fmtAED(p.market) : '—'}</td>
-                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#6b6860]">{askLabel(p)}</td>
+                          <td className="py-1.5 text-right tabular-nums text-[12px] text-[#5f6b63]">{askLabel(p)}</td>
                         </tr>
                       ))}
                     </Fragment>
@@ -1668,12 +1686,12 @@ export default function PlatformPulsePage() {
 
       {/* ── 4 · PROVIDERS ── */}
       <SectionHead id="sec-providers" no="Section 4 · Providers" q="Is each provider earning its place?" />
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-[#1a1916]">Needs intervention today</h3>
-          <span className="text-[10px] font-semibold text-[#9b9890]">click a row to see the work</span>
+          <h3 className="text-sm font-bold text-[#14201a]">Needs intervention today</h3>
+          <span className="text-[10px] font-semibold text-[#8a948d]">click a row to see the work</span>
         </div>
-        <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">The platform analog of “delayed orders” — each queue mirrors the per-provider Action Center exactly</p>
+        <p className="text-[11px] text-[#8a948d] mt-0.5 mb-2">The platform analog of “delayed orders” — each queue mirrors the per-provider Action Center exactly</p>
         <div className="divide-y divide-[#f0ede8]">
           {data.queues.map((qu) => {
             const open = openQueue === qu.key;
@@ -1681,29 +1699,29 @@ export default function PlatformPulsePage() {
             return (
               <div key={qu.key}>
                 <button onClick={() => setOpenQueue(open ? null : qu.key)}
-                  className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-[#fafaf8] px-1 rounded-lg">
-                  <span className="flex-1 text-[13px] text-[#1a1916]">{qu.label}</span>
-                  {qu.amount != null && qu.amount > 0 && <span className="text-[12px] text-[#6b6860] tabular-nums">{fmtAED(qu.amount)}</span>}
+                  className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-[#f6f8f6] px-1 rounded-lg">
+                  <span className="flex-1 text-[13px] text-[#14201a]">{qu.label}</span>
+                  {qu.amount != null && qu.amount > 0 && <span className="text-[12px] text-[#5f6b63] tabular-nums">{fmtAED(qu.amount)}</span>}
                   {qu.oldestDays != null && qu.oldestDays > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-[#9b9890] tabular-nums"><Clock size={11} /> oldest {qu.oldestDays}d</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-[#8a948d] tabular-nums"><Clock size={11} /> oldest {qu.oldestDays}d</span>
                   )}
                   <span className="min-w-[26px] text-center text-[12px] font-bold tabular-nums rounded-full px-2 py-0.5"
-                    style={{ background: qu.count === 0 ? '#f0faf6' : '#fef2f2', color: tone }}>{qu.count}</span>
-                  {qu.count > 0 ? (open ? <ChevronUp size={14} className="text-[#9b9890]" /> : <ChevronDown size={14} className="text-[#9b9890]" />) : <span className="w-3.5" />}
+                    style={{ background: qu.count === 0 ? '#eef7f2' : '#fef2f2', color: tone }}>{qu.count}</span>
+                  {qu.count > 0 ? (open ? <ChevronUp size={14} className="text-[#8a948d]" /> : <ChevronDown size={14} className="text-[#8a948d]" />) : <span className="w-3.5" />}
                 </button>
                 {open && qu.count > 0 && (
                   <div className="pb-2 pl-1">
-                    <div className="rounded-xl bg-[#fafaf8] border border-[#f0ede8] divide-y divide-[#f0ede8]">
+                    <div className="rounded-xl bg-[#f6f8f6] border border-[#f0ede8] divide-y divide-[#f0ede8]">
                       {qu.items.map((it) => {
                         const label = [it.unit && `Unit ${it.unit}`, it.building, it.tenant].filter(Boolean).join(' · ') || it.detail || `#${it.id}`;
                         const href = it.userId != null ? `/dashboard/admin/users/${it.userId}` : it.rpId != null ? `/dashboard/admin/kyc/rental-provider/${it.rpId}` : null;
                         const row = (
                           <div className="flex items-center gap-3 px-3 py-2">
-                            <span className="flex-1 text-[12px] text-[#3d3b35]">{label}{it.detail && label !== it.detail ? <span className="text-[#9b9890]"> — {it.detail}</span> : null}</span>
-                            {it.amount != null && <span className="text-[12px] tabular-nums text-[#6b6860]">{fmtAED(it.amount)}</span>}
-                            <span className="text-[11px] text-[#9b9890] whitespace-nowrap">{dateLabel(it.date)}</span>
-                            {it.rpName && <span className="text-[10px] text-[#9b9890] border border-[#e8e6e0] rounded-full px-2 py-0.5 whitespace-nowrap">{it.rpName}</span>}
-                            {href && <ArrowUpRight size={12} className="text-[#9b9890]" />}
+                            <span className="flex-1 text-[12px] text-[#46534c]">{label}{it.detail && label !== it.detail ? <span className="text-[#8a948d]"> — {it.detail}</span> : null}</span>
+                            {it.amount != null && <span className="text-[12px] tabular-nums text-[#5f6b63]">{fmtAED(it.amount)}</span>}
+                            <span className="text-[11px] text-[#8a948d] whitespace-nowrap">{dateLabel(it.date)}</span>
+                            {it.rpName && <span className="text-[10px] text-[#8a948d] border border-[#e4e9e5] rounded-full px-2 py-0.5 whitespace-nowrap">{it.rpName}</span>}
+                            {href && <ArrowUpRight size={12} className="text-[#8a948d]" />}
                           </div>
                         );
                         return href
@@ -1711,7 +1729,7 @@ export default function PlatformPulsePage() {
                           : <div key={`${qu.key}-${it.id}`}>{row}</div>;
                       })}
                       {qu.truncated && (
-                        <p className="px-3 py-2 text-[11px] text-[#9b9890]">Showing {qu.items.length} of {qu.count}{qu.href ? ' — open the linked board for the rest' : ''}</p>
+                        <p className="px-3 py-2 text-[11px] text-[#8a948d]">Showing {qu.items.length} of {qu.count}{qu.href ? ' — open the linked board for the rest' : ''}</p>
                       )}
                     </div>
                     {qu.href && (
@@ -1742,21 +1760,21 @@ export default function PlatformPulsePage() {
                 <td className="py-2.5 text-right"><Meter pct={data.customers.portalAdoption.pct} width="w-28" /></td>
               </tr>
               <tr>
-                <td className="py-2.5 text-[#9b9890]">Complaints &amp; resolution time</td>
-                <td className="py-2.5 text-right text-[11px] text-[#9b9890]">not tracked yet — needs a complaint/ticket category at intake</td>
+                <td className="py-2.5 text-[#8a948d]">Complaints &amp; resolution time</td>
+                <td className="py-2.5 text-right text-[11px] text-[#8a948d]">not tracked yet — needs a complaint/ticket category at intake</td>
               </tr>
             </tbody>
           </table>
-          <p className="text-[11px] text-[#9b9890] mt-2">Portal-active customers likely pay faster — adoption is a collections lever, not a vanity metric ({data.customers.portalAdoption.active30d} of {data.customers.portalAdoption.activeCustomers} active customers).</p>
+          <p className="text-[11px] text-[#8a948d] mt-2">Portal-active customers likely pay faster — adoption is a collections lever, not a vanity metric ({data.customers.portalAdoption.active30d} of {data.customers.portalAdoption.activeCustomers} active customers).</p>
         </ChartCard>
         <MoveOutReasonsCard mo={data.customers.moveOuts} />
       </div>
 
       {/* ── 6 · EXPOSURE ── */}
       <SectionHead id="sec-exposure" no="Section 6 · Exposure" q="What's at risk?" />
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-        <h3 className="text-sm font-bold text-[#1a1916]">Concentration risk</h3>
-        <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">Platform fragility at a glance — losing one provider or one building should never be invisible until it happens</p>
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4">
+        <h3 className="text-sm font-bold text-[#14201a]">Concentration risk</h3>
+        <p className="text-[11px] text-[#8a948d] mt-0.5 mb-2">Platform fragility at a glance — losing one provider or one building should never be invisible until it happens</p>
         <table className="w-full text-[13px]">
           <tbody className="divide-y divide-[#f0ede8]">
             {[
@@ -1786,7 +1804,7 @@ export default function PlatformPulsePage() {
               label: `${b.cases} · ${fmtAED(b.amount)}`,
             }))} />
           )}
-          <p className="text-[11px] text-[#9b9890] mt-1">The 60+ bucket is the compliance exposure — deposit delays are the top complaint driver in UAE rentals.</p>
+          <p className="text-[11px] text-[#8a948d] mt-1">The 60+ bucket is the compliance exposure — deposit delays are the top complaint driver in UAE rentals.</p>
         </ChartCard>
       </div>
 
@@ -1800,7 +1818,7 @@ export default function PlatformPulsePage() {
           a quiet-but-watched day is visible rather than reading as inactivity. */}
       <ChartCard title="Platform activity / day"
         sub={`Last 30 days · ${data.usage.actions30d.toLocaleString()} actions by ${data.usage.activeUsers30d} users`}>
-        <div className="flex items-center gap-4 text-[11px] text-[#6b6860] mb-1">
+        <div className="flex items-center gap-4 text-[11px] text-[#5f6b63] mb-1">
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-[2px] inline-block" style={{ background: BLUE }} />Actions</span>
           <span className="flex items-center gap-1.5"><span className="w-3.5 h-0.5 inline-block" style={{ background: JADE }} />Page views</span>
         </div>
@@ -1834,7 +1852,7 @@ export default function PlatformPulsePage() {
               k: 'Busiest day',
               v: DAY_LONG[heat.busiestDay],
               s: `${heat.byDay[heat.busiestDay].toLocaleString()} actions · heaviest hour of the day is ${String(heat.busiestHour).padStart(2, '0')}:00`,
-              tone: '#1a1916',
+              tone: '#14201a',
             },
             {
               k: 'Quietest day',
@@ -1843,17 +1861,17 @@ export default function PlatformPulsePage() {
               tone: '#b45309',
             },
           ].map((c) => (
-            <div key={c.k} className="rounded-xl border border-[#e8e6e0] bg-[#fafaf8] px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{c.k}</div>
+            <div key={c.k} className="rounded-xl border border-[#e4e9e5] bg-[#f6f8f6] px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{c.k}</div>
               <div className="text-[14px] font-bold mt-0.5 tabular-nums" style={{ color: c.tone }}>{c.v}</div>
-              <div className="text-[11px] text-[#6b6860] mt-0.5">{c.s}</div>
+              <div className="text-[11px] text-[#5f6b63] mt-0.5">{c.s}</div>
             </div>
           ))}
         </div>
         {heat.core && (
-          <p className="text-[11.5px] text-[#6b6860] mb-3">
+          <p className="text-[11.5px] text-[#5f6b63] mb-3">
             Seven in ten actions land between{' '}
-            <span className="font-semibold text-[#1a1916]">
+            <span className="font-semibold text-[#14201a]">
               {String(heat.core.from).padStart(2, '0')}:00 and {String(heat.core.to).padStart(2, '0')}:59
             </span>{' '}
             — the working window to schedule maintenance, migrations and bulk sends around.
@@ -1863,7 +1881,7 @@ export default function PlatformPulsePage() {
           <div className="min-w-[640px]">
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, di) => (
               <div key={day} className="flex items-center gap-0.5 mb-0.5">
-                <span className="w-9 text-[10px] text-[#9b9890] text-right pr-1.5 shrink-0">{day}</span>
+                <span className="w-9 text-[10px] text-[#8a948d] text-right pr-1.5 shrink-0">{day}</span>
                 {heat.grid[di].map((v, h) => {
                   const idx = heat.max === 0 || v === 0 ? 0 : Math.min(HEAT.length - 1, 1 + Math.floor((v / heat.max) * (HEAT.length - 2)));
                   return (
@@ -1876,12 +1894,12 @@ export default function PlatformPulsePage() {
             <div className="flex items-center gap-0.5 mt-1">
               <span className="w-9 shrink-0" />
               {Array.from({ length: 24 }, (_, h) => (
-                <span key={h} className="flex-1 min-w-[16px] text-center text-[9px] text-[#9b9890]">{h % 4 === 0 ? String(h).padStart(2, '0') : ''}</span>
+                <span key={h} className="flex-1 min-w-[16px] text-center text-[9px] text-[#8a948d]">{h % 4 === 0 ? String(h).padStart(2, '0') : ''}</span>
               ))}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1 mt-2 text-[11px] text-[#9b9890]">
+        <div className="flex items-center gap-1 mt-2 text-[11px] text-[#8a948d]">
           Fewer actions {HEAT.map((c) => <span key={c} className="w-2.5 h-2.5 rounded-[3px] inline-block" style={{ background: c }} />)} More · times in Dubai (GST)
         </div>
       </ChartCard>
@@ -1898,7 +1916,7 @@ export default function PlatformPulsePage() {
           ) : (
             <table className="w-full text-[13px]">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-[#9b9890]">
+                <tr className="text-left text-[10px] uppercase tracking-wide text-[#8a948d]">
                   <th className="py-1.5 font-semibold">Unit</th>
                   <th className="py-1.5 font-semibold text-right">Views</th>
                   <th className="py-1.5 font-semibold text-right">Visitors</th>
@@ -1909,12 +1927,12 @@ export default function PlatformPulsePage() {
                 {data.usage.listings.top.map((l, i) => (
                   <tr key={l.unitId}>
                     <td className="py-2">
-                      <span className="inline-block w-4 text-[10px] text-[#9b9890] tabular-nums">{i + 1}</span>
-                      <Link href={`/listings/units/${l.unitId}`} className="text-[#1a1916] hover:underline">{l.unit}</Link>
-                      <span className="text-[11px] text-[#9b9890] ml-1.5">{l.property}</span>
+                      <span className="inline-block w-4 text-[10px] text-[#8a948d] tabular-nums">{i + 1}</span>
+                      <Link href={`/listings/units/${l.unitId}`} className="text-[#14201a] hover:underline">{l.unit}</Link>
+                      <span className="text-[11px] text-[#8a948d] ml-1.5">{l.property}</span>
                     </td>
                     <td className="py-2 text-right tabular-nums font-semibold">{l.views.toLocaleString()}</td>
-                    <td className="py-2 text-right tabular-nums text-[#6b6860]">{l.visitors.toLocaleString()}</td>
+                    <td className="py-2 text-right tabular-nums text-[#5f6b63]">{l.visitors.toLocaleString()}</td>
                     <td className={`py-2 text-right tabular-nums font-semibold ${l.leads > 0 ? 'text-[#1a7a5a]' : 'text-[#b45309]'}`}>
                       {l.leads}
                     </td>
@@ -1926,11 +1944,12 @@ export default function PlatformPulsePage() {
         </ChartCard>
       </div>
 
-      <p className="text-[11px] text-[#9b9890] mt-5">
+      <p className="text-[11px] text-[#8a948d] mt-5">
         Every figure is live from the platform database, scoped by the shared lease rule (active, or PDCs confirmed; expired / terminated / wound-down excluded) so it matches each provider&apos;s own dashboard.
         Not instrumented yet, shown as such above: complaints and resolution time.
         Generated {new Date(data.generatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}.
       </p>
     </div>
+    </>
   );
 }

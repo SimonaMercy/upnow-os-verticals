@@ -15,9 +15,9 @@
  * the same drill shape: the pages opened → the tape of individual views.
  *
  * Every token here is lifted from the canvas rather than approximated:
- * page #fafaf8 · panels #fff · rules #e8e6e0 · ink #1a1916 · mid #4f4c44 ·
- * dim #6b6860 · faint #9b9890 · jade #2e9f82 · deep #1a5a4a · amber #e8a020 ·
- * red #d43f3f. Square corners throughout; Spline Sans Mono for every control,
+ * page #f6f8f6 · panels #fff · rules #e4e9e5 · ink #14201a · mid #46534c ·
+ * dim #5f6b63 · faint #8a948d · jade #047246 · deep #0f4f36 · amber #e8a020 ·
+ * red #c2413b. Square corners throughout; Spline Sans Mono for every control,
  * figure and micro-label; Public Sans for prose.
  *
  * Backend: GET /api/reports/activity-log · GET /api/reports/activity-log/page-views
@@ -372,14 +372,14 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginLeft: 'auto' }}>
             <Label>Property</Label>
             <select value={prop ?? 'all'} onChange={(e) => { setProp(e.target.value === 'all' ? null : Number(e.target.value)); setUnit(null); resetDrill(); }}
-              style={{ boxSizing: 'border-box', border: `1px solid ${LINE}`, background: PANEL, color: '#3d3b35',
+              style={{ boxSizing: 'border-box', border: `1px solid ${LINE}`, background: PANEL, color: '#46534c',
                 font: `600 10px ${MONO}`, letterSpacing: '.06em', padding: '6px 10px', cursor: 'pointer', minWidth: 150, borderRadius: 0 }}>
               <option value="all">All properties</option>
               {data.filters.properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <Label>Unit</Label>
             <select value={unit ?? 'all'} onChange={(e) => { setUnit(e.target.value === 'all' ? null : Number(e.target.value)); resetDrill(); }}
-              style={{ boxSizing: 'border-box', border: `1px solid ${LINE}`, background: PANEL, color: '#3d3b35',
+              style={{ boxSizing: 'border-box', border: `1px solid ${LINE}`, background: PANEL, color: '#46534c',
                 font: `600 10px ${MONO}`, letterSpacing: '.06em', padding: '6px 10px', cursor: 'pointer', minWidth: 120, borderRadius: 0 }}>
               <option value="all">All units</option>
               {data.filters.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -525,7 +525,7 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
                     cursor: p.count ? 'pointer' : 'default', borderRadius: 0 }}>
                   <span style={{ font: `700 10.5px ${MONO}`, letterSpacing: '.06em', minWidth: 26, textAlign: 'center', padding: '4px 0',
                     color: on ? '#fff' : p.count ? DEEP : FAINT,
-                    background: on ? A : p.count ? '#d8f2e8' : '#f0ede8' }}>{p.id}</span>
+                    background: on ? A : p.count ? '#d8efe3' : '#f0ede8' }}>{p.id}</span>
                   <span style={{ flex: 1, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: p.count ? INK : FAINT, letterSpacing: '-.01em' }}>{p.name}</span>
                     <span style={{ font: `500 9.5px ${MONO}`, color: heavy ? AMB : FAINT }}>
@@ -559,7 +559,7 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
                 <button key={id} onClick={() => { if (!a.count) return; setAction(on ? null : id); setPage(0); }}
                   style={{ width: '100%', display: 'flex', gap: 12, alignItems: 'center', border: 0,
                     borderBottom: '1px solid #f0ede8', borderLeft: `3px solid ${on ? A : 'transparent'}`,
-                    background: on ? '#f0faf6' : PANEL, padding: '10px 18px',
+                    background: on ? '#eef7f2' : PANEL, padding: '10px 18px',
                     cursor: a.count ? 'pointer' : 'default', opacity: a.count ? 1 : 0.55, borderRadius: 0 }}>
                   <span style={{ font: `600 10px ${MONO}`, color: FAINT, minWidth: 16 }}>{String(i + 1).padStart(2, '0')}</span>
                   <span style={{ flex: 1, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
@@ -630,8 +630,8 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
                         // Heat: 12% floor so a single step is still visible,
                         // amber when the cell contains rework.
                         const t = n ? 0.12 + (n / data.matrix.max) * 0.88 : 0;
-                        const bg = b.future ? 'repeating-linear-gradient(45deg,#f0ede8 0 3px,#fafaf8 3px 6px)'
-                          : b.off ? '#f4f3ef'
+                        const bg = b.future ? 'repeating-linear-gradient(45deg,#f0ede8 0 3px,#f6f8f6 3px 6px)'
+                          : b.off ? '#eef1ef'
                           : n ? (rw > 0 ? `rgba(232,160,32,${t})` : `rgba(${ACTOR_RGB[actor] ?? '46,159,130'},${t})`)
                           : 'transparent';
                         return (
@@ -689,7 +689,7 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
           </div>
 
           <div style={{ padding: '12px 28px', display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', borderBottom: `1px solid ${LINE}` }}>
-            <p style={{ margin: 0, font: `600 11px ${MONO}`, letterSpacing: '.08em', textTransform: 'uppercase', color: '#3d3b35' }}>{filterLabel}</p>
+            <p style={{ margin: 0, font: `600 11px ${MONO}`, letterSpacing: '.08em', textTransform: 'uppercase', color: '#46534c' }}>{filterLabel}</p>
             {hasFilter && (
               <button onClick={resetDrill} style={{ border: `1px solid ${LINE}`, background: PANEL, color: DIM,
                 font: `500 10px ${MONO}`, letterSpacing: '.08em', textTransform: 'uppercase', padding: '5px 9px', cursor: 'pointer', borderRadius: 0 }}>clear</button>
@@ -733,7 +733,7 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
             <div style={{ position: 'sticky', top: 0, background: PANEL, zIndex: 1, display: 'flex', gap: 10,
               alignItems: 'center', padding: '11px 20px 9px', borderBottom: `1px solid ${LINE}` }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: A }} />
-              <p style={{ margin: 0, font: `600 10px ${MONO}`, letterSpacing: '.14em', textTransform: 'uppercase', color: '#3d3b35' }}>Live tape</p>
+              <p style={{ margin: 0, font: `600 10px ${MONO}`, letterSpacing: '.14em', textTransform: 'uppercase', color: '#46534c' }}>Live tape</p>
               <p style={{ margin: '0 0 0 auto', font: `500 10px ${MONO}`, color: FAINT }}>{data.total.toLocaleString()} on tape</p>
             </div>
             {data.entries.map((e) => {
@@ -745,7 +745,7 @@ export function ActivityLogView({ endpoint, backHref }: { endpoint: string; back
                     {new Date(e.at).toLocaleTimeString('en-GB', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <span style={{ font: `700 9px ${MONO}`, color: chip[1], background: chip[2], padding: '3px 5px' }}>{chip[0]}</span>
-                  <span style={{ font: `700 9px ${MONO}`, background: '#d8f2e8', color: DEEP, padding: '3px 5px' }}>{e.lane ?? '—'}</span>
+                  <span style={{ font: `700 9px ${MONO}`, background: '#d8efe3', color: DEEP, padding: '3px 5px' }}>{e.lane ?? '—'}</span>
                   <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: INK, letterSpacing: '-.01em' }}>
                       {e.label} <span style={{ fontWeight: 400, color: DIM }}>· {e.cid ?? '—'}</span>
@@ -1129,7 +1129,7 @@ function PublicVisitsPanel({ pub, loading, err, pageKey, unitId, onPickPage, onP
                     <span style={{ font: `500 10.5px ${MONO}`, color: DIM }}>{e.visitor}</span>
                     {/* The anonymous → signed-in handoff, per session (0156). */}
                     {e.signedIn && (
-                      <span style={{ marginLeft: 7, font: `700 9px ${MONO}`, color: DEEP, background: '#d8f2e8', padding: '3px 5px' }}>
+                      <span style={{ marginLeft: 7, font: `700 9px ${MONO}`, color: DEEP, background: '#d8efe3', padding: '3px 5px' }}>
                         SIGNED IN
                       </span>
                     )}

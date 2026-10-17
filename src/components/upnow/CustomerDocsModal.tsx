@@ -188,42 +188,42 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={dismiss} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e8e6e0]">
-          <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2">
-            <Files size={16} className="text-[#2e9f82]" /> All documents{docs ? ` (${shown.length})` : ''}{name ? ` — ${name}` : ''}
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#e4e9e5]">
+          <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2">
+            <Files size={16} className="text-[#047246]" /> All documents{docs ? ` (${shown.length})` : ''}{name ? ` — ${name}` : ''}
           </h3>
           <div className="flex items-center gap-3">
             {openable.length > 0 && (
               <button
                 type="button"
                 onClick={() => openDocsTogether(openable)}
-                className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
+                className="text-xs text-[#047246] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
                 <Eye size={12} /> View All
               </button>
             )}
-            <button type="button" onClick={dismiss} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+            <button type="button" onClick={dismiss} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
           </div>
         </div>
         <div className="overflow-y-auto px-5 py-4">
           {!docs && !err && (
-            <p className="text-sm text-[#6b6860] flex items-center gap-2 py-4 justify-center"><Loader2 size={14} className="animate-spin" /> Loading documents…</p>
+            <p className="text-sm text-[#5f6b63] flex items-center gap-2 py-4 justify-center"><Loader2 size={14} className="animate-spin" /> Loading documents…</p>
           )}
           {err && (
             <p className="text-sm text-[#b91c1c] flex items-center gap-2 py-4 justify-center"><AlertTriangle size={14} /> {err}</p>
           )}
           {docs && shown.length === 0 && !err && (
-            <p className="text-sm text-[#9b9890] py-4 text-center">No documents on file for this customer.</p>
+            <p className="text-sm text-[#8a948d] py-4 text-center">No documents on file for this customer.</p>
           )}
           {groups.map(g => (
             <div key={g.key} className="mb-4 last:mb-0">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-[#9b9890] mb-2">{g.label} ({g.items.length})</div>
+              <div className="text-[11px] font-bold uppercase tracking-wide text-[#8a948d] mb-2">{g.label} ({g.items.length})</div>
               <div className="space-y-1.5">
                 {g.items.map(d => (
-                  <div key={d.id} className="flex items-center gap-2.5 border border-[#e8e6e0] rounded-lg px-3 py-1.5 min-h-[34px]">
-                    <FileText size={14} className="text-[#9b9890] shrink-0" />
-                    <span className="text-[12.5px] font-medium text-[#1a1916] truncate">{docLabel(d, docs ?? [])}</span>
-                    <span className="text-[10px] text-[#9b9890] shrink-0 hidden sm:inline">{catLabel(d.category)}</span>
+                  <div key={d.id} className="flex items-center gap-2.5 border border-[#e4e9e5] rounded-lg px-3 py-1.5 min-h-[34px]">
+                    <FileText size={14} className="text-[#8a948d] shrink-0" />
+                    <span className="text-[12.5px] font-medium text-[#14201a] truncate">{docLabel(d, docs ?? [])}</span>
+                    <span className="text-[10px] text-[#8a948d] shrink-0 hidden sm:inline">{catLabel(d.category)}</span>
                     {/* Only surface states that need action — a "Processed/Attached" badge on
                         every file is noise. Show "Requested" (no file yet) or "Pending review". */}
                     {!d.fileUrl ? (
@@ -233,11 +233,11 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                     ) : (d.status === 'attached' || d.status === 'pending') ? (
                       <span className="inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 shrink-0 bg-[#dbeafe] text-[#1d4ed8]">Pending review</span>
                     ) : null}
-                    {d.expiryDate && <span className="text-[11px] text-[#9b9890] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
+                    {d.expiryDate && <span className="text-[11px] text-[#8a948d] shrink-0">exp {fmtDate(d.expiryDate)}</span>}
                     {(d.fileUrl || canDelete) && (
                       <div className="ml-auto flex items-center gap-3 shrink-0">
                         {d.fileUrl && (
-                        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
+                        <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: docLabel(d, docs ?? []) })} className="text-xs text-[#047246] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer">View <Eye size={12} /></button>
                         )}
                         {/* Contract paperwork (Contract Attachment, Contract Registration/Ejari, …) is the
                             counterparty's own document — offer a clean, watermark-free download alongside
@@ -246,7 +246,7 @@ export function CustomerDocsModal({ tenantId, tenantName, documents, leases, exc
                           <DownloadDocButton
                             documentId={d.id}
                             label="Download"
-                            className="text-xs text-[#6b6860] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            className="text-xs text-[#5f6b63] font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
                           />
                         )}
                         {canDelete && (

@@ -21,8 +21,8 @@ export interface CustomerInitial {
   vatTrn?: string | null;
 }
 
-const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
-const label = 'block text-[10px] font-semibold uppercase tracking-wide text-[#9b9890] mb-1';
+const field = 'w-full rounded-xl border border-[#e4e9e5] bg-white px-3 py-2 text-sm text-[#14201a] focus:outline-none focus:ring-2 focus:ring-[#047246]';
+const label = 'block text-[10px] font-semibold uppercase tracking-wide text-[#8a948d] mb-1';
 
 /**
  * Create or edit a customer. `create` posts name/email/phone (+ company);
@@ -172,12 +172,12 @@ export function CustomerForm({ mode, initial, submitUrl, method, onDone, onCance
       {err && <p className="text-xs text-red-600">{err}</p>}
       <div className="flex items-center gap-2">
         <button type="button" onClick={submit} disabled={busy}
-          className="text-sm font-semibold px-4 py-2 rounded-xl bg-[#2e9f82] text-white disabled:opacity-60">
+          className="text-sm font-semibold px-4 py-2 rounded-xl bg-[#047246] text-white disabled:opacity-60">
           {busy ? 'Saving…' : mode === 'create' ? 'Create customer' : 'Save changes'}
         </button>
-        <button type="button" onClick={onCancel} className="text-sm font-medium px-4 py-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef]">Cancel</button>
+        <button type="button" onClick={onCancel} className="text-sm font-medium px-4 py-2 rounded-xl border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef]">Cancel</button>
       </div>
-      {mode === 'create' && <p className="text-[11px] text-[#9b9890]">They&apos;ll sign in with this email via a one-time code — no password needed.</p>}
+      {mode === 'create' && <p className="text-[11px] text-[#8a948d]">They&apos;ll sign in with this email via a one-time code — no password needed.</p>}
     </div>
   );
 }

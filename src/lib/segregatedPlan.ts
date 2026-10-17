@@ -395,10 +395,10 @@ const GROUP_TITLE: Record<SegKey, string> = {
  *  and the on-screen card so the two read identically. Currently uniform (brand
  *  green) across all groups — swap per-group hues back here to make it colourful. */
 export const SEG_COLORS: Record<SegKey, { accent: string; tint: string }> = {
-  deposit: { accent: '#1a5a4a', tint: '#eef2f0' },
-  rental: { accent: '#1a5a4a', tint: '#eef2f0' },
-  management: { accent: '#1a5a4a', tint: '#eef2f0' },
-  third_party: { accent: '#1a5a4a', tint: '#eef2f0' },
+  deposit: { accent: '#0f4f36', tint: '#eef2f0' },
+  rental: { accent: '#0f4f36', tint: '#eef2f0' },
+  management: { accent: '#0f4f36', tint: '#eef2f0' },
+  third_party: { accent: '#0f4f36', tint: '#eef2f0' },
 };
 
 /** Order rows by real due date; blanks sort last (keeps the schedule readable). */

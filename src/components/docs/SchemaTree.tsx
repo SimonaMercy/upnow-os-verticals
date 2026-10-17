@@ -74,18 +74,18 @@ function PropertyRow({ name, schema, spec, required, depth }: PropertyRowProps) 
           paddingBlock: 8,
           paddingInlineStart: 16 + depth * 20,
           paddingInlineEnd: 16,
-          borderBottom: '1px solid #f4f3ef',
+          borderBottom: '1px solid #eef1ef',
           cursor: canExpand ? 'pointer' : 'default',
           backgroundColor: depth % 2 === 1 ? '#fdfcfb' : 'transparent',
         }}
       >
-        <span style={{ fontSize: 10, marginTop: 4, color: '#9b9890', width: 10, flexShrink: 0 }}>
+        <span style={{ fontSize: 10, marginTop: 4, color: '#8a948d', width: 10, flexShrink: 0 }}>
           {canExpand ? (expanded ? '▾' : '▸') : ''}
         </span>
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#1a1916' }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, color: '#14201a' }}>
               {name}
             </span>
             {required && (
@@ -94,7 +94,7 @@ function PropertyRow({ name, schema, spec, required, depth }: PropertyRowProps) 
               </span>
             )}
             {resolved.readOnly && (
-              <span style={{ fontSize: 10, color: '#6b6860', fontStyle: 'italic' }}>read-only</span>
+              <span style={{ fontSize: 10, color: '#5f6b63', fontStyle: 'italic' }}>read-only</span>
             )}
             {resolved.deprecated && (
               <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600, backgroundColor: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>
@@ -107,22 +107,22 @@ function PropertyRow({ name, schema, spec, required, depth }: PropertyRowProps) 
               {typeLabel(schema, spec)}
             </span>
             {resolved.description && (
-              <span style={{ fontSize: 12, color: '#6b6860' }}>{resolved.description}</span>
+              <span style={{ fontSize: 12, color: '#5f6b63' }}>{resolved.description}</span>
             )}
           </div>
           {resolved.enum && (
-            <div style={{ marginTop: 4, fontSize: 11, color: '#6b6860' }}>
+            <div style={{ marginTop: 4, fontSize: 11, color: '#5f6b63' }}>
               Enum: {resolved.enum.map(v => (
-                <code key={String(v)} style={{ backgroundColor: '#f4f3ef', padding: '1px 4px', borderRadius: 3, marginRight: 4 }}>
+                <code key={String(v)} style={{ backgroundColor: '#eef1ef', padding: '1px 4px', borderRadius: 3, marginRight: 4 }}>
                   {JSON.stringify(v)}
                 </code>
               ))}
             </div>
           )}
           {resolved.example !== undefined && (
-            <div style={{ marginTop: 3, fontSize: 11, color: '#9b9890' }}>
+            <div style={{ marginTop: 3, fontSize: 11, color: '#8a948d' }}>
               Example:{' '}
-              <code style={{ backgroundColor: '#f4f3ef', padding: '1px 4px', borderRadius: 3 }}>
+              <code style={{ backgroundColor: '#eef1ef', padding: '1px 4px', borderRadius: 3 }}>
                 {JSON.stringify(resolved.example)}
               </code>
             </div>
@@ -131,7 +131,7 @@ function PropertyRow({ name, schema, spec, required, depth }: PropertyRowProps) 
       </div>
 
       {expanded && hasObjChildren && resolved.properties && (
-        <div style={{ borderLeft: '2px solid #e8e6e0', marginInlineStart: 16 + depth * 20 + 18 }}>
+        <div style={{ borderLeft: '2px solid #e4e9e5', marginInlineStart: 16 + depth * 20 + 18 }}>
           {Object.entries(resolved.properties).map(([k, v]) => (
             <PropertyRow key={k} name={k} schema={v} spec={spec}
               required={resolved.required?.includes(k) ?? false} depth={depth + 1} />
@@ -140,7 +140,7 @@ function PropertyRow({ name, schema, spec, required, depth }: PropertyRowProps) 
       )}
 
       {expanded && hasArrayChildren && arrayItem?.properties && (
-        <div style={{ borderLeft: '2px solid #e8e6e0', marginInlineStart: 16 + depth * 20 + 18 }}>
+        <div style={{ borderLeft: '2px solid #e4e9e5', marginInlineStart: 16 + depth * 20 + 18 }}>
           {Object.entries(arrayItem.properties).map(([k, v]) => (
             <PropertyRow key={k} name={k} schema={v} spec={spec}
               required={arrayItem.required?.includes(k) ?? false} depth={depth + 1} />
@@ -165,11 +165,11 @@ export function SchemaTree({ schema, spec }: Props) {
       <div style={{
         padding: '10px 14px', backgroundColor: '#f6f8fa', borderRadius: 8,
         fontFamily: 'monospace', fontSize: 13, color: '#7c3aed',
-        border: '1px solid #e8e6e0',
+        border: '1px solid #e4e9e5',
       }}>
         {typeLabel(schema, spec)}
         {resolved.description && (
-          <span style={{ color: '#6b6860', fontFamily: 'inherit', marginInlineStart: 8 }}>
+          <span style={{ color: '#5f6b63', fontFamily: 'inherit', marginInlineStart: 8 }}>
             — {resolved.description}
           </span>
         )}
@@ -182,14 +182,14 @@ export function SchemaTree({ schema, spec }: Props) {
     const itemResolved = resolveSchema(resolved.items, spec);
     if (!itemResolved.properties) {
       return (
-        <div style={{ padding: '10px 14px', backgroundColor: '#f6f8fa', borderRadius: 8, fontFamily: 'monospace', fontSize: 13, color: '#7c3aed', border: '1px solid #e8e6e0' }}>
+        <div style={{ padding: '10px 14px', backgroundColor: '#f6f8fa', borderRadius: 8, fontFamily: 'monospace', fontSize: 13, color: '#7c3aed', border: '1px solid #e4e9e5' }}>
           {typeLabel(schema, spec)}
         </div>
       );
     }
     return (
-      <div style={{ border: '1px solid #e8e6e0', borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '8px 16px', backgroundColor: '#f6f8fa', borderBottom: '1px solid #e8e6e0', fontSize: 11, fontWeight: 700, color: '#6b6860', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ border: '1px solid #e4e9e5', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ padding: '8px 16px', backgroundColor: '#f6f8fa', borderBottom: '1px solid #e4e9e5', fontSize: 11, fontWeight: 700, color: '#5f6b63', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', gap: 8, alignItems: 'center' }}>
           Array items
           <span style={{ fontFamily: 'monospace', color: '#7c3aed', textTransform: 'none', fontWeight: 400 }}>
             {typeLabel(resolved.items, spec)}
@@ -205,13 +205,13 @@ export function SchemaTree({ schema, spec }: Props) {
 
   // Object
   return (
-    <div style={{ border: '1px solid #e8e6e0', borderRadius: 10, overflow: 'hidden' }}>
+    <div style={{ border: '1px solid #e4e9e5', borderRadius: 10, overflow: 'hidden' }}>
       {resolved.properties && Object.entries(resolved.properties).map(([k, v]) => (
         <PropertyRow key={k} name={k} schema={v} spec={spec}
           required={resolved.required?.includes(k) ?? false} depth={0} />
       ))}
       {!resolved.properties && (
-        <div style={{ padding: '12px 16px', color: '#9b9890', fontSize: 13, fontStyle: 'italic' }}>
+        <div style={{ padding: '12px 16px', color: '#8a948d', fontSize: 13, fontStyle: 'italic' }}>
           Empty object
         </div>
       )}

@@ -51,13 +51,13 @@ function HtmlDocFrame({ doc, watermark }: { doc: DocViewerDoc; watermark: string
     })();
     return () => { live = false; };
   }, [doc.id, doc.fileUrl]);
-  if (html === undefined) return <div className="px-4 py-6 text-xs text-[#9b9890]">Opening the email…</div>;
-  if (html === null) return <div className="px-4 py-6 text-xs text-[#9b9890]">This email could not be shown.</div>;
+  if (html === undefined) return <div className="px-4 py-6 text-xs text-[#8a948d]">Opening the email…</div>;
+  if (html === null) return <div className="px-4 py-6 text-xs text-[#8a948d]">This email could not be shown.</div>;
   return (
     <div className="relative">
       <iframe title="Email as it was received" srcDoc={html} sandbox="" referrerPolicy="no-referrer"
         className="block w-full border-0 bg-white" style={{ height: '70vh' }} />
-      <div aria-hidden className="pointer-events-none absolute inset-0 flex items-end justify-end p-2 text-[10px] text-[#9b9890]/70 select-none">{watermark}</div>
+      <div aria-hidden className="pointer-events-none absolute inset-0 flex items-end justify-end p-2 text-[10px] text-[#8a948d]/70 select-none">{watermark}</div>
     </div>
   );
 }
@@ -185,9 +185,9 @@ function DocModal({ state, dismiss }: { state: DocViewerState; dismiss: () => vo
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/60" onClick={dismiss} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e8e6e0]">
-          <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2 min-w-0">
-            {multi ? <Files size={16} className="text-[#2e9f82] shrink-0" /> : <FileText size={16} className="text-[#2e9f82] shrink-0" />}
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e4e9e5]">
+          <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2 min-w-0">
+            {multi ? <Files size={16} className="text-[#047246] shrink-0" /> : <FileText size={16} className="text-[#047246] shrink-0" />}
             <span className="truncate">{heading}</span>
           </h3>
           <div className="flex items-center gap-1 shrink-0">
@@ -196,15 +196,15 @@ function DocModal({ state, dismiss }: { state: DocViewerState; dismiss: () => vo
               onClick={() => setRotation((r) => (r + 90) % 360)}
               aria-label="Rotate document"
               title="Rotate 90°"
-              className="flex items-center gap-1 text-xs font-medium text-[#6b6860] hover:text-[#1a1916] cursor-pointer px-2 py-1 rounded-md hover:bg-[#f4f3ef]"
+              className="flex items-center gap-1 text-xs font-medium text-[#5f6b63] hover:text-[#14201a] cursor-pointer px-2 py-1 rounded-md hover:bg-[#eef1ef]"
             >
               <RotateCw size={16} /> Rotate
             </button>
-            <button type="button" onClick={dismiss} aria-label="Close" className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+            <button type="button" onClick={dismiss} aria-label="Close" className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
           </div>
         </div>
         <div
-          className="overflow-y-auto px-5 py-4 space-y-4 bg-[#f4f3ef] select-none"
+          className="overflow-y-auto px-5 py-4 space-y-4 bg-[#eef1ef] select-none"
           onContextMenu={(e) => e.preventDefault()}
           onDragStart={(e) => e.preventDefault()}
           style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
@@ -212,9 +212,9 @@ function DocModal({ state, dismiss }: { state: DocViewerState; dismiss: () => vo
           {docs.map((d, i) => {
             const cap = captionOf(d);
             return (
-              <figure key={`${d.fileUrl}-${i}`} className="bg-white rounded-xl border border-[#e8e6e0] overflow-hidden m-0">
+              <figure key={`${d.fileUrl}-${i}`} className="bg-white rounded-xl border border-[#e4e9e5] overflow-hidden m-0">
                 {multi && cap && (
-                  <figcaption className="px-4 py-2 text-xs font-semibold text-[#3d3b35] border-b border-[#efeee9]">{cap}</figcaption>
+                  <figcaption className="px-4 py-2 text-xs font-semibold text-[#46534c] border-b border-[#efeee9]">{cap}</figcaption>
                 )}
                 {isHtml(d) ? <HtmlDocFrame doc={d} watermark={watermark} /> : (
                 <SecureDocCanvas

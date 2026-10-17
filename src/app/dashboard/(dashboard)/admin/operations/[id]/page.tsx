@@ -35,7 +35,7 @@ const STATUS: Record<string, { bg: string; fg: string; label: string }> = {
   assigned:    { bg: '#ede9fe', fg: '#6d28d9', label: 'Assigned' },
   en_route:    { bg: '#e0f2fe', fg: '#0369a1', label: 'En route' },
   in_progress: { bg: '#e0e7ff', fg: '#4338ca', label: 'In progress' },
-  completed:   { bg: '#d8f2e8', fg: '#1a7a5a', label: 'Completed' },
+  completed:   { bg: '#d8efe3', fg: '#1a7a5a', label: 'Completed' },
   dispute:     { bg: '#fee2e2', fg: '#991b1b', label: 'Dispute' },
   cancelled:   { bg: '#f3f4f6', fg: '#6b7280', label: 'Cancelled' },
 };
@@ -326,7 +326,7 @@ export default function AdminBookingDetailPage() {
             <Fact label="Package" value={[b.packageName, b.hours ? `${b.hours}h` : null, b.quantity ? `×${b.quantity}` : null].filter(Boolean).join(' · ') || '—'} />
           </div>
           {b.specialInstructions && (
-            <p style={{ fontSize: 13, color: MUTE, marginTop: 10, padding: '8px 10px', background: '#fafaf8', borderRadius: 8 }}>{b.specialInstructions}</p>
+            <p style={{ fontSize: 13, color: MUTE, marginTop: 10, padding: '8px 10px', background: '#f6f8f6', borderRadius: 8 }}>{b.specialInstructions}</p>
           )}
           {b.cancellationReason && (
             <p style={{ fontSize: 12.5, color: '#991b1b', marginTop: 8 }}>Cancellation reason: {b.cancellationReason}</p>

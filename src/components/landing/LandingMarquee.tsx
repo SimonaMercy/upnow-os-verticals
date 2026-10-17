@@ -21,7 +21,7 @@ export function LandingMarquee() {
   return (
     <div style={{
       background: '#ffffff',
-      borderTop: '1px solid #e8e6e0', borderBottom: '1px solid #e8e6e0',
+      borderTop: '1px solid #e4e9e5', borderBottom: '1px solid #e4e9e5',
       overflow: 'hidden', position: 'relative', padding: 0,
     }}>
       <div aria-hidden style={{
@@ -40,12 +40,12 @@ export function LandingMarquee() {
           <Link key={i} href={item.href} style={{
             display: 'inline-flex', alignItems: 'center', gap: 7,
             padding: '13px 24px', textDecoration: 'none', whiteSpace: 'nowrap',
-            fontSize: 13, fontWeight: 600, color: '#6b6860',
+            fontSize: 13, fontWeight: 600, color: '#5f6b63',
             transition: 'color 0.18s',
             borderRight: '1px solid #f0f0ec',
           }}
-          onMouseEnter={e => { e.currentTarget.style.color = '#2e9f82'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = '#6b6860'; }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#047246'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = '#5f6b63'; }}
           >
             <span>{item.emoji}</span>
             {item.label}

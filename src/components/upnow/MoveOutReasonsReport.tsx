@@ -83,13 +83,13 @@ interface Payload {
  * deutan ΔE 18.9 / normal ΔE 23.0 — comfortably clear of the floors).
  * "Not recorded" is deliberately grey and hatched: it is the ABSENCE of a
  * category, not a fourth one, and should never read as a peer of the others. */
-const JADE = '#2e9f82';
+const JADE = '#047246';
 const SIDE_FILL: Record<Side, string> = {
-  customer: '#2e9f82',
+  customer: '#047246',
   landlord: '#6b6ad8',
   breach: '#c9553f',
 };
-const NULL_FILL = '#9b9890';
+const NULL_FILL = '#8a948d';
 
 /* ── formatting ────────────────────────────────────────────────────────────── */
 const fmtAed = (fils: number | null | undefined): string =>
@@ -199,50 +199,50 @@ export function MoveOutReasonsReport({
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5 print:mb-3">
         <div>
           {onBack ? (
-            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </button>
           ) : (
-            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden">
+            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden">
               <ArrowLeft size={14} /> All Reports
             </Link>
           )}
           <h1 className="text-2xl font-bold text-[#26241f] flex items-center gap-2">
-            <LogOut size={22} className="text-[#2e9f82]" /> Move-out Reasons
+            <LogOut size={22} className="text-[#047246]" /> Move-out Reasons
           </h1>
-          <p className="text-sm text-[#6b6860] mt-1 max-w-3xl">
+          <p className="text-sm text-[#5f6b63] mt-1 max-w-3xl">
             Why customers left, from the reason recorded when the tenancy ended. A move-out is an accepted
             termination, a renewal declined to vacate, or a term that ran out with nothing continuing it —
             voided leases and tenancies that simply renewed are not move-outs and are excluded.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5">
-            <CalendarRange size={15} className="text-[#2e9f82]" />
-            <span className="text-xs font-medium text-[#6b6860]">Year</span>
+          <label className="inline-flex items-center gap-2 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5">
+            <CalendarRange size={15} className="text-[#047246]" />
+            <span className="text-xs font-medium text-[#5f6b63]">Year</span>
             <select
               value={year === 'all' ? 'all' : String(year)}
               onChange={e => setReportsYear(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+              className="text-sm font-semibold text-[#14201a] bg-transparent focus:outline-none cursor-pointer pr-1"
               aria-label="Report year">
               {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
               <option value="all">All years</option>
             </select>
           </label>
-          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-50">
+          <button onClick={downloadCsv} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246] disabled:opacity-50">
             <Download size={15} /> CSV
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
             <Printer size={15} /> Print
           </button>
         </div>
       </div>
 
-      {loading && <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
+      {loading && <div className="flex items-center gap-2 text-[#5f6b63] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>}
       {error && !loading && <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>}
 
       {data && !loading && data.totals.moveOuts === 0 && (
-        <div className="rounded-2xl border border-dashed border-[#e8e6e0] bg-white p-10 text-center">
+        <div className="rounded-2xl border border-dashed border-[#e4e9e5] bg-white p-10 text-center">
           <p className="text-sm font-semibold text-[#26241f]">No move-outs {data.year ? `in ${data.year}` : 'on record'}.</p>
           <p className="text-xs text-[#8a8780] mt-1">Nobody left in this period — try another year.</p>
         </div>
@@ -260,7 +260,7 @@ export function MoveOutReasonsReport({
 
           {/* Coverage bar — how much of everything below is actually recorded. */}
           {data.totals.notRecorded > 0 && (
-            <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4 mb-6">
+            <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4 mb-6">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <span className="text-xs font-semibold text-[#26241f]">Reason coverage</span>
                 <span className="text-xs text-[#8a8780]">
@@ -295,8 +295,8 @@ export function MoveOutReasonsReport({
                     title={`${r.label} — ${r.count} move-out${r.count === 1 ? '' : 's'} (${r.pct}%), ${fmtAed(r.annualRentFils)} AED annual rent`}
                     className={`grid grid-cols-[minmax(140px,190px)_1fr_auto] items-center gap-3 text-left rounded-lg px-2 py-1.5 -mx-2 transition-colors ${on ? 'bg-[#eef7f3]' : 'hover:bg-[#f7f6f2]'}`}
                   >
-                    <span className={`text-xs truncate ${isNull ? 'text-[#8a8780] italic' : 'text-[#3d3b35]'}`}>{r.label}</span>
-                    <span className="h-5 bg-[#f4f3ef] rounded-[4px] overflow-hidden">
+                    <span className={`text-xs truncate ${isNull ? 'text-[#8a8780] italic' : 'text-[#46534c]'}`}>{r.label}</span>
+                    <span className="h-5 bg-[#eef1ef] rounded-[4px] overflow-hidden">
                       <span
                         className="block h-full rounded-[4px]"
                         style={{
@@ -352,7 +352,7 @@ export function MoveOutReasonsReport({
                         : 'repeating-linear-gradient(45deg, rgba(255,255,255,0.45) 0 2px, transparent 2px 4px)',
                     }}
                   />
-                  <span className="text-xs text-[#3d3b35]">{s.label}</span>
+                  <span className="text-xs text-[#46534c]">{s.label}</span>
                   <span className="text-xs tabular-nums font-semibold text-[#26241f] ml-auto">{s.count}</span>
                   <span className="text-xs tabular-nums text-[#8a8780] w-11 text-right">{s.pct}%</span>
                 </div>
@@ -362,14 +362,14 @@ export function MoveOutReasonsReport({
 
           {/* ── 3. How it ended + when ─────────────────────────────────────── */}
           <div className="grid lg:grid-cols-2 gap-4 mb-6">
-            <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4 sm:p-5">
+            <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4 sm:p-5">
               <div className="text-base font-semibold text-[#26241f] mb-1">How the tenancy ended</div>
               <div className="text-xs text-[#8a8780] mb-3">The mechanism, not the reason.</div>
               <div className="grid gap-1.5">
                 {data.byPath.map(p => (
                   <div key={p.path} className="grid grid-cols-[minmax(120px,150px)_1fr_auto] items-center gap-3" title={PATH_HINT[p.path]}>
-                    <span className="text-xs text-[#3d3b35]">{p.label}</span>
-                    <span className="h-5 bg-[#f4f3ef] rounded-[4px] overflow-hidden">
+                    <span className="text-xs text-[#46534c]">{p.label}</span>
+                    <span className="h-5 bg-[#eef1ef] rounded-[4px] overflow-hidden">
                       <span className="block h-full rounded-[4px]" style={{ width: `${Math.max(2, (p.count / data.totals.moveOuts) * 100)}%`, background: JADE }} />
                     </span>
                     <span className="text-xs tabular-nums font-semibold text-[#26241f] w-8 text-right">{p.count}</span>
@@ -379,7 +379,7 @@ export function MoveOutReasonsReport({
             </div>
 
             {data.byMonth.length > 0 && (
-              <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4 sm:p-5">
+              <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4 sm:p-5">
                 <div className="text-base font-semibold text-[#26241f] mb-1">When they left</div>
                 <div className="text-xs text-[#8a8780] mb-3">Move-outs per month of {data.year}.</div>
                 <div className="flex items-end gap-[2px] h-28">
@@ -403,12 +403,12 @@ export function MoveOutReasonsReport({
             title={focus === null ? 'Move-outs' : `Move-outs — ${data.byReason.find(r => (r.code ?? '__none__') === focus)?.label ?? ''}`}
             subtitle="Click a customer to open the lease."
             action={focus !== null
-              ? <button onClick={() => setFocus(null)} className="text-xs text-[#2e9f82] font-semibold hover:underline">Show all {data.totals.moveOuts}</button>
+              ? <button onClick={() => setFocus(null)} className="text-xs text-[#047246] font-semibold hover:underline">Show all {data.totals.moveOuts}</button>
               : undefined}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm whitespace-nowrap">
                 <thead>
-                  <tr className="text-left text-[#6b6860] border-b border-[#e8e6e0]">
+                  <tr className="text-left text-[#5f6b63] border-b border-[#e4e9e5]">
                     <th className="py-2.5 pr-4 font-medium">Customer</th>
                     <th className="py-2.5 px-3 font-medium">Unit</th>
                     <th className="py-2.5 px-3 font-medium">Moved out</th>
@@ -422,15 +422,15 @@ export function MoveOutReasonsReport({
                   {shown.map(r => (
                     <tr key={r.contractId} className="border-b border-[#f1efe9] hover:bg-[#f7f6f2] group align-top">
                       <td className="py-2.5 pr-4">
-                        <Link href={contractHref(r.contractId, 'lease', managerRp ? { rp: managerRp } : undefined)} className="font-medium text-[#26241f] group-hover:text-[#2e9f82]">
+                        <Link href={contractHref(r.contractId, 'lease', managerRp ? { rp: managerRp } : undefined)} className="font-medium text-[#26241f] group-hover:text-[#047246]">
                           {r.customer ?? `Lease #${r.contractId}`}
                         </Link>
                       </td>
-                      <td className="py-2.5 px-3 text-[#3d3b35]">
+                      <td className="py-2.5 px-3 text-[#46534c]">
                         {r.unitLabel ?? '—'}
                         {r.buildingName && <div className="text-xs text-[#8a8780]">{r.buildingName}</div>}
                       </td>
-                      <td className="py-2.5 px-3 text-[#6b6860] text-xs">{fmtDate(r.moveOutDate)}</td>
+                      <td className="py-2.5 px-3 text-[#5f6b63] text-xs">{fmtDate(r.moveOutDate)}</td>
                       <td className="py-2.5 px-3">
                         <span className="inline-flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-[2px] shrink-0"
@@ -441,13 +441,13 @@ export function MoveOutReasonsReport({
                           <div className="text-xs text-[#8a8780] mt-0.5 max-w-[280px] whitespace-normal">{r.reasonNote}</div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 text-xs text-[#6b6860]" title={PATH_HINT[r.path]}>
+                      <td className="py-2.5 px-3 text-xs text-[#5f6b63]" title={PATH_HINT[r.path]}>
                         {PATH_LABEL[r.path]}
                         {r.initiatedBy && (
                           <div className="text-[#8a8780]">by {r.initiatedBy === 'tenant' ? 'customer' : 'you'}</div>
                         )}
                       </td>
-                      <td className="py-2.5 px-3 text-right tabular-nums text-[#3d3b35] text-xs">{fmtStay(r.tenancyMonths)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-[#46534c] text-xs">{fmtStay(r.tenancyMonths)}</td>
                       <td className="py-2.5 pl-3 text-right tabular-nums font-semibold text-[#26241f]">{fmtAed(r.annualRentFils)}</td>
                     </tr>
                   ))}
@@ -483,8 +483,8 @@ function Kpi({ label, value, sub, Icon, tone }: {
   tone?: 'warn';
 }) {
   return (
-    <div className={`rounded-2xl border p-4 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-[#e8e6e0] bg-white'}`}>
-      <div className="flex items-center gap-1.5 text-xs text-[#6b6860]"><Icon size={13} /> {label}</div>
+    <div className={`rounded-2xl border p-4 ${tone === 'warn' ? 'border-amber-200 bg-amber-50' : 'border-[#e4e9e5] bg-white'}`}>
+      <div className="flex items-center gap-1.5 text-xs text-[#5f6b63]"><Icon size={13} /> {label}</div>
       <div className="text-xl font-bold text-[#26241f] mt-1 tabular-nums">{value}</div>
       {sub && <div className="text-xs text-[#8a8780] mt-0.5">{sub}</div>}
     </div>
@@ -494,7 +494,7 @@ function Section({ title, subtitle, action, children }: {
   title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-[#e8e6e0] bg-white p-4 sm:p-5 mb-6">
+    <div className="rounded-2xl border border-[#e4e9e5] bg-white p-4 sm:p-5 mb-6">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <div className="text-base font-semibold text-[#26241f]">{title}</div>

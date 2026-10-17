@@ -93,12 +93,12 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
         <div className="border-b border-[#ede9e3] p-5">
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#d8f2e8] to-[#a7f3d0] text-[#1a7a5a] flex items-center justify-center text-sm font-bold shrink-0">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#d8efe3] to-[#a7f3d0] text-[#1a7a5a] flex items-center justify-center text-sm font-bold shrink-0">
                 {initials(deal.customerName)}
               </div>
               <div className="min-w-0">
-                <h2 className="text-base font-bold text-[#1a1916] truncate">{deal.customerName}</h2>
-                <p className="text-xs text-[#9b9890] flex items-center gap-1 truncate">
+                <h2 className="text-base font-bold text-[#14201a] truncate">{deal.customerName}</h2>
+                <p className="text-xs text-[#8a948d] flex items-center gap-1 truncate">
                   <Building2 size={11} />
                   {deal.buildingName ?? '—'} · {deal.unitLabel}
                 </p>
@@ -106,7 +106,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
             </div>
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-lg hover:bg-[#f4f3ef] flex items-center justify-center text-[#6b6860] cursor-pointer shrink-0"
+              className="w-8 h-8 rounded-lg hover:bg-[#eef1ef] flex items-center justify-center text-[#5f6b63] cursor-pointer shrink-0"
               aria-label="Close"
             >
               <X size={16} />
@@ -114,31 +114,31 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
           </div>
 
           {/* Contact + finance row */}
-          <div className="flex items-center flex-wrap gap-3 text-xs text-[#6b6860] mb-3">
+          <div className="flex items-center flex-wrap gap-3 text-xs text-[#5f6b63] mb-3">
             {deal.customerPhone && (
-              <a href={`tel:${deal.customerPhone}`} className="flex items-center gap-1 hover:text-[#2e9f82]">
+              <a href={`tel:${deal.customerPhone}`} className="flex items-center gap-1 hover:text-[#047246]">
                 <Phone size={11} /> {deal.customerPhone}
               </a>
             )}
             {deal.customerEmail && (
-              <a href={`mailto:${deal.customerEmail}`} className="flex items-center gap-1 hover:text-[#2e9f82] truncate">
+              <a href={`mailto:${deal.customerEmail}`} className="flex items-center gap-1 hover:text-[#047246] truncate">
                 <Mail size={11} /> <span className="truncate">{deal.customerEmail}</span>
               </a>
             )}
             {deal.rentFils && (
-              <span className="text-[#1a1916] font-semibold">{fmtMoney(deal.rentFils)}/yr</span>
+              <span className="text-[#14201a] font-semibold">{fmtMoney(deal.rentFils)}/yr</span>
             )}
           </div>
 
           {/* Stage banner */}
-          <div className="bg-[#fafaf8] border border-[#ede9e3] rounded-xl p-3">
+          <div className="bg-[#f6f8f6] border border-[#ede9e3] rounded-xl p-3">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d]">
                 Current stage
               </span>
               <span className="text-[10px] font-bold text-[#1a7a5a]">{progress}%</span>
             </div>
-            <p className="text-sm font-semibold text-[#1a1916] mb-2">
+            <p className="text-sm font-semibold text-[#14201a] mb-2">
               {PIPELINE_STAGE_LABEL[deal.pipelineStage]}
             </p>
             <div className="h-1.5 bg-[#f0ede8] rounded-full overflow-hidden">
@@ -146,7 +146,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
                 className={`h-full rounded-full transition-all ${
                   isLost ? 'bg-[#fca5a5]'
                   : deal.pipelineStage === 'active' ? 'bg-[#10b981]'
-                  : 'bg-[#2e9f82]'
+                  : 'bg-[#047246]'
                 }`}
                 style={{ width: `${progress}%` }}
               />
@@ -167,7 +167,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
             </div>
           )}
 
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890] mb-3">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d] mb-3">
             Journey
           </h3>
 
@@ -182,7 +182,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
                 <div key={step.stage} className="relative flex items-start gap-3">
                   <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                     status === 'complete' ? 'bg-[#10b981] text-white'
-                    : status === 'current'  ? 'bg-[#2e9f82] text-white ring-4 ring-[#d8f2e8]'
+                    : status === 'current'  ? 'bg-[#047246] text-white ring-4 ring-[#d8efe3]'
                     : status === 'lost'     ? 'bg-[#ef4444] text-white'
                     : 'bg-white border-2 border-[#ede9e3] text-[#c8c6c0]'
                   }`}>
@@ -191,18 +191,18 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
                   <div className="flex-1 pb-2 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className={`text-sm font-semibold ${
-                        status === 'upcoming' ? 'text-[#c8c6c0]' : 'text-[#1a1916]'
+                        status === 'upcoming' ? 'text-[#c8c6c0]' : 'text-[#14201a]'
                       }`}>
                         {PIPELINE_STAGE_LABEL[step.stage]}
                       </p>
                       {status === 'current' && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider bg-[#2e9f82] text-white px-1.5 py-0.5 rounded-full">
+                        <span className="text-[9px] font-bold uppercase tracking-wider bg-[#047246] text-white px-1.5 py-0.5 rounded-full">
                           Current
                         </span>
                       )}
                     </div>
                     <p className={`text-xs mt-0.5 ${
-                      status === 'upcoming' ? 'text-[#c8c6c0]' : 'text-[#6b6860]'
+                      status === 'upcoming' ? 'text-[#c8c6c0]' : 'text-[#5f6b63]'
                     }`}>
                       {step.description}
                     </p>
@@ -221,7 +221,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
           {deal.leadId && (
             <a
               href={`/rental-provider/dashboard/leads`}
-              className="flex-1 text-center text-xs font-medium text-[#6b6860] border border-[#e8e6e0] rounded-lg py-2 hover:bg-[#f4f3ef]"
+              className="flex-1 text-center text-xs font-medium text-[#5f6b63] border border-[#e4e9e5] rounded-lg py-2 hover:bg-[#eef1ef]"
             >
               Open in Leads
             </a>
@@ -229,7 +229,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
           {deal.contractId && (
             <a
               href={`/rental-provider/dashboard/contracts/${deal.contractId}/v2`}
-              className="flex-1 text-center text-xs font-medium text-[#1a1916] border border-[#1a1916] rounded-lg py-2 hover:bg-[#f4f3ef] flex items-center justify-center gap-1"
+              className="flex-1 text-center text-xs font-medium text-[#14201a] border border-[#14201a] rounded-lg py-2 hover:bg-[#eef1ef] flex items-center justify-center gap-1"
             >
               Open contract <ExternalLink size={11} />
             </a>
@@ -237,7 +237,7 @@ export function PipelineDealDrawer({ deal, onClose, onPrimary }: Props) {
           {!deal.contractId && deal.leadId && deal.pipelineStage === 'cheques' && (
             <a
               href={`/rental-provider/dashboard/contracts/new?leadId=${deal.leadId}`}
-              className="flex-1 text-center text-xs font-medium text-white bg-[#2e9f82] rounded-lg py-2 hover:bg-[#268a72] flex items-center justify-center gap-1"
+              className="flex-1 text-center text-xs font-medium text-white bg-[#047246] rounded-lg py-2 hover:bg-[#268a72] flex items-center justify-center gap-1"
             >
               Issue contract <ArrowRight size={11} />
             </a>
@@ -321,7 +321,7 @@ function StageDetail({ deal }: { deal: Deal }) {
 
   if (deal.pipelineStage === 'active' && deal.contractRef) {
     return (
-      <div className="mt-2 bg-[#d8f2e8] border border-[#a7f3d0] rounded-lg p-2.5 text-xs text-[#1a7a5a]">
+      <div className="mt-2 bg-[#d8efe3] border border-[#a7f3d0] rounded-lg p-2.5 text-xs text-[#1a7a5a]">
         <p className="font-semibold flex items-center gap-1">
           <CheckCircle2 size={11} />
           Active tenant · {deal.contractRef}

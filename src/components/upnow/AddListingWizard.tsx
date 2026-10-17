@@ -22,7 +22,7 @@ import {
   CheckCircle2, AlertCircle, Loader2, FileSpreadsheet, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
-import { SPACE_CATEGORIES, type PropertyFormData } from './PropertyFormModal';
+import { SPACE_CATEGORIES, NEW_SPACE_CATEGORIES, type PropertyFormData } from './PropertyFormModal';
 import {
   RESIDENTIAL_UNIT_TYPES, COMMERCIAL_UNIT_TYPES, INDUSTRIAL_UNIT_TYPES,
   FURNISHING_OPTIONS, AMENITIES, UNIT_TIERS,
@@ -30,13 +30,13 @@ import {
 } from './UnitFormModal';
 
 /* ─── styles ──────────────────────────────────────────────────────────────── */
-const INPUT  = 'w-full border border-[#e8e6e0] rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const INPUT  = 'w-full border border-[#e4e9e5] rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-[#047246]';
 const SELECT = INPUT + ' appearance-none';
 const ERR    = 'text-[10px] text-red-500 mt-0.5';
 
 function Label({ t, req }: { t: string; req?: boolean }) {
   return (
-    <label className="block text-xs font-medium text-[#6b6860] mb-1">
+    <label className="block text-xs font-medium text-[#5f6b63] mb-1">
       {t}{req && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
@@ -431,19 +431,19 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
         style={{ maxWidth: 720, maxHeight: '94vh' }}
       >
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e4e9e5] shrink-0">
           <div>
-            <h2 className="font-semibold text-[#1a1916]">Add Listing</h2>
-            <p className="text-xs text-[#9b9890] mt-0.5">Property + units in one go</p>
+            <h2 className="font-semibold text-[#14201a]">Add Listing</h2>
+            <p className="text-xs text-[#8a948d] mt-0.5">Property + units in one go</p>
           </div>
-          <button onClick={onClose} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer">
+          <button onClick={onClose} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer">
             <X size={20} />
           </button>
         </div>
 
         {/* ── Mode tabs ── */}
         {!done && (
-          <div className="flex border-b border-[#e8e6e0] shrink-0">
+          <div className="flex border-b border-[#e4e9e5] shrink-0">
             {([
               { key: 'new',      label: 'New Property' },
               { key: 'existing', label: 'Use Existing' },
@@ -454,8 +454,8 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                 onClick={() => { setMode(m.key); setError(null); }}
                 className={`flex-1 py-2.5 text-sm font-medium transition-colors cursor-pointer border-b-2 ${
                   mode === m.key
-                    ? 'border-[#2e9f82] text-[#2e9f82]'
-                    : 'border-transparent text-[#6b6860] hover:text-[#1a1916]'
+                    ? 'border-[#047246] text-[#047246]'
+                    : 'border-transparent text-[#5f6b63] hover:text-[#14201a]'
                 }`}
               >
                 {m.label}
@@ -470,11 +470,11 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
           {/* ══ DONE ══ */}
           {done && (
             <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-              <div className="w-16 h-16 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-                <CheckCircle2 size={32} className="text-[#2e9f82]" />
+              <div className="w-16 h-16 rounded-full bg-[#d8efe3] flex items-center justify-center mb-4">
+                <CheckCircle2 size={32} className="text-[#047246]" />
               </div>
-              <h3 className="text-lg font-bold text-[#1a1916] mb-1">All done!</h3>
-              <p className="text-sm text-[#6b6860]">{doneMsg}</p>
+              <h3 className="text-lg font-bold text-[#14201a] mb-1">All done!</h3>
+              <p className="text-sm text-[#5f6b63]">{doneMsg}</p>
               {importErrs.length > 0 && (
                 <div className="mt-4 text-left w-full max-w-sm">
                   <p className="text-xs font-semibold text-amber-700 mb-2">Rows with errors:</p>
@@ -490,7 +490,7 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
 
               {/* ─ Property section ─ */}
               <section>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-3">Property</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-3">Property</p>
                 <div className="space-y-3">
 
                   {/* Category tiles */}
@@ -498,15 +498,15 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                     <Label t="Category" req />
                     {pe.spaceCategory && <p className={ERR}>{pe.spaceCategory}</p>}
                     <div className="grid grid-cols-3 gap-2">
-                      {SPACE_CATEGORIES.map(c => (
+                      {NEW_SPACE_CATEGORIES.map(c => (
                         <button
                           key={c.id} type="button"
                           onClick={() => updP('spaceCategory', c.id)}
-                          className={`rounded-xl border p-2.5 text-left cursor-pointer transition-colors ${pf.spaceCategory === c.id ? 'border-[#2e9f82] bg-[#f0fdf8]' : 'border-[#e8e6e0] hover:bg-[#f4f3ef]'}`}
+                          className={`rounded-xl border p-2.5 text-left cursor-pointer transition-colors ${pf.spaceCategory === c.id ? 'border-[#047246] bg-[#f0fdf8]' : 'border-[#e4e9e5] hover:bg-[#eef1ef]'}`}
                         >
                           <span className="text-lg">{c.icon}</span>
-                          <p className="text-xs font-semibold text-[#1a1916] mt-1">{c.label}</p>
-                          <p className="text-[10px] text-[#9b9890]">{c.desc}</p>
+                          <p className="text-xs font-semibold text-[#14201a] mt-1">{c.label}</p>
+                          <p className="text-[10px] text-[#8a948d]">{c.desc}</p>
                         </button>
                       ))}
                     </div>
@@ -588,8 +588,8 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               {/* ─ Units section ─ */}
               <section>
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890]">Units</p>
-                  <span className="text-xs text-[#9b9890]">{rows.length} row{rows.length !== 1 ? 's' : ''}</span>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d]">Units</p>
+                  <span className="text-xs text-[#8a948d]">{rows.length} row{rows.length !== 1 ? 's' : ''}</span>
                 </div>
                 <UnitTable rows={rows} unitTypes={unitTypes} rowErrors={rowErrors} onUpdate={updRow} onAdd={addRow} onDelete={delRow} onDuplicate={dupRow} />
               </section>
@@ -600,10 +600,10 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
           {!done && mode === 'existing' && (
             <div className="px-6 py-5 space-y-5">
               <section>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-3">Choose Property</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-3">Choose Property</p>
                 {existingProperties.length === 0 ? (
-                  <p className="text-sm text-[#9b9890] py-4">
-                    No properties yet. <button className="text-[#2e9f82] underline cursor-pointer" onClick={() => setMode('new')}>Create one first.</button>
+                  <p className="text-sm text-[#8a948d] py-4">
+                    No properties yet. <button className="text-[#047246] underline cursor-pointer" onClick={() => setMode('new')}>Create one first.</button>
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -611,14 +611,14 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                       <button
                         key={p.id}
                         onClick={() => { setSelectedPropId(p.id); setSelectedPropCategory(p.spaceCategory); setError(null); }}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left cursor-pointer transition-colors ${selectedPropId === p.id ? 'border-[#2e9f82] bg-[#f0fdf8]' : 'border-[#e8e6e0] hover:bg-[#f4f3ef]'}`}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-left cursor-pointer transition-colors ${selectedPropId === p.id ? 'border-[#047246] bg-[#f0fdf8]' : 'border-[#e4e9e5] hover:bg-[#eef1ef]'}`}
                       >
                         <span className="text-xl shrink-0">{SPACE_CATEGORIES.find(c => c.id === p.spaceCategory)?.icon ?? '🏢'}</span>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-[#1a1916] truncate">{p.buildingName}</p>
-                          {p.fullAddress && <p className="text-xs text-[#9b9890] truncate">{p.fullAddress}</p>}
+                          <p className="text-sm font-semibold text-[#14201a] truncate">{p.buildingName}</p>
+                          {p.fullAddress && <p className="text-xs text-[#8a948d] truncate">{p.fullAddress}</p>}
                         </div>
-                        {selectedPropId === p.id && <CheckCircle2 size={15} className="text-[#2e9f82] shrink-0" />}
+                        {selectedPropId === p.id && <CheckCircle2 size={15} className="text-[#047246] shrink-0" />}
                       </button>
                     ))}
                   </div>
@@ -628,8 +628,8 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               {selectedPropId && (
                 <section>
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890]">Units to Add</p>
-                    <span className="text-xs text-[#9b9890]">{rows.length} row{rows.length !== 1 ? 's' : ''}</span>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d]">Units to Add</p>
+                    <span className="text-xs text-[#8a948d]">{rows.length} row{rows.length !== 1 ? 's' : ''}</span>
                   </div>
                   <UnitTable rows={rows} unitTypes={unitTypesFor(selectedPropCategory)} rowErrors={rowErrors} onUpdate={updRow} onAdd={addRow} onDelete={delRow} onDuplicate={dupRow} />
                 </section>
@@ -644,7 +644,7 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               {/* Explanation */}
               <div className="bg-[#f0fdf8] border border-[#a7f3d0] rounded-xl p-4">
                 <p className="text-sm font-semibold text-[#1a7a5a] mb-1">Single file, all data combined</p>
-                <p className="text-xs text-[#3d3b35] leading-relaxed">
+                <p className="text-xs text-[#46534c] leading-relaxed">
                   Each CSV row contains both property and unit information. Rows sharing the same
                   <strong> building_name</strong> are grouped into one property automatically —
                   no need to enter the property twice.
@@ -652,15 +652,15 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               </div>
 
               {/* Template download */}
-              <div className="flex items-center gap-3 bg-[#f4f3ef] rounded-xl p-4">
-                <FileSpreadsheet size={20} className="text-[#2e9f82] shrink-0" />
+              <div className="flex items-center gap-3 bg-[#eef1ef] rounded-xl p-4">
+                <FileSpreadsheet size={20} className="text-[#047246] shrink-0" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-[#1a1916]">Download the CSV template</p>
-                  <p className="text-xs text-[#9b9890]">Fill in your data then upload below.</p>
+                  <p className="text-sm font-medium text-[#14201a]">Download the CSV template</p>
+                  <p className="text-xs text-[#8a948d]">Fill in your data then upload below.</p>
                 </div>
                 <button
                   onClick={downloadTemplate}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] border border-[#2e9f82] rounded-lg px-3 py-2 hover:bg-[#f0fdf8] cursor-pointer shrink-0"
+                  className="flex items-center gap-1.5 text-xs font-semibold text-[#047246] border border-[#047246] rounded-lg px-3 py-2 hover:bg-[#f0fdf8] cursor-pointer shrink-0"
                 >
                   <Download size={13} /> Template
                 </button>
@@ -668,14 +668,14 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
 
               {/* Template column reference */}
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-widest text-[#9b9890] mb-2">CSV Columns</p>
-                <div className="overflow-x-auto rounded-xl border border-[#e8e6e0]">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a948d] mb-2">CSV Columns</p>
+                <div className="overflow-x-auto rounded-xl border border-[#e4e9e5]">
                   <table className="w-full text-xs min-w-[560px]">
                     <thead>
-                      <tr className="bg-[#f4f3ef]">
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Column</th>
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Required</th>
-                        <th className="px-3 py-2 text-left font-medium text-[#6b6860]">Notes</th>
+                      <tr className="bg-[#eef1ef]">
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Column</th>
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Required</th>
+                        <th className="px-3 py-2 text-left font-medium text-[#5f6b63]">Notes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#f0ede8]">
@@ -695,10 +695,10 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                         ['service_charges_aed',  '',  'Per year'],
                         ['description',          '',  'Free text'],
                       ].map(([col, req, note]) => (
-                        <tr key={col} className="hover:bg-[#fafaf8]">
-                          <td className="px-3 py-1.5 font-mono text-[#1a1916]">{col}</td>
+                        <tr key={col} className="hover:bg-[#f6f8f6]">
+                          <td className="px-3 py-1.5 font-mono text-[#14201a]">{col}</td>
                           <td className="px-3 py-1.5 text-center">{req && <span className="text-red-500 font-bold">{req}</span>}</td>
-                          <td className="px-3 py-1.5 text-[#6b6860]">{note}</td>
+                          <td className="px-3 py-1.5 text-[#5f6b63]">{note}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -709,9 +709,9 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               {/* Upload */}
               <div>
                 <Label t="Upload your CSV" req />
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-xl p-6 cursor-pointer hover:border-[#2e9f82] transition-colors">
-                  <Upload size={22} className="text-[#9b9890] mb-2" />
-                  <span className="text-sm text-[#6b6860]">Click to choose a .csv file</span>
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-xl p-6 cursor-pointer hover:border-[#047246] transition-colors">
+                  <Upload size={22} className="text-[#8a948d] mb-2" />
+                  <span className="text-sm text-[#5f6b63]">Click to choose a .csv file</span>
                   <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
                 </label>
                 {csvError && <p className={ERR + ' mt-1'}>{csvError}</p>}
@@ -721,39 +721,39 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
               {csvRows.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-[#3d3b35]">
+                    <p className="text-xs font-semibold text-[#46534c]">
                       {csvRows.length} row{csvRows.length !== 1 ? 's' : ''} parsed —&nbsp;
-                      <span className="text-[#2e9f82]">{csvRows.filter(r => !r._error).length} valid</span>
+                      <span className="text-[#047246]">{csvRows.filter(r => !r._error).length} valid</span>
                       {csvRows.filter(r => r._error).length > 0 && (
                         <span className="text-amber-600">, {csvRows.filter(r => r._error).length} will be skipped</span>
                       )}
                     </p>
                   </div>
-                  <div className="overflow-x-auto rounded-xl border border-[#e8e6e0]">
+                  <div className="overflow-x-auto rounded-xl border border-[#e4e9e5]">
                     <table className="w-full text-xs min-w-[580px]">
                       <thead>
-                        <tr className="bg-[#f4f3ef]">
+                        <tr className="bg-[#eef1ef]">
                           {['Building', 'Category', 'Unit #', 'Type', 'Beds', 'sqft', 'Rent AED', ''].map(h => (
-                            <th key={h} className="px-3 py-2 text-left font-medium text-[#6b6860]">{h}</th>
+                            <th key={h} className="px-3 py-2 text-left font-medium text-[#5f6b63]">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#f0ede8]">
                         {csvRows.slice(0, 12).map((row, i) => (
-                          <tr key={i} className={row._error ? 'bg-red-50 opacity-60' : 'hover:bg-[#fafaf8]'}>
-                            <td className="px-3 py-1.5 font-medium text-[#1a1916]">{row.building_name || '—'}</td>
-                            <td className="px-3 py-1.5 text-[#6b6860] capitalize">{row.category || '—'}</td>
+                          <tr key={i} className={row._error ? 'bg-red-50 opacity-60' : 'hover:bg-[#f6f8f6]'}>
+                            <td className="px-3 py-1.5 font-medium text-[#14201a]">{row.building_name || '—'}</td>
+                            <td className="px-3 py-1.5 text-[#5f6b63] capitalize">{row.category || '—'}</td>
                             <td className="px-3 py-1.5">{row.unit_number || '—'}</td>
-                            <td className="px-3 py-1.5 text-[#6b6860]">{row.unit_type || '—'}</td>
+                            <td className="px-3 py-1.5 text-[#5f6b63]">{row.unit_type || '—'}</td>
                             <td className="px-3 py-1.5">{row.bedrooms || '—'}</td>
                             <td className="px-3 py-1.5">{row.size_sqft || '—'}</td>
-                            <td className="px-3 py-1.5 text-[#2e9f82] font-medium">
+                            <td className="px-3 py-1.5 text-[#047246] font-medium">
                               {row.annual_rent_aed ? `${Number(row.annual_rent_aed).toLocaleString('en-AE')}` : '—'}
                             </td>
                             <td className="px-3 py-1.5">
                               {row._error
                                 ? <span title={row._error}><AlertCircle size={12} className="text-red-500" /></span>
-                                : <CheckCircle2 size={12} className="text-[#2e9f82]" />
+                                : <CheckCircle2 size={12} className="text-[#047246]" />
                               }
                             </td>
                           </tr>
@@ -761,15 +761,15 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                       </tbody>
                     </table>
                     {csvRows.length > 12 && (
-                      <p className="text-center text-xs text-[#9b9890] py-2">… and {csvRows.length - 12} more rows</p>
+                      <p className="text-center text-xs text-[#8a948d] py-2">… and {csvRows.length - 12} more rows</p>
                     )}
                   </div>
                 </div>
               )}
 
               {importing && (
-                <div className="flex items-center gap-2 text-sm text-[#6b6860]">
-                  <Loader2 size={14} className="animate-spin text-[#2e9f82]" />
+                <div className="flex items-center gap-2 text-sm text-[#5f6b63]">
+                  <Loader2 size={14} className="animate-spin text-[#047246]" />
                   Importing {importProgress.done} / {importProgress.total}…
                 </div>
               )}
@@ -782,33 +782,33 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
         </div>
 
         {/* ── Footer ── */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-[#e8e6e0] shrink-0 bg-[#fafaf8]">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[#e4e9e5] shrink-0 bg-[#f6f8f6]">
           {done ? (
             <>
               <button
                 onClick={() => { setDone(false); setRows([emptyRow()]); setMode('new'); setPf({ ...EMPTY_PROP }); }}
-                className="text-sm text-[#2e9f82] font-medium border border-[#2e9f82] px-4 py-2 rounded-lg hover:bg-[#f0fdf8] cursor-pointer"
+                className="text-sm text-[#047246] font-medium border border-[#047246] px-4 py-2 rounded-lg hover:bg-[#f0fdf8] cursor-pointer"
               >
                 Add Another Listing
               </button>
               <button
                 onClick={onClose}
                 className="text-sm font-semibold text-white px-5 py-2 rounded-lg cursor-pointer"
-                style={{ background: '#1a1916' }}
+                style={{ background: '#14201a' }}
               >
                 Done
               </button>
             </>
           ) : (
             <>
-              <button onClick={onClose} className="text-sm text-[#6b6860] hover:text-[#1a1916] px-4 py-2 cursor-pointer">Cancel</button>
+              <button onClick={onClose} className="text-sm text-[#5f6b63] hover:text-[#14201a] px-4 py-2 cursor-pointer">Cancel</button>
 
               {mode !== 'import' && (
                 <button
                   onClick={handleSaveAll}
                   disabled={saving || (mode === 'existing' && !selectedPropId)}
                   className="flex items-center gap-2 text-sm font-semibold text-white px-5 py-2 rounded-lg disabled:opacity-50 cursor-pointer"
-                  style={{ background: '#2e9f82' }}
+                  style={{ background: '#047246' }}
                 >
                   {saving && <Loader2 size={14} className="animate-spin" />}
                   Save Property + {rows.length} Unit{rows.length !== 1 ? 's' : ''}
@@ -820,7 +820,7 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
                   onClick={runImport}
                   disabled={importing || csvRows.filter(r => !r._error).length === 0}
                   className="flex items-center gap-2 text-sm font-semibold text-white px-5 py-2 rounded-lg disabled:opacity-50 cursor-pointer"
-                  style={{ background: '#2e9f82' }}
+                  style={{ background: '#047246' }}
                 >
                   {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                   Import {csvRows.filter(r => !r._error).length} Rows
@@ -835,8 +835,8 @@ export function AddListingWizard({ open, existingProperties, onClose, onDone }: 
 }
 
 /* ─── UnitTable sub-component ─────────────────────────────────────────────── */
-const CELL = 'w-full border border-[#e8e6e0] rounded-lg px-2 py-1 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
-const CELL_ERR = 'w-full border rounded-lg px-2 py-1 text-sm bg-white focus:outline-none focus:border-[#2e9f82] border-red-400';
+const CELL = 'w-full border border-[#e4e9e5] rounded-lg px-2 py-1 text-sm bg-white focus:outline-none focus:border-[#047246]';
+const CELL_ERR = 'w-full border rounded-lg px-2 py-1 text-sm bg-white focus:outline-none focus:border-[#047246] border-red-400';
 
 function UnitTable({
   rows, unitTypes, rowErrors, onUpdate, onAdd, onDelete, onDuplicate,
@@ -857,28 +857,28 @@ function UnitTable({
   }
 
   return (
-    <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
+    <div className="rounded-xl border border-[#e4e9e5] overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm" style={{ minWidth: 1100 }}>
           <thead>
-            <tr className="bg-[#f4f3ef]">
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-20">Unit # <span className="text-red-500">*</span></th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-32">Type <span className="text-red-500">*</span></th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-14">Floor</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-16">Beds</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-20">sqft</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-[#6b6860] w-28">Rent/yr AED <span className="text-red-500">*</span></th>
-              <th colSpan={4} className="px-2 py-2 text-center text-xs font-semibold text-[#2e9f82] border-l border-[#e8e6e0]">
+            <tr className="bg-[#eef1ef]">
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-20">Unit # <span className="text-red-500">*</span></th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-32">Type <span className="text-red-500">*</span></th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-14">Floor</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-16">Beds</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-20">sqft</th>
+              <th className="px-2 py-2 text-left text-xs font-medium text-[#5f6b63] w-28">Rent/yr AED <span className="text-red-500">*</span></th>
+              <th colSpan={4} className="px-2 py-2 text-center text-xs font-semibold text-[#047246] border-l border-[#e4e9e5]">
                 Financials (AED)
               </th>
               <th className="w-14" />
             </tr>
             <tr className="bg-[#f9f8f6] border-t border-[#f0ede8]">
               <th colSpan={6} />
-              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890] border-l border-[#e8e6e0]">Security Dep.</th>
-              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Admin Fee</th>
-              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Contract Registration Fee</th>
-              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#9b9890]">Commission</th>
+              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#8a948d] border-l border-[#e4e9e5]">Security Dep.</th>
+              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#8a948d]">Admin Fee</th>
+              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#8a948d]">Contract Registration Fee</th>
+              <th className="px-2 py-1 text-left text-[10px] font-medium text-[#8a948d]">Commission</th>
               <th />
             </tr>
           </thead>
@@ -887,7 +887,7 @@ function UnitTable({
               const e = rowErrors[r.id] ?? {};
               const isLast = i === rows.length - 1;
               return (
-                <tr key={r.id} className="bg-white hover:bg-[#fafaf8]">
+                <tr key={r.id} className="bg-white hover:bg-[#f6f8f6]">
                   <td className="px-2 py-2">
                     <input
                       ref={isLast ? lastRef : undefined}
@@ -936,7 +936,7 @@ function UnitTable({
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center gap-1">
-                      <button title="Duplicate row" onClick={() => onDuplicate(r.id)} className="text-[#c8c6c0] hover:text-[#2e9f82] cursor-pointer" type="button">
+                      <button title="Duplicate row" onClick={() => onDuplicate(r.id)} className="text-[#c8c6c0] hover:text-[#047246] cursor-pointer" type="button">
                         <Plus size={13} />
                       </button>
                       <button title="Delete row" onClick={() => onDelete(r.id)} disabled={rows.length === 1} className="text-[#c8c6c0] hover:text-red-500 disabled:opacity-30 cursor-pointer" type="button">
@@ -950,10 +950,10 @@ function UnitTable({
           </tbody>
         </table>
       </div>
-      <div className="px-3 py-2.5 bg-[#fafaf8] border-t border-[#f0ede8]">
+      <div className="px-3 py-2.5 bg-[#f6f8f6] border-t border-[#f0ede8]">
         <button
           onClick={handleAdd}
-          className="flex items-center gap-1.5 text-xs font-medium text-[#2e9f82] hover:text-[#1f6655] cursor-pointer"
+          className="flex items-center gap-1.5 text-xs font-medium text-[#047246] hover:text-[#1f6655] cursor-pointer"
         >
           <Plus size={13} /> Add row
         </button>

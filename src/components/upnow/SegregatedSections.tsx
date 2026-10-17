@@ -15,8 +15,8 @@ import { View, Text, StyleSheet } from '@react-pdf/renderer';
 import { paymentRefLabel, SEG_COLORS, type SegregatedPlan } from '@/lib/segregatedPlan';
 
 const INK = '#1c1b17';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
+const MUTE = '#5f6b63';
+const FAINT = '#8a948d';
 const HAIR = '#e7e2d9';
 const HAIR_SOFT = '#f0ece4';
 const TOTAL = '#15803d';
@@ -45,11 +45,11 @@ const s = StyleSheet.create({
   totalLab: { fontSize: 7, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700, color: MUTE },
   discTag: { marginLeft: 6, fontSize: 6.5, fontWeight: 700, letterSpacing: 0.5, color: '#b91c1c', backgroundColor: '#fdede7', borderWidth: 0.5, borderColor: '#f3cabb', borderRadius: 6, paddingVertical: 1.5, paddingHorizontal: 5 },
   grandBox: { marginTop: 12, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, borderColor: '#cfdcd6', backgroundColor: '#eef2f0' },
-  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 9, backgroundColor: '#fafaf8' },
+  recRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 9, backgroundColor: '#f6f8f6' },
   recLab: { fontSize: 8, fontWeight: 500, color: MUTE },
   grand: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   grandLab: { fontSize: 8.5, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: MUTE },
-  grandVal: { fontSize: 13, fontWeight: 700, color: '#1a5a4a' },
+  grandVal: { fontSize: 13, fontWeight: 700, color: '#0f4f36' },
 });
 
 const METHOD_LABEL: Record<string, string> = {

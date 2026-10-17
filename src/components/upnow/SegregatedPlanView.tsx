@@ -20,7 +20,7 @@ const METHOD_LABEL: Record<string, string> = {
 const fmtD = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-AE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 function thCss(width: number): React.CSSProperties {
-  return { width: `${width}%`, fontSize: 9, letterSpacing: '.05em', textTransform: 'uppercase', color: '#9b9890', fontWeight: 700, textAlign: 'left', padding: '7px 10px 5px', borderBottom: '1px solid #f0ece4', whiteSpace: 'nowrap' };
+  return { width: `${width}%`, fontSize: 9, letterSpacing: '.05em', textTransform: 'uppercase', color: '#8a948d', fontWeight: 700, textAlign: 'left', padding: '7px 10px 5px', borderBottom: '1px solid #f0ece4', whiteSpace: 'nowrap' };
 }
 const tdCss: React.CSSProperties = { padding: '6px 10px', fontSize: 12, borderBottom: '1px solid #f4f1ea', verticalAlign: 'middle' };
 
@@ -100,7 +100,7 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                 {/* "payments", not "cheques" — a plan can mix transfers and cheques. */}
-                {g.key === 'rental' && g.lines.length > 1 && <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9b9890' }}>{g.lines.length} payments</span>}
+                {g.key === 'rental' && g.lines.length > 1 && <span style={{ fontSize: 10.5, fontWeight: 600, color: '#8a948d' }}>{g.lines.length} payments</span>}
                 {headAttach}
               </div>
             </div>
@@ -126,9 +126,9 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
                   {g.lines.map((l, i) => (
                     <tr key={i}>
                       <td style={{ ...tdCss, fontWeight: 600 }}>{l.item}</td>
-                      {showRef && <td style={{ ...tdCss, color: '#6b6860', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{paymentRefLabel(l.chequeNo, l.method)}</td>}
-                      {showMethod && <td style={{ ...tdCss, color: '#6b6860' }}>{METHOD_LABEL[l.method ?? ''] ?? '—'}</td>}
-                      <td style={{ ...tdCss, color: '#6b6860' }}>{fmtD(l.dueDate)}</td>
+                      {showRef && <td style={{ ...tdCss, color: '#5f6b63', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{paymentRefLabel(l.chequeNo, l.method)}</td>}
+                      {showMethod && <td style={{ ...tdCss, color: '#5f6b63' }}>{METHOD_LABEL[l.method ?? ''] ?? '—'}</td>}
+                      <td style={{ ...tdCss, color: '#5f6b63' }}>{fmtD(l.dueDate)}</td>
                       <td style={{ ...tdCss, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{aed(l.amount)}</td>
                       {perLineAttach && (
                         <td style={{ ...tdCss, textAlign: 'right' }}>
@@ -144,14 +144,14 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
                   {g.key === 'rental' && plan.rentDiscount && (
                     <>
                       <tr>
-                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8', fontSize: 11.5, fontWeight: 600, color: '#6b6860' }}>Rental amount</td>
-                        <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8', textAlign: 'right', fontWeight: 700, color: '#6b6860', fontVariantNumeric: 'tabular-nums' }}>{aed(plan.rentDiscount.listedRent)}</td>
-                        {perLineAttach && <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#fafaf8' }} />}
+                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#f6f8f6', fontSize: 11.5, fontWeight: 600, color: '#5f6b63' }}>Rental amount</td>
+                        <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#f6f8f6', textAlign: 'right', fontWeight: 700, color: '#5f6b63', fontVariantNumeric: 'tabular-nums' }}>{aed(plan.rentDiscount.listedRent)}</td>
+                        {perLineAttach && <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, background: '#f6f8f6' }} />}
                       </tr>
                       <tr>
-                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderBottom: 0, background: '#fafaf8', fontSize: 11.5, fontWeight: 600, color: '#b91c1c' }}>Discount{plan.rentDiscount.discountType === 'percent' && plan.rentDiscount.discountPercent ? ` (${plan.rentDiscount.discountPercent}%)` : ''}</td>
-                        <td style={{ ...tdCss, borderBottom: 0, background: '#fafaf8', textAlign: 'right', fontWeight: 700, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>- {aed(plan.rentDiscount.discountAmount)}</td>
-                        {perLineAttach && <td style={{ ...tdCss, borderBottom: 0, background: '#fafaf8' }} />}
+                        <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderBottom: 0, background: '#f6f8f6', fontSize: 11.5, fontWeight: 600, color: '#b91c1c' }}>Discount{plan.rentDiscount.discountType === 'percent' && plan.rentDiscount.discountPercent ? ` (${plan.rentDiscount.discountPercent}%)` : ''}</td>
+                        <td style={{ ...tdCss, borderBottom: 0, background: '#f6f8f6', textAlign: 'right', fontWeight: 700, color: '#b91c1c', fontVariantNumeric: 'tabular-nums' }}>- {aed(plan.rentDiscount.discountAmount)}</td>
+                        {perLineAttach && <td style={{ ...tdCss, borderBottom: 0, background: '#f6f8f6' }} />}
                       </tr>
                     </>
                   )}
@@ -160,7 +160,7 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
                       {/* Span every column except Amount, whatever the optional
                           columns add up to — otherwise the total drifts left out
                           of the Amount column it is supposed to sum. */}
-                      <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>{g.key === 'rental' && plan.rentDiscount ? 'Net rent · Total' : 'Total'}</td>
+                      <td colSpan={2 + (showRef ? 1 : 0) + (showMethod ? 1 : 0)} style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#5f6b63' }}>{g.key === 'rental' && plan.rentDiscount ? 'Net rent · Total' : 'Total'}</td>
                       <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0, textAlign: 'right', fontWeight: 800, color: c.accent, fontVariantNumeric: 'tabular-nums' }}>{aed(g.total)}</td>
                       {perLineAttach && <td style={{ ...tdCss, borderTop: `1.5px solid ${c.accent}55`, borderBottom: 0 }} />}
                     </tr>
@@ -173,28 +173,28 @@ export function SegregatedPlanView({ plan, style, bankDetails, renderAttach }: {
       })}
       <div style={{ marginTop: 14, padding: '11px 14px', borderRadius: 10, background: '#eef2f0', border: '1px solid #cfdcd6' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860' }}>Total Payable</span>
-          <span style={{ fontSize: 17, fontWeight: 800, color: '#1a5a4a', fontVariantNumeric: 'tabular-nums' }}>AED {aed(plan.grandTotal)}</span>
+          <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#5f6b63' }}>Total Payable</span>
+          <span style={{ fontSize: 17, fontWeight: 800, color: '#0f4f36', fontVariantNumeric: 'tabular-nums' }}>AED {aed(plan.grandTotal)}</span>
         </div>
       </div>
       {/* Where the transfers go. The cheque payee is not repeated — it is the
           landlord, already named at the top of the summary. */}
       {hasTransfer && bank && (
-        <div style={{ marginTop: 10, padding: '11px 14px', borderRadius: 10, border: '1px solid #e7e2d9', background: '#fafaf8' }}>
-          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#6b6860', marginBottom: 6 }}>
+        <div style={{ marginTop: 10, padding: '11px 14px', borderRadius: 10, border: '1px solid #e7e2d9', background: '#f6f8f6' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase', color: '#5f6b63', marginBottom: 6 }}>
             Bank transfer to
           </div>
           {/* Two rows: account name + bank, then the IBAN on its own line so the
               long number never has to wrap inside half a column. */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 20px', fontSize: 12 }}>
             {bank.accountName && (
-              <div><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890' }}>Account name</div><div style={{ fontWeight: 700 }}>{bank.accountName}</div></div>
+              <div><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d' }}>Account name</div><div style={{ fontWeight: 700 }}>{bank.accountName}</div></div>
             )}
             {bank.bankName && (
-              <div><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890' }}>Bank</div><div style={{ fontWeight: 700 }}>{bank.bankName}</div></div>
+              <div><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d' }}>Bank</div><div style={{ fontWeight: 700 }}>{bank.bankName}</div></div>
             )}
             {bank.iban && (
-              <div style={{ gridColumn: '1 / -1' }}><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890' }}>IBAN</div><div style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{bank.iban}</div></div>
+              <div style={{ gridColumn: '1 / -1' }}><div style={{ fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d' }}>IBAN</div><div style={{ fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{bank.iban}</div></div>
             )}
           </div>
         </div>

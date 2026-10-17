@@ -115,7 +115,7 @@ export function AddressMapPicker({ value, onChange, placeholder }: {
         draggable: true,
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          fillColor: '#2e9f82',
+          fillColor: '#047246',
           fillOpacity: 1,
           strokeColor: '#ffffff',
           strokeWeight: 3,
@@ -186,7 +186,7 @@ export function AddressMapPicker({ value, onChange, placeholder }: {
           ref={searchRef}
           defaultValue={value?.address ?? ''}
           placeholder={placeholder ?? 'Search your building, street or area…'}
-          className="w-full rounded-xl border-2 pl-9 pr-4 py-3 text-sm outline-none transition-colors focus:border-[#2e9f82]"
+          className="w-full rounded-xl border-2 pl-9 pr-4 py-3 text-sm outline-none transition-colors focus:border-[#047246]"
           style={{ borderColor: 'var(--line)', background: '#fff' }}
           onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); /* let Autocomplete handle it */ }}
         />

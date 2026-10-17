@@ -72,7 +72,7 @@ function colourise(line: string, lineKey: string) {
   TOKEN.lastIndex = 0;
   while ((m = TOKEN.exec(line)) !== null) {
     if (m.index > last) out.push(line.slice(last, m.index));
-    const colour = m[1] ? '#1a5a4a' : m[2] ? '#b45309' : m[3] ? '#7c3aed' : '#1d4ed8';
+    const colour = m[1] ? '#0f4f36' : m[2] ? '#b45309' : m[3] ? '#7c3aed' : '#1d4ed8';
     out.push(
       <span key={`${lineKey}-${m.index}`} style={{ color: colour }}>
         {m[0]}
@@ -101,9 +101,9 @@ function JsonBlock({ value }: { value: unknown }) {
         onClick={copy}
         style={{
           position: 'absolute', top: 8, right: 8, zIndex: 1,
-          background: '#ffffff', border: '1px solid #e8e6e0', borderRadius: 6,
+          background: '#ffffff', border: '1px solid #e4e9e5', borderRadius: 6,
           padding: '3px 9px', cursor: 'pointer', fontSize: 11,
-          color: copied ? '#15803d' : '#6b6860', fontWeight: 600,
+          color: copied ? '#15803d' : '#5f6b63', fontWeight: 600,
         }}
       >
         {copied ? '✓ Copied' : 'Copy'}
@@ -113,12 +113,12 @@ function JsonBlock({ value }: { value: unknown }) {
         padding: '12px 14px',
         paddingInlineEnd: 72,
         backgroundColor: '#f6f8fa',
-        border: '1px solid #e8e6e0',
+        border: '1px solid #e4e9e5',
         borderRadius: 8,
         fontFamily: 'monospace',
         fontSize: 12,
         lineHeight: 1.65,
-        color: '#3d3b35',
+        color: '#46534c',
         overflowX: 'auto',
         maxHeight: 460,
         overflowY: 'auto',
@@ -151,9 +151,9 @@ export function SamplePanel({ samples }: { samples: Sample[] }) {
                 style={{
                   padding: '4px 11px',
                   borderRadius: 7,
-                  border: `1px solid ${isActive ? '#a7e0cd' : '#e8e6e0'}`,
-                  backgroundColor: isActive ? '#f0faf6' : '#ffffff',
-                  color: isActive ? '#1a5a4a' : '#6b6860',
+                  border: `1px solid ${isActive ? '#a7e0cd' : '#e4e9e5'}`,
+                  backgroundColor: isActive ? '#eef7f2' : '#ffffff',
+                  color: isActive ? '#0f4f36' : '#5f6b63',
                   fontWeight: isActive ? 700 : 500,
                   fontSize: 12,
                   cursor: 'pointer',
@@ -166,7 +166,7 @@ export function SamplePanel({ samples }: { samples: Sample[] }) {
         </div>
       )}
       {current.description && (
-        <p style={{ fontSize: 12, color: '#6b6860', margin: '0 0 8px' }}>{current.description}</p>
+        <p style={{ fontSize: 12, color: '#5f6b63', margin: '0 0 8px' }}>{current.description}</p>
       )}
       <JsonBlock value={current.value} />
     </div>

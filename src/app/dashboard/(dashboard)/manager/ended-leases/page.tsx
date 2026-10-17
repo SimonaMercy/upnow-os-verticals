@@ -29,11 +29,11 @@ const DEPOSIT_LABELS: Record<string, string> = {
   held: 'Held', returned: 'Returned', partial_return: 'Part-returned', forfeited: 'Forfeited', none: '—',
 };
 const DEPOSIT_STYLE: Record<string, string> = {
-  held: 'bg-[#d8f2e8] text-[#1a7a5a]',
+  held: 'bg-[#d8efe3] text-[#1a7a5a]',
   returned: 'bg-[#dbeafe] text-[#1e40af]',
   partial_return: 'bg-[#fef3c7] text-[#92400e]',
   forfeited: 'bg-[#fee2e2] text-[#b91c1c]',
-  none: 'bg-[#f4f3ef] text-[#9b9890]',
+  none: 'bg-[#eef1ef] text-[#8a948d]',
 };
 
 function yearMatch(r: EndedCustomerRow, y: number): boolean {
@@ -126,12 +126,12 @@ export default function ManagerEndedLeasesPage() {
   if (!permsLoading && !allowed) {
     return (
       <div className="p-6">
-        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-2xl px-7 py-10 mt-12">
+        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-2xl px-7 py-10 mt-12">
           <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]">
             <Lock size={20} />
           </div>
-          <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-          <p className="text-sm text-[#6b6860] mt-1.5 leading-relaxed">
+          <p className="text-base font-bold text-[#14201a]">Permission required</p>
+          <p className="text-sm text-[#5f6b63] mt-1.5 leading-relaxed">
             This landlord hasn’t granted you the <strong>Manage Agreements</strong> permission, so their ended leases aren’t available.
           </p>
         </div>
@@ -168,20 +168,20 @@ export default function ManagerEndedLeasesPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">Ended Leases</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">Every lease that has ended — expired, or terminated with its settlement paid. Open one for its settlement statement.</p>
+          <h1 className="text-2xl font-bold text-[#14201a]">Ended Leases</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5">Every lease that has ended — expired, or terminated with its settlement paid. Open one for its settlement statement.</p>
         </div>
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e8e6e0] bg-white text-[#6b6860]" title="Scope by lease year">
+          <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-[38px] rounded-xl border border-[#e4e9e5] bg-white text-[#5f6b63]" title="Scope by lease year">
             <Calendar size={14} />
             <select value={filterYear} onChange={e => setFilterYear(e.target.value)} aria-label="Filter by year"
-              className="bg-transparent text-sm font-semibold text-[#1a1916] focus:outline-none cursor-pointer pr-1 py-1">
+              className="bg-transparent text-sm font-semibold text-[#14201a] focus:outline-none cursor-pointer pr-1 py-1">
               <option value="all">All years</option>
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           <button onClick={load} disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] transition-colors disabled:opacity-50 cursor-pointer">
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e4e9e5] text-[#5f6b63] hover:text-[#14201a] transition-colors disabled:opacity-50 cursor-pointer">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
         </div>
@@ -196,9 +196,9 @@ export default function ManagerEndedLeasesPage() {
           { label: 'Deposits Settled', value: String(depositsSettled), sub: 'returned / deducted' },
         ].map((s, i) => (
           <div key={i} className="bg-white rounded-2xl p-5 shadow-sm border border-[#f0ede8]">
-            <div className="text-xs text-[#6b6860] font-medium">{s.label}</div>
-            <div className="font-bold text-xl text-[#1a1916] mt-1 truncate">{s.value}</div>
-            <div className="text-xs text-[#9b9890] mt-0.5">{s.sub}</div>
+            <div className="text-xs text-[#5f6b63] font-medium">{s.label}</div>
+            <div className="font-bold text-xl text-[#14201a] mt-1 truncate">{s.value}</div>
+            <div className="text-xs text-[#8a948d] mt-0.5">{s.sub}</div>
           </div>
         ))}
       </div>
@@ -206,53 +206,53 @@ export default function ManagerEndedLeasesPage() {
       {/* Filters */}
       <div className="bg-white rounded-xl p-4 flex flex-wrap gap-3 items-center mb-4 shadow-sm border border-[#f0ede8]">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d]" />
           <input type="text" placeholder="Search customer, unit, property, ref…" value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
+            className="w-full border border-[#e4e9e5] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#047246]" />
         </div>
         <select value={filterOutcome} onChange={e => setFilterOutcome(e.target.value)}
-          className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
+          className="border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white text-[#46534c] cursor-pointer">
           <option value="all">All outcomes</option>
           <option value="expired">Expired</option>
           <option value="terminated">Terminated</option>
         </select>
         {properties.length > 0 && (
           <select value={filterProperty} onChange={e => setFilterProperty(e.target.value)}
-            className="border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white text-[#3d3b35] cursor-pointer">
+            className="border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white text-[#46534c] cursor-pointer">
             <option value="all">All properties</option>
             {properties.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         )}
         {hasFilters && (
-          <button onClick={clearFilters} className="text-xs text-[#2e9f82] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
+          <button onClick={clearFilters} className="text-xs text-[#047246] font-medium hover:underline flex items-center gap-1 cursor-pointer ml-auto">
             <X size={12} /> Reset
           </button>
         )}
       </div>
 
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-[#6b6860]">{filtered.length} ended lease{filtered.length !== 1 ? 's' : ''}</span>
+        <span className="text-sm text-[#5f6b63]">{filtered.length} ended lease{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-[#f0ede8]">
         {loading ? (
-          <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-[#2e9f82]" /></div>
+          <div className="flex items-center justify-center py-16"><Loader2 size={22} className="animate-spin text-[#047246]" /></div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
             <p className="text-sm text-red-600">{error}</p>
-            <button onClick={load} className="text-xs text-[#2e9f82] font-medium hover:underline cursor-pointer">Retry</button>
+            <button onClick={load} className="text-xs text-[#047246] font-medium hover:underline cursor-pointer">Retry</button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-14 h-14 rounded-full bg-[#f4f3ef] flex items-center justify-center mb-4">
-              <CalendarX size={24} className="text-[#6b6860]" />
+            <div className="w-14 h-14 rounded-full bg-[#eef1ef] flex items-center justify-center mb-4">
+              <CalendarX size={24} className="text-[#5f6b63]" />
             </div>
-            <p className="text-sm text-[#6b6860] mb-1">
+            <p className="text-sm text-[#5f6b63] mb-1">
               {filterYear !== 'all' ? `No ended leases for ${filterYear}.` : hasFilters ? 'No ended leases match your filters.' : 'No ended leases yet.'}
             </p>
-            <p className="text-xs text-[#9b9890]">
+            <p className="text-xs text-[#8a948d]">
               {filterYear !== 'all' ? 'Switch to “All years” to see every ended lease.' : 'A lease appears here once it expires, or once its termination settlement is paid.'}
             </p>
           </div>
@@ -260,36 +260,36 @@ export default function ManagerEndedLeasesPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left min-w-[900px]">
               <thead>
-                <tr className="bg-[#f4f3ef] border-b border-[#e8e6e0]">
+                <tr className="bg-[#eef1ef] border-b border-[#e4e9e5]">
                   {['Customer', 'Property / Unit', 'Lease', 'Period', 'Ended On', 'Outcome', 'Deposit'].map(h => (
-                    <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#6b6860]">{h}</th>
+                    <th key={h} className="px-4 py-3 text-[10px] font-semibold uppercase tracking-wide text-[#5f6b63]">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(r => (
                   <tr key={`${r.customerId}-${r.leaseId ?? r.lastContractRef}`} onClick={() => openStatement(r)}
-                    className="border-b border-[#f0ede8] hover:bg-[#fafaf8] text-sm text-[#1a1916] cursor-pointer transition-colors">
+                    className="border-b border-[#f0ede8] hover:bg-[#f6f8f6] text-sm text-[#14201a] cursor-pointer transition-colors">
                     <td className="px-4 py-3.5">
                       <div className="font-medium">{(r.entityType === 'company' && r.companyName?.trim()) || r.name || '—'}</div>
-                      <div className="text-xs text-[#9b9890]">{r.email || r.emiratesId || ''}</div>
+                      <div className="text-xs text-[#8a948d]">{r.email || r.emiratesId || ''}</div>
                       {r.customerStillActive && (
-                        <span className="inline-flex mt-1 rounded-full text-[10px] font-semibold px-2 py-0.5 bg-[#d8f2e8] text-[#1a7a5a]" title="This customer still rents another unit">
+                        <span className="inline-flex mt-1 rounded-full text-[10px] font-semibold px-2 py-0.5 bg-[#d8efe3] text-[#1a7a5a]" title="This customer still rents another unit">
                           Still a customer
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">
+                    <td className="px-4 py-3.5 text-[#5f6b63]">
                       <div>{r.lastProperty}</div>
-                      <div className="text-xs text-[#9b9890]">Unit {r.lastUnit}</div>
+                      <div className="text-xs text-[#8a948d]">Unit {r.lastUnit}</div>
                     </td>
-                    <td className="px-4 py-3.5 font-mono text-xs text-[#6b6860]">
+                    <td className="px-4 py-3.5 font-mono text-xs text-[#5f6b63]">
                       {r.lastContractRef}
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-[#6b6860]">{r.startDate?.slice(0, 10) ?? '—'} → {r.endDate?.slice(0, 10) ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-[#6b6860]">{r.latestEndDate?.slice(0, 10) ?? '—'}</td>
+                    <td className="px-4 py-3.5 text-xs text-[#5f6b63]">{r.startDate?.slice(0, 10) ?? '—'} → {r.endDate?.slice(0, 10) ?? '—'}</td>
+                    <td className="px-4 py-3.5 text-[#5f6b63]">{r.latestEndDate?.slice(0, 10) ?? '—'}</td>
                     <td className="px-4 py-3.5">
-                      <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${OUTCOME_STYLE[r.outcome] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>
+                      <span className={`inline-flex items-center rounded-full text-xs font-medium px-2.5 py-0.5 ${OUTCOME_STYLE[r.outcome] ?? 'bg-[#eef1ef] text-[#5f6b63]'}`}>
                         {OUTCOME_LABELS[r.outcome] ?? r.outcome}
                       </span>
                     </td>

@@ -40,13 +40,13 @@ const cap = (v: string) => (v ? v[0].toUpperCase() + v.slice(1) : '—');
  *  as words: "Staff Accommodation". */
 const titleCase = (v: string) =>
   (v ?? '').split(/[_\-\s]+/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
-const CONDC: Record<string, string> = { good: '#2e9f82', fair: '#c98a1a', poor: '#c0392b', '': '#9b9890' };
+const CONDC: Record<string, string> = { good: '#047246', fair: '#c98a1a', poor: '#c0392b', '': '#8a948d' };
 
 // Jade palette mirroring InspectionReportView.module.css.
-const JADE = '#2e9f82';
-const INK = '#1a1916';
-const MUTE = '#9b9890';
-const LINE = '#e8e6e0';
+const JADE = '#047246';
+const INK = '#14201a';
+const MUTE = '#8a948d';
+const LINE = '#e4e9e5';
 const s = StyleSheet.create({
   page: { paddingTop: 30, paddingBottom: 40, paddingHorizontal: 30, fontSize: 9, color: INK, fontFamily: 'Helvetica' },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
@@ -68,9 +68,9 @@ const s = StyleSheet.create({
   tileL: { fontSize: 7, color: '#4a6c60', textTransform: 'uppercase' },
   tileV: { fontSize: 14, fontFamily: 'Helvetica-Bold', color: INK, marginTop: 2 },
   secH: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: INK, marginTop: 4, marginBottom: 5 },
-  thead: { flexDirection: 'row', backgroundColor: '#f4f3ef', paddingVertical: 4, paddingHorizontal: 5, borderTopLeftRadius: 5, borderTopRightRadius: 5 },
-  th: { fontSize: 6.8, fontFamily: 'Helvetica-Bold', color: '#6b6860', textTransform: 'uppercase' },
-  catHead: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0faf6', paddingVertical: 3.5, paddingHorizontal: 5, marginTop: 5, borderRadius: 4 },
+  thead: { flexDirection: 'row', backgroundColor: '#eef1ef', paddingVertical: 4, paddingHorizontal: 5, borderTopLeftRadius: 5, borderTopRightRadius: 5 },
+  th: { fontSize: 6.8, fontFamily: 'Helvetica-Bold', color: '#5f6b63', textTransform: 'uppercase' },
+  catHead: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#eef7f2', paddingVertical: 3.5, paddingHorizontal: 5, marginTop: 5, borderRadius: 4 },
   catName: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: INK },
   catMeta: { fontSize: 7, color: MUTE, marginLeft: 6 },
   trow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3, paddingHorizontal: 5, borderBottom: `0.5px solid #f0ede7` },
@@ -80,9 +80,9 @@ const s = StyleSheet.create({
   condPill: { fontSize: 7, fontFamily: 'Helvetica-Bold' },
   cQty: { width: '11%', textAlign: 'center' },
   cCost: { width: '13%', textAlign: 'right', fontFamily: 'Helvetica-Bold' },
-  cRem: { width: '25%', color: '#6b6860', fontSize: 7.8 },
+  cRem: { width: '25%', color: '#5f6b63', fontSize: 7.8 },
   costFoot: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 8, paddingTop: 6, borderTop: `1px solid ${LINE}`, gap: 10 },
-  costK: { fontSize: 8.5, color: '#6b6860' },
+  costK: { fontSize: 8.5, color: '#5f6b63' },
   costV: { fontSize: 12, fontFamily: 'Helvetica-Bold', color: JADE },
   notesH: { fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: INK, marginTop: 12, marginBottom: 3 },
   notes: { fontSize: 8.5, color: '#3a382f', lineHeight: 1.4, border: `1px solid ${LINE}`, borderRadius: 6, padding: 7, backgroundColor: '#faf9f6' },
@@ -94,7 +94,7 @@ const s = StyleSheet.create({
   sigImg: { height: 40, objectFit: 'contain', marginBottom: 3 },
   sigPad: { height: 40, borderBottom: `1px solid ${INK}`, marginBottom: 3 },
   sigDate: { fontSize: 7, color: MUTE },
-  ack: { fontSize: 7.5, color: '#6b6860', marginTop: 14, lineHeight: 1.4 },
+  ack: { fontSize: 7.5, color: '#5f6b63', marginTop: 14, lineHeight: 1.4 },
 });
 
 export default function InspectionReportV2Pdf({ data }: { data: InspectionV2PdfData }) {

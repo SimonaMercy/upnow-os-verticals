@@ -134,8 +134,8 @@ const DEPOSIT_LABELS: Record<string, string> = {
 function HeadStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
     <div className="shrink-0">
-      <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide whitespace-nowrap">{label}</p>
-      <p className={`text-base font-bold whitespace-nowrap ${accent ?? 'text-[#1a1916]'}`}>{value}</p>
+      <p className="text-[10px] text-[#8a948d] font-medium uppercase tracking-wide whitespace-nowrap">{label}</p>
+      <p className={`text-base font-bold whitespace-nowrap ${accent ?? 'text-[#14201a]'}`}>{value}</p>
     </div>
   );
 }
@@ -185,8 +185,8 @@ const sortDocs = (docs: CustomerDoc[]): CustomerDoc[] =>
 function DetailField({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] text-[#9b9890] font-medium uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-semibold text-[#1a1916] break-words">{value || '—'}</p>
+      <p className="text-[10px] text-[#8a948d] font-medium uppercase tracking-wide">{label}</p>
+      <p className="text-sm font-semibold text-[#14201a] break-words">{value || '—'}</p>
     </div>
   );
 }
@@ -197,10 +197,10 @@ function TenancyHeader({ lc }: { lc: Lifecycle }) {
   const unitLabel = lc.unit.number || lc.unit.name || '—';
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span className="w-8 h-8 rounded-lg bg-[#f4f3ef] grid place-items-center text-[#6b6860] shrink-0"><Home size={15} /></span>
-      <span className="text-[13px] font-bold text-[#1a1916]">{lc.property.buildingName || '—'} · Unit {unitLabel}</span>
-      <span className="text-[11px] text-[#9b9890] font-mono">{lc.ref} · {fmtPeriod(lc.startDate, lc.endDate)}</span>
-      <span className={`inline-flex items-center rounded-full text-[10px] font-semibold px-2 py-0.5 capitalize ${OUTCOME_STYLE[lc.outcome] ?? 'bg-[#f4f3ef] text-[#6b6860]'}`}>{lc.outcome}</span>
+      <span className="w-8 h-8 rounded-lg bg-[#eef1ef] grid place-items-center text-[#5f6b63] shrink-0"><Home size={15} /></span>
+      <span className="text-[13px] font-bold text-[#14201a]">{lc.property.buildingName || '—'} · Unit {unitLabel}</span>
+      <span className="text-[11px] text-[#8a948d] font-mono">{lc.ref} · {fmtPeriod(lc.startDate, lc.endDate)}</span>
+      <span className={`inline-flex items-center rounded-full text-[10px] font-semibold px-2 py-0.5 capitalize ${OUTCOME_STYLE[lc.outcome] ?? 'bg-[#eef1ef] text-[#5f6b63]'}`}>{lc.outcome}</span>
     </div>
   );
 }
@@ -228,12 +228,12 @@ function TenancySettlement({ lc, links, showHeader, onOpenStatement }: { lc: Lif
           <div className="flex items-center gap-3 shrink-0">
             {onOpenStatement && (
               <button type="button" onClick={() => onOpenStatement(lc.leaseId)}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2e9f82] hover:underline cursor-pointer">
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#047246] hover:underline cursor-pointer">
                 <FileText size={11} /> View full statement
               </button>
             )}
             {settleHref && (
-              <a href={settleHref} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6b6860] hover:underline">
+              <a href={settleHref} className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#5f6b63] hover:underline">
                 <ExternalLink size={11} /> Contract page
               </a>
             )}
@@ -245,7 +245,7 @@ function TenancySettlement({ lc, links, showHeader, onOpenStatement }: { lc: Lif
             <SettlementLines s={lc.settlement} openHref={null} />
           </button>
         ) : (
-          <p className="text-[11px] text-[#9b9890]">No move-out settlement was recorded.{dep && dep.status === 'held' ? ' The deposit is still marked as held.' : ''}</p>
+          <p className="text-[11px] text-[#8a948d]">No move-out settlement was recorded.{dep && dep.status === 'held' ? ' The deposit is still marked as held.' : ''}</p>
         )}
       </div>
 
@@ -255,7 +255,7 @@ function TenancySettlement({ lc, links, showHeader, onOpenStatement }: { lc: Lif
           <DocGroupLabel>Security deposit · {fmtAed(dep.amount)} · {DEPOSIT_LABELS[dep.status] ?? dep.status}{dep.settledOn ? ` · settled ${dep.settledOn}` : ''}</DocGroupLabel>
           {depDocs.length > 0
             ? <DocList docs={depDocs.map(toLink)} labelFor={labelAll} />
-            : <p className="text-[11px] text-[#9b9890]">No deposit documents on file.</p>}
+            : <p className="text-[11px] text-[#8a948d]">No deposit documents on file.</p>}
         </div>
       )}
 
@@ -287,9 +287,9 @@ function TenancyContractDocs({ lc, leaseDocs, showHeader }: { lc: Lifecycle; lea
   // so a chain of contracts reads as cleanly-separated, arranged blocks.
   const Card = ({ title, period, docs }: { title: string; period?: string; docs: CustomerDoc[] }) => (
     <div className="rounded-xl border border-[#f0ede8] overflow-hidden">
-      <div className="flex items-center justify-between gap-2 bg-[#f4f3ef] px-3 py-2">
-        <span className="font-mono text-[11px] font-bold text-[#3d3b35] truncate">{title}</span>
-        {period && <span className="text-[11px] text-[#9b9890] shrink-0">{period}</span>}
+      <div className="flex items-center justify-between gap-2 bg-[#eef1ef] px-3 py-2">
+        <span className="font-mono text-[11px] font-bold text-[#46534c] truncate">{title}</span>
+        {period && <span className="text-[11px] text-[#8a948d] shrink-0">{period}</span>}
       </div>
       <div className="p-2.5">
         <DocList docs={sortDocs(docs).map(toLink)} labelFor={labelAll} />
@@ -350,37 +350,37 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={dismiss}>
       <div className="w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl bg-[#fbfbf9] shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e8e6e0] bg-white">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#e4e9e5] bg-white">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h2 className="text-lg font-bold text-[#1a1916] truncate">{tenantDisplayName(row) || tenantDisplayName(c) || 'Customer'}</h2>
-              <span className="inline-flex items-center gap-1 rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#f4f3ef] text-[#6b6860]">
+              <h2 className="text-lg font-bold text-[#14201a] truncate">{tenantDisplayName(row) || tenantDisplayName(c) || 'Customer'}</h2>
+              <span className="inline-flex items-center gap-1 rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#eef1ef] text-[#5f6b63]">
                 <CalendarX size={12} /> Ended customer
               </span>
             </div>
-            <p className="text-xs text-[#9b9890] mt-0.5">
+            <p className="text-xs text-[#8a948d] mt-0.5">
               {row.lastProperty}{row.lastUnit && row.lastUnit !== '—' ? ` · Unit ${row.lastUnit}` : ''}{row.latestEndDate ? ` · ended ${row.latestEndDate}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
             {links?.customer && (
-              <a href={links.customer(row.customerId)} className="text-[11px] text-[#2e9f82] font-semibold hover:underline inline-flex items-center gap-1">
+              <a href={links.customer(row.customerId)} className="text-[11px] text-[#047246] font-semibold hover:underline inline-flex items-center gap-1">
                 <UserCircle size={13} /> Full profile
               </a>
             )}
-            <button onClick={dismiss} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer p-1.5 rounded-lg hover:bg-[#f4f3ef]"><X size={18} /></button>
+            <button onClick={dismiss} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer p-1.5 rounded-lg hover:bg-[#eef1ef]"><X size={18} /></button>
           </div>
         </div>
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {loading ? (
-            <div className="flex items-center justify-center py-20"><Loader2 size={22} className="animate-spin text-[#2e9f82]" /></div>
+            <div className="flex items-center justify-center py-20"><Loader2 size={22} className="animate-spin text-[#047246]" /></div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center py-16 text-center gap-2">
               <AlertCircle size={22} className="text-[#b91c1c]" />
               <p className="text-sm text-[#b91c1c]">{error}</p>
-              <button onClick={fetchDetail} className="text-xs text-[#2e9f82] font-medium hover:underline cursor-pointer">Retry</button>
+              <button onClick={fetchDetail} className="text-xs text-[#047246] font-medium hover:underline cursor-pointer">Retry</button>
             </div>
           ) : detail ? (
             <>
@@ -390,7 +390,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
                 const renewals = detail.lifecycles.reduce((s, lc) => s + Math.max(0, (lc.history?.length || 1) - 1), 0);
                 return (
                   <div className="bg-white rounded-2xl border border-[#f0ede8] p-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-                    <p className="text-[10px] text-[#9b9890] font-semibold uppercase tracking-wide mb-2.5">Summary of tenant</p>
+                    <p className="text-[10px] text-[#8a948d] font-semibold uppercase tracking-wide mb-2.5">Summary of tenant</p>
                     <div className="flex items-center gap-x-8 overflow-x-auto">
                       <HeadStat label="Total leases" value={String(totalLeaseRows)} />
                       <HeadStat label="Total collection" value={fmtAed(detail.financials.totalCollected)} accent={detail.financials.totalCollected > 0 ? 'text-[#1a7a5a]' : undefined} />
@@ -404,7 +404,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
 
               {/* 2 · Customer details — one row card */}
               <div className="bg-white rounded-2xl border border-[#f0ede8] p-4">
-                <p className="text-[10px] text-[#9b9890] font-semibold uppercase tracking-wide mb-2.5">Customer details</p>
+                <p className="text-[10px] text-[#8a948d] font-semibold uppercase tracking-wide mb-2.5">Customer details</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-3">
                   <DetailField label="Name" value={c?.name ?? row.name} />
                   <DetailField label="Email" value={c?.email ?? row.email} />
@@ -457,7 +457,7 @@ export default function EndedLeaseDetailModal({ row, loadDetail, onClose, links,
                         if (inBucket.length === 0) return null;
                         return (
                           <div key={key}>
-                            <DocGroupLabel><Icon size={12} className="text-[#2e9f82]" /> {label} ({inBucket.length})</DocGroupLabel>
+                            <DocGroupLabel><Icon size={12} className="text-[#047246]" /> {label} ({inBucket.length})</DocGroupLabel>
                             <DocList docs={inBucket.map(toLink)} labelFor={labelOf} />
                           </div>
                         );

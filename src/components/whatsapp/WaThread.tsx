@@ -190,7 +190,7 @@ export function WaThread({ rp, chatId, isManager, onBack, onChanged, alwaysShowB
   };
 
   if (error) return <div className="p-6 text-sm text-[#b42318]">{error}</div>;
-  if (!chat) return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  if (!chat) return <div className="p-6 text-sm text-[#8a948d]">Loading…</div>;
 
   const offline = chat.lineStatus !== 'connected';
   const rows = messages.map((m, i) => ({ m, day: i === 0 || waDayLabel(messages[i - 1].sentAt) !== waDayLabel(m.sentAt) ? waDayLabel(m.sentAt) : null }));
@@ -200,47 +200,47 @@ export function WaThread({ rp, chatId, isManager, onBack, onChanged, alwaysShowB
         onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
         onDrop={(e) => { e.preventDefault(); setDragging(false); const files = Array.from(e.dataTransfer.files); if (files.length && !offline) setPending((cur) => [...cur, ...toPending(files)].slice(0, 10)); }}>
-        <style>{`.wa-flash > div:not(:empty) { animation: waFlash 1.6s ease-out; } @keyframes waFlash { 0%, 40% { box-shadow: 0 0 0 3px rgba(46,159,130,.45); } 100% { box-shadow: 0 0 0 3px rgba(46,159,130,0); } } @media (prefers-reduced-motion: reduce) { .wa-flash > div { animation: none; } }`}</style>
+        <style>{`.wa-flash > div:not(:empty) { animation: waFlash 1.6s ease-out; } @keyframes waFlash { 0%, 40% { box-shadow: 0 0 0 3px rgba(4,114,70,.45); } 100% { box-shadow: 0 0 0 3px rgba(4,114,70,0); } } @media (prefers-reduced-motion: reduce) { .wa-flash > div { animation: none; } }`}</style>
 
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#e8e6e0] bg-white shrink-0">
-          <button type="button" onClick={onBack} aria-label={alwaysShowBack ? 'Back' : 'All conversations'} className={`${alwaysShowBack ? '' : 'lg:hidden '}p-1.5 -ml-1 rounded-full text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer`}><ArrowLeft size={17} /></button>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[#e4e9e5] bg-white shrink-0">
+          <button type="button" onClick={onBack} aria-label={alwaysShowBack ? 'Back' : 'All conversations'} className={`${alwaysShowBack ? '' : 'lg:hidden '}p-1.5 -ml-1 rounded-full text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer`}><ArrowLeft size={17} /></button>
           <button type="button" onClick={() => setPanel(true)} className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer">
             <span className="w-10 h-10 shrink-0 rounded-full bg-[#e8f3ef] text-[#1a7a5a] grid place-items-center text-sm font-semibold">{chat.isGroup ? <Users size={17} /> : initials(chat.name) || <User size={17} />}</span>
             <span className="min-w-0">
               <span className="flex items-center gap-2">
-                <span className="text-[15px] font-semibold text-[#1a1916] truncate">{chat.name}</span>
+                <span className="text-[15px] font-semibold text-[#14201a] truncate">{chat.name}</span>
                 <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 ${KIND_CHIP[chat.kind]}`}>{KIND_LABEL[chat.kind]}</span>
               </span>
-              <span className="block text-xs text-[#6b6860] truncate">
+              <span className="block text-xs text-[#5f6b63] truncate">
                 {[chat.isGroup ? 'Group' : prettyPhone(chat.phone), chat.context?.type === 'customer' && chat.context.contracts[0] ? `Unit ${chat.context.contracts[0].unitNumber} · ${chat.context.contracts[0].buildingName}` : null, `on ${chat.lineLabel}`].filter(Boolean).join(' · ')}
               </span>
             </span>
           </button>
-          <button type="button" onClick={() => setPanel((v) => !v)} aria-label="About this conversation" aria-pressed={panel} className={`p-2 rounded-full cursor-pointer ${panel ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}><Info size={17} /></button>
+          <button type="button" onClick={() => setPanel((v) => !v)} aria-label="About this conversation" aria-pressed={panel} className={`p-2 rounded-full cursor-pointer ${panel ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'text-[#5f6b63] hover:bg-[#eef1ef]'}`}><Info size={17} /></button>
         </div>
 
         <div ref={scroller} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 space-y-1.5 bg-[#f1efe9]">
           {hasMore && (
             <div className="flex justify-center pb-2">
-              <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1a7a5a] bg-white border border-[#e8e6e0] rounded-full px-3.5 py-1.5 hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+              <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1a7a5a] bg-white border border-[#e4e9e5] rounded-full px-3.5 py-1.5 hover:border-[#047246] cursor-pointer disabled:opacity-60">
                 {loadingOlder && <Loader2 size={12} className="animate-spin" />} Earlier messages
               </button>
             </div>
           )}
-          {!hasMore && messages.length > 0 && <div className="text-center text-[11px] text-[#9b9890] pb-2">This is everything WhatsApp has shared with the platform for this conversation.</div>}
-          {messages.length === 0 && <div className="text-center text-sm text-[#9b9890] py-10">No messages yet. Write the first one below.</div>}
+          {!hasMore && messages.length > 0 && <div className="text-center text-[11px] text-[#8a948d] pb-2">This is everything WhatsApp has shared with the platform for this conversation.</div>}
+          {messages.length === 0 && <div className="text-center text-sm text-[#8a948d] py-10">No messages yet. Write the first one below.</div>}
           {rows.map(({ m, day }) => (
             <div key={m.id} className="space-y-1.5">
-              {day && <div className="flex justify-center py-1.5"><span className="text-[11px] font-medium text-[#4a4842] bg-white/90 border border-[#e8e6e0] rounded-full px-3 py-1">{day}</span></div>}
+              {day && <div className="flex justify-center py-1.5"><span className="text-[11px] font-medium text-[#4a4842] bg-white/90 border border-[#e4e9e5] rounded-full px-3 py-1">{day}</span></div>}
               <WaMessageBubble m={m} rp={rp} isGroup={chat.isGroup} onReply={setReplyTo} onOpenMedia={setLightbox} onJumpTo={jumpTo} onRetry={(x) => void sendText(x.body)} />
             </div>
           ))}
         </div>
 
         {!atBottom && (
-          <button type="button" onClick={toBottom} aria-label="Go to the latest message" className="absolute right-5 bottom-[84px] w-10 h-10 rounded-full bg-white border border-[#e8e6e0] shadow-md grid place-items-center text-[#4a4842] hover:text-[#1a7a5a] cursor-pointer z-10">
+          <button type="button" onClick={toBottom} aria-label="Go to the latest message" className="absolute right-5 bottom-[84px] w-10 h-10 rounded-full bg-white border border-[#e4e9e5] shadow-md grid place-items-center text-[#4a4842] hover:text-[#1a7a5a] cursor-pointer z-10">
             <ArrowDown size={17} />
-            {newBelow > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold grid place-items-center">{newBelow}</span>}
+            {newBelow > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#047246] text-white text-[10px] font-bold grid place-items-center">{newBelow}</span>}
           </button>
         )}
 
@@ -253,7 +253,7 @@ export function WaThread({ rp, chatId, isManager, onBack, onChanged, alwaysShowB
           onSendText={sendText} onSendFiles={sendFiles} onSendVoice={sendVoice} />
 
         {dragging && !offline && chat.canSend && (
-          <div className="absolute inset-0 z-30 bg-[#eef9f4]/90 border-2 border-dashed border-[#2e9f82] grid place-items-center pointer-events-none">
+          <div className="absolute inset-0 z-30 bg-[#eef9f4]/90 border-2 border-dashed border-[#047246] grid place-items-center pointer-events-none">
             <span className="text-base font-semibold text-[#1a7a5a]">Drop to send to {chat.name}</span>
           </div>
         )}

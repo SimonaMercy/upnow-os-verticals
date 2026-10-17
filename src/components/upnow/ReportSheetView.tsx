@@ -235,12 +235,12 @@ function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, ro
   onDrill?: (row: R, key: keyof R) => void;
 }) {
   return (
-    <div className="rounded-xl border border-[#e8e6e0] bg-white overflow-x-auto">
+    <div className="rounded-xl border border-[#e4e9e5] bg-white overflow-x-auto">
       <table className="w-full border-collapse text-[11px] leading-tight">
         <thead>
-          <tr className="bg-[#faf9f6] border-b border-[#e8e6e0]">
+          <tr className="bg-[#faf9f6] border-b border-[#e4e9e5]">
             {cols.map((c, i) => (
-              <th key={String(c.key)} className={`px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#9b9890] leading-[1.15] align-bottom ${i === 0 ? 'text-left' : 'text-right'}`}>
+              <th key={String(c.key)} className={`px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#8a948d] leading-[1.15] align-bottom ${i === 0 ? 'text-left' : 'text-right'}`}>
                 {c.label}
               </th>
             ))}
@@ -248,16 +248,16 @@ function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, ro
         </thead>
         <tbody>
           {rows.map(r => (
-            <tr key={r.label} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#fafaf8]">
+            <tr key={r.label} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#f6f8f6]">
               {cols.map((c, i) => {
                 const v = render(r, c.key);
                 const canDrill = !!drillKeys?.includes(c.key) && onDrill && (r.items?.length ?? 0) > 0 && v !== '' && v !== '0';
                 return (
-                  <td key={String(c.key)} className={`px-2 py-[5px] whitespace-nowrap tabular-nums ${i === 0 ? 'text-left font-semibold text-[#1a1916]' : `text-right ${v === '0' || v === '' ? 'text-[#c8c6c0]' : 'text-[#4a4742]'}`}`}>
+                  <td key={String(c.key)} className={`px-2 py-[5px] whitespace-nowrap tabular-nums ${i === 0 ? 'text-left font-semibold text-[#14201a]' : `text-right ${v === '0' || v === '' ? 'text-[#c8c6c0]' : 'text-[#4a4742]'}`}`}>
                     {canDrill ? (
                       <button
                         onClick={() => onDrill!(r, c.key)}
-                        className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer print:no-underline print:text-[#4a4742]"
+                        className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#047246] cursor-pointer print:no-underline print:text-[#4a4742]"
                         title="See the records behind this number">
                         {v}
                       </button>
@@ -269,7 +269,7 @@ function SheetTable<R extends { label: string; items?: DrillItem[] }>({ cols, ro
           ))}
         </tbody>
         <tfoot>
-          <tr className="bg-[#faf9f6] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+          <tr className="bg-[#faf9f6] border-t-2 border-[#e4e9e5] font-bold text-[#14201a]">
             {cols.map((c, i) => (
               <td key={String(c.key)} className={`px-2 py-1.5 whitespace-nowrap tabular-nums ${i === 0 ? 'text-left' : 'text-right'}`}>
                 {i === 0 ? 'Year total' : render(totals as unknown as R | null, c.key)}
@@ -307,10 +307,10 @@ function CashTotals({ totals, year }: { totals: CashTotalsShape; year: number })
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
       {tiles.map(t => (
-        <div key={t.label} className="bg-white rounded-xl border border-[#e8e6e0] px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{t.label}</p>
-          <p className={`text-sm font-bold tabular-nums mt-0.5 ${t.green ? 'text-[#1a7a5a]' : 'text-[#1a1916]'}`}>{t.value}</p>
-          {t.sub && <p className="text-[10px] text-[#9b9890] tabular-nums">{t.sub}</p>}
+        <div key={t.label} className="bg-white rounded-xl border border-[#e4e9e5] px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{t.label}</p>
+          <p className={`text-sm font-bold tabular-nums mt-0.5 ${t.green ? 'text-[#1a7a5a]' : 'text-[#14201a]'}`}>{t.value}</p>
+          {t.sub && <p className="text-[10px] text-[#8a948d] tabular-nums">{t.sub}</p>}
         </div>
       ))}
     </div>
@@ -355,21 +355,21 @@ function CashPanels({ totals, year }: { totals: CashTotalsShape; year: number })
     <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 mt-5 print:break-inside-avoid">
       {panels.map(panel => (
         <div key={panel.title}>
-          <div className="text-[12px] font-bold text-[#1a1916] mb-2">{panel.title}</div>
-          <table className="w-full text-[12px] border border-[#e8e6e0] rounded-lg overflow-hidden bg-white">
+          <div className="text-[12px] font-bold text-[#14201a] mb-2">{panel.title}</div>
+          <table className="w-full text-[12px] border border-[#e4e9e5] rounded-lg overflow-hidden bg-white">
             <tbody>
               {panel.rows.map(r => (
-                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#f4f3ef] font-bold text-[#1a1916]' : 'text-[#6b6860]'}`}>
+                <tr key={r.label} className={`border-b border-[#f0ede8] last:border-b-0 ${r.total ? 'bg-[#eef1ef] font-bold text-[#14201a]' : 'text-[#5f6b63]'}`}>
                   <td className="px-3 py-2 text-left">
                     {r.label}
-                    {r.note && <span className="block text-[10.5px] text-[#9b9890] font-normal">{r.note}</span>}
+                    {r.note && <span className="block text-[10.5px] text-[#8a948d] font-normal">{r.note}</span>}
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#1a1916]">{fmtAed(r.value)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-[#14201a]">{fmtAed(r.value)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="text-[11px] text-[#6b6860] mt-2 leading-relaxed">{panel.note}</p>
+          <p className="text-[11px] text-[#5f6b63] mt-2 leading-relaxed">{panel.note}</p>
         </div>
       ))}
     </div>
@@ -379,9 +379,9 @@ function CashPanels({ totals, year }: { totals: CashTotalsShape; year: number })
 function StateCard({ loading, error }: { loading: boolean; error: string | null }) {
   if (loading) {
     return (
-      <div className="bg-white rounded-xl border border-[#e8e6e0] p-10 flex items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-[#2e9f82]" />
-        <span className="ml-2 text-sm text-[#6b6860]">Loading…</span>
+      <div className="bg-white rounded-xl border border-[#e4e9e5] p-10 flex items-center justify-center">
+        <Loader2 size={18} className="animate-spin text-[#047246]" />
+        <span className="ml-2 text-sm text-[#5f6b63]">Loading…</span>
       </div>
     );
   }
@@ -557,34 +557,34 @@ export default function ReportSheetView({
 
   return (
     <div className="p-6">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#1a1916] mb-4">
+      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#14201a] mb-4">
         <ArrowLeft size={15} /> All reports
       </button>
 
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div>
-          <h1 className="text-xl font-bold text-[#1a1916]">{cfg.title}</h1>
-          <p className="text-xs text-[#6b6860] mt-0.5">{cfg.subtitle}</p>
+          <h1 className="text-xl font-bold text-[#14201a]">{cfg.title}</h1>
+          <p className="text-xs text-[#5f6b63] mt-0.5">{cfg.subtitle}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Property filter — options come from the report (filter-independent). */}
-          <label className="inline-flex items-center gap-1.5 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
-            <Building2 size={14} className="text-[#2e9f82]" />
+          <label className="inline-flex items-center gap-1.5 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+            <Building2 size={14} className="text-[#047246]" />
             <select
               value={String(buildingId)}
               onChange={e => setBuildingId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-              className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1 max-w-[170px]"
+              className="text-sm font-semibold text-[#14201a] bg-transparent focus:outline-none cursor-pointer pr-1 max-w-[170px]"
               aria-label="Property">
               <option value="all">All properties</option>
               {buildingOpts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </label>
           {/* Leasing model — Lease (direct) / Sub-lease / Management. */}
-          <label className="inline-flex items-center gap-1.5 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+          <label className="inline-flex items-center gap-1.5 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
             <select
               value={leaseType}
               onChange={e => setLeaseType(e.target.value as typeof leaseType)}
-              className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+              className="text-sm font-semibold text-[#14201a] bg-transparent focus:outline-none cursor-pointer pr-1"
               aria-label="Lease type">
               <option value="all">All lease types</option>
               <option value="direct">Lease</option>
@@ -592,12 +592,12 @@ export default function ReportSheetView({
               <option value="management">Management</option>
             </select>
           </label>
-          <label className="inline-flex items-center gap-2 bg-white border border-[#e8e6e0] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
-            <CalendarRange size={14} className="text-[#2e9f82]" />
+          <label className="inline-flex items-center gap-2 bg-white border border-[#e4e9e5] rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+            <CalendarRange size={14} className="text-[#047246]" />
             <select
               value={String(year)}
               onChange={e => setReportsYear(Number(e.target.value))}
-              className="text-sm font-semibold text-[#1a1916] bg-transparent focus:outline-none cursor-pointer pr-1"
+              className="text-sm font-semibold text-[#14201a] bg-transparent focus:outline-none cursor-pointer pr-1"
               aria-label="Year">
               {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
@@ -605,7 +605,7 @@ export default function ReportSheetView({
           <button
             onClick={doExport}
             disabled={exporting || loading || !!error}
-            className="inline-flex items-center gap-1.5 bg-[#2e9f82] hover:bg-[#278a71] disabled:opacity-50 text-white text-sm font-semibold rounded-xl px-3.5 py-2">
+            className="inline-flex items-center gap-1.5 bg-[#047246] hover:bg-[#278a71] disabled:opacity-50 text-white text-sm font-semibold rounded-xl px-3.5 py-2">
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             {cfg.exportLabel}
           </button>
@@ -693,7 +693,7 @@ export default function ReportSheetView({
               return v == null ? '' : String(v);
             }}
           />
-          <p className="text-[10px] text-[#9b9890] mt-2">All amounts in AED. Anchored on the cheque date; cancelled cheques excluded; includes customers who have since moved out. Expected is Received + Pending — a bounced cheque is reported beside it, never inside it. Penalty is the penalty / late fee charged in the month — bounced-cheque, replacement and deferral charges plus the late/early lifecycle penalties — read like Bounced: reported beside the rent, never inside it, whether or not it has been collected yet. The header tile says how much of the year’s penalties actually cleared. Click any figure in a month — Expected, Received, Pending, Bounced or Penalty — for the records behind that number; the month name opens all of them.</p>
+          <p className="text-[10px] text-[#8a948d] mt-2">All amounts in AED. Anchored on the cheque date; cancelled cheques excluded; includes customers who have since moved out. Expected is Received + Pending — a bounced cheque is reported beside it, never inside it. Penalty is the penalty / late fee charged in the month — bounced-cheque, replacement and deferral charges plus the late/early lifecycle penalties — read like Bounced: reported beside the rent, never inside it, whether or not it has been collected yet. The header tile says how much of the year’s penalties actually cleared. Click any figure in a month — Expected, Received, Pending, Bounced or Penalty — for the records behind that number; the month name opens all of them.</p>
           <CashPanels totals={(data as CashReport).totals} year={(data as CashReport).year} />
         </>
       )}
@@ -704,26 +704,26 @@ export default function ReportSheetView({
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#f0ede8]">
               <div>
-                <h3 className="text-base font-bold text-[#1a1916]">{drill.title}</h3>
+                <h3 className="text-base font-bold text-[#14201a]">{drill.title}</h3>
                 {/* The subset's own total, so the popup can be checked against
                     the cell that opened it without adding the rows up by hand. */}
-                <p className="text-xs text-[#6b6860] mt-0.5">
+                <p className="text-xs text-[#5f6b63] mt-0.5">
                   {drill.items.length} {drill.countLabel}{drill.items.length === 1 ? '' : 's'}
                   {drill.items.some(it => it.amountFils != null) && (
-                    <> · <span className="font-semibold text-[#1a1916] tabular-nums">
+                    <> · <span className="font-semibold text-[#14201a] tabular-nums">
                       AED {fmtAed(drill.items.reduce((s, it) => s + Number(it.amountFils ?? 0), 0))}
                     </span></>
                   )}
                 </p>
               </div>
-              <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef]">✕</button>
+              <button onClick={() => setDrill(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef]">✕</button>
             </div>
             <div className="overflow-auto">
               {drill.items.length === 0 ? (
-                <p className="px-5 py-8 text-center text-sm text-[#9b9890]">No records for this period.</p>
+                <p className="px-5 py-8 text-center text-sm text-[#8a948d]">No records for this period.</p>
               ) : (
                 <table className="w-full text-xs">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890] sticky top-0 z-10">
+                  <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d] sticky top-0 z-10">
                     <tr>
                       {drill.columns.map(c => (
                         <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.money ? 'text-right' : 'text-left'}`}>{c.label}</th>
@@ -737,20 +737,20 @@ export default function ReportSheetView({
                   {groupDrillItems(drill).map(g => (
                     <tbody key={g.key}>
                       {drill.groupKey && (
-                        <tr className="bg-[#f4f3ef] border-t border-[#e3e0d9]">
+                        <tr className="bg-[#eef1ef] border-t border-[#e3e0d9]">
                           <td colSpan={drill.columns.length + 1} className="px-4 py-2">
                             <div className="flex items-baseline justify-between gap-3">
-                              <span className="text-[11px] font-bold uppercase tracking-wide text-[#1a1916]">{g.key}</span>
-                              <span className="text-[10px] text-[#6b6860] tabular-nums">
+                              <span className="text-[11px] font-bold uppercase tracking-wide text-[#14201a]">{g.key}</span>
+                              <span className="text-[10px] text-[#5f6b63] tabular-nums">
                                 {g.items.length} {drill.countLabel}{g.items.length === 1 ? '' : 's'}
-                                {g.totalFils > 0 && <> · <span className="font-semibold text-[#1a1916]">AED {fmtAed(g.totalFils)}</span></>}
+                                {g.totalFils > 0 && <> · <span className="font-semibold text-[#14201a]">AED {fmtAed(g.totalFils)}</span></>}
                               </span>
                             </div>
                           </td>
                         </tr>
                       )}
                       {g.items.map((it, idx) => (
-                        <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#fafaf8] align-top">
+                        <tr key={idx} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6] align-top">
                           {drill.columns.map(c => {
                             const raw = it[c.key];
                             // A bounce has to be findable in a mixed month list —
@@ -761,7 +761,7 @@ export default function ReportSheetView({
                               const tone = s === 'bounced' ? 'bg-[#fee2e2] text-[#b91c1c]'
                                 : s === 'cleared' ? 'bg-[#dcf5ec] text-[#1a7a5a]'
                                 : s === 'pending' ? 'bg-[#fef3c7] text-[#92400e]'
-                                : 'bg-[#f4f3ef] text-[#6b6860]';
+                                : 'bg-[#eef1ef] text-[#5f6b63]';
                               return (
                                 <td key={c.key} className="px-4 py-2.5 text-left">
                                   <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${tone}`}>{s || '—'}</span>
@@ -773,8 +773,8 @@ export default function ReportSheetView({
                             if (c.rangeEnd) {
                               const end = it[c.rangeEnd];
                               return (
-                                <td key={c.key} className="px-4 py-2.5 text-left whitespace-nowrap text-[#1a1916] tabular-nums">
-                                  {raw == null && end == null ? '—' : <>{fmtDate(raw)} <span className="text-[#9b9890]">→</span> {fmtDate(end)}</>}
+                                <td key={c.key} className="px-4 py-2.5 text-left whitespace-nowrap text-[#14201a] tabular-nums">
+                                  {raw == null && end == null ? '—' : <>{fmtDate(raw)} <span className="text-[#8a948d]">→</span> {fmtDate(end)}</>}
                                 </td>
                               );
                             }
@@ -787,10 +787,10 @@ export default function ReportSheetView({
                               : String(val);
                             const sub = c.sub ? it[c.sub] : null;
                             return (
-                              <td key={c.key} className={`px-4 py-2.5 ${c.money ? 'text-right tabular-nums font-semibold' : 'text-left'} text-[#1a1916]`}>
+                              <td key={c.key} className={`px-4 py-2.5 ${c.money ? 'text-right tabular-nums font-semibold' : 'text-left'} text-[#14201a]`}>
                                 <div className={c.emphasis ? 'text-[13px] font-bold whitespace-nowrap' : undefined}>{text}</div>
                                 {sub != null && String(sub) !== '' && (
-                                  <div className={`text-[10px] text-[#9b9890] mt-0.5 leading-tight ${c.emphasis ? 'max-w-[210px]' : ''}`}>
+                                  <div className={`text-[10px] text-[#8a948d] mt-0.5 leading-tight ${c.emphasis ? 'max-w-[210px]' : ''}`}>
                                     {c.sub === 'dueDate' || /date$/i.test(c.sub ?? '') ? fmtDate(sub) : String(sub)}
                                   </div>
                                 )}
@@ -799,7 +799,7 @@ export default function ReportSheetView({
                           })}
                           <td className="px-4 py-2.5 text-right">
                             {it.contractId != null && (
-                              <a href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline whitespace-nowrap">Open ↗</a>
+                              <a href={`${contractsBase}/${it.contractId}/v2`} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline whitespace-nowrap">Open ↗</a>
                             )}
                           </td>
                         </tr>

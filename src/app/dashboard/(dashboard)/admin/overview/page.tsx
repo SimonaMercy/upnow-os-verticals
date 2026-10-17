@@ -2,32 +2,50 @@
  * Admin — Platform Overview (dashboard/admin/overview)
  *
  * The ORIGINAL admin landing page. /dashboard/admin now renders Platform Pulse
- * instead; this is kept, unchanged and still reachable at its own route rather
- * than deleted — several cards here have no Pulse equivalent yet.
+ * instead; this is kept and still reachable at its own route rather than
+ * deleted — several cards here have no Pulse equivalent yet.
  *
  * The super-admin's landing: an at-a-glance platform-health snapshot spanning
  * BOTH marketplaces — Rental Providers and Service Providers — plus cross-platform
  * stats. Customer / SP headline counts are ACTIVE-only (SCRUM-595).
  *
- * Risk / watchlist / harm-events now live on the dedicated Risk board
- * (/dashboard/admin/risk); the Overview keeps only a compact risk-summary tile.
+ * Risk / watchlist / harm-events live on the dedicated Risk board
+ * (/dashboard/admin/risk); the Overview keeps only a compact risk summary.
  * Deep analytics live on /dashboard/admin/analytics. Amounts are WHOLE AED.
+ *
+ * Parity with previous page (Genspark kit rebuild):
+ *  - API: GET /admin/overview, GET /admin/analytics/rp, GET /admin/analytics/sp,
+ *    GET /admin/risk/overview (→ .kpis). All four in parallel; each failure is
+ *    swallowed individually (widget falls back to "—" / empty state), as before.
+ *  - Title switches on role: super_admin → "Platform Overview", else "Admin Overview".
+ *  - Header links: Deep analytics (/dashboard/admin/analytics), Risk board (/dashboard/admin/risk).
+ *  - Risk summary (watchlist RPs, deposits at risk AED + count, open critical alerts) → /risk.
+ *    Now rendered as Attn cards; open-disputes count added from the same /admin/overview data.
+ *  - Rental KPIs (Properties, Units, Active customers, Rental providers, Managers, Occupancy)
+ *    with the same drill-in hrefs (users?role=…, units?availability=occupied, …).
+ *  - Charts: Customer age, Top nationalities (top 8), Properties by emirate (bar click →
+ *    /properties?emirate=), Unit mix (bar click → /units?unitType=), New leases (12 mo area),
+ *    Customer KYC (→ /kyc?tab=tenants), Top rental providers list (→ /users/:ownerUserId or
+ *    /kyc/rental-provider/:rpId), Services by category (bar click → /listings?section=sp&category=),
+ *    Zones served, Rating distribution, Users by role pie (slice click → /users?role=),
+ *    New signups stacked bars, Disputes case-load (→ /disputes) with open count.
+ *  - SP KPIs (Active SPs, Active technicians, Services offered, Avg rating) with same hrefs.
+ *  - Loading state (skeleton) and every chart's empty-state copy kept.
+ *  - Whole-card links became labelled "View"/"Open" buttons in each Card header (same targets).
  */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  Building2, Home, Users, UserCog, ShieldCheck, TrendingUp, Loader2,
-  ArrowUpRight, ShieldAlert, Wrench, HardHat, ListChecks, Globe, Scale, Star, Gauge,
-} from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie,
   XAxis, YAxis, CartesianGrid, Tooltip, Cell, Legend,
 } from 'recharts';
 import { apiGet } from '@/lib/api';
+import {
+  Attn, AttnCard, Btn, Card, Cols, Kpi, Kpis, OsPage, PageHead, Pill, ScopeStrip, fmtAedK,
+} from '@/components/os/kit';
 
 /* ── Types ── */
 interface Overview {
@@ -68,69 +86,32 @@ interface SpAnalytics {
 interface RiskKpis { rpsOnWatchlist: number; depositsAtRiskAed: number; depositsAtRiskCount: number; openCriticalAlerts: number; }
 interface RiskOverview { kpis: RiskKpis }
 
-/* ── Style ── */
-const GREEN = '#2e9f82', BLUE = '#3b6fb5', AMBER = '#d97706', PURPLE = '#7c3aed', RED = '#dc2626', TEAL = '#0d9488', ROSE = '#e11d48';
-const PALETTE = [GREEN, BLUE, AMBER, PURPLE, TEAL, ROSE, '#6b6860', '#b45309'];
+/* ── Chart style ── */
+const GREEN = '#047246', BLUE = '#3b6fb5', AMBER = '#d97706', PURPLE = '#7c3aed', TEAL = '#0d9488', ROSE = '#e11d48';
+const PALETTE = [GREEN, BLUE, AMBER, PURPLE, TEAL, ROSE, '#5f6b63', '#b45309'];
 const ROLE_LABEL: Record<string, string> = {
   customer: 'Customers', rental_provider: 'Rental providers', manager: 'Managers',
   service_provider: 'Service providers', super_admin: 'Admins',
 };
-const tooltipStyle = { borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
-function fmtAED(aed: number | null | undefined): string {
-  if (aed == null) return '—';
-  const a = Math.abs(aed);
-  if (a >= 1_000_000) return `AED ${(aed / 1_000_000).toFixed(2)}M`;
-  if (a >= 1_000) return `AED ${Math.round(aed / 1_000)}K`;
-  return `AED ${Math.round(aed).toLocaleString('en-AE')}`;
-}
-const aedAxis = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}K` : String(v));
+const tooltipStyle = { borderRadius: 12, border: '1px solid #e4e9e5', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' };
 const monthLabel = (m: string) => { const [, mm] = m.split('-'); return ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(mm)] || m; };
 
-function KpiTile({ icon: Icon, label, value, sub, tone = 'neutral', href }: {
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  label: string; value: string; sub?: string; tone?: 'neutral' | 'good' | 'bad' | 'warn'; href?: string;
-}) {
-  const vc = tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#1a1916]';
-  const body = (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5 h-full hover:border-[#d4d2cc] transition-colors">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold"><Icon size={12} /> {label}</div>
-      <p className={`text-xl font-bold mt-1.5 leading-none ${vc}`}>{value}</p>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
-    </div>
-  );
-  return href ? <Link href={href}>{body}</Link> : body;
-}
-function ChartCard({ title, sub, children, href, hint }: { title: string; sub?: string; children: React.ReactNode; href?: string; hint?: string }) {
-  const inner = (
-    <>
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
-        {(href || hint) && <span className="flex items-center gap-0.5 text-[10px] font-semibold text-[#9b9890] whitespace-nowrap">{hint ?? 'View'} <ArrowUpRight size={12} /></span>}
-      </div>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-1">{sub}</p>}
-      <div className="mt-2">{children}</div>
-    </>
-  );
-  return href ? (
-    <Link href={href} className="block bg-white rounded-2xl border border-[#e8e6e0] p-4 hover:border-[#d4d2cc] transition-colors">{inner}</Link>
-  ) : (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">{inner}</div>
-  );
-}
-function SectionHeader({ icon: Icon, title, sub }: { icon: React.ComponentType<{ size?: number; className?: string }>; title: string; sub?: string }) {
-  return (
-    <div className="flex items-center gap-2 mt-7 mb-3">
-      <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-[#f0faf6] text-[#1a7a5a]"><Icon size={15} /></span>
-      <div>
-        <h2 className="text-[14px] font-bold text-[#1a1916] leading-none">{title}</h2>
-        {sub && <p className="text-[11px] text-[#9b9890] mt-1">{sub}</p>}
-      </div>
-    </div>
-  );
-}
 function EmptyChart({ text }: { text: string }) {
-  return <div className="h-[190px] flex items-center justify-center text-center text-[12px] text-[#9b9890] px-4">{text}</div>;
+  return <div className="gx-empty" style={{ height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{text}</div>;
 }
+/** Section divider between the three marketplace blocks. */
+function Section({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div style={{ margin: '22px 0 10px' }}>
+      <div className="gx-eyebrow">{title}</div>
+      <p style={{ fontSize: 11.5, color: 'var(--ms-ink-3)', marginTop: 2 }}>{sub}</p>
+    </div>
+  );
+}
+/** Card header affordance: a labelled link, or a hint that the chart itself is clickable. */
+const viewBtn = (href: string, label = 'View') => <Btn size="xs" href={href}>{label}</Btn>;
+const clickHint = (t: string) => <Pill tone="outline" dot={false}>{t}</Pill>;
+
 /** Simple categorical bar chart (name/value). */
 function CatBar({ data, color = GREEN, empty, fmt, onBarClick }: { data: { name: string; value: number }[]; color?: string; empty: string; fmt?: (v: number) => string; onBarClick?: (name: string) => void }) {
   if (!data.length || data.every((d) => !d.value)) return <EmptyChart text={empty} />;
@@ -138,15 +119,24 @@ function CatBar({ data, color = GREEN, empty, fmt, onBarClick }: { data: { name:
     <ResponsiveContainer width="100%" height={190}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} angle={data.length > 5 ? -20 : 0} textAnchor={data.length > 5 ? 'end' : 'middle'} height={data.length > 5 ? 44 : 24} />
-        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={30} tickFormatter={fmt ? (v) => fmt(Number(v)) : undefined} />
-        <Tooltip formatter={(v: unknown) => [fmt ? fmt(Number(v)) : String(v), ''] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+        <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#8a948d' }} axisLine={false} tickLine={false} interval={0} angle={data.length > 5 ? -20 : 0} textAnchor={data.length > 5 ? 'end' : 'middle'} height={data.length > 5 ? 44 : 24} />
+        <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={30} tickFormatter={fmt ? (v) => fmt(Number(v)) : undefined} />
+        <Tooltip formatter={(v: unknown) => [fmt ? fmt(Number(v)) : String(v), ''] as [string, string]} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
         <Bar dataKey="value" radius={[4, 4, 0, 0]} cursor={onBarClick ? 'pointer' : undefined}
           onClick={onBarClick ? (d: unknown) => { const n = d as { payload?: { name?: string }; name?: string }; onBarClick(String(n?.payload?.name ?? n?.name ?? '')); } : undefined}>
           {data.map((_, i) => <Cell key={i} fill={color} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+function SkeletonCards() {
+  return (
+    <div aria-busy="true">
+      <Kpis>{Array.from({ length: 6 }).map((_, i) => <div key={i} className="gx-kpi"><div className="gx-skel" style={{ height: 10, width: '50%' }} /><div className="gx-skel" style={{ height: 20, width: '40%', marginTop: 8 }} /></div>)}</Kpis>
+      <Cols kind="3">{Array.from({ length: 3 }).map((_, i) => <Card key={i} pad><div className="gx-skel" style={{ height: 190 }} /></Card>)}</Cols>
+    </div>
   );
 }
 
@@ -162,7 +152,6 @@ export default function AdminPlatformOverview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
     Promise.all([
       apiGet<Overview>('/admin/overview').then(setOv).catch(() => null),
       apiGet<RpAnalytics>('/admin/analytics/rp').then(setRp).catch(() => null),
@@ -196,143 +185,144 @@ export default function AdminPlatformOverview() {
   const disputesOpen = (ov?.disputes ?? []).filter((d) => !/resolved|closed/i.test(d.name)).reduce((s, d) => s + d.value, 0);
   const disputesTotal = (ov?.disputes ?? []).reduce((s, d) => s + d.value, 0);
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-2">
-        <div>
-          <h1 className="text-lg font-bold text-[#1a1916]">{isSuperAdmin ? 'Platform Overview' : 'Admin Overview'}</h1>
-          <p className="text-[12px] text-[#9b9890] mt-0.5">A health snapshot across both marketplaces — rentals and home services. Customer &amp; provider totals are active-only.</p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Link href="/dashboard/admin/analytics" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold bg-white text-[#3f3d39] border border-[#e8e6e0] hover:border-[#d4d2cc] transition-colors">
-            Deep analytics <ArrowUpRight size={13} />
-          </Link>
-          <Link href="/dashboard/admin/risk" className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold bg-[#fef2f2] text-[#b91c1c] border border-[#f3c9c9] hover:border-[#dc2626] transition-colors">
-            Risk board <ArrowUpRight size={13} />
-          </Link>
-        </div>
-      </div>
+  const n = (v: number | undefined | null) => (v == null ? '—' : String(v));
 
-      {loading && !ov ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 flex items-center justify-center mt-4">
-          <Loader2 size={18} className="animate-spin text-[#2e9f82]" /><span className="ml-2 text-sm text-[#6b6860]">Loading…</span>
-        </div>
-      ) : (
+  return (
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Overview"
+        title={isSuperAdmin ? 'Platform Overview' : 'Admin Overview'}
+        lede="A health snapshot across both marketplaces — rentals and home services. Customer & provider totals are active-only."
+        actions={<>
+          <Btn href="/dashboard/admin/analytics">Deep analytics</Btn>
+          <Btn href="/dashboard/admin/risk" variant="danger">Risk board</Btn>
+        </>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Admin' },
+        { label: 'Marketplaces', value: 'Rentals · Home services' },
+        { label: 'Totals', value: 'Active-only' },
+        { label: 'Amounts', value: 'Whole AED' },
+      ]} />
+
+      {loading && !ov ? <SkeletonCards /> : (
         <>
-          {/* Risk summary strip */}
-          <Link href="/dashboard/admin/risk" className="block">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-2xl border border-[#f3c9c9] bg-[#fef6f6] px-4 py-2.5 mb-2 hover:border-[#dc2626] transition-colors">
-              <span className="flex items-center gap-1.5 text-[12px] font-bold text-[#b91c1c]"><ShieldAlert size={14} /> Risk</span>
-              <span className="text-[12px] text-[#6b6860]"><b className="text-[#b91c1c]">{risk?.rpsOnWatchlist ?? '—'}</b> RPs on watchlist</span>
-              <span className="text-[12px] text-[#6b6860]"><b className="text-[#b91c1c]">{risk ? fmtAED(risk.depositsAtRiskAed) : '—'}</b> deposits at risk ({risk?.depositsAtRiskCount ?? 0})</span>
-              <span className="text-[12px] text-[#6b6860]"><b className="text-[#b91c1c]">{risk?.openCriticalAlerts ?? '—'}</b> open critical alerts</span>
-              <span className="ml-auto text-[11px] font-semibold text-[#b91c1c] flex items-center gap-1">Open risk board <ArrowUpRight size={12} /></span>
-            </div>
-          </Link>
+          {/* Risk summary + open disputes — what needs an admin's attention. */}
+          <Attn>
+            <AttnCard tone={risk && risk.rpsOnWatchlist > 0 ? 'bad' : 'ok'} n={n(risk?.rpsOnWatchlist)} t="RPs on watchlist" s="Open risk board" href="/dashboard/admin/risk" />
+            <AttnCard tone={risk && risk.depositsAtRiskCount > 0 ? 'bad' : 'ok'} n={risk ? fmtAedK(risk.depositsAtRiskAed) : '—'} t="Deposits at risk" s={`${risk?.depositsAtRiskCount ?? 0} deposits`} href="/dashboard/admin/risk" />
+            <AttnCard tone={risk && risk.openCriticalAlerts > 0 ? 'bad' : 'ok'} n={n(risk?.openCriticalAlerts)} t="Open critical alerts" s="Open risk board" href="/dashboard/admin/risk" />
+            <AttnCard tone={disputesOpen > 0 ? 'warn' : 'ok'} n={ov ? String(disputesOpen) : '—'} t="Open disputes" s={`${disputesTotal} total cases`} href="/dashboard/admin/disputes" />
+          </Attn>
 
           {/* ════════ RENTAL ════════ */}
-          <SectionHeader icon={Building2} title="Rental marketplace" sub="Properties, units, active customers and the rental book." />
+          <Section title="Rental marketplace" sub="Properties, units, active customers and the rental book." />
+          <Kpis>
+            <Kpi k="Properties" v={n(c?.properties)} d={c ? `${c.units} units` : undefined} href="/dashboard/admin/properties" />
+            <Kpi k="Units" v={n(c?.units)} d={c ? `${c.listedUnits} listed` : undefined} href="/dashboard/admin/units" />
+            <Kpi k="Active customers" v={n(c?.activeCustomers)} d={c ? `of ${c.totalTenants} total` : undefined} href="/dashboard/admin/users?role=customer&status=active" />
+            <Kpi k="Rental providers" v={n(c?.rentalProviders)} d="landlords" href="/dashboard/admin/users?role=rental_provider" />
+            <Kpi k="Managers" v={n(c?.managers)} d="delegated" href="/dashboard/admin/users?role=manager" />
+            <Kpi k="Occupancy" v={f ? `${f.occupancyPct}%` : '—'} dark
+              d={c ? `${c.occupiedUnits}/${c.units} occupied${f && f.occupancyPct < 60 ? ' · below 60%' : ''}` : undefined}
+              href="/dashboard/admin/units?availability=occupied" />
+          </Kpis>
 
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
-            <KpiTile icon={Building2} label="Properties" value={c ? String(c.properties) : '—'} sub={c ? `${c.units} units` : ''} href="/dashboard/admin/properties" />
-            <KpiTile icon={Home} label="Units" value={c ? String(c.units) : '—'} sub={c ? `${c.listedUnits} listed` : ''} href="/dashboard/admin/units" />
-            <KpiTile icon={Users} label="Active customers" value={c ? String(c.activeCustomers) : '—'} sub={c ? `of ${c.totalTenants} total` : ''} tone="good" href="/dashboard/admin/users?role=customer&status=active" />
-            <KpiTile icon={UserCog} label="Rental providers" value={c ? String(c.rentalProviders) : '—'} sub="landlords" href="/dashboard/admin/users?role=rental_provider" />
-            <KpiTile icon={ShieldCheck} label="Managers" value={c ? String(c.managers) : '—'} sub="delegated" href="/dashboard/admin/users?role=manager" />
-            <KpiTile icon={Gauge} label="Occupancy" value={f ? `${f.occupancyPct}%` : '—'} sub={c ? `${c.occupiedUnits}/${c.units} occupied` : ''} tone={f && f.occupancyPct < 60 ? 'warn' : 'neutral'} href="/dashboard/admin/units?availability=occupied" />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Customer age" sub="tenants by age band (from KYC DOB)" href="/dashboard/admin/users?role=customer&status=active">
-              <CatBar data={rp?.ageMix ?? []} color={BLUE} empty="No tenant date-of-birth data yet." />
-            </ChartCard>
-            <ChartCard title="Top nationalities" sub="tenants by nationality" href="/dashboard/admin/users?role=customer&status=active">
+          <Cols kind="3">
+            <Card title="Customer age" sub="customers by age band (from KYC DOB)" right={viewBtn('/dashboard/admin/users?role=customer&status=active')} pad>
+              <CatBar data={rp?.ageMix ?? []} color={BLUE} empty="No customer date-of-birth data yet." />
+            </Card>
+            <Card title="Top nationalities" sub="customers by nationality" right={viewBtn('/dashboard/admin/users?role=customer&status=active')} pad>
               <CatBar data={nationalities} color={PURPLE} empty="No nationality data yet." />
-            </ChartCard>
-            <ChartCard title="Properties by emirate" sub="geographic spread" hint="Click a bar">
+            </Card>
+            <Card title="Properties by emirate" sub="geographic spread" right={clickHint('Click a bar')} pad>
               <CatBar data={ov?.geographic ?? []} color={GREEN} empty="No properties yet."
-                onBarClick={(n) => router.push(`/dashboard/admin/properties?emirate=${encodeURIComponent(n)}`)} />
-            </ChartCard>
-          </div>
+                onBarClick={(name) => router.push(`/dashboard/admin/properties?emirate=${encodeURIComponent(name)}`)} />
+            </Card>
+          </Cols>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Unit mix" sub="units by type" hint="Click a bar">
+          <Cols kind="2e">
+            <Card title="Unit mix" sub="units by type" right={clickHint('Click a bar')} pad>
               <CatBar data={rp?.unitMix ?? []} color={TEAL} empty="No units yet."
-                onBarClick={(n) => router.push(`/dashboard/admin/units?unitType=${encodeURIComponent(n)}`)} />
-            </ChartCard>
-            <ChartCard title="New leases" sub="leases started per month (12 mo)" href="/dashboard/admin/users?role=customer&status=active">
+                onBarClick={(name) => router.push(`/dashboard/admin/units?unitType=${encodeURIComponent(name)}`)} />
+            </Card>
+            <Card title="New leases" sub="leases started per month (12 mo)" right={viewBtn('/dashboard/admin/users?role=customer&status=active')} pad>
               {newLeases.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <AreaChart data={newLeases} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <defs><linearGradient id="nl" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={GREEN} stopOpacity={0.3} /><stop offset="100%" stopColor={GREEN} stopOpacity={0} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={26} />
+                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={26} />
                     <Tooltip formatter={(v: unknown) => [String(v), 'New leases'] as [string, string]} contentStyle={tooltipStyle} />
                     <Area type="monotone" dataKey="value" stroke={GREEN} strokeWidth={2} fill="url(#nl)" dot={{ r: 2, fill: GREEN }} />
                   </AreaChart>
                 </ResponsiveContainer>
               ) : <EmptyChart text="No leases started in the last 12 months." />}
-            </ChartCard>
-          </div>
+            </Card>
+          </Cols>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-            <ChartCard title="Customer KYC" sub="tenants by verification status" href="/dashboard/admin/kyc?tab=tenants">
+          <Cols kind="2e">
+            <Card title="Customer KYC" sub="customers by verification status" right={viewBtn('/dashboard/admin/kyc?tab=tenants', 'Open KYC')} pad>
               <CatBar data={kycData} color={BLUE} empty="No customers yet." />
-            </ChartCard>
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4">
-              <h3 className="text-sm font-bold text-[#1a1916] flex items-center gap-1.5"><TrendingUp size={14} className="text-[#2e9f82]" /> Top rental providers</h3>
-              <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">by unit count · click to open</p>
-              {(ov?.topRps ?? []).length ? (
-                <ul className="divide-y divide-[#f0ede8]">
-                  {ov!.topRps.map((r, i) => (
-                    <li key={r.rpId}>
-                      <Link href={r.ownerUserId != null ? `/dashboard/admin/users/${r.ownerUserId}` : `/dashboard/admin/kyc/rental-provider/${r.rpId}`}
-                        className="flex items-center justify-between py-1.5 text-[12px] hover:text-[#1a7a5a] transition-colors">
-                        <span className="truncate"><span className="text-[#9b9890] font-semibold mr-2">{i + 1}</span>{r.name}</span>
-                        <span className="font-bold text-[#1a1916] flex-shrink-0 flex items-center gap-1">{r.units} <span className="font-normal text-[#9b9890]">units</span> <ArrowUpRight size={11} className="text-[#c4c2bc]" /></span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              ) : <EmptyChart text="No rental providers yet." />}
-            </div>
-          </div>
+            </Card>
+            <Card title="Top rental providers" sub="by unit count">
+              <div className="gx-tbl-scroll">
+                <table className="gx-tbl">
+                  <thead><tr><th>#</th><th>Rental provider</th><th className="num">Units</th><th className="act"><span className="sr-only">Actions</span></th></tr></thead>
+                  {(ov?.topRps ?? []).length ? (
+                    <tbody>
+                      {ov!.topRps.map((r, i) => {
+                        const href = r.ownerUserId != null ? `/dashboard/admin/users/${r.ownerUserId}` : `/dashboard/admin/kyc/rental-provider/${r.rpId}`;
+                        return (
+                          <tr key={r.rpId} className="click" onClick={() => router.push(href)}>
+                            <td className="mono">{i + 1}</td>
+                            <td className="strong">{r.name}</td>
+                            <td className="num">{r.units}</td>
+                            <td className="act" onClick={(e) => e.stopPropagation()}><Btn size="xs" href={href}>Open</Btn></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  ) : (
+                    <tbody><tr><td colSpan={4}><div className="gx-empty">No rental providers yet.</div></td></tr></tbody>
+                  )}
+                </table>
+              </div>
+            </Card>
+          </Cols>
 
           {/* ════════ SERVICE PROVIDERS ════════ */}
-          <SectionHeader icon={Wrench} title="Service-provider marketplace" sub="Home-services providers, technicians and the service catalogue. Some metrics populate as SP data lands." />
+          <Section title="Service-provider marketplace" sub="Home-services providers, technicians and the service catalogue. Some metrics populate as SP data lands." />
+          <Kpis>
+            <Kpi k="Active service providers" v={n(c?.activeServiceProviders)} d={c ? `of ${c.serviceProviders} total` : undefined} href="/dashboard/admin/kyc?tab=service&status=compliant" />
+            <Kpi k="Active technicians" v={n(c?.activeTechnicians)} d={c ? `of ${c.technicians} total` : undefined} href="/dashboard/admin/kyc?tab=technicians" />
+            <Kpi k="Services offered" v={n(c?.servicesOffered)} d="catalogue SKUs" href="/dashboard/admin/listings?section=sp" />
+            <Kpi k="Avg rating" v={sp?.ratings.average != null ? `${sp.ratings.average}★` : '—'} d={sp ? `${sp.ratings.rated} rated · ${sp.ratings.unrated} unrated` : undefined} href="/dashboard/admin/analytics" />
+          </Kpis>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <KpiTile icon={Wrench} label="Active service providers" value={c ? String(c.activeServiceProviders) : '—'} sub={c ? `of ${c.serviceProviders} total` : ''} tone={c && c.activeServiceProviders > 0 ? 'good' : 'neutral'} href="/dashboard/admin/kyc?tab=service&status=compliant" />
-            <KpiTile icon={HardHat} label="Active technicians" value={c ? String(c.activeTechnicians) : '—'} sub={c ? `of ${c.technicians} total` : ''} href="/dashboard/admin/kyc?tab=technicians" />
-            <KpiTile icon={ListChecks} label="Services offered" value={c ? String(c.servicesOffered) : '—'} sub="catalogue SKUs" href="/dashboard/admin/listings?section=sp" />
-            <KpiTile icon={Star} label="Avg rating" value={sp?.ratings.average != null ? `${sp.ratings.average}★` : '—'} sub={sp ? `${sp.ratings.rated} rated · ${sp.ratings.unrated} unrated` : ''} href="/dashboard/admin/analytics" />
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Services by category" sub="catalogue breakdown" hint="Click a bar">
+          <Cols kind="3">
+            <Card title="Services by category" sub="catalogue breakdown" right={clickHint('Click a bar')} pad>
               <CatBar data={sp?.services ?? []} color={TEAL} empty="No service catalogue yet — populates as SPs add services."
-                onBarClick={(n) => router.push(`/dashboard/admin/listings?section=sp&category=${encodeURIComponent(n)}`)} />
-            </ChartCard>
-            <ChartCard title="Zones served" sub="emirates covered by SPs" href="/dashboard/admin/analytics">
+                onBarClick={(name) => router.push(`/dashboard/admin/listings?section=sp&category=${encodeURIComponent(name)}`)} />
+            </Card>
+            <Card title="Zones served" sub="emirates covered by SPs" right={viewBtn('/dashboard/admin/analytics')} pad>
               <CatBar data={sp?.zones ?? []} color={PURPLE} empty="No coverage zones recorded yet." />
-            </ChartCard>
-            <ChartCard title="Rating distribution" sub="SPs by star rating" href="/dashboard/admin/analytics">
+            </Card>
+            <Card title="Rating distribution" sub="SPs by star rating" right={viewBtn('/dashboard/admin/analytics')} pad>
               <CatBar data={sp?.ratings.distribution ?? []} color={AMBER} empty="No SP ratings yet." />
-            </ChartCard>
-          </div>
+            </Card>
+          </Cols>
 
           {/* ════════ PLATFORM ════════ */}
-          <SectionHeader icon={Globe} title="Platform" sub="Cross-marketplace — users, growth and disputes." />
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <ChartCard title="Users by role" sub="all registered accounts" hint="Click a slice">
+          <Section title="Platform" sub="Cross-marketplace — users, growth and disputes." />
+          <Cols kind="3">
+            <Card title="Users by role" sub="all registered accounts" right={clickHint('Click a slice')} pad>
               {usersByRole.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <PieChart>
                     <Pie data={usersByRole} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={38} paddingAngle={2}
-                      onClick={(d: unknown) => { const n = d as { payload?: { role?: string }; role?: string }; const role = n?.payload?.role ?? n?.role; if (role) router.push(`/dashboard/admin/users?role=${role}`); }}>
+                      onClick={(d: unknown) => { const x = d as { payload?: { role?: string }; role?: string }; const role = x?.payload?.role ?? x?.role; if (role) router.push(`/dashboard/admin/users?role=${role}`); }}>
                       {usersByRole.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} style={{ cursor: 'pointer' }} />)}
                     </Pie>
                     <Legend wrapperStyle={{ fontSize: 10 }} />
@@ -340,15 +330,15 @@ export default function AdminPlatformOverview() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : <EmptyChart text="No users yet." />}
-            </ChartCard>
-            <ChartCard title="New signups" sub="accounts created per month (12 mo)" href="/dashboard/admin/users">
+            </Card>
+            <Card title="New signups" sub="accounts created per month (12 mo)" right={viewBtn('/dashboard/admin/users')} pad>
               {signups.series.length ? (
                 <ResponsiveContainer width="100%" height={190}>
                   <BarChart data={signups.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={26} />
-                    <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={26} />
+                    <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
                     {signups.roles.map((role, i) => (
                       <Bar key={role} dataKey={role} stackId="s" name={ROLE_LABEL[role] ?? role} fill={PALETTE[i % PALETTE.length]} radius={i === signups.roles.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} />
                     ))}
@@ -356,28 +346,31 @@ export default function AdminPlatformOverview() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : <EmptyChart text="No signups in the last 12 months." />}
-            </ChartCard>
-            <Link href="/dashboard/admin/disputes" className="block bg-white rounded-2xl border border-[#e8e6e0] p-4 hover:border-[#d4d2cc] transition-colors">
-              <h3 className="text-sm font-bold text-[#1a1916] flex items-center justify-between gap-1.5"><span className="flex items-center gap-1.5"><Scale size={14} className="text-[#2e9f82]" /> Disputes</span><ArrowUpRight size={12} className="text-[#9b9890]" /></h3>
-              <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">case load</p>
+            </Card>
+            <Card title="Disputes" sub="case load" right={viewBtn('/dashboard/admin/disputes', 'Open disputes')}>
               {disputesTotal > 0 ? (
-                <div className="space-y-2">
-                  {(ov?.disputes ?? []).map((d) => (
-                    <div key={d.name} className="flex items-center justify-between text-[12px]">
-                      <span className="capitalize text-[#3f3d39]">{d.name.replace(/_/g, ' ')}</span>
-                      <span className="font-bold text-[#1a1916]">{d.value}</span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between text-[12px] pt-2 border-t border-[#f0ede8]">
-                    <span className="font-semibold text-[#b45309]">Open</span>
-                    <span className="font-bold text-[#b45309]">{disputesOpen}</span>
-                  </div>
+                <div className="gx-tbl-scroll">
+                  <table className="gx-tbl">
+                    <thead><tr><th>Status</th><th className="num">Cases</th></tr></thead>
+                    <tbody>
+                      {(ov?.disputes ?? []).map((d) => (
+                        <tr key={d.name}>
+                          <td><Pill tone={/resolved|closed/i.test(d.name) ? 'primary' : 'amber'}>{d.name.replace(/_/g, ' ').replace(/^\w/, (ch) => ch.toUpperCase())}</Pill></td>
+                          <td className="num strong">{d.value}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td className="strong">Open</td>
+                        <td className="num strong">{disputesOpen}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-              ) : <EmptyChart text="No disputes raised — nothing to action. 🎉" />}
-            </Link>
-          </div>
+              ) : <EmptyChart text="No disputes raised — nothing to action." />}
+            </Card>
+          </Cols>
         </>
       )}
-    </div>
+    </OsPage>
   );
 }

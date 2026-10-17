@@ -42,14 +42,14 @@ export const KIND_META: Record<VendorKind, { label: string; bg: string; fg: stri
   utility:    { label: 'Utility', bg: '#e0f2fe', fg: '#0369a1' },
   government: { label: 'Government', bg: '#ede9fe', fg: '#6d28d9' },
   insurance:  { label: 'Insurance', bg: '#fef3c7', fg: '#92400e' },
-  supplier:   { label: 'Supplier', bg: '#f4f3ef', fg: '#6b6860' },
+  supplier:   { label: 'Supplier', bg: '#eef1ef', fg: '#5f6b63' },
   landlord:   { label: 'Head landlord', bg: '#fce7f3', fg: '#9d174d' },
   internal:   { label: 'Internal', bg: '#e0e7ff', fg: '#3730a3' },
 };
 const STATUS: Record<VendorRow['inviteStatus'], { label: string; bg: string; fg: string }> = {
-  accepted:    { label: 'Accepted', bg: '#d8f2e8', fg: '#1a7a5a' },
+  accepted:    { label: 'Accepted', bg: '#d8efe3', fg: '#1a7a5a' },
   invited:     { label: 'Invited', bg: '#fef3c7', fg: '#92400e' },
-  not_invited: { label: 'Not invited', bg: '#f4f3ef', fg: '#6b6860' },
+  not_invited: { label: 'Not invited', bg: '#eef1ef', fg: '#5f6b63' },
 };
 export const chip = (label: string, bg: string, fg: string) => (
   <span key={label} className="text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: bg, color: fg }}>{label}</span>
@@ -93,17 +93,17 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
     const participating = v.kind === 'service';
     return (
       <Link key={v.serviceProviderId} href={detailHrefOf(v.serviceProviderId)}
-        className="flex items-center gap-4 px-5 py-4 bg-white border border-[#e8e6e0] rounded-2xl hover:border-[#c9c6bd] transition-colors">
+        className="flex items-center gap-4 px-5 py-4 bg-white border border-[#e4e9e5] rounded-2xl hover:border-[#c9c6bd] transition-colors">
         <div className="w-11 h-11 rounded-xl grid place-items-center font-extrabold text-[15px] shrink-0" style={{ background: km.bg, color: km.fg }}>{v.name.charAt(0)}</div>
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[15px] font-bold text-[#1a1916]">{v.name}</span>
+            <span className="text-[15px] font-bold text-[#14201a]">{v.name}</span>
             {chip(km.label, km.bg, km.fg)}
             {v.relationship === 'internal_team' && chip('Own team', '#e0f2fe', '#0369a1')}
             {participating && chip(st.label, st.bg, st.fg)}
-            {v.isDefault && chip('Default', '#f4f3ef', '#6b6860')}
+            {v.isDefault && chip('Default', '#eef1ef', '#5f6b63')}
           </div>
-          <span className="text-[13px] text-[#6b6860] truncate">
+          <span className="text-[13px] text-[#5f6b63] truncate">
             {v.category ? <><b className="text-[#4a4842] font-semibold">{v.category}</b>{' · '}</> : null}
             {v.paymentFrequency && PAY_FREQ_LABEL[v.paymentFrequency] ? <>{`Paid ${PAY_FREQ_LABEL[v.paymentFrequency].toLowerCase()}`}{' · '}</> : null}
             {participating
@@ -115,8 +115,8 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
             before acceptance the status chip already says it all. */}
         {participating && v.inviteStatus === 'accepted' && (
           <div className="flex items-center gap-6 text-right shrink-0">
-            <div className="flex flex-col"><span className="text-[17px] font-extrabold text-[#1a1916]">{v.technicians}</span><span className="text-[11px] text-[#9b9890]">technicians</span></div>
-            <div className="flex flex-col"><span className="text-[17px] font-extrabold text-[#1a1916]">{v.openJobs}</span><span className="text-[11px] text-[#9b9890]">open jobs</span></div>
+            <div className="flex flex-col"><span className="text-[17px] font-extrabold text-[#14201a]">{v.technicians}</span><span className="text-[11px] text-[#8a948d]">technicians</span></div>
+            <div className="flex flex-col"><span className="text-[17px] font-extrabold text-[#14201a]">{v.openJobs}</span><span className="text-[11px] text-[#8a948d]">open jobs</span></div>
           </div>
         )}
       </Link>
@@ -127,25 +127,25 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#1a1916] flex items-center gap-2"><Users size={22} /> Vendors</h1>
-          <p className="text-sm text-[#6b6860] max-w-2xl mt-1.5">Everyone your buildings depend on. Open a vendor for its pricing, people and status.</p>
+          <h1 className="text-2xl font-extrabold text-[#14201a] flex items-center gap-2"><Users size={22} /> Vendors</h1>
+          <p className="text-sm text-[#5f6b63] max-w-2xl mt-1.5">Everyone your buildings depend on. Open a vendor for its pricing, people and status.</p>
         </div>
         <button type="button" onClick={() => setAdding(true)}
-          className="h-10 px-4 rounded-xl text-[13.5px] font-bold text-white inline-flex items-center gap-2 cursor-pointer" style={{ background: '#2e9f82' }}>
+          className="h-10 px-4 rounded-xl text-[13.5px] font-bold text-white inline-flex items-center gap-2 cursor-pointer" style={{ background: '#047246' }}>
           <Plus size={15} /> Add vendor
         </button>
       </div>
 
       {err && <p className="text-sm text-red-700 bg-[#fef2f2] border border-[#fecaca] rounded-xl px-4 py-2.5 mb-4">{err}</p>}
-      {rows == null && !err && <p className="text-sm text-[#9b9890]">Loading…</p>}
+      {rows == null && !err && <p className="text-sm text-[#8a948d]">Loading…</p>}
 
       {rows != null && (
         <div className="grid gap-4">
           <div className="flex items-center gap-2.5 flex-wrap">
             <label className="relative w-full sm:w-[300px]">
-              <Search size={14} className="absolute left-3 top-[11px] text-[#9b9890]" />
+              <Search size={14} className="absolute left-3 top-[11px] text-[#8a948d]" />
               <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search vendors — name, what they're for, contact…"
-                className="w-full pl-9 pr-3 h-10 border border-[#e8e6e0] rounded-xl text-[13px] bg-white focus:outline-none focus:border-[#2e9f82]" />
+                className="w-full pl-9 pr-3 h-10 border border-[#e4e9e5] rounded-xl text-[13px] bg-white focus:outline-none focus:border-[#047246]" />
             </label>
             <div className="flex gap-1.5 flex-wrap">
               {([['all', 'All', rows.length] as const, ...ALL_KINDS.map(k => [k, KIND_META[k].label, ofKind(k).length] as const)]).map(([k, label, n]) => {
@@ -153,7 +153,7 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
                 return (
                   <button key={k} type="button" onClick={() => setKind(k as VendorKind | 'all')}
                     className="text-[12px] font-semibold px-3 py-1.5 rounded-full border cursor-pointer transition-colors"
-                    style={on ? { background: '#1a1916', color: '#fff', borderColor: '#1a1916' } : { background: meta?.bg ?? '#fff', color: meta?.fg ?? '#6b6860', borderColor: meta ? 'transparent' : '#e8e6e0' }}>
+                    style={on ? { background: '#14201a', color: '#fff', borderColor: '#14201a' } : { background: meta?.bg ?? '#fff', color: meta?.fg ?? '#5f6b63', borderColor: meta ? 'transparent' : '#e4e9e5' }}>
                     {label} · {n}
                   </button>
                 );
@@ -163,7 +163,7 @@ export function VendorsListView({ base = '/maintenance', rp = null, detailHrefOf
           <div className="grid gap-2.5">
             {shown.map(row)}
             {shown.length === 0 && (
-              <p className="text-sm text-[#9b9890] bg-white border border-[#e8e6e0] rounded-2xl px-5 py-4">
+              <p className="text-sm text-[#8a948d] bg-white border border-[#e4e9e5] rounded-2xl px-5 py-4">
                 {rows.length === 0 ? 'No vendors yet — add your first with "Add vendor".' : needle ? `Nothing matches "${q.trim()}".` : `No ${KIND_META[kind as VendorKind]?.label.toLowerCase() ?? ''} vendors yet.`}
               </p>
             )}

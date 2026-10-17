@@ -154,7 +154,7 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(source, loupe.x - region / 2, loupe.y - region / 2, region, region, 0, 0, c.width, c.height);
-    ctx.strokeStyle = '#2e9f82';
+    ctx.strokeStyle = '#047246';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(c.width / 2, c.height / 2 - 14);
@@ -259,12 +259,12 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[92vh]">
 
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e8e6e0]">
-          <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2 min-w-0">
-            <ScanLine size={16} className="text-[#2e9f82] shrink-0" />
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e4e9e5]">
+          <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2 min-w-0">
+            <ScanLine size={16} className="text-[#047246] shrink-0" />
             <span className="truncate">{phase === 'adjust' ? 'Scan document' : 'Review scan'}</span>
           </h3>
-          <button type="button" onClick={onCancel} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer" aria-label="Close">
+          <button type="button" onClick={onCancel} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer" aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -289,8 +289,8 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
                   <svg className="absolute inset-0 pointer-events-none" width={view.w} height={view.h}>
                     <polygon
                       points={quad.map((p) => `${p.x * view.scale},${p.y * view.scale}`).join(' ')}
-                      fill="rgba(46,159,130,0.18)"
-                      stroke="#2e9f82"
+                      fill="rgba(4,114,70,0.18)"
+                      stroke="#047246"
                       strokeWidth={2}
                     />
                   </svg>
@@ -306,7 +306,7 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
                         className="absolute w-8 h-8 -ml-4 -mt-4 cursor-move flex items-center justify-center"
                         style={{ left: mx * view.scale, top: my * view.scale }}
                       >
-                        <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-[#2e9f82] shadow-md" />
+                        <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-[#047246] shadow-md" />
                       </div>
                     );
                   })}
@@ -318,7 +318,7 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
                       className="absolute w-9 h-9 rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center"
                       style={{ left: p.x * view.scale, top: p.y * view.scale, transform: 'translate(-50%, -50%)' }}
                     >
-                      <div className="w-5 h-5 rounded-full bg-[#2e9f82] border-2 border-white shadow-md" />
+                      <div className="w-5 h-5 rounded-full bg-[#047246] border-2 border-white shadow-md" />
                     </div>
                   ))}
                   {/* Magnifier while a corner is dragged, on the side away from the finger */}
@@ -342,23 +342,23 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
         </div>
 
         {/* Controls */}
-        <div className="px-5 py-3.5 border-t border-[#e8e6e0] space-y-3">
+        <div className="px-5 py-3.5 border-t border-[#e4e9e5] space-y-3">
           {error && <p className="text-xs text-[#b91c1c]">{error}</p>}
 
           {phase === 'adjust' ? (
             <>
-              <p className="text-[11px] text-[#9b9890]">Drag the corners so the outline hugs the document edges, then continue.</p>
+              <p className="text-[11px] text-[#8a948d]">Drag the corners so the outline hugs the document edges, then continue.</p>
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <button type="button" onClick={onCancel} className="text-sm font-medium text-[#6b6860] hover:text-[#1a1916] px-2 py-2 cursor-pointer">
+                <button type="button" onClick={onCancel} className="text-sm font-medium text-[#5f6b63] hover:text-[#14201a] px-2 py-2 cursor-pointer">
                   Cancel
                 </button>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={onUseOriginal}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-full border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef] cursor-pointer">
                     <ImageIcon size={13} /> Use photo as-is
                   </button>
                   <button type="button" onClick={goPreview} disabled={!source || !quad || working}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
                     {working ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />} Continue
                   </button>
                 </div>
@@ -366,28 +366,28 @@ export function DocumentScanModal({ file, onConfirm, onUseOriginal, onCancel }: 
             </>
           ) : (
             <>
-              <div className="flex items-center gap-1 bg-[#f4f3ef] rounded-full p-1 w-fit">
+              <div className="flex items-center gap-1 bg-[#eef1ef] rounded-full p-1 w-fit">
                 <button type="button" onClick={() => setUseEnhanced(true)}
-                  className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer ${useEnhanced ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860]'}`}>
-                  <Sparkles size={12} className={useEnhanced ? 'text-[#2e9f82]' : ''} /> Enhanced
+                  className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer ${useEnhanced ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63]'}`}>
+                  <Sparkles size={12} className={useEnhanced ? 'text-[#047246]' : ''} /> Enhanced
                 </button>
                 <button type="button" onClick={() => setUseEnhanced(false)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer ${!useEnhanced ? 'bg-white text-[#1a1916] shadow-sm' : 'text-[#6b6860]'}`}>
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer ${!useEnhanced ? 'bg-white text-[#14201a] shadow-sm' : 'text-[#5f6b63]'}`}>
                   Original colours
                 </button>
               </div>
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <button type="button" onClick={() => setPhase('adjust')}
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[#6b6860] hover:text-[#1a1916] px-2 py-2 cursor-pointer">
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[#5f6b63] hover:text-[#14201a] px-2 py-2 cursor-pointer">
                   <ArrowLeft size={14} /> Adjust corners
                 </button>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={onUseOriginal}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-full border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef] cursor-pointer">
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-full border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef] cursor-pointer">
                     <ImageIcon size={13} /> Use photo as-is
                   </button>
                   <button type="button" onClick={confirm} disabled={working}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-full bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-50 cursor-pointer">
                     {working ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Upload scan
                   </button>
                 </div>

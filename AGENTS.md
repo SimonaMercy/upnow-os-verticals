@@ -294,10 +294,12 @@ Standalone component used in `ExpandedDetail` and `DirectExpandedDetail` (both w
 - **Summary banner** above doc list: amber pills for missing required, red pills for rejected — shows exact document names.
 - **Header counter**: `X/Y uploaded` (amber) when incomplete → `All required ✓` (green) when done.
 
-### RP Contract Timeline (rental-provider/dashboard/contracts/[id]/page.tsx)
+### RP Contract Timeline (rental-provider/dashboard/contracts/[id]/v2 — `STEPS_NEW` in `_sections/shared.tsx`)
 
-Clean **6-step** timeline for non-renewal:
-1. Contract Issued → 2. Payment Collection → 3. Signatures → 4. Ejari Registration → 5. Move-In & DEWA → 6. Active Tenancy
+Clean **6-step** timeline for non-renewal (payment is collected on the LEAD, before the contract exists — there is no payment step on the contract):
+1. Contract issued → 2. Signatures → 3. Ejari (Contract Registration) → 4. Utility (DEWA) → 5. Move-in inspection → 6. Active tenancy
+
+Registration comes before utility (the utility account is opened against the registration certificate) and the lease goes **active on the move-in counter-signature**, not on registration. The words are per subcategory — see "Long-term Spaces journey" below (`stepsNewFor()`).
 
 The `ContractDetail` interface has **no `viewing` field** on the frontend. The backend still returns it (reserved for future move-in checklist feature) — do not add it back to the TS interface unless you are building that feature.
 
@@ -737,3 +739,33 @@ Commit `05d6c13`. Strict text-only rename across 40 files (27 FE, 13 BE), symmet
 - `Contract sent to tenant — clauses are locked.` on RP contract page — changed to **Customer** (action banner, not a legal label).
 - `Customer confirmed cheques submitted` / `Awaiting customer to confirm cheques handed over` — changed to **Customer** (action banner).
 - `data/guide.ts` — "Tenant signs" step name + `actor: 'Tenant'` → **Customer signs** / `actor: 'Customer'` (consistency with surrounding actor labels). The keyword tag `'tenant'` (search term, not displayed) left untouched.
+
+---
+
+## Long-term Spaces journey — MarketSpace alignment (Oct 2026)
+
+Frontend-only relabel over the **unchanged** backend state machine. One pure module owns the words: [`src/lib/spaceJourney.ts`](src/lib/spaceJourney.ts). The customer v1 list, the v2 space page, the RP leads queue, the lead detail and the RP contract rail all read it, so both sides name the same stop the same way.
+
+**Subcategory** = `spaceSubcategory(unitType, property.spaceCategory)`: land unit types → `land`; otherwise `effectiveSpaceCategory` (mixed-use resolves per unit). Mixed-use is retired for NEW listings (`NEW_SPACE_CATEGORIES`, public FilterBar) but existing mixed-use units keep working and read residential/commercial per unit.
+
+**Customer rails** (`newLeaseSteps` / `renewalSteps`; state → stop via `journeyPosition`, label via `customerStateLabel`, full def via `presentCustomerState`):
+
+| Subcategory | New-lease stops |
+|---|---|
+| Residential (8) | Viewing → Documents → Offer & cheques → Contract & signatures → Ejari → DEWA → Move-in → Active tenancy |
+| Commercial (8) | Site visit → Company documents → Heads of terms → Lease & signatures → Ejari → Utilities → Fit-out & handover → Active lease |
+| Industrial (8) | Site visit → Company documents → Offer → Lease & signatures → Ejari → Utilities → Handover → Active lease |
+| Land (7) | Site visit → Due diligence → Offer → Land lease agreement → Registration → Handover → Active land lease (utility states sit on Handover) |
+
+Renewal is 6 stops for all four (Terms offered → Documents → Cheques / PDC → Sign → Ejari/Registration renewal → Renewal active). `Ejari`/`DEWA` become `Registration`/`Utilities` when the listing's emirate is known and is not Dubai (`authorityNames`). A Book Now lead's first stop reads "Application received", not "Viewing booked" (`bookedViaOf` heuristic: viewing row carries both `desiredMoveIn` and `preferredChequeCount`, or no viewing — wording only, never routing; only consulted on the `booked` state). The scratchpad test asserts all 4 × 28 states have a label + index and indices never go backwards.
+
+**RP side**: leads queue columns/filters use `leadColumnLabel` (single-subcategory portfolio → its words; mixed → "Viewing / site visit", "Offer / terms"); stage pills use `leadStageLabel` per lead; a **New / Contacted** lane is first (it holds the leads on the first-reply clock). Lead detail nodes = `leadJourneyNodes(sub)`; "Log call outcome" (Reached / No answer / Call back / Not interested) posts a structured note via `POST /leads/:id/notes` — it never moves the stage. Contract rail = `stepsNewFor(unitType, spaceCategory, emirate)` (same 6 keys).
+
+**First-reply SLA = 15 minutes** (`FIRST_RESPONSE_SLA_MS`, `FIRST_RESPONSE_SLA_LABEL` in `src/lib/os/sla.ts`; nearing under 5 min). Use the label constant in copy — never hard-code a duration.
+
+**Public listing** (`listings/units/[id]/ListingPageClient.tsx`): CTA per subcategory (Request a viewing / Request a site visit / Enquire about plot) + "Book now — apply directly" + "Request a call back" (the public listing API exposes no provider phone, so there is no Call/WhatsApp; call-back goes through `POST /leads/viewings` with a note). Extra enquiry fields are folded into the existing `notes` (viewing) / `occupantsDetails` (book-now) string — never new JSON keys (backend whitelist validation). "Cost to move in" is a labelled frontend estimate in fils (`src/lib/moveInCost.ts`): listing figures win (securityDeposit, commission, adminFee, ejariFeeFils — all whole AED), else MarketSpace defaults.
+
+**Land documents**: land unit types have their own pack (`LAND_RENTAL_DOCS`: intended-use statement, optional) on top of the identity pack — company: trade licence + signatory EID (+ MOA); individual: Emirates ID + passport. No employment letter / marriage certificate. The required set is unchanged (identity pack only) so in-flight land leads don't regress.
+
+**Customer v2 comment fix**: the order is signature → Ejari → utility → move-in → active (Ejari is NOT after move-in). A "Tenancy starts <date>" line shows on the setup steps because activation follows the move-in counter-signature, not the start date.
+

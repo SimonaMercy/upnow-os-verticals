@@ -53,14 +53,14 @@ export function NoticesSection({ contractId }: { contractId: number }) {
   const urgent = data.breaches.some(b => (b.stage === 'warning_sent' || b.stage === 'final_warning')) || data.cases.some(c => c.stage !== 'closed');
 
   return (
-    <section id="notices" className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden scroll-mt-24">
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-[#f0eeea]" style={{ background: urgent ? '#fff7ed' : '#fafaf8' }}>
+    <section id="notices" className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden scroll-mt-24">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-[#f0eeea]" style={{ background: urgent ? '#fff7ed' : '#f6f8f6' }}>
         <div className="w-9 h-9 rounded-xl grid place-items-center shrink-0" style={{ background: urgent ? '#fed7aa' : '#eef3f1', color: urgent ? '#9a3412' : '#2e6f5e' }}>
           {urgent ? <AlertTriangle size={17} /> : <ShieldAlert size={17} />}
         </div>
         <div className="min-w-0">
-          <h2 className="text-sm font-bold text-[#1a1916]">Notices &amp; warnings</h2>
-          <p className="text-[12px] text-[#6b6860]">What your landlord has served on this lease and by when you need to act. The letters themselves are delivered to you separately.</p>
+          <h2 className="text-sm font-bold text-[#14201a]">Notices &amp; warnings</h2>
+          <p className="text-[12px] text-[#5f6b63]">What your landlord has served on this lease and by when you need to act. The letters themselves are delivered to you separately.</p>
         </div>
       </div>
 
@@ -74,11 +74,11 @@ export function NoticesSection({ contractId }: { contractId: number }) {
             <div key={`b-${b.id}`} className="rounded-xl border border-[#eef0ee] px-4 py-3">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={pill} style={{ background: t.bg, color: t.fg }}>{b.stageLabel}</span>
-                <span className="text-[13px] font-semibold text-[#1a1916]">{b.categoryLabel}</span>
-                {deadline && <span className="text-[12px] text-[#6b6860]">· put right by <b className="text-[#1a1916]">{fmt(deadline)}</b></span>}
+                <span className="text-[13px] font-semibold text-[#14201a]">{b.categoryLabel}</span>
+                {deadline && <span className="text-[12px] text-[#5f6b63]">· put right by <b className="text-[#14201a]">{fmt(deadline)}</b></span>}
               </div>
-              {b.hint && <p className="text-[12.5px] mt-1.5" style={{ color: b.hint.includes('passed') ? '#b42318' : '#3d3b35' }}>{b.hint}</p>}
-              <div className="text-[11.5px] text-[#6b6860] mt-2 flex gap-4 flex-wrap">
+              {b.hint && <p className="text-[12.5px] mt-1.5" style={{ color: b.hint.includes('passed') ? '#b42318' : '#46534c' }}>{b.hint}</p>}
+              <div className="text-[11.5px] text-[#5f6b63] mt-2 flex gap-4 flex-wrap">
                 {b.warningSentDate && <span>Warning issued {fmt(b.warningSentDate)}</span>}
                 {b.finalWarningDate && <span>Final warning {fmt(b.finalWarningDate)}</span>}
                 {b.resolvedDate && <span>Resolved {fmt(b.resolvedDate)}</span>}
@@ -102,17 +102,17 @@ export function NoticesSection({ contractId }: { contractId: number }) {
             <div key={`c-${c.id}`} className="rounded-xl border px-4 py-3" style={{ borderColor: '#d9d3f7', background: '#faf9fe' }}>
               <div className="flex items-center gap-2 flex-wrap">
                 <Gavel size={14} style={{ color: '#5b3fbf' }} />
-                <span className="text-[13px] font-semibold text-[#1a1916]">Legal case · {c.typeLabel}</span>
+                <span className="text-[13px] font-semibold text-[#14201a]">Legal case · {c.typeLabel}</span>
                 <span className={pill} style={{ background: t.bg, color: t.fg }}>{c.stageLabel}</span>
-                <span className="text-[11.5px] text-[#6b6860]">{c.filedByLabel}</span>
+                <span className="text-[11.5px] text-[#5f6b63]">{c.filedByLabel}</span>
               </div>
-              {c.hint && <p className="text-[12.5px] mt-1.5" style={{ color: c.hint.includes('passed') ? '#b42318' : '#3d3b35' }}>{c.hint}</p>}
-              <div className="text-[11.5px] text-[#6b6860] mt-2 flex gap-4 flex-wrap">
+              {c.hint && <p className="text-[12.5px] mt-1.5" style={{ color: c.hint.includes('passed') ? '#b42318' : '#46534c' }}>{c.hint}</p>}
+              <div className="text-[11.5px] text-[#5f6b63] mt-2 flex gap-4 flex-wrap">
                 {c.noticeServedDate && <span>{c.noticeTypeLabel} served {fmt(c.noticeServedDate)}</span>}
                 {c.noticeDeadline && <span>Deadline {fmt(c.noticeDeadline)}</span>}
                 {c.nextHearingDate && <span>Hearing {fmt(c.nextHearingDate)}</span>}
                 {c.decisionDate && <span>Decision {fmt(c.decisionDate)}{c.outcomeLabel ? ` — ${c.outcomeLabel}` : ''}</span>}
-                {c.claimAmount != null && <span>{c.claimLabel}: <b className="text-[#1a1916]">AED {Number(c.claimAmount).toLocaleString('en-AE')}</b></span>}
+                {c.claimAmount != null && <span>{c.claimLabel}: <b className="text-[#14201a]">AED {Number(c.claimAmount).toLocaleString('en-AE')}</b></span>}
               </div>
             </div>
           );

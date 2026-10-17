@@ -35,7 +35,7 @@ function ThreadSlideOver({ rp, threadId, canSend, isManager, onClose, onChanged 
     <div className="fixed inset-0 z-50">
       <div className={`slideover-scrim${closing ? ' closing' : ''} absolute inset-0 bg-black/40`} onClick={dismiss} />
       <div className={`slideover-panel${closing ? ' closing' : ''} absolute right-0 top-0 h-full w-full max-w-[860px] bg-white shadow-2xl flex flex-col`}>
-        <div className="px-3 pt-3"><button type="button" onClick={dismiss} aria-label="Back" className="p-1.5 rounded-lg hover:bg-[#f4f3ef] cursor-pointer text-[#6b6860]"><ArrowLeft size={18} /></button></div>
+        <div className="px-3 pt-3"><button type="button" onClick={dismiss} aria-label="Back" className="p-1.5 rounded-lg hover:bg-[#eef1ef] cursor-pointer text-[#5f6b63]"><ArrowLeft size={18} /></button></div>
         <div className="flex-1 min-h-0"><EmailThreadView key={threadId} rp={rp} threadId={threadId} canSend={canSend} isManager={isManager} onChanged={onChanged} /></div>
       </div>
     </div>
@@ -88,14 +88,14 @@ export function EmailsCard({ rp, tenantId, leadId, vendorId, to, isManager = fal
   const body = (
     <>
       {!mailbox.connected && (
-        <p className="text-sm text-[#6b6860]">
+        <p className="text-sm text-[#5f6b63]">
           {isManager
             ? 'The landlord has not connected an email yet, so emails can’t be sent from here.'
             : <>Connect your email in <Link href={settingsHref} className="text-[#1a7a5a] font-semibold hover:underline">Settings → Email</Link> to write to this person from here and see their replies.</>}
         </p>
       )}
-      {mailbox.connected && !to && <p className="text-sm text-[#6b6860] mb-2">No email address on file for this person.</p>}
-      {mailbox.connected && threads.length === 0 && to && <p className="text-sm text-[#9b9890]">No emails yet.</p>}
+      {mailbox.connected && !to && <p className="text-sm text-[#5f6b63] mb-2">No email address on file for this person.</p>}
+      {mailbox.connected && threads.length === 0 && to && <p className="text-sm text-[#8a948d]">No emails yet.</p>}
 
       {threads.length > 0 && (
         <div className="divide-y divide-[#f0eee9] border border-[#f0eee9] rounded-xl overflow-hidden">
@@ -103,7 +103,7 @@ export function EmailsCard({ rp, tenantId, leadId, vendorId, to, isManager = fal
           {showAll && <EmailPager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
           {total > PREVIEW && (
             <button type="button" onClick={() => { setShowAll((v) => !v); setPage(1); }}
-              className="w-full px-4 py-2.5 text-xs font-medium text-[#1a7a5a] bg-[#fbfaf8] hover:bg-[#f4f3ef] cursor-pointer text-center">
+              className="w-full px-4 py-2.5 text-xs font-medium text-[#1a7a5a] bg-[#fbfaf8] hover:bg-[#eef1ef] cursor-pointer text-center">
               {showAll ? `Show only the latest ${PREVIEW}` : `Show all ${total.toLocaleString('en-GB')} conversations`}
             </button>
           )}
@@ -188,13 +188,13 @@ export function EmailsCard({ rp, tenantId, leadId, vendorId, to, isManager = fal
   return (
     // min-w-0 / max-w-full: inside a flex or grid column the long one-line
     // preview would otherwise set the card's width and stretch the whole page.
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm p-5 min-w-0 max-w-full overflow-hidden">
       <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-base font-semibold text-[#1a1916] flex items-center gap-2 flex-1">
-          <Mail size={16} className="text-[#2e9f82]" /> Emails <span className="font-normal text-[#9b9890]">({total.toLocaleString('en-GB')})</span>
+        <h2 className="text-base font-semibold text-[#14201a] flex items-center gap-2 flex-1">
+          <Mail size={16} className="text-[#047246]" /> Emails <span className="font-normal text-[#8a948d]">({total.toLocaleString('en-GB')})</span>
         </h2>
         {canSend && to && (
-          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer">
+          <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer">
             <Plus size={14} /> New email
           </button>
         )}

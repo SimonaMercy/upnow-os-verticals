@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { LayoutDashboard, Home, Search, Building2, FileText, CalendarCheck, Wrench, Users, Star, Wallet, BookOpen, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, ShieldCheck, ShieldAlert, BarChart2, AlertTriangle, Inbox, Briefcase, UserCircle, TrendingUp, UserCheck, Mail, Receipt, BedDouble, Heart, HelpCircle, Archive, ClipboardList, ClipboardCheck, SlidersHorizontal, LineChart, Activity, Gauge, FileSignature, HeartPulse, MapPin, Scale, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, FileText, CalendarCheck, Wrench, Users, Star, Wallet, Bell, Settings, LogOut, Menu, X, ChevronRight, ChevronLeft, AlertTriangle, Briefcase, UserCircle, BedDouble, Heart, HelpCircle, ClipboardList, MapPin } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { useAuth, dashboardPath, UserRole } from '@/contexts/AuthContext';
 import { buildDisplayName } from '@/lib/utils';
@@ -15,6 +15,9 @@ import { EMAILS_SYNCED_EVENT, useEmailSyncOnLogin } from '@/lib/useEmailSyncOnLo
 import { useBrowserAlerts } from '@/lib/useBrowserAlerts';
 import { useWhatsappEnabled } from '@/lib/useWhatsappEnabled';
 import { whatsappEnabled } from '@/lib/whatsappApi';
+import { OsRail, OsContextBar, OsCrumb } from './os/OsRail';
+import { isOsRole } from './os/workspaces';
+import { OsProviders } from './os/OsProviders';
 
 // ── Manager permission cache (loaded once per session) ──────────────────────
 // Keeps the FULL per-landlord permission set so the nav can re-scope to the
@@ -123,11 +126,12 @@ const NAV: Record<UserRole, NavItem[]> = {
   customer: [
     { label: 'My Spaces',   href: '/dashboard/customer/spaces',   icon: BedDouble },
     { label: 'My Services', href: '/dashboard/customer/services', icon: Wrench },
+    // Stays, venues, courts and charters booked on the marketplace (preview engine — no backend yet).
+    { label: 'My Bookings', href: '/dashboard/customer/bookings', icon: CalendarCheck },
     { label: 'My Profile',  href: '/dashboard/customer/profile',  icon: UserCircle },
   ],
-  // v32 preview: the landlord rail is derived from OS_GROUPS (buildOsRail) —
-  // one dark/light tab per prototype group; the folded pages surface as an
-  // in-page tab strip (OsGroupTabs).
+  // Rental provider, manager and admin use the UpNow OS workspace shell instead —
+  // their navigation lives in ./os/workspaces.ts (OsRail).
   rental_provider: [],
   service_provider: [
     // Onboarding, Team and Documents intentionally have no nav entries:
@@ -151,10 +155,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Earnings',         href: '/dashboard/service-provider/earnings',   icon: Wallet },
     { label: 'Settings',         href: '/dashboard/service-provider/settings',   icon: Settings },
   ],
-  // v32 preview: like the landlord rail, the manager rail comes from
-  // OS_GROUPS (buildOsRail) — every requirePerm gate is on the group children,
-  // so an undelegated page drops from the tab strip and a fully undelegated
-  // group drops its rail tab, exactly as the flat rail behaved.
+  // See ./os/workspaces.ts — the requirePerm gates moved there with the routes.
   manager: [],
   technician: [
     { label: 'Overview',         href: '/dashboard/technician',                icon: LayoutDashboard },
@@ -168,319 +169,11 @@ const NAV: Record<UserRole, NavItem[]> = {
     { divider: true },
     { label: 'Settings',         href: '/dashboard/technician/settings',       icon: Settings, soon: true },
   ],
-  admin: [
-    // `/dashboard/admin` now renders Platform Pulse, so Overview IS the pulse —
-    // the separate "Platform Pulse" entry would be a second door to one room.
-    { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
-    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
-    { section: 'Users' },
-    { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
-    { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
-    // The two provider types get their own sections — they are different
-    // businesses with different surfaces, and lumping them under one "Listings"
-    // header hid that. Platform Billing sits under Rental Provider because it
-    // bills exactly them (subscription + lease origination / renewal /
-    // settlement fees); the SP side is commission-based and billed elsewhere.
-    { section: 'Rental Provider' },
-    { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
-    { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
-    { section: 'Service Provider' },
-    // Dispatch is the daily operational surface for the SP business — the
-    // needs-assignment queue and the live job board — so it leads the section
-    // ahead of the configuration surfaces. It was built but left hidden, which
-    // meant the only way in was typing the URL.
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, match: ['/dashboard/admin/operations'] },
-    { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
-    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
-    // Reviews, Payouts and Disputes are SP-business surfaces, not general admin
-    // ones: reviews are of a service provider on a booking, payouts settle SP
-    // earnings, disputes are raised against SP jobs. They live under this
-    // section rather than in a loose block at the bottom of the rail.
-    { label: 'Reviews',          href: '/dashboard/admin/reviews',             icon: Star },
-    { label: 'Payouts',          href: '/dashboard/admin/payouts',             icon: Wallet },
-    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
-    { divider: true },
-    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
-    { divider: true },
-    // Platform-wide surfaces — not tied to either provider business.
-    { section: 'Platform' },
-    // SP-252 — the versioned platform agreement providers accept; publish + acceptance evidence.
-    // It is a platform document (audience-scoped: provider today, others later), so it lives
-    // here rather than under one provider section.
-    { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
-    // Legal & breach — the jurisdiction rule book (cure periods, notice days, filing fee).
-    { label: 'Jurisdiction',     href: '/dashboard/admin/legal',               icon: Scale },
-    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
-    { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
-    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true, hidden: true },
-  ],
-  super_admin: [
-    // `/dashboard/admin` now renders Platform Pulse, so Overview IS the pulse —
-    // the separate "Platform Pulse" entry would be a second door to one room.
-    { label: 'Overview',         href: '/dashboard/admin',                     icon: Gauge, match: ['/dashboard/admin/pulse'] },
-    { label: 'Activity',         href: '/dashboard/admin/activity',            icon: Activity, hidden: true },
-    { section: 'Users' },
-    { label: 'User Management',  href: '/dashboard/admin/users',               icon: Users },
-    { label: 'Profile Verification', href: '/dashboard/admin/kyc',             icon: ShieldCheck },
-    // The two provider types get their own sections — they are different
-    // businesses with different surfaces, and lumping them under one "Listings"
-    // header hid that. Platform Billing sits under Rental Provider because it
-    // bills exactly them (subscription + lease origination / renewal /
-    // settlement fees); the SP side is commission-based and billed elsewhere.
-    { section: 'Rental Provider' },
-    { label: 'Listings',         href: '/dashboard/admin/listings/rental-providers',  icon: Building2 },
-    { label: 'Platform Billing', href: '/dashboard/admin/billing',             icon: Receipt },
-    { section: 'Service Provider' },
-    // Dispatch is the daily operational surface for the SP business — the
-    // needs-assignment queue and the live job board — so it leads the section
-    // ahead of the configuration surfaces. It was built but left hidden, which
-    // meant the only way in was typing the URL.
-    { label: 'Dispatch',         href: '/dashboard/admin/operations',          icon: ClipboardList, match: ['/dashboard/admin/operations'] },
-    { label: 'Listings',         href: '/dashboard/admin/listings/service-providers', icon: Wrench },
-    { label: 'Service Catalog',  href: '/dashboard/admin/catalog',             icon: SlidersHorizontal },
-    // Reviews, Payouts and Disputes are SP-business surfaces, not general admin
-    // ones: reviews are of a service provider on a booking, payouts settle SP
-    // earnings, disputes are raised against SP jobs. They live under this
-    // section rather than in a loose block at the bottom of the rail.
-    { label: 'Reviews',          href: '/dashboard/admin/reviews',             icon: Star },
-    { label: 'Payouts',          href: '/dashboard/admin/payouts',             icon: Wallet },
-    { label: 'Disputes',         href: '/dashboard/admin/disputes',            icon: AlertTriangle },
-    { divider: true },
-    { label: 'Risk',             href: '/dashboard/admin/risk',                icon: ShieldAlert, hidden: true },
-    { divider: true },
-    // Platform-wide surfaces — not tied to either provider business.
-    { section: 'Platform' },
-    // SP-252 — the versioned platform agreement providers accept; publish + acceptance evidence.
-    // It is a platform document (audience-scoped: provider today, others later), so it lives
-    // here rather than under one provider section.
-    { label: 'Platform Agreement', href: '/dashboard/admin/agreements',        icon: FileSignature },
-    // Legal & breach — the jurisdiction rule book (cure periods, notice days, filing fee).
-    { label: 'Jurisdiction',     href: '/dashboard/admin/legal',               icon: Scale },
-    { label: 'Analytics',        href: '/dashboard/admin/analytics',           icon: BarChart2, hidden: true },
-    { label: 'Platform Status',  href: '/dashboard/admin/status',              icon: HeartPulse },
-    { label: 'Inbox',            href: '/dashboard/admin/inbox',               icon: Inbox, hidden: true },
-    { label: 'Settings',         href: '/dashboard/admin/settings',            icon: Settings, soon: true, hidden: true },
-  ],
+  // See ./os/workspaces.ts (admin portal workspaces).
+  admin: [],
+  // See ./os/workspaces.ts (admin portal workspaces).
+  super_admin: [],
 };
-
-/* ─────────────────────────────────────────────
-   v32 preview groups — the single source of truth for the landlord and
-   manager navigation on this branch. One rail tab per prototype group
-   (dark = shared UpNow OS, light = Spaces pack); the pages that fold into a
-   group appear as an in-page tab strip (OsGroupTabs) instead of extra rail
-   rows. Grouping per the prototype's currentMap. Every existing route keeps
-   an entry (parity gate).
-───────────────────────────────────────────── */
-type OsChild = { label: string; href: string; badgeKey?: NavBadgeKey; requirePerm?: string | string[]; match?: string[]; hidden?: true; financeHidden?: true };
-// `soon` = the prototype tab has no page yet: the rail shows it dimmed with an
-// "In development" chip (no link, no children).
-type OsGroup = { label: string; icon: React.ElementType; tone: NavTone; badgeKey?: NavBadgeKey; soon?: true; children: OsChild[] };
-
-const RP_BASE = '/rental-provider/dashboard';
-const MGR_BASE = '/dashboard/manager';
-
-const OS_GROUPS: Partial<Record<UserRole, OsGroup[]>> = {
-  rental_provider: [
-    { label: 'Demand', icon: TrendingUp, tone: 'shared', badgeKey: 'leads', children: [
-      { label: 'Leads', href: `${RP_BASE}/leads` },
-    ] },
-    // The lead/viewing calendar already exists as a view of the Leads page —
-    // the tab deep-links it (owner, 29 Sep: "calendar we already have linked
-    // with lead").
-    { label: 'Calendar', icon: CalendarCheck, tone: 'shared', children: [
-      { label: 'Calendar', href: `${RP_BASE}/leads?view=calendar` },
-    ] },
-    { label: 'Communications', icon: Mail, tone: 'shared', children: [
-      { label: 'Emails', href: `${RP_BASE}/communications`, badgeKey: 'emails' },
-      { label: 'WhatsApp', href: `${RP_BASE}/whatsapp`, badgeKey: 'whatsapp' },
-    ] },
-    // No shared Finance tab: Payments and Deposits are the lease money and
-    // live in the pack's Transactions tab (owner, 29 Sep: "payments related
-    // things will fall in Transactions").
-    { label: 'Settings', icon: Settings, tone: 'shared', children: [
-      { label: 'Settings', href: `${RP_BASE}/settings`, match: [`${RP_BASE}/maintenance-list`, `${RP_BASE}/restoration-list`, `${RP_BASE}/amc/categories`] },
-      // Templates sit with the operating configuration (owner, 29 Sep).
-      { label: 'Templates', href: `${RP_BASE}/templates` },
-      { label: 'My Profile', href: `${RP_BASE}/profile` },
-    ] },
-    { label: 'Overview', icon: LayoutDashboard, tone: 'pack', children: [
-      { label: 'Overview', href: RP_BASE },
-    ] },
-    { label: 'Portfolio', icon: Building2, tone: 'pack', children: [
-      { label: 'Properties', href: `${RP_BASE}/portfolio`, badgeKey: 'properties' },
-      { label: 'Units', href: `${RP_BASE}/units`, badgeKey: 'units' },
-    ] },
-    { label: 'Customers', icon: UserCheck, tone: 'pack', children: [
-      { label: 'Customers', href: `${RP_BASE}/tenants` },
-    ] },
-    { label: 'Leases', icon: FileText, tone: 'pack', children: [
-      { label: 'Leases', href: `${RP_BASE}/orders`, match: [`${RP_BASE}/contracts`] },
-      { label: 'Ended Leases', href: `${RP_BASE}/ended-leases` },
-    ] },
-    // Transactions = the money moving on the leases (owner, 29 Sep). One page:
-    // deposits are a tab INSIDE Payments (/deposits is a legacy redirect,
-    // SCRUM-577), so the tab opens the ledger directly with no strip.
-    { label: 'Transactions', icon: Wallet, tone: 'pack', children: [
-      { label: 'Payments', href: `${RP_BASE}/payments`, match: [`${RP_BASE}/deposits`] },
-    ] },
-    // Operations keeps its rail badge: that one IS a worklist length, a single fact.
-    { label: 'Operations', icon: ClipboardList, tone: 'pack', badgeKey: 'operations', children: [
-      { label: 'Ops Board', href: `${RP_BASE}/operations` },
-    ] },
-    // Prototype: "Staff activity + provider costs → Spaces → Performance &
-    // Economics" — the Team activity overview is that page today. LANDLORD-ONLY
-    // (the API refuses managers), so the manager groups have no counterpart.
-    // It follows Transactions and Operations directly (owner, 4 Oct:
-    // "Transaction, operations and performance & economics together").
-    { label: 'Performance & Economics', icon: LineChart, tone: 'pack', children: [
-      { label: 'Team', href: `${RP_BASE}/team` },
-    ] },
-    // Maintenance = upkeep of the units: the requests, who does the work and
-    // the standing contracts (owner, 4 Oct: "create maintenance menu and move them").
-    { label: 'Maintenance', icon: Wrench, tone: 'pack', children: [
-      { label: 'Requests', href: `${RP_BASE}/maintenance`, match: [`${RP_BASE}/maintenance/`] },
-      { label: 'Vendors', href: `${RP_BASE}/vendors` },
-      // AMC folds into the vendor pages when the commitments layer lands.
-      { label: 'AMC', href: `${RP_BASE}/amc` },
-      // Building inspections (0383): each building's monthly / quarterly walk-through.
-      { label: 'Building inspections', href: `${RP_BASE}/building-inspections`, match: [`${RP_BASE}/building-inspections/`] },
-    ] },
-    // Two pipelines, two pages (owner, 14 Sep: "keep breaches and Legal separate — separate pages").
-    { label: 'Cases', icon: Scale, tone: 'pack', children: [
-      { label: 'Breaches', href: `${RP_BASE}/breaches` },
-      { label: 'Legal', href: `${RP_BASE}/legal` },
-    ] },
-    { label: 'Reports', icon: BarChart2, tone: 'pack', children: [
-      { label: 'Reports', href: `${RP_BASE}/reports` },
-      { label: 'Analytics', href: `${RP_BASE}/analytics`, hidden: true },
-    ] },
-    // No Business tab for now (owner, 4 Oct: "Business you can remove for
-    // now") — the provider's own company (entities, branches, payables,
-    // people, P&L in the prototype) has no page yet.
-  ],
-  manager: [
-    { label: 'Demand', icon: TrendingUp, tone: 'shared', children: [
-      { label: 'Leads', href: `${MGR_BASE}/leads`, requirePerm: 'canManageViewings', match: [`${MGR_BASE}/viewings`] },
-    ] },
-    { label: 'Calendar', icon: CalendarCheck, tone: 'shared', children: [
-      { label: 'Calendar', href: `${MGR_BASE}/leads?view=calendar`, requirePerm: 'canManageViewings' },
-    ] },
-    { label: 'Communications', icon: Mail, tone: 'shared', children: [
-      { label: 'Emails', href: `${MGR_BASE}/communications`, requirePerm: 'canReadEmails' },
-      { label: 'WhatsApp', href: `${MGR_BASE}/whatsapp`, requirePerm: 'canReadWhatsapp' },
-    ] },
-    { label: 'Settings', icon: Settings, tone: 'shared', children: [
-      // Settings holds the delegated lists (maintenance coverage, restoration,
-      // AMC categories) — not for a finance-only member (owner, 23 Sep 2026).
-      { label: 'Settings', href: `${MGR_BASE}/settings`, financeHidden: true, match: [`${MGR_BASE}/maintenance-coverage`, `${MGR_BASE}/maintenance-list`, `${MGR_BASE}/restoration-list`, `${MGR_BASE}/amc/categories`] },
-      // Templates sit with the operating configuration (owner, 29 Sep).
-      { label: 'Templates', href: `${MGR_BASE}/templates`, requirePerm: 'canManageTemplates' },
-      { label: 'My Profile', href: `${MGR_BASE}/profile` },
-    ] },
-    { label: 'Overview', icon: LayoutDashboard, tone: 'pack', children: [
-      { label: 'Overview', href: MGR_BASE },
-    ] },
-    { label: 'Portfolio', icon: Building2, tone: 'pack', children: [
-      { label: 'Properties', href: `${MGR_BASE}/properties`, requirePerm: 'canListProperties' },
-      { label: 'Units', href: `${MGR_BASE}/units`, requirePerm: 'canListProperties', financeHidden: true },
-    ] },
-    { label: 'Customers', icon: UserCheck, tone: 'pack', children: [
-      { label: 'Customers', href: `${MGR_BASE}/tenants`, requirePerm: 'canManageAgreements' },
-    ] },
-    { label: 'Leases', icon: FileText, tone: 'pack', children: [
-      { label: 'Leases', href: `${MGR_BASE}/contracts`, requirePerm: 'canManageAgreements' },
-      { label: 'Ended Leases', href: `${MGR_BASE}/ended-leases`, requirePerm: 'canManageAgreements' },
-    ] },
-    // Transactions = the money moving on the leases (owner, 29 Sep). One page:
-    // deposits are a tab INSIDE Payments (/deposits is a legacy redirect).
-    { label: 'Transactions', icon: Wallet, tone: 'pack', children: [
-      { label: 'Payments', href: `${MGR_BASE}/payments`, requirePerm: 'canManageDeposits', match: [`${MGR_BASE}/deposits`] },
-    ] },
-    { label: 'Operations', icon: ClipboardList, tone: 'pack', children: [
-      { label: 'Ops Board', href: `${MGR_BASE}/operations`, requirePerm: 'canManageAgreements' },
-    ] },
-    { label: 'Maintenance', icon: Wrench, tone: 'pack', children: [
-      { label: 'Requests', href: `${MGR_BASE}/maintenance`, requirePerm: 'canManageMaintenance', match: [`${MGR_BASE}/maintenance/`] },
-      { label: 'Vendors', href: `${MGR_BASE}/vendors`, requirePerm: 'canManageVendors' },
-      // Either flag opens AMC: the coordinator (contracts & visits) or the
-      // finance manager (bills, installments, expenses report) — 0319.
-      { label: 'AMC', href: `${MGR_BASE}/amc`, requirePerm: ['canManageAmc', 'canRecordVendorPayments'] },
-      { label: 'Building inspections', href: `${MGR_BASE}/building-inspections`, requirePerm: 'canManageInspections', match: [`${MGR_BASE}/building-inspections/`] },
-    ] },
-    { label: 'Cases', icon: Scale, tone: 'pack', children: [
-      { label: 'Breaches', href: `${MGR_BASE}/breaches`, requirePerm: 'canManageLegal' },
-      { label: 'Legal', href: `${MGR_BASE}/legal`, requirePerm: 'canManageLegal' },
-    ] },
-    { label: 'Reports', icon: BarChart2, tone: 'pack', children: [
-      { label: 'Reports', href: `${MGR_BASE}/reports`, requirePerm: 'canViewReports' },
-      { label: 'Analytics', href: `${MGR_BASE}/analytics`, requirePerm: 'canViewReports', hidden: true },
-    ] },
-  ],
-};
-
-// Finance-only = holds a money flag and none of the working flags. Units
-// (layout pricing) and the delegated Settings lists are not on their map
-// (owner, 23 Sep 2026). Shared by the rail and the tab strip.
-function isFinanceOnly(role: UserRole, perms: Record<string, boolean>): boolean {
-  return role === 'manager'
-    && (perms.canRecordPayments || perms.canClearCheques || perms.canManageCollections)
-    && !perms.canManageAgreements && !perms.canEditProperties && !perms.canManageViewings && !perms.canManageMaintenance;
-}
-
-/** A group's children this user can see — same rules as the flat rail applied:
- *  parked entries drop, WhatsApp drops without a bridge, manager permission
- *  gates and the finance-only carve-out apply per child. */
-function visibleOsChildren(group: OsGroup, role: UserRole, managerPerms: Record<string, boolean>, waOn: boolean, financeOnly: boolean): OsChild[] {
-  return group.children.filter(c => {
-    if (c.hidden) return false;
-    if (!waOn && c.href.endsWith('/whatsapp')) return false;
-    if (role === 'manager') {
-      if (c.financeHidden && financeOnly) return false;
-      if (c.requirePerm) {
-        const need = Array.isArray(c.requirePerm) ? c.requirePerm : [c.requirePerm];
-        if (!need.some(f => managerPerms[f] === true)) return false;
-      }
-    }
-    return true;
-  });
-}
-
-/** Rail items from OS_GROUPS: one tab per group with visible children, its
- *  href the first page the user can open, its `match` covering every child so
- *  the tab highlights wherever inside the group the user is. The two layer
- *  headers and the divider between them are inserted where the tone flips. */
-function buildOsRail(role: UserRole, managerPerms: Record<string, boolean>, waOn: boolean): NavItem[] {
-  const groups = OS_GROUPS[role] ?? [];
-  const financeOnly = isFinanceOnly(role, managerPerms);
-  const items: NavItem[] = [];
-  let toneSeen: NavTone | null = null;
-  for (const g of groups) {
-    const kids = visibleOsChildren(g, role, managerPerms, waOn, financeOnly);
-    if (!g.soon && !kids.length) continue;
-    if (g.tone !== toneSeen) {
-      if (toneSeen) items.push({ divider: true });
-      items.push({ section: g.tone === 'shared' ? 'Shared UpNow OS' : 'Spaces pack', tone: g.tone });
-      toneSeen = g.tone;
-    }
-    if (g.soon) {
-      // No page behind it yet — dimmed placeholder with an "In development"
-      // chip; the href is only a stable React key, soon-items never link.
-      items.push({ label: g.label, href: `#soon-${g.label}`, icon: g.icon, tone: g.tone, soon: true });
-      continue;
-    }
-    const [first, ...rest] = kids;
-    items.push({
-      label: g.label,
-      href: first.href,
-      icon: g.icon,
-      badgeKey: g.badgeKey,
-      tone: g.tone,
-      match: [...rest.map(k => k.href), ...kids.flatMap(k => k.match ?? [])],
-    });
-  }
-  return items;
-}
 
 const ROLE_LABEL: Record<UserRole, string> = {
   customer:          'Customer',
@@ -577,9 +270,7 @@ function Sidebar({
   const spTier = useSpTier();
   const baseNav = role === 'service_provider' && spTier === 'landlord_vendor'
     ? SP_LIGHT_NAV
-    : OS_GROUPS[role]
-      ? buildOsRail(role, managerPerms, waOn)
-      : (NAV[role] ?? []);
+    : (NAV[role] ?? []);
   // WhatsApp has no entry where the environment has no bridge to run it through.
   const rawNav = baseNav.filter(item => !('hidden' in item && item.hidden))
     .filter(item => waOn || !('href' in item && typeof item.href === 'string' && item.href.endsWith('/whatsapp')));
@@ -661,7 +352,7 @@ function Sidebar({
       {/* Nav */}
       {/* The v32 tabs are filled blocks, so they get a little more air than the
           flat rails' 2px (owner, 4 Oct) — inline, the module serves every rail. */}
-      <nav className={shell.nav} style={{ ...(OS_GROUPS[role] ? { gap: 6 } : null), ...(collapsed ? { alignItems: 'center' } : null) }}>
+      <nav className={shell.nav} style={collapsed ? { alignItems: 'center' } : undefined}>
         {navItems.map((item, i) => {
           if ('divider' in item) {
             return <hr key={`divider-${i}`} className={shell.divider} style={collapsed ? { width: '100%' } : undefined} />;
@@ -766,14 +457,14 @@ function Sidebar({
               <span className={shell.glyph} style={{ ...(item.tone ? { color: 'inherit' } : null), ...(collapsed && hasBadge ? { position: 'relative' } : null) }}>
                 <Icon size={16} />
                 {collapsed && hasBadge && (
-                  <span style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 99, background: '#2e9f82', border: '1.5px solid #fff' }} />
+                  <span style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 99, background: '#047246', border: '1.5px solid #fff' }} />
                 )}
               </span>
               {!collapsed && <span>{item.label}</span>}
               {!collapsed && hasBadge && (
                 <span
                   className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold tabular-nums leading-none"
-                  style={{ background: '#2e9f82', color: '#fff' }}
+                  style={{ background: '#047246', color: '#fff' }}
                 >
                   {badgeCount > 999 ? '999+' : badgeCount}
                 </span>
@@ -893,75 +584,35 @@ function CustomerAvatarMenu() {
 /* ─────────────────────────────────────────────
    DashboardShell — main export
 ───────────────────────────────────────────── */
-/** v32 preview: the in-page tab strip for the active OS group — the pages that
- *  fold into the selected rail tab (e.g. Portfolio → Properties · Units).
- *  Rendered by the shell between the topbar and the page so no page component
- *  changes; hidden when the group has one visible page. Tone-coloured like the
- *  rail: dark band for shared-OS groups, light band for Spaces-pack groups. */
-function OsGroupTabs({ role, pathname, counts }: { role: UserRole; pathname: string; counts: NavCounts }) {
+/** UpNow OS rail for the rental-provider, manager and admin roles (./os). Supplies the
+ *  manager permission map, the WhatsApp bridge flag and the ?rp= scope carry-over the
+ *  rail needs, from the same hooks the legacy Sidebar uses. */
+/** Service-provider account-state flags for the OS rail: `spSetupOpen` keeps the
+ *  Onboarding entry in Business until the profile is approved (compliant). */
+let _spSetupOpen: boolean | null = null;
+function useSpNavFlags(role: UserRole): Record<string, boolean> {
+  const [open, setOpen] = useState<boolean | null>(_spSetupOpen);
+  useEffect(() => {
+    if (role !== 'service_provider' || _spSetupOpen != null) return;
+    apiGet<{ profile?: { complianceStatus?: string | null } }>('/profiles/service-provider/me')
+      .then((d) => { _spSetupOpen = d?.profile?.complianceStatus !== 'compliant'; setOpen(_spSetupOpen); })
+      .catch(() => { /* no flag → entry stays hidden */ });
+  }, [role]);
+  return useMemo(() => ({ spSetupOpen: open === true }), [open]);
+}
+
+function OsSidebar({ role, pathname, counts, collapsed, onClose }: {
+  role: UserRole; pathname: string; counts: NavCounts; collapsed?: boolean; onClose?: () => void;
+}) {
   const managerPerms = useManagerNavPerms(role);
+  const spFlags = useSpNavFlags(role);
+  const perms = role === 'service_provider' ? spFlags : managerPerms;
   const waOn = useWhatsappEnabled(role);
-  const tabsSearchParams = useSearchParams();
-  const scopeRp = role === 'manager' ? tabsSearchParams.get('rp') : null;
+  const sp = useSearchParams();
+  const scopeRp = role === 'manager' ? sp.get('rp') : null;
   const withScope = (href: string) =>
     scopeRp && href.startsWith('/dashboard/manager') ? `${href}${href.includes('?') ? '&' : '?'}rp=${scopeRp}` : href;
-  const groups = OS_GROUPS[role];
-  if (!groups) return null;
-  const onPath = (base: string) => pathname === base || pathname.startsWith(base + '/');
-  // Most specific claim wins: /rental-provider/dashboard (Overview) would
-  // prefix-match everything, so prefer the group whose matched base is longest.
-  let active: OsGroup | undefined;
-  let bestLen = -1;
-  for (const g of groups) {
-    for (const c of g.children) {
-      for (const base of [c.href, ...(c.match ?? [])]) {
-        if (onPath(base) && base.length > bestLen) { active = g; bestLen = base.length; }
-      }
-    }
-  }
-  if (!active) return null;
-  const kids = visibleOsChildren(active, role, managerPerms, waOn, isFinanceOnly(role, managerPerms));
-  if (kids.length < 2) return null;
-  const shared = active.tone === 'shared';
-  return (
-    <div
-      className="flex-shrink-0 flex items-center gap-1.5 px-5 py-2 border-b overflow-x-auto"
-      style={{ background: shared ? '#124e39' : '#e7f4ed', borderColor: shared ? '#0b3f2c' : '#cce7d9' }}
-    >
-      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: shared ? '#8fc3a2' : '#527a66', marginRight: 8, whiteSpace: 'nowrap' }}>
-        {active.label}
-      </span>
-      {kids.map((c) => {
-        const isOn = onPath(c.href) || (c.match?.some(onPath) ?? false);
-        const n = c.badgeKey ? (counts[c.badgeKey] ?? 0) : 0;
-        return (
-          <Link
-            key={c.href}
-            href={withScope(c.href)}
-            className="inline-flex items-center gap-1.5 rounded-full whitespace-nowrap"
-            style={{
-              padding: '5px 12px', fontSize: 13, fontWeight: isOn ? 700 : 500,
-              ...(shared
-                ? (isOn ? { background: '#fff', color: '#0b3f2c' } : { color: '#d9ebe4' })
-                : (isOn ? { background: '#124e39', color: '#fff' } : { color: '#174c3a' })),
-            }}
-          >
-            {c.label}
-            {n > 0 && (
-              <span
-                className="inline-flex items-center justify-center min-w-[18px] rounded-full tabular-nums leading-none"
-                style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px',
-                  background: isOn ? (shared ? '#e7f4ed' : 'rgba(255,255,255,.28)') : '#2e9f82',
-                  color: isOn && shared ? '#124e39' : '#fff' }}
-              >
-                {n > 999 ? '999+' : n}
-              </span>
-            )}
-          </Link>
-        );
-      })}
-    </div>
-  );
+  return <OsRail role={role} pathname={pathname} counts={counts} perms={perms} waOn={waOn} collapsed={collapsed} onClose={onClose} withScope={withScope} />;
 }
 
 export function DashboardShell({ children }: { children: ReactNode }) {
@@ -1040,6 +691,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   const role = user.role;
+  // Rental provider, manager, service provider and admin run in the UpNow OS workspace
+  // shell (./os). A landlord-invited light vendor keeps its small legacy nav (SP_LIGHT_NAV);
+  // the OS providers still mount for every OS role so the tier stamp landing after the
+  // first render never remounts the page.
+  const osProviders = isOsRole(role);
+  const osShell = osProviders && !(role === 'service_provider' && spTier === 'landlord_vendor');
 
   // Hide the sidebar entirely on the onboarding page so it's a focused
   // full-screen flow (no nav to escape to before submitting).
@@ -1050,6 +707,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     // `app-shell-root` is the hook the document dock insets so its rail never
     // covers the page it was opened from — see .doc-dock in globals.css.
+    <OsProviders enabled={osProviders}>
     <div className="app-shell-root flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-base-100)', transition: 'padding 0.24s cubic-bezier(.22,.9,.3,1)' }}>
       {/* Desktop sidebar */}
       {!hideSidebar && (
@@ -1057,7 +715,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           className="hidden lg:flex flex-shrink-0 h-full overflow-hidden"
           style={{ width: sidebarCollapsed ? 60 : 240, transition: 'width 0.2s ease' }}
         >
-          <Sidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} counts={navCounts} />
+          {osShell
+            ? <OsSidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} counts={navCounts} />
+            : <Sidebar role={role} pathname={pathname} collapsed={sidebarCollapsed} counts={navCounts} />}
         </div>
       )}
 
@@ -1069,7 +729,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             onClick={() => setSidebarOpen(false)}
           />
           <div className="absolute left-0 top-0 h-full z-50" style={{ width: 240 }}>
-            <Sidebar role={role} pathname={pathname} onClose={() => setSidebarOpen(false)} counts={navCounts} />
+            {osShell
+              ? <OsSidebar role={role} pathname={pathname} onClose={() => setSidebarOpen(false)} counts={navCounts} />
+              : <Sidebar role={role} pathname={pathname} onClose={() => setSidebarOpen(false)} counts={navCounts} />}
           </div>
         </div>
       )}
@@ -1130,6 +792,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </button>
           )}
 
+          {/* UpNow OS: the business you work as (real Gate 1 status) + the vertical scope */}
+          {!hideSidebar && osShell && (
+            <div className="flex-1 min-w-0 mx-3"><OsContextBar role={role} /></div>
+          )}
+
           {hideSidebar ? (
             <div className="flex items-center gap-3">
               <span className="hidden text-xs sm:block" style={{ color: 'var(--color-neutral-400)' }}>{user.email}</span>
@@ -1170,8 +837,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </header>
         )}
 
-        {/* v32 preview: the active group's pages as an in-page tab strip */}
-        {!hideSidebar && <OsGroupTabs role={role} pathname={pathname} counts={navCounts} />}
+        {/* Where you are: vertical/shared layer › workspace › page */}
+        {!hideSidebar && osShell && <OsCrumb role={role} pathname={pathname} />}
 
         {/* Page content */}
         <main className={cn('flex-1 min-h-0 overflow-y-auto', shell.mainCanvas)}>
@@ -1179,5 +846,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         </main>
       </div>
     </div>
+    </OsProviders>
   );
 }

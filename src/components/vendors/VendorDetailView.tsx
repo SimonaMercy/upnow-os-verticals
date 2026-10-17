@@ -50,7 +50,7 @@ const AMC_STATUS: Record<string, { bg: string; fg: string; label: string }> = {
   active: { bg: '#dcfce7', fg: '#15803d', label: 'Active' },
   expiring: { bg: '#fef3c7', fg: '#b45309', label: 'Expiring soon' },
   expired: { bg: '#fee2e2', fg: '#b91c1c', label: 'Expired' },
-  unknown: { bg: '#f4f3ef', fg: '#6b6860', label: 'No expiry' },
+  unknown: { bg: '#eef1ef', fg: '#5f6b63', label: 'No expiry' },
 };
 const STAGE_LABEL: Record<string, string> = {
   requested: 'Requested', awaiting_approval: 'Awaiting approval', in_progress: 'In progress',
@@ -139,46 +139,46 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
 
   if (!v) return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <Link href={listHref} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860]"><ArrowLeft size={14} /> Vendors</Link>
-      <p className="text-sm text-[#9b9890] mt-6">{err ?? 'Loading…'}</p>
+      <Link href={listHref} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63]"><ArrowLeft size={14} /> Vendors</Link>
+      <p className="text-sm text-[#8a948d] mt-6">{err ?? 'Loading…'}</p>
     </div>
   );
 
   const km = KIND_META[v.kind] ?? KIND_META.service;
   const participating = v.kind === 'service';
   const own = v.relationship === 'internal_team';
-  const card = 'bg-white rounded-2xl border border-[#e8e6e0] p-5';
+  const card = 'bg-white rounded-2xl border border-[#e4e9e5] p-5';
   const missing = (val: string | null) => val
-    ? <span className="text-[#1a1916] font-medium break-words">{val}</span>
-    : participating ? <span className="text-[#b91c1c] font-semibold">Missing</span> : <span className="text-[#9b9890]">—</span>;
+    ? <span className="text-[#14201a] font-medium break-words">{val}</span>
+    : participating ? <span className="text-[#b91c1c] font-semibold">Missing</span> : <span className="text-[#8a948d]">—</span>;
 
   const profile: { label: string; node: React.ReactNode }[] = [
     { label: 'Email', node: missing(v.email) },
     { label: 'Phone', node: missing(v.phone) },
-    ...(participating || v.entityType === 'individual' ? [{ label: 'Entity', node: <span className="text-[#1a1916] font-medium">{v.entityType === 'individual' ? 'Individual / solo' : 'Company'}</span> }] : []),
-    { label: 'Contact person', node: <span className="text-[#1a1916] font-medium">{v.contactName ?? '—'}</span> },
+    ...(participating || v.entityType === 'individual' ? [{ label: 'Entity', node: <span className="text-[#14201a] font-medium">{v.entityType === 'individual' ? 'Individual / solo' : 'Company'}</span> }] : []),
+    { label: 'Contact person', node: <span className="text-[#14201a] font-medium">{v.contactName ?? '—'}</span> },
     // A record (Etisalat, an authority) keeps only what it has — no empty address / licence rows (owner, 30 Sep).
-    ...(participating || v.address ? [{ label: 'Address', node: <span className="text-[#1a1916] font-medium break-words">{v.address ?? '—'}</span> }] : []),
-    ...(v.trn ? [{ label: 'TRN', node: <span className="text-[#1a1916] font-medium tabular-nums">{v.trn}</span> }] : []),
+    ...(participating || v.address ? [{ label: 'Address', node: <span className="text-[#14201a] font-medium break-words">{v.address ?? '—'}</span> }] : []),
+    ...(v.trn ? [{ label: 'TRN', node: <span className="text-[#14201a] font-medium tabular-nums">{v.trn}</span> }] : []),
     ...(!participating && !v.tradeLicence?.number && !v.tradeLicence?.expiry && !v.tradeLicence?.doc ? [] : [{ label: 'Trade licence', node: (() => {
       const lic = v.tradeLicence; const today = new Date().toISOString().slice(0, 10);
-      if (!lic || (!lic.number && !lic.expiry && !lic.doc)) return <span className="text-[#9b9890]">Not on file</span>;
+      if (!lic || (!lic.number && !lic.expiry && !lic.doc)) return <span className="text-[#8a948d]">Not on file</span>;
       const expired = lic.expiry != null && lic.expiry < today;
       return (
-        <span className="text-[#1a1916] font-medium">
+        <span className="text-[#14201a] font-medium">
           {lic.number ?? 'No number'}
           {lic.expiry && <> · <span className={expired ? 'text-[#b91c1c] font-semibold' : 'text-[#1a7a5a]'}>{expired ? `expired ${fmtD(lic.expiry)}` : `valid until ${fmtD(lic.expiry)}`}</span></>}
           {/* The copy itself lives on the Vendor KYC card below (owner, 12 Sep) — no second link here. */}
         </span>
       );
     })() }]),
-    { label: "What they're for", node: <span className="text-[#1a1916] font-medium">{v.category ?? '—'}</span> },
-    { label: 'Payment frequency', node: <span className="text-[#1a1916] font-medium">{v.paymentFrequency ? PAY_FREQ_LABEL[v.paymentFrequency] ?? v.paymentFrequency : '—'}</span> },
+    { label: "What they're for", node: <span className="text-[#14201a] font-medium">{v.category ?? '—'}</span> },
+    { label: 'Payment frequency', node: <span className="text-[#14201a] font-medium">{v.paymentFrequency ? PAY_FREQ_LABEL[v.paymentFrequency] ?? v.paymentFrequency : '—'}</span> },
     ...(participating ? [
-      { label: 'Relationship', node: <span className="text-[#1a1916] font-medium">{own ? 'Our own team' : 'Contracted vendor'}</span> },
-      { label: 'Trades', node: <span className="text-[#1a1916] font-medium">{v.trades.length ? v.trades.map(t => t.name).join(' · ') : 'Not set'}</span> },
-      { label: 'On UpNow', node: <span className="text-[#1a1916] font-medium">{v.inviteStatus === 'accepted' ? `Yes — accepted ${fmtD(v.acceptedAt)}` : v.inviteStatus === 'invited' ? `Invited ${fmtD(v.invitedAt)} — awaiting acceptance` : 'Not yet — your record only'}</span> },
-    ] : [{ label: 'Platform', node: <span className="text-[#9b9890]">Record only — never invited, never assigned work</span> }]),
+      { label: 'Relationship', node: <span className="text-[#14201a] font-medium">{own ? 'Our own team' : 'Contracted vendor'}</span> },
+      { label: 'Trades', node: <span className="text-[#14201a] font-medium">{v.trades.length ? v.trades.map(t => t.name).join(' · ') : 'Not set'}</span> },
+      { label: 'On UpNow', node: <span className="text-[#14201a] font-medium">{v.inviteStatus === 'accepted' ? `Yes — accepted ${fmtD(v.acceptedAt)}` : v.inviteStatus === 'invited' ? `Invited ${fmtD(v.invitedAt)} — awaiting acceptance` : 'Not yet — your record only'}</span> },
+    ] : [{ label: 'Platform', node: <span className="text-[#8a948d]">Record only — never invited, never assigned work</span> }]),
   ];
 
   const STATS = [
@@ -191,34 +191,34 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
       <div className="bg-white rounded-2xl shadow-sm p-5">
         <div className="flex items-start gap-3.5 flex-wrap">
           <button onClick={() => router.push(listHref)} aria-label="Back to Vendors"
-            className="w-9 h-9 mt-0.5 rounded-full border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] shrink-0 cursor-pointer">
+            className="w-9 h-9 mt-0.5 rounded-full border border-[#e4e9e5] flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] shrink-0 cursor-pointer">
             <ArrowLeft size={16} />
           </button>
           <div className="w-12 h-12 rounded-2xl grid place-items-center font-bold text-[17px] shrink-0" style={{ background: km.bg, color: km.fg }}>{v.name.charAt(0)}</div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs text-[#9b9890] flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs text-[#8a948d] flex items-center gap-1.5 flex-wrap">
               <Link href={listHref} className="hover:underline">Vendors</Link>
               <span className="text-[#c4c1b8]">›</span>
               <span className="truncate max-w-[240px]">{v.name}</span>
             </p>
-            <h1 className="text-[22px] leading-tight font-bold text-[#1a1916] mt-0.5">{v.name}</h1>
+            <h1 className="text-[22px] leading-tight font-bold text-[#14201a] mt-0.5">{v.name}</h1>
             <div className="flex items-center gap-2 flex-wrap mt-1.5">
               {own && chip('Own team', '#e0f2fe', '#0369a1')}
               {chip(km.label, km.bg, km.fg)}
               {participating && chip(v.inviteStatus === 'accepted' ? 'On UpNow' : v.inviteStatus === 'invited' ? 'Invited' : 'Not invited',
-                v.inviteStatus === 'accepted' ? '#d8f2e8' : v.inviteStatus === 'invited' ? '#fef3c7' : '#f4f3ef',
-                v.inviteStatus === 'accepted' ? '#1a7a5a' : v.inviteStatus === 'invited' ? '#92400e' : '#6b6860')}
-              {v.isDefault && chip('Default', '#f4f3ef', '#6b6860')}
+                v.inviteStatus === 'accepted' ? '#d8efe3' : v.inviteStatus === 'invited' ? '#fef3c7' : '#eef1ef',
+                v.inviteStatus === 'accepted' ? '#1a7a5a' : v.inviteStatus === 'invited' ? '#92400e' : '#5f6b63')}
+              {v.isDefault && chip('Default', '#eef1ef', '#5f6b63')}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">
               <Pencil size={14} /> Edit
             </button>
             {participating && v.inviteStatus !== 'accepted' && (
               <button type="button" disabled={busy} onClick={invite}
-                className="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-full text-white cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
+                className="inline-flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-full text-white cursor-pointer disabled:opacity-50" style={{ background: '#047246' }}>
                 {v.inviteStatus === 'invited' ? 'Resend invite' : 'Invite to UpNow'}
               </button>
             )}
@@ -228,7 +228,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 pt-4 border-t border-[#eeece6]">
           {profile.map((f, i) => (
             <div key={i} className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{f.label}</div>
+              <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{f.label}</div>
               <div className="text-sm mt-1">{f.node}</div>
             </div>
           ))}
@@ -244,7 +244,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
             <code className="text-[12px] bg-white border border-[#bae6fd] rounded-lg px-2 py-1 break-all flex-1 min-w-[240px]">{inviteUrl.url}</code>
             <button type="button" onClick={() => { void navigator.clipboard?.writeText(inviteUrl.url); }} className="inline-flex items-center gap-1 text-[12px] font-bold text-[#0369a1] cursor-pointer"><Copy size={12} /> Copy</button>
             <a href={`https://wa.me/?text=${encodeURIComponent(inviteUrl.url)}`} target="_blank" rel="noopener noreferrer" className="text-[12px] font-bold underline">WhatsApp</a>
-            <button type="button" onClick={() => setInviteUrl(null)} className="text-[#9b9890] cursor-pointer" aria-label="Dismiss"><X size={14} /></button>
+            <button type="button" onClick={() => setInviteUrl(null)} className="text-[#8a948d] cursor-pointer" aria-label="Dismiss"><X size={14} /></button>
           </div>
         )}
       </div>
@@ -256,12 +256,12 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
         <div className="grid grid-cols-1 divide-x divide-[#eeece6]">
           {STATS.map((st, i) => (
             <div key={i} className={`px-5 py-4 ${st.onClick ? 'cursor-pointer hover:bg-[#faf9f7] transition-colors' : ''}`} onClick={st.onClick} role={st.onClick ? 'button' : undefined}>
-              <div className="text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1 text-[#9b9890]">
-                {st.label}{st.onClick && <ExternalLink size={11} className="text-[#2e9f82]" />}
+              <div className="text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1 text-[#8a948d]">
+                {st.label}{st.onClick && <ExternalLink size={11} className="text-[#047246]" />}
               </div>
               <div className="mt-1.5 flex items-baseline gap-2 flex-wrap">
-                <span className="font-bold text-xl text-[#1a1916]">{st.value}</span>
-                <span className="text-xs text-[#9b9890]">{st.sub}</span>
+                <span className="font-bold text-xl text-[#14201a]">{st.value}</span>
+                <span className="text-xs text-[#8a948d]">{st.sub}</span>
               </div>
             </div>
           ))}
@@ -272,13 +272,13 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
       {(() => {
         const active = contracts.filter(c => c.status !== 'expired');
         const past = contracts.filter(c => c.status === 'expired');
-        const th = 'text-left px-4 py-2.5 text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold';
-        const td = 'px-4 py-3 text-sm text-[#1a1916]';
+        const th = 'text-left px-4 py-2.5 text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold';
+        const td = 'px-4 py-3 text-sm text-[#14201a]';
         const rowOf = (c: AmcRow, pastRow: boolean) => {
           const paid = (ledger[c.id] ?? []).filter(r => r.status === 'paid');
           return (
           <tr key={c.id} className="border-b border-[#f4f2ec] last:border-0 align-top">
-            <td className={td + ' font-mono text-xs text-[#9b9890]'}>AMC-{c.id}{c.accountNumber && <div className="font-sans text-[11.5px] font-semibold text-[#4a4842] mt-0.5 whitespace-nowrap">Acc {c.accountNumber}</div>}</td>
+            <td className={td + ' font-mono text-xs text-[#8a948d]'}>AMC-{c.id}{c.accountNumber && <div className="font-sans text-[11.5px] font-semibold text-[#4a4842] mt-0.5 whitespace-nowrap">Acc {c.accountNumber}</div>}</td>
             <td className={td + ' font-medium'}>{c.propertyName ?? 'All properties'}</td>
             <td className={td + ' whitespace-nowrap'}>{fmtD(c.startDate)} → {c.ongoing ? 'Ongoing' : fmtD(c.endDate)}</td>
             <td className={td}>
@@ -286,16 +286,16 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
                 const proofs = paid.filter(r => r.proof).map(r => ({ fileUrl: r.proof!.fileUrl, caption: `Payment #${r.seq}${r.reference ? ` · ${r.reference}` : ''}${r.paidAt ? ` · ${fmtD(r.paidAt)}` : ''}`, documentKey: r.proof!.documentKey }));
                 if (proofs.length) return (
                   <button type="button" onClick={() => openDocViewer(proofs, `Payments — AMC-${c.id}`)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer whitespace-nowrap">View payment{proofs.length > 1 ? `s · ${proofs.length}` : ''}</button>
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer whitespace-nowrap">View payment{proofs.length > 1 ? `s · ${proofs.length}` : ''}</button>
                 );
                 if (paid.length) return <span className="text-[12px] font-semibold text-[#92400e] whitespace-nowrap" title="Paid, but no proof of payment on file">Paid · no proof</span>;
-                return <span className="text-[12px] text-[#9b9890]">—</span>;
+                return <span className="text-[12px] text-[#8a948d]">—</span>;
               })()}
             </td>
             <td className={td}>
               {pastRow
                 ? (c.renewedById != null
-                  ? <span className="inline-flex rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#d8f2e8] text-[#1a7a5a]">Renewed</span>
+                  ? <span className="inline-flex rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#d8efe3] text-[#1a7a5a]">Renewed</span>
                   : <span className="inline-flex rounded-full text-[11px] font-semibold px-2.5 py-0.5 bg-[#fee2e2] text-[#b91c1c]">Not renewed</span>)
                 : (() => { const st = AMC_STATUS[c.status] ?? AMC_STATUS.unknown; return <span className="inline-flex rounded-full text-[11px] font-semibold px-2.5 py-0.5" style={{ background: st.bg, color: st.fg }}>{st.label}</span>; })()}
               {c.renewalOfId != null && !pastRow && <span className="ml-1.5 inline-flex rounded-full text-[10px] font-medium px-2 py-0.5 bg-[#eef2ff] text-[#4338ca]">Renewal</span>}
@@ -309,13 +309,13 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
         return (
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
-            <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
+            <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2">
               <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#1a7a5a] grid place-items-center"><FileSignature size={14} /></span>
-              Active AMC ({active.length}) <span className="text-xs text-[#9b9890] font-normal">· {contracts.length} contracts total</span>
+              Active AMC ({active.length}) <span className="text-xs text-[#8a948d] font-normal">· {contracts.length} contracts total</span>
             </h2>
             {past.length > 0 && (
               <button type="button" onClick={() => setShowPast(o => !o)}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full border border-[#e8e6e0] bg-white text-[#4a4842] hover:bg-[#f4f3ef] cursor-pointer">
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full border border-[#e4e9e5] bg-white text-[#4a4842] hover:bg-[#eef1ef] cursor-pointer">
                 History ({past.length})
               </button>
             )}
@@ -327,7 +327,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
               </tr></thead>
               <tbody>
                 {active.map(c => rowOf(c, false))}
-                {active.length === 0 && <tr><td colSpan={6} className="px-4 py-4 text-sm text-[#9b9890]">No running contract — renew from History, or add one on the AMC page.</td></tr>}
+                {active.length === 0 && <tr><td colSpan={6} className="px-4 py-4 text-sm text-[#8a948d]">No running contract — renew from History, or add one on the AMC page.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -335,12 +335,12 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
           {showPast && past.length > 0 && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => setShowPast(false)}>
               <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef]">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-[#eef1ef]">
                   <div>
-                    <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2"><History size={14} /> AMC history · {v.name}</h2>
-                    <p className="text-[11px] text-[#9b9890] mt-0.5">{past.length} expired contract{past.length === 1 ? '' : 's'} — renewed ones link to their renewal; the rest can be renewed or cancelled from the contract page.</p>
+                    <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2"><History size={14} /> AMC history · {v.name}</h2>
+                    <p className="text-[11px] text-[#8a948d] mt-0.5">{past.length} expired contract{past.length === 1 ? '' : 's'} — renewed ones link to their renewal; the rest can be renewed or cancelled from the contract page.</p>
                   </div>
-                  <button type="button" onClick={() => setShowPast(false)} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer" aria-label="Close"><X size={18} /></button>
+                  <button type="button" onClick={() => setShowPast(false)} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer" aria-label="Close"><X size={18} /></button>
                 </div>
                 <div className="overflow-auto">
                   <table className="w-full">
@@ -362,35 +362,35 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
       <div className="grid lg:grid-cols-3 gap-5 items-start">
         <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm p-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
+            <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2">
               <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#1a7a5a] grid place-items-center"><FileText size={14} /></span>
               Vendor KYC
             </h2>
-            <span className="text-[11.5px] text-[#9b9890]">Only the active copy counts — a replaced or expired copy stays in history.</span>
+            <span className="text-[11.5px] text-[#8a948d]">Only the active copy counts — a replaced or expired copy stays in history.</span>
           </div>
           {/* Same shape as the customer's KYC card: one row per slot, its state on the left, View / Replace on the right. */}
           <div className="mt-3 grid gap-1">
             {(kyc?.slots ?? []).map(slot => {
               const cur = slot.current; const today = new Date().toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
               const expired = slot.state === 'expired', expiring = slot.state === 'expiring';
-              const tone = expired ? 'bg-[#fee2e2] text-[#b91c1c]' : expiring ? 'bg-[#fdf3e7] text-[#b07415]' : cur ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#f4f3ef] text-[#9b9890]';
+              const tone = expired ? 'bg-[#fee2e2] text-[#b91c1c]' : expiring ? 'bg-[#fdf3e7] text-[#b07415]' : cur ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'bg-[#eef1ef] text-[#8a948d]';
               const open = kycHistory === slot.key;
               return (
                 <div key={slot.key} className="rounded-xl hover:bg-[#fafdfb]">
                   <div className="flex items-center gap-3 px-3 py-2.5">
                     <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${tone}`}>{expired || expiring ? <AlertTriangle size={16} /> : cur ? <Check size={16} /> : <FileText size={16} />}</span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-bold text-[#1a1916] truncate">{slot.label} <span className="font-normal text-[#9b9890]">· {slot.required ? 'required' : 'optional'}</span></div>
+                      <div className="text-[13px] font-bold text-[#14201a] truncate">{slot.label} <span className="font-normal text-[#8a948d]">· {slot.required ? 'required' : 'optional'}</span></div>
                       <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
                         {cur ? (
                           <>
-                            {cur.documentNumber && <span className="text-[#1a1916]">{cur.documentNumber}</span>}
+                            {cur.documentNumber && <span className="text-[#14201a]">{cur.documentNumber}</span>}
                             {slot.expires && (cur.expiryDate
                               ? expired ? <span className="text-[#b91c1c]">Expired {fmtD(cur.expiryDate)}</span> : <span className={expiring ? 'text-[#b07415]' : 'text-[#1a7a5a]'}>{expiring ? 'Expires' : 'Valid until'} {fmtD(cur.expiryDate)}</span>
                               : <span className="text-[#b07415]">No expiry recorded</span>)}
-                            <span className="text-[#9b9890]">filed {fmtD(cur.filedAt)}</span>
+                            <span className="text-[#8a948d]">filed {fmtD(cur.filedAt)}</span>
                             {slot.history.length > 0 && (
-                              <button type="button" onClick={() => setKycHistory(open ? null : slot.key)} className="inline-flex items-center gap-1 text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><History size={11} /> {slot.history.length} earlier cop{slot.history.length === 1 ? 'y' : 'ies'}</button>
+                              <button type="button" onClick={() => setKycHistory(open ? null : slot.key)} className="inline-flex items-center gap-1 text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><History size={11} /> {slot.history.length} earlier cop{slot.history.length === 1 ? 'y' : 'ies'}</button>
                             )}
                           </>
                         ) : <span className="text-[#b07415]">Not uploaded · {slot.hint}</span>}
@@ -398,20 +398,20 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
                     </div>
                     {cur && (
                       <button type="button" onClick={() => openDocViewer({ fileUrl: cur.fileUrl, caption: `${slot.label} — ${v.name}`, documentKey: slot.key })}
-                        className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">View</button>
+                        className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">View</button>
                     )}
                     <button type="button" onClick={() => { setKycOpen(slot); setKycFile(null); setKycNumber(cur?.documentNumber ?? ''); setKycExpiry(''); setKycErr(null); }}
-                      className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg cursor-pointer ${cur ? 'border border-[#e8e6e0] bg-white text-[#1a1916] hover:bg-[#f4f3ef]' : 'border border-[#2e9f82] bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                      className={`shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg cursor-pointer ${cur ? 'border border-[#e4e9e5] bg-white text-[#14201a] hover:bg-[#eef1ef]' : 'border border-[#047246] bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                       <Upload size={13} /> {cur ? 'Replace' : 'Upload'}
                     </button>
                   </div>
                   {open && slot.history.length > 0 && (
-                    <div className="ml-12 mr-3 mb-2 border border-[#f0eee8] rounded-lg divide-y divide-[#f4f3ef]">
+                    <div className="ml-12 mr-3 mb-2 border border-[#f0eee8] rounded-lg divide-y divide-[#eef1ef]">
                       {slot.history.map(h => (
                         <div key={h.id} className="flex items-center gap-3 px-3 py-1.5 text-[11.5px]">
-                          <span className="text-[#9b9890] shrink-0">filed {fmtD(h.filedAt)}</span>
+                          <span className="text-[#8a948d] shrink-0">filed {fmtD(h.filedAt)}</span>
                           <span className="min-w-0 flex-1 truncate text-[#5b615e]">{h.documentNumber ?? h.displayName ?? slot.label}{h.expiryDate ? ` · ${h.expiryDate < today ? 'expired' : 'valid until'} ${fmtD(h.expiryDate)}` : ''}</span>
-                          <span className="text-[10px] font-bold px-1.5 py-[1px] rounded-full bg-[#f4f3ef] text-[#6b6860]">Superseded</span>
+                          <span className="text-[10px] font-bold px-1.5 py-[1px] rounded-full bg-[#eef1ef] text-[#5f6b63]">Superseded</span>
                           <button type="button" onClick={() => openDocViewer({ fileUrl: h.fileUrl, caption: `${slot.label} (earlier copy) — ${v.name}`, documentKey: slot.key })} className="text-[#1a7a5a] font-semibold underline cursor-pointer">View</button>
                         </div>
                       ))}
@@ -420,35 +420,35 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
                 </div>
               );
             })}
-            {kyc == null && <p className="text-[13px] text-[#9b9890] px-3 py-2">Loading…</p>}
+            {kyc == null && <p className="text-[13px] text-[#8a948d] px-3 py-2">Loading…</p>}
             {/* Anything filed outside the slots (an import's extra file) — same row as a slot, marked as such. */}
             {(kyc?.other ?? []).map(d => (
               <div key={d.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-[#fafdfb]">
                 <span className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[#eef9f4] text-[#1a7a5a]"><Check size={16} /></span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-bold text-[#1a1916] truncate">{d.displayName ?? d.documentKey.replace(/_/g, ' ')} <span className="font-normal text-[#9b9890]">· on file</span></div>
+                  <div className="text-[13px] font-bold text-[#14201a] truncate">{d.displayName ?? d.documentKey.replace(/_/g, ' ')} <span className="font-normal text-[#8a948d]">· on file</span></div>
                   <div className="text-[11px] font-semibold mt-0.5 flex items-center gap-x-2 flex-wrap">
-                    {d.documentNumber && <span className="text-[#1a1916]">{d.documentNumber}</span>}
+                    {d.documentNumber && <span className="text-[#14201a]">{d.documentNumber}</span>}
                     {d.expiryDate && <span className="text-[#1a7a5a]">Valid until {fmtD(d.expiryDate)}</span>}
-                    <span className="text-[#9b9890]">filed {fmtD(d.filedAt)}</span>
+                    <span className="text-[#8a948d]">filed {fmtD(d.filedAt)}</span>
                   </div>
                 </div>
                 <button type="button" onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: `${d.displayName ?? d.documentKey} — ${v.name}`, documentKey: d.documentKey })}
-                  className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8f2e8] cursor-pointer">View</button>
+                  className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-lg border border-[#cfe9df] bg-[#eef9f4] text-[#1a7a5a] hover:bg-[#d8efe3] cursor-pointer">View</button>
               </div>
             ))}
             {contracts.some(c => c.documents.length > 0) && (
-              <p className="text-[11.5px] text-[#9b9890] px-3 pt-2">Contract paperwork — attachments, bills, payment proofs — lives on each <Link href={amcHref} className="text-[#1a7a5a] underline">AMC page</Link> ({contracts.reduce((n, c) => n + c.documents.length, 0)} file{contracts.reduce((n, c) => n + c.documents.length, 0) === 1 ? '' : 's'}).</p>
+              <p className="text-[11.5px] text-[#8a948d] px-3 pt-2">Contract paperwork — attachments, bills, payment proofs — lives on each <Link href={amcHref} className="text-[#1a7a5a] underline">AMC page</Link> ({contracts.reduce((n, c) => n + c.documents.length, 0)} file{contracts.reduce((n, c) => n + c.documents.length, 0) === 1 ? '' : 's'}).</p>
             )}
           </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm p-5">
-          <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
+          <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#1a7a5a] grid place-items-center"><TrendingUp size={14} /></span>
             AMC progression
           </h2>
-          <p className="text-[11.5px] text-[#9b9890] mt-0.5">What the contract costs, term over term — like rent progression.</p>
+          <p className="text-[11.5px] text-[#8a948d] mt-0.5">What the contract costs, term over term — like rent progression.</p>
           <div className="mt-3 grid gap-4">
             {Object.entries(
               contracts.reduce<Record<string, AmcRow[]>>((acc, c) => {
@@ -461,7 +461,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
               const chron = [...rows].sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? ''));
               return (
                 <div key={prop}>
-                  <p className="text-[11px] uppercase tracking-wide text-[#9b9890] font-semibold">{prop}</p>
+                  <p className="text-[11px] uppercase tracking-wide text-[#8a948d] font-semibold">{prop}</p>
                   <div className="grid gap-1.5 mt-1.5">
                     {chron.map((c, i) => {
                       const prevVal = i > 0 ? chron[i - 1].annualValueAed ?? null : null;
@@ -469,16 +469,16 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
                       const delta = val != null && prevVal != null && prevVal !== 0 ? val - prevVal : null;
                       return (
                         <div key={c.id} className="border border-[#f0eee8] rounded-xl px-3.5 py-2.5">
-                          <p className="text-[11.5px] text-[#9b9890]">{fmtD(c.startDate)}{c.status === 'expired' ? ' · expired' : ''}</p>
+                          <p className="text-[11.5px] text-[#8a948d]">{fmtD(c.startDate)}{c.status === 'expired' ? ' · expired' : ''}</p>
                           <div className="flex items-baseline gap-2 flex-wrap mt-0.5">
-                            <span className="text-sm font-bold text-[#1a1916]">{val != null ? aed(val) : 'Value not recorded'}</span>
+                            <span className="text-sm font-bold text-[#14201a]">{val != null ? aed(val) : 'Value not recorded'}</span>
                             {delta != null && delta !== 0 && (
                               <span className={`text-[11.5px] font-semibold ${delta > 0 ? 'text-[#b45309]' : 'text-[#15803d]'}`}>
                                 {delta > 0 ? '▲' : '▼'} {aed(Math.abs(delta))} ({Math.round(Math.abs(delta) / prevVal! * 100)}%)
                               </span>
                             )}
                           </div>
-                          {val == null && <p className="text-[11px] text-[#9b9890] mt-0.5">Add it when renewing, or edit the contract on the AMC page.</p>}
+                          {val == null && <p className="text-[11px] text-[#8a948d] mt-0.5">Add it when renewing, or edit the contract on the AMC page.</p>}
                         </div>
                       );
                     })}
@@ -486,7 +486,7 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
                 </div>
               );
             })}
-            {contracts.length === 0 && <p className="text-[13px] text-[#9b9890]">No contracts on record yet.</p>}
+            {contracts.length === 0 && <p className="text-[13px] text-[#8a948d]">No contracts on record yet.</p>}
           </div>
         </div>
       </div>
@@ -505,38 +505,38 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
 
       {/* ── Maintenance history — only when there is any (owner, 12 Sep) ── */}
       {jobs.length > 0 && <div className="bg-white rounded-2xl shadow-sm p-5">
-        <h2 className="text-sm font-bold text-[#1a1916] flex items-center gap-2">
+        <h2 className="text-sm font-bold text-[#14201a] flex items-center gap-2">
           <span className="w-7 h-7 rounded-lg bg-[#eef9f4] text-[#1a7a5a] grid place-items-center"><Wrench size={14} /></span>
-          Maintenance history <span className="text-xs text-[#9b9890] font-normal">({jobs.length})</span>
+          Maintenance history <span className="text-xs text-[#8a948d] font-normal">({jobs.length})</span>
         </h2>
         <div className="grid gap-1.5 mt-3">
           {jobs.slice(0, 6).map(j => (
             <Link key={j.id} href={requestHrefOf(j.id)} className="flex items-center gap-3 py-2 border-b border-[#f9f8f6] last:border-0 flex-wrap hover:bg-[#faf9f7] rounded-lg px-1 -mx-1">
-              <span className="font-mono text-[11px] text-[#9b9890]">{j.ref}</span>
-              <span className="text-[13.5px] font-semibold text-[#1a1916] truncate max-w-[280px]">{j.title}</span>
-              <span className="text-[12px] text-[#6b6860]">{j.unit?.unitNumber ? `Unit ${j.unit.unitNumber}` : ''}{j.property?.buildingName ? ` · ${j.property.buildingName}` : ''}</span>
-              <span className="ml-auto text-[12px] text-[#6b6860]">{j.stage === 'closed' ? `Closed ${fmtD(j.closedAt)}${j.invoiceTotalAed != null ? ` · ${aed(j.invoiceTotalAed)}` : ''}` : (STAGE_LABEL[j.stage] ?? j.stage)}</span>
+              <span className="font-mono text-[11px] text-[#8a948d]">{j.ref}</span>
+              <span className="text-[13.5px] font-semibold text-[#14201a] truncate max-w-[280px]">{j.title}</span>
+              <span className="text-[12px] text-[#5f6b63]">{j.unit?.unitNumber ? `Unit ${j.unit.unitNumber}` : ''}{j.property?.buildingName ? ` · ${j.property.buildingName}` : ''}</span>
+              <span className="ml-auto text-[12px] text-[#5f6b63]">{j.stage === 'closed' ? `Closed ${fmtD(j.closedAt)}${j.invoiceTotalAed != null ? ` · ${aed(j.invoiceTotalAed)}` : ''}` : (STAGE_LABEL[j.stage] ?? j.stage)}</span>
             </Link>
           ))}
-          {jobs.length === 0 && <p className="text-[13px] text-[#9b9890]">{participating ? 'No maintenance requests routed to this vendor yet.' : 'Records take no maintenance work.'}</p>}
+          {jobs.length === 0 && <p className="text-[13px] text-[#8a948d]">{participating ? 'No maintenance requests routed to this vendor yet.' : 'Records take no maintenance work.'}</p>}
         </div>
       </div>}
 
       {participating && v.pricing.some(x => x.mode !== 'none') && (
         <div className={card}>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-bold text-[#1a1916]">How they charge</h2>
-            <span className="text-[11.5px] text-[#9b9890]">Set by the vendor in their own account — you decide if and who pays; they decide how much.</span>
+            <h2 className="text-sm font-bold text-[#14201a]">How they charge</h2>
+            <span className="text-[11.5px] text-[#8a948d]">Set by the vendor in their own account — you decide if and who pays; they decide how much.</span>
           </div>
           <div className="grid gap-1.5 mt-3">
             {v.pricing.filter(x => x.mode !== 'none').map(x => (
               <div key={x.categoryGroupId} className="flex items-center gap-3 py-1.5 border-b border-[#f9f8f6] last:border-0">
-                <span className="text-[13.5px] font-semibold text-[#1a1916] flex-1">{x.group}</span>
-                <span className="text-[13px] text-[#1a1916]">{x.mode === 'hourly' ? <>Hourly · <b>AED {x.hourlyRateAed}/h</b></> : 'Quote per job'}</span>
+                <span className="text-[13.5px] font-semibold text-[#14201a] flex-1">{x.group}</span>
+                <span className="text-[13px] text-[#14201a]">{x.mode === 'hourly' ? <>Hourly · <b>AED {x.hourlyRateAed}/h</b></> : 'Quote per job'}</span>
               </div>
             ))}
             {v.pricing.filter(x => x.mode !== 'none').length === 0 && (
-              <p className="text-[13px] text-[#9b9890]">{own ? 'Own team — work runs at cost; no rates to set.' : v.inviteStatus === 'accepted' ? 'No rates set yet — jobs engage at cost until they pick hourly or quote on their profile.' : 'Rates appear once the vendor accepts and sets them in their account.'}</p>
+              <p className="text-[13px] text-[#8a948d]">{own ? 'Own team — work runs at cost; no rates to set.' : v.inviteStatus === 'accepted' ? 'No rates set yet — jobs engage at cost until they pick hourly or quote on their profile.' : 'Rates appear once the vendor accepts and sets them in their account.'}</p>
             )}
           </div>
         </div>
@@ -545,51 +545,51 @@ export function VendorDetailView({ spId, base = '/maintenance', amcBase = '/amc'
       {participating && v.inviteStatus === 'accepted' && (
         <div className={card}>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-bold text-[#1a1916]">Technicians · {techs?.length ?? 0}</h2>
-            <span className="text-[11.5px] text-[#9b9890]">{own ? 'Your crew — they manage their roster in the team account.' : 'Managed by the vendor in their own account.'}</span>
+            <h2 className="text-sm font-bold text-[#14201a]">Technicians · {techs?.length ?? 0}</h2>
+            <span className="text-[11.5px] text-[#8a948d]">{own ? 'Your crew — they manage their roster in the team account.' : 'Managed by the vendor in their own account.'}</span>
           </div>
           <div className="grid gap-1.5 mt-3">
             {(techs ?? []).map(t => (
               <div key={t.id} className="flex items-center gap-3 py-1.5 border-b border-[#f9f8f6] last:border-0">
                 <div className="flex flex-col flex-1">
-                  <span className="text-[13.5px] font-semibold text-[#1a1916]">{t.name}</span>
-                  <span className="text-[11.5px] text-[#9b9890]">{t.phone ?? 'no phone'}</span>
+                  <span className="text-[13.5px] font-semibold text-[#14201a]">{t.name}</span>
+                  <span className="text-[11.5px] text-[#8a948d]">{t.phone ?? 'no phone'}</span>
                 </div>
-                {chip(t.status === 'active' ? 'Active' : t.status, t.status === 'active' ? '#d8f2e8' : '#f4f3ef', t.status === 'active' ? '#1a7a5a' : '#6b6860')}
+                {chip(t.status === 'active' ? 'Active' : t.status, t.status === 'active' ? '#d8efe3' : '#eef1ef', t.status === 'active' ? '#1a7a5a' : '#5f6b63')}
               </div>
             ))}
-            {(techs ?? []).length === 0 && <p className="text-[13px] text-[#9b9890]">None yet — the vendor adds them from their account.</p>}
+            {(techs ?? []).length === 0 && <p className="text-[13px] text-[#8a948d]">None yet — the vendor adds them from their account.</p>}
           </div>
         </div>
       )}
       {kycOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/30" onClick={() => !kycBusy && setKycOpen(null)}>
           <div className="bg-white rounded-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-[#f4f3ef]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#eef1ef]">
               <div>
-                <h2 className="text-sm font-bold text-[#1a1916]">{kycOpen.current ? 'Replace' : 'Upload'} · {kycOpen.label}</h2>
-                <p className="text-[11px] text-[#9b9890] mt-0.5">{kycOpen.current ? 'The current copy moves to history; this one becomes the active copy.' : kycOpen.hint}</p>
+                <h2 className="text-sm font-bold text-[#14201a]">{kycOpen.current ? 'Replace' : 'Upload'} · {kycOpen.label}</h2>
+                <p className="text-[11px] text-[#8a948d] mt-0.5">{kycOpen.current ? 'The current copy moves to history; this one becomes the active copy.' : kycOpen.hint}</p>
               </div>
-              <button type="button" onClick={() => setKycOpen(null)} className="text-[#9b9890] hover:text-[#1a1916] cursor-pointer" aria-label="Close"><X size={18} /></button>
+              <button type="button" onClick={() => setKycOpen(null)} className="text-[#8a948d] hover:text-[#14201a] cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
             <div className="px-5 py-4 space-y-3">
-              <label className={`flex items-center justify-center gap-2 text-xs border border-dashed rounded-lg px-3 py-5 cursor-pointer ${kycFile ? 'border-[#1a7a5a] bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'border-[#d8d6d0] text-[#6b6860] hover:bg-[#f9f8f6]'}`}>
+              <label className={`flex items-center justify-center gap-2 text-xs border border-dashed rounded-lg px-3 py-5 cursor-pointer ${kycFile ? 'border-[#1a7a5a] bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'border-[#d8d6d0] text-[#5f6b63] hover:bg-[#f9f8f6]'}`}>
                 <Upload size={14} /> {kycFile ? kycFile.name : 'Choose the file (PDF or photo)'}
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => { setKycFile(e.target.files?.[0] ?? null); e.target.value = ''; }} />
               </label>
               {kycOpen.key === 'trade_license' && (
                 <div><span className="block text-[12px] font-semibold text-[#4a4842] mb-1">Licence number</span>
-                  <input value={kycNumber} onChange={e => setKycNumber(e.target.value)} placeholder="e.g. 1234567" className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]" /></div>
+                  <input value={kycNumber} onChange={e => setKycNumber(e.target.value)} placeholder="e.g. 1234567" className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]" /></div>
               )}
               {kycOpen.expires && (
                 <div><span className="block text-[12px] font-semibold text-[#4a4842] mb-1">Expiry date</span>
-                  <input type="date" value={kycExpiry} onChange={e => setKycExpiry(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]" /></div>
+                  <input type="date" value={kycExpiry} onChange={e => setKycExpiry(e.target.value)} className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]" /></div>
               )}
               {kycErr && <p className="text-xs text-[#b91c1c] bg-[#fef2f2] rounded-lg px-3 py-2">{kycErr}</p>}
             </div>
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#f4f3ef]">
-              <button type="button" onClick={() => setKycOpen(null)} className="text-xs font-medium px-4 py-2 rounded-xl border border-[#e8e6e0] text-[#6b6860] cursor-pointer">Cancel</button>
-              <button type="button" disabled={kycBusy || !kycFile} onClick={() => void saveKyc()} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 cursor-pointer" style={{ background: '#2e9f82' }}>{kycBusy ? 'Saving…' : kycOpen.current ? 'Replace copy' : 'Save document'}</button>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-[#eef1ef]">
+              <button type="button" onClick={() => setKycOpen(null)} className="text-xs font-medium px-4 py-2 rounded-xl border border-[#e4e9e5] text-[#5f6b63] cursor-pointer">Cancel</button>
+              <button type="button" disabled={kycBusy || !kycFile} onClick={() => void saveKyc()} className="text-xs font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-60 cursor-pointer" style={{ background: '#047246' }}>{kycBusy ? 'Saving…' : kycOpen.current ? 'Replace copy' : 'Save document'}</button>
             </div>
           </div>
         </div>

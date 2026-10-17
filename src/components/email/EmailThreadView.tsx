@@ -53,9 +53,9 @@ export function useStagedAttachments(rp: Rp) {
 export function SignedAs({ text }: { text: string | null | undefined }) {
   if (!text?.trim()) return null;
   return (
-    <div className="mt-1.5 text-[11px] text-[#9b9890]">
+    <div className="mt-1.5 text-[11px] text-[#8a948d]">
       Signed automatically with your name:
-      <div className="mt-1 pl-2.5 border-l-2 border-[#e8e6e0] text-[#6b6860] whitespace-pre-wrap leading-snug">{text}</div>
+      <div className="mt-1 pl-2.5 border-l-2 border-[#e4e9e5] text-[#5f6b63] whitespace-pre-wrap leading-snug">{text}</div>
     </div>
   );
 }
@@ -65,9 +65,9 @@ export function AttachmentChips({ files, onRemove }: { files: StagedAttachment[]
   return (
     <div className="flex flex-wrap gap-1.5">
       {files.map((f) => (
-        <span key={f.key} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-[#f4f3ef] text-[#4a4842] text-xs">
-          <Paperclip size={11} /> {f.fileName} <span className="text-[#9b9890]">{fileSize(f.sizeBytes)}</span>
-          <button type="button" aria-label={`Remove ${f.fileName}`} onClick={() => onRemove(f.key)} className="rounded-full p-0.5 hover:bg-[#e8e6e0] cursor-pointer"><X size={11} /></button>
+        <span key={f.key} className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-[#eef1ef] text-[#4a4842] text-xs">
+          <Paperclip size={11} /> {f.fileName} <span className="text-[#8a948d]">{fileSize(f.sizeBytes)}</span>
+          <button type="button" aria-label={`Remove ${f.fileName}`} onClick={() => onRemove(f.key)} className="rounded-full p-0.5 hover:bg-[#e4e9e5] cursor-pointer"><X size={11} /></button>
         </span>
       ))}
     </div>
@@ -76,18 +76,18 @@ export function AttachmentChips({ files, onRemove }: { files: StagedAttachment[]
 
 type Who = (email: string) => string;
 
-const TOOL = 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#2b2a27] hover:bg-[#f4f3ef] cursor-pointer';
+const TOOL = 'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#2b2a27] hover:bg-[#eef1ef] cursor-pointer';
 const TOOL_ON = 'bg-[#eef9f4] text-[#1a7a5a]';
 
 /** One line of an email's header — "Cc  Asrar <asrar@…>, broker@…". */
 function HeaderLine({ label, list, who }: { label: string; list: string[]; who: Who }) {
   return (
     <div className="flex gap-3">
-      <dt className="w-9 shrink-0 text-[#9b9890]">{label}</dt>
+      <dt className="w-9 shrink-0 text-[#8a948d]">{label}</dt>
       <dd className="flex-1 min-w-0 break-words text-[#2b2a27]">
         {list.map((e, i) => {
           const name = who(e);
-          return <span key={`${e}-${i}`}>{i > 0 && ', '}{name}{name !== e && name !== 'You' && <span className="text-[#9b9890]"> &lt;{e}&gt;</span>}</span>;
+          return <span key={`${e}-${i}`}>{i > 0 && ', '}{name}{name !== e && name !== 'You' && <span className="text-[#8a948d]"> &lt;{e}&gt;</span>}</span>;
         })}
       </dd>
     </div>
@@ -107,47 +107,47 @@ function Message({ m, rp, who, open, onToggle, onForward }: { m: EmailMessageRow
   // The text — the whole email when it has no layout of its own, the stand-in when the layout cannot be had.
   const textBody = (
     <>
-      <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : <span className="text-[#9b9890] italic">No text in this email{m.attachments?.length ? ' — see the attachment below' : ''}.</span>)}</div>
+      <div className="text-sm text-[#2b2a27] whitespace-pre-wrap break-words leading-relaxed" dir="auto">{parts.main || (parts.quoted || parts.signature ? '' : <span className="text-[#8a948d] italic">No text in this email{m.attachments?.length ? ' — see the attachment below' : ''}.</span>)}</div>
       {(parts.signature || parts.quoted) && (
         <div className="mt-2.5 flex flex-wrap gap-2">
-          {parts.signature && <button type="button" onClick={() => setShowSignature((v) => !v)} aria-expanded={showSignature} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showSignature ? 'Hide signature' : 'Signature'}</button>}
-          {parts.quoted && <button type="button" onClick={() => setShowQuoted((v) => !v)} aria-expanded={showQuoted} className="text-[11px] text-[#6b6860] border border-[#e8e6e0] rounded-full px-2.5 py-0.5 hover:border-[#9b9890] cursor-pointer">{showQuoted ? 'Hide earlier emails' : 'Earlier emails quoted below'}</button>}
+          {parts.signature && <button type="button" onClick={() => setShowSignature((v) => !v)} aria-expanded={showSignature} className="text-[11px] text-[#5f6b63] border border-[#e4e9e5] rounded-full px-2.5 py-0.5 hover:border-[#8a948d] cursor-pointer">{showSignature ? 'Hide signature' : 'Signature'}</button>}
+          {parts.quoted && <button type="button" onClick={() => setShowQuoted((v) => !v)} aria-expanded={showQuoted} className="text-[11px] text-[#5f6b63] border border-[#e4e9e5] rounded-full px-2.5 py-0.5 hover:border-[#8a948d] cursor-pointer">{showQuoted ? 'Hide earlier emails' : 'Earlier emails quoted below'}</button>}
         </div>
       )}
-      {showSignature && <div className="mt-2 text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.signature}</div>}
-      {showQuoted && <div className="mt-2 pl-3 border-l-2 border-[#e8e6e0] text-xs text-[#6b6860] whitespace-pre-wrap break-words" dir="auto">{parts.quoted}</div>}
+      {showSignature && <div className="mt-2 text-xs text-[#5f6b63] whitespace-pre-wrap break-words" dir="auto">{parts.signature}</div>}
+      {showQuoted && <div className="mt-2 pl-3 border-l-2 border-[#e4e9e5] text-xs text-[#5f6b63] whitespace-pre-wrap break-words" dir="auto">{parts.quoted}</div>}
     </>
   );
 
   if (!open) {
     return (
       <button type="button" onClick={onToggle} aria-expanded={false}
-        className={`w-full text-left rounded-xl border pl-3 pr-3.5 py-2.5 flex items-center gap-3 cursor-pointer hover:border-[#2e9f82] ${out ? 'bg-[#f6fbf9] border-[#d7ede5] border-l-[3px] border-l-[#2e9f82]' : 'bg-white border-[#e8e6e0]'}`}>
+        className={`w-full text-left rounded-xl border pl-3 pr-3.5 py-2.5 flex items-center gap-3 cursor-pointer hover:border-[#047246] ${out ? 'bg-[#f6fbf9] border-[#d7ede5] border-l-[3px] border-l-[#047246]' : 'bg-white border-[#e4e9e5]'}`}>
         <Avatar name={out ? null : who(m.fromEmail)} tone={out ? 'you' : 'record'} size={30} />
-        <span className="text-[13px] font-semibold text-[#1a1916] shrink-0 max-w-[32%] truncate">{sender}</span>
-        <span className="text-[13px] text-[#6b6860] truncate flex-1 min-w-0" dir="auto">{firstWords(m.bodyText) || '(no text)'}</span>
-        {m.attachments.length > 0 && <span className="shrink-0 inline-flex items-center gap-0.5 text-[11px] text-[#9b9890] tabular-nums"><Paperclip size={11} />{m.attachments.length}</span>}
-        <span className="text-[11px] text-[#9b9890] shrink-0 tabular-nums">{emailWhen(m.sentAt)}</span>
+        <span className="text-[13px] font-semibold text-[#14201a] shrink-0 max-w-[32%] truncate">{sender}</span>
+        <span className="text-[13px] text-[#5f6b63] truncate flex-1 min-w-0" dir="auto">{firstWords(m.bodyText) || '(no text)'}</span>
+        {m.attachments.length > 0 && <span className="shrink-0 inline-flex items-center gap-0.5 text-[11px] text-[#8a948d] tabular-nums"><Paperclip size={11} />{m.attachments.length}</span>}
+        <span className="text-[11px] text-[#8a948d] shrink-0 tabular-nums">{emailWhen(m.sentAt)}</span>
       </button>
     );
   }
   return (
-    <article className={`rounded-xl border ${out ? 'bg-[#f6fbf9] border-[#d7ede5] border-l-[3px] border-l-[#2e9f82]' : 'bg-white border-[#e8e6e0]'}`}>
+    <article className={`rounded-xl border ${out ? 'bg-[#f6fbf9] border-[#d7ede5] border-l-[3px] border-l-[#047246]' : 'bg-white border-[#e4e9e5]'}`}>
       <div className="flex items-start gap-3 pl-3 pr-3.5 pt-3">
         <Avatar name={out ? null : who(m.fromEmail)} tone={out ? 'you' : 'record'} size={36} />
         <div className="min-w-0 flex-1">
           <div role="button" tabIndex={0} aria-expanded onClick={onToggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
             className="flex items-baseline gap-2 cursor-pointer" title="Fold this email">
-            <span className="text-sm font-semibold text-[#1a1916] truncate">{sender}</span>
-            <span className="text-[11px] text-[#9b9890] ml-auto shrink-0 tabular-nums">{emailWhen(m.sentAt)}</span>
+            <span className="text-sm font-semibold text-[#14201a] truncate">{sender}</span>
+            <span className="text-[11px] text-[#8a948d] ml-auto shrink-0 tabular-nums">{emailWhen(m.sentAt)}</span>
           </div>
           {/* The email's own header, as a mail app shows it — nobody on it is hidden. */}
           <dl className="mt-1.5 mb-1 rounded-lg bg-white/70 border border-[#f0eee9] px-3 py-2 text-xs space-y-1">
             <HeaderLine label="From" list={[m.fromEmail]} who={out ? (e) => (m.fromName ? m.fromName : e) : who} />
             <HeaderLine label="To" list={to} who={who} />
             {m.ccEmails.length > 0 && <HeaderLine label="Cc" list={m.ccEmails} who={who} />}
-            <div className="flex gap-3"><dt className="w-9 shrink-0 text-[#9b9890]">Date</dt><dd className="flex-1 text-[#2b2a27] tabular-nums">{when}</dd></div>
-            {bareSubject(m.subject) && <div className="flex gap-3"><dt className="w-9 shrink-0 text-[#9b9890]">Subj.</dt><dd className="flex-1 min-w-0 break-words text-[#2b2a27]">{m.subject}</dd></div>}
+            <div className="flex gap-3"><dt className="w-9 shrink-0 text-[#8a948d]">Date</dt><dd className="flex-1 text-[#2b2a27] tabular-nums">{when}</dd></div>
+            {bareSubject(m.subject) && <div className="flex gap-3"><dt className="w-9 shrink-0 text-[#8a948d]">Subj.</dt><dd className="flex-1 min-w-0 break-words text-[#2b2a27]">{m.subject}</dd></div>}
           </dl>
         </div>
       </div>
@@ -175,17 +175,17 @@ function CcEditor({ list, who, onChange }: { list: string[]; who: Who; onChange:
   };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-[#9b9890] w-7">Cc</span>
+      <span className="text-xs text-[#8a948d] w-7">Cc</span>
       {list.map((e) => (
-        <span key={e} title={e} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-[#f4f3ef] text-xs text-[#2b2a27]">
+        <span key={e} title={e} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-[#eef1ef] text-xs text-[#2b2a27]">
           {who(e)}
-          <button type="button" aria-label={`Don't copy ${e}`} onClick={() => onChange(list.filter((x) => x !== e))} className="rounded-full p-0.5 hover:bg-[#e8e6e0] cursor-pointer"><X size={11} /></button>
+          <button type="button" aria-label={`Don't copy ${e}`} onClick={() => onChange(list.filter((x) => x !== e))} className="rounded-full p-0.5 hover:bg-[#e4e9e5] cursor-pointer"><X size={11} /></button>
         </span>
       ))}
-      <span className="inline-flex items-center gap-1 text-xs text-[#6b6860]">
+      <span className="inline-flex items-center gap-1 text-xs text-[#5f6b63]">
         <Plus size={11} />
         <input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',' || e.key === ';') { e.preventDefault(); add(); } }}
-          placeholder="copy someone else" aria-label="Copy someone else" className="w-[150px] bg-transparent text-xs focus:outline-none placeholder:text-[#9b9890]" />
+          placeholder="copy someone else" aria-label="Copy someone else" className="w-[150px] bg-transparent text-xs focus:outline-none placeholder:text-[#8a948d]" />
       </span>
     </div>
   );
@@ -294,7 +294,7 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
   };
 
   if (error) return <div className="p-6 text-sm text-[#b42318]">{error}</div>;
-  if (!thread) return <div className="p-6 text-sm text-[#9b9890]">Loading…</div>;
+  if (!thread) return <div className="p-6 text-sm text-[#8a948d]">Loading…</div>;
 
   const title = thread.recordName ?? thread.counterpartName ?? who(thread.counterpartEmail);
   const current = thread.contracts.find((c) => c.status === 'active') ?? thread.contracts[0];
@@ -307,38 +307,38 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
   return (
     <div className="flex h-full min-h-0 relative">
       <div className="flex flex-col h-full min-h-0 flex-1 min-w-0">
-        <div className="px-4 sm:px-5 py-3 border-b border-[#e8e6e0] shrink-0 flex items-start gap-3">
+        <div className="px-4 sm:px-5 py-3 border-b border-[#e4e9e5] shrink-0 flex items-start gap-3">
           <Avatar name={title} tone={thread.kind === 'other' ? 'other' : 'record'} size={42} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-semibold text-[#1a1916] truncate" title={title}>{title}</span>
+              <span className="text-sm font-semibold text-[#14201a] truncate" title={title}>{title}</span>
               <KindChip kind={thread.kind} />
             </div>
-            <h2 className="text-[15px] font-semibold text-[#1a1916] break-words leading-snug mt-0.5">{bareSubject(thread.subject)}</h2>
-            <div className="text-xs text-[#9b9890] mt-0.5">
-              <span className="text-[#6b6860]">{where}</span>{thread.mailbox && thread.ownAddresses.length > 1 && <> · on <span className="text-[#6b6860]">{thread.mailbox.emailAddress}</span></>} · {thread.totalMessages.toLocaleString('en-GB')} {thread.totalMessages === 1 ? 'email' : 'emails'}
+            <h2 className="text-[15px] font-semibold text-[#14201a] break-words leading-snug mt-0.5">{bareSubject(thread.subject)}</h2>
+            <div className="text-xs text-[#8a948d] mt-0.5">
+              <span className="text-[#5f6b63]">{where}</span>{thread.mailbox && thread.ownAddresses.length > 1 && <> · on <span className="text-[#5f6b63]">{thread.mailbox.emailAddress}</span></>} · {thread.totalMessages.toLocaleString('en-GB')} {thread.totalMessages === 1 ? 'email' : 'emails'}
               {theirs > 0 && <> · {theirs} on their side</>}{copied > 0 && <> · {copied} in copy</>}
               {thread.files.length > 0 && <> · {thread.files.length} {thread.files.length === 1 ? 'file' : 'files'}</>}
             </div>
           </div>
           {thread.messages.length > 1 && (
             <button type="button" onClick={() => setOpenIds(allOpen ? new Set([thread.messages[thread.messages.length - 1].id]) : new Set(thread.messages.map((m) => m.id)))}
-              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-[#4a4842] border border-[#e8e6e0] hover:border-[#9b9890] cursor-pointer">
+              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-[#4a4842] border border-[#e4e9e5] hover:border-[#8a948d] cursor-pointer">
               {allOpen ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />}<span className="hidden md:inline">{allOpen ? 'Fold all' : 'Open all'}</span>
             </button>
           )}
           <button type="button" onClick={() => setAbout((v) => !v)} aria-pressed={about} aria-label="About this conversation"
-            className={`shrink-0 p-2 rounded-full cursor-pointer ${about ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'text-[#6b6860] hover:bg-[#f4f3ef]'}`}><Info size={17} /></button>
+            className={`shrink-0 p-2 rounded-full cursor-pointer ${about ? 'bg-[#eef9f4] text-[#1a7a5a]' : 'text-[#5f6b63] hover:bg-[#eef1ef]'}`}><Info size={17} /></button>
         </div>
 
         {/* A mail app's toolbar: what can be done with the newest email of the trail. */}
-        <div className="px-4 sm:px-5 py-2 border-b border-[#e8e6e0] shrink-0 flex flex-wrap items-center gap-1.5 bg-white" role="toolbar" aria-label="Email actions">
+        <div className="px-4 sm:px-5 py-2 border-b border-[#e4e9e5] shrink-0 flex flex-wrap items-center gap-1.5 bg-white" role="toolbar" aria-label="Email actions">
           {canSend && (
             <>
               <button type="button" onClick={() => start('reply')} aria-pressed={mode === 'reply'} className={`${TOOL} ${mode === 'reply' ? TOOL_ON : ''}`}><Reply size={14} /> Reply</button>
               {everyoneElse.length > 0 && <button type="button" onClick={() => start('all')} aria-pressed={mode === 'all'} className={`${TOOL} ${mode === 'all' ? TOOL_ON : ''}`}><ReplyAll size={14} /> Reply all</button>}
               <button type="button" onClick={() => startForward(thread.messages[thread.messages.length - 1].id)} aria-pressed={mode === 'forward'} className={`${TOOL} ${mode === 'forward' ? TOOL_ON : ''}`}><Forward size={14} /> Forward</button>
-              <span className="w-px h-5 bg-[#e8e6e0] mx-1" />
+              <span className="w-px h-5 bg-[#e4e9e5] mx-1" />
             </>
           )}
           <button type="button" onClick={() => void markUnread()} className={TOOL}><MailOpen size={14} /> Mark as unread</button>
@@ -348,7 +348,7 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
           {thread.earlier > 0 && (
             <div className="text-center pb-1">
               <button type="button" onClick={() => void showEarlier()} disabled={loadingEarlier}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1a7a5a] bg-white border border-[#e8e6e0] rounded-full px-4 py-1.5 hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1a7a5a] bg-white border border-[#e4e9e5] rounded-full px-4 py-1.5 hover:border-[#047246] cursor-pointer disabled:opacity-60">
                 {loadingEarlier ? <Loader2 size={12} className="animate-spin" /> : null}
                 {loadingEarlier ? 'Loading…' : `Show earlier emails · ${thread.earlier.toLocaleString('en-GB')} more`}
               </button>
@@ -359,7 +359,7 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
             const sep = i === 0 || d !== dayLabel(thread.messages[i - 1].sentAt);
             return (
               <div key={m.id} className="space-y-2">
-                {sep && <div className="flex items-center gap-3 pt-2 pb-0.5"><span className="h-px flex-1 bg-[#e8e6e0]" /><span className="text-[11px] font-medium text-[#9b9890]">{d}</span><span className="h-px flex-1 bg-[#e8e6e0]" /></div>}
+                {sep && <div className="flex items-center gap-3 pt-2 pb-0.5"><span className="h-px flex-1 bg-[#e4e9e5]" /><span className="text-[11px] font-medium text-[#8a948d]">{d}</span><span className="h-px flex-1 bg-[#e4e9e5]" /></div>}
                 <Message m={m} rp={rp} who={who} open={openIds.has(m.id)}
                   onToggle={() => setOpenIds((prev) => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; })}
                   onForward={canSend ? () => startForward(m.id) : undefined} />
@@ -370,42 +370,42 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
         </div>
 
         {!canSend && (
-          <div className="border-t border-[#e8e6e0] px-5 py-3 shrink-0 bg-white text-xs text-[#6b6860]">
+          <div className="border-t border-[#e4e9e5] px-5 py-3 shrink-0 bg-white text-xs text-[#5f6b63]">
             {thread.canSend
               ? 'No email is connected, so a reply can’t be sent from here.'
               : 'You can read this conversation but not reply — sending emails is not among the authorities this landlord gave you.'}
           </div>
         )}
         {canSend && mode !== 'closed' && (
-          <div className="border-t border-[#e8e6e0] px-4 sm:px-5 py-3 shrink-0 bg-white">
+          <div className="border-t border-[#e4e9e5] px-4 sm:px-5 py-3 shrink-0 bg-white">
             <div className="flex items-center gap-1.5 text-xs mb-1.5">
-              <span className="text-[#9b9890] w-7">To</span>
+              <span className="text-[#8a948d] w-7">To</span>
               {mode === 'forward' ? (
                 <input autoFocus type="email" value={forwardTo} onChange={(e) => setForwardTo(e.target.value)} placeholder="who to forward it to — any email address" aria-label="Forward to"
-                  className="flex-1 border-b border-[#e8e6e0] py-1 text-xs focus:outline-none focus:border-[#2e9f82] placeholder:text-[#9b9890]" />
+                  className="flex-1 border-b border-[#e4e9e5] py-1 text-xs focus:outline-none focus:border-[#047246] placeholder:text-[#8a948d]" />
               ) : (
-                <><span className="text-[#2b2a27]">{who(thread.replyTo)}</span><span className="text-[#9b9890] truncate">{who(thread.replyTo) !== thread.replyTo ? `<${thread.replyTo}>` : ''}</span></>
+                <><span className="text-[#2b2a27]">{who(thread.replyTo)}</span><span className="text-[#8a948d] truncate">{who(thread.replyTo) !== thread.replyTo ? `<${thread.replyTo}>` : ''}</span></>
               )}
-              <button type="button" onClick={discard} aria-label="Discard" className="ml-auto p-1 rounded text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer"><X size={14} /></button>
+              <button type="button" onClick={discard} aria-label="Discard" className="ml-auto p-1 rounded text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer"><X size={14} /></button>
             </div>
             <div className="mb-2"><CcEditor list={cc} who={who} onChange={setCc} /></div>
             {mode === 'forward' && forwarding && (
-              <div className="mb-2 text-xs text-[#6b6860] rounded-lg bg-[#fbfaf8] border border-[#f0eee9] px-2.5 py-1.5">
+              <div className="mb-2 text-xs text-[#5f6b63] rounded-lg bg-[#fbfaf8] border border-[#f0eee9] px-2.5 py-1.5">
                 Forwarding <span className="text-[#2b2a27]">{forwarding.direction === 'out' ? 'your email' : `${who(forwarding.fromEmail)}’s email`}</span> of {new Date(forwarding.sentAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                 {forwarding.attachments.length > 0 ? ` with ${forwarding.attachments.length === 1 ? 'its file' : `its ${forwarding.attachments.length} files`}` : ''}. It stays on this trail.
               </div>
             )}
             <textarea autoFocus={mode !== 'forward'} value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={mode === 'forward' ? 'Add a note above the forwarded email (optional)…' : 'Write your reply…'}
-              className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82] resize-y" />
+              className="w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#047246] resize-y" />
             <SignedAs text={thread.signaturePreview} />
             <div className="mt-2"><AttachmentChips files={staged.files} onRemove={staged.remove} /></div>
             <div className="mt-2 flex items-center gap-2">
               <input ref={fileRef} type="file" multiple hidden onChange={(e) => { void staged.add(e.target.files); e.target.value = ''; }} />
-              <button type="button" onClick={() => fileRef.current?.click()} disabled={staged.uploading} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e8e6e0] text-[#4a4842] hover:border-[#2e9f82] cursor-pointer disabled:opacity-60">
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={staged.uploading} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-[#e4e9e5] text-[#4a4842] hover:border-[#047246] cursor-pointer disabled:opacity-60">
                 {staged.uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />} Attach
               </button>
               <span className="text-xs text-[#b42318] flex-1">{sendError ?? staged.error ?? ''}</span>
-              <button type="button" onClick={send} disabled={(mode === 'forward' ? !forwardTo.trim() : !body.trim()) || sending || staged.uploading} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">
+              <button type="button" onClick={send} disabled={(mode === 'forward' ? !forwardTo.trim() : !body.trim()) || sending || staged.uploading} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-[#047246] text-white hover:bg-[#26856d] cursor-pointer disabled:opacity-60">
                 {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {sending ? 'Sending…' : mode === 'forward' ? 'Forward' : cc.length ? `Send to ${cc.length + 1}` : 'Send'}
               </button>
             </div>
@@ -414,7 +414,7 @@ export function EmailThreadView({ rp, threadId, canSend: mailboxReady = true, is
       </div>
 
       {about && (
-        <div className="absolute inset-0 z-10 xl:static xl:inset-auto xl:z-auto xl:w-[320px] xl:shrink-0 xl:border-l xl:border-[#e8e6e0]">
+        <div className="absolute inset-0 z-10 xl:static xl:inset-auto xl:z-auto xl:w-[320px] xl:shrink-0 xl:border-l xl:border-[#e4e9e5]">
           <EmailContextPanel rp={rp} isManager={isManager} thread={thread} onClose={() => setAbout(false)}
             onLinked={(next) => { if (next.id !== thread.id) onMoved?.(next.id); else show(next, true); onChangedRef.current?.(); }} />
         </div>

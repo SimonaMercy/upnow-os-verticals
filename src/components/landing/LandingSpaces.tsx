@@ -5,7 +5,7 @@ import { Home, Building2, Warehouse, ArrowRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 const CATEGORIES = [
-  { Icon: Home,         label: 'Residential',  sub: 'Apartments, villas, studios', href: '/listings?category=Residential', price: 'From AED 30k/yr', topBg: '#f0faf6', topBorder: '#d8f2e8', iconColor: '#2e9f82' },
+  { Icon: Home,         label: 'Residential',  sub: 'Apartments, villas, studios', href: '/listings?category=Residential', price: 'From AED 30k/yr', topBg: '#eef7f2', topBorder: '#d8efe3', iconColor: '#047246' },
   { Icon: Building2,    label: 'Commercial',   sub: 'Offices, retail, showrooms',  href: '/listings?category=Commercial',  price: 'From AED 50k/yr', topBg: '#f0f9ff', topBorder: '#bae6fd', iconColor: '#0ea5e9' },
   { Icon: Warehouse,    label: 'Industrial',   sub: 'Warehouses, cold storage',    href: '/listings?category=Industrial',  price: 'From AED 40k/yr', topBg: '#f0fdf4', topBorder: '#bbf7d0', iconColor: '#16a34a' },
 
@@ -13,23 +13,23 @@ const CATEGORIES = [
 
 export function LandingSpaces() {
   return (
-    <section style={{ background: '#fafaf8', paddingBlock: 80 }}>
+    <section style={{ background: '#f6f8f6', paddingBlock: 80 }}>
       <div className="container">
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 40, flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#2e9f82', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>Spaces</p>
-            <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#1a1916', letterSpacing: '-0.025em', margin: '0 0 8px', lineHeight: 1.1 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, color: '#047246', letterSpacing: '0.10em', textTransform: 'uppercase', margin: '0 0 10px' }}>Spaces</p>
+            <h2 style={{ fontSize: 'clamp(24px, 3vw, 36px)', fontWeight: 900, color: '#14201a', letterSpacing: '-0.025em', margin: '0 0 8px', lineHeight: 1.1 }}>
               Every space type.<br />One platform.
             </h2>
-            <p style={{ fontSize: 15, color: '#6b6860', margin: 0 }}>5 space categories. Transparent pricing. Digital contracts end-to-end.</p>
+            <p style={{ fontSize: 15, color: '#5f6b63', margin: 0 }}>5 space categories. Transparent pricing. Digital contracts end-to-end.</p>
           </div>
           <Link href="/listings" style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
-            border: '1px solid #d8f2e8', borderRadius: 12,
+            border: '1px solid #d8efe3', borderRadius: 12,
             padding: '10px 18px', textDecoration: 'none',
-            color: '#2e9f82', fontSize: 13, fontWeight: 700,
-            background: '#f0faf6', whiteSpace: 'nowrap',
+            color: '#047246', fontSize: 13, fontWeight: 700,
+            background: '#eef7f2', whiteSpace: 'nowrap',
           }}>
             View all spaces <ArrowRight size={13} aria-hidden />
           </Link>
@@ -39,7 +39,7 @@ export function LandingSpaces() {
           {CATEGORIES.map(({ Icon, label, sub, href, price, topBg, topBorder, iconColor }) => (
             <Link key={label} href={href} style={{
               display: 'flex', flexDirection: 'column',
-              background: '#ffffff', border: '1px solid #e8e6e0',
+              background: '#ffffff', border: '1px solid #e4e9e5',
               borderRadius: 18, overflow: 'hidden', textDecoration: 'none',
               boxShadow: '0 2px 8px rgba(15,23,42,0.04)',
               transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
@@ -52,7 +52,7 @@ export function LandingSpaces() {
             onMouseLeave={e => {
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 2px 8px rgba(15,23,42,0.04)';
-              e.currentTarget.style.borderColor = '#e8e6e0';
+              e.currentTarget.style.borderColor = '#e4e9e5';
             }}
             >
               {/* Coloured top */}
@@ -64,9 +64,9 @@ export function LandingSpaces() {
               </div>
               {/* Content */}
               <div style={{ padding: '16px 20px 20px' }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: '#9b9890', margin: '0 0 4px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{price}</p>
-                <h3 style={{ fontSize: 16, fontWeight: 800, color: '#1a1916', margin: '0 0 4px', letterSpacing: '-0.015em' }}>{label}</h3>
-                <p style={{ fontSize: 12, color: '#6b6860', margin: 0, lineHeight: 1.5 }}>{sub}</p>
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#8a948d', margin: '0 0 4px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{price}</p>
+                <h3 style={{ fontSize: 16, fontWeight: 800, color: '#14201a', margin: '0 0 4px', letterSpacing: '-0.015em' }}>{label}</h3>
+                <p style={{ fontSize: 12, color: '#5f6b63', margin: 0, lineHeight: 1.5 }}>{sub}</p>
               </div>
             </Link>
           ))}

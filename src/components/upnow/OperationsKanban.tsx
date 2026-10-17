@@ -57,7 +57,7 @@ const COLS: ColDef[] = [
   { key: 'ejari',        title: 'Contract Registration',             hint: 'Tenancy registered with the certificate on file.',    accent: '#1a7a4f', soft: '#e7f3ec', dot: '#1a9a64' },
   { key: 'utility',      title: 'Utility',           hint: 'DEWA / utility account on file (new leases).',        accent: '#6a4f8f', soft: '#efeaf5', dot: '#6a4f8f' },
   { key: 'move_in',      title: 'Move-in',           hint: 'Move-in inspection signed (new leases).',             accent: '#2b7a78', soft: '#e3f1f0', dot: '#2b7a78' },
-  { key: 'ready',        title: 'Ready to activate', hint: 'Every step done — lock it and it moves to Leases.',   accent: '#1a7a5a', soft: '#ebf8f2', dot: '#2e9f82' },
+  { key: 'ready',        title: 'Ready to activate', hint: 'Every step done — lock it and it moves to Leases.',   accent: '#1a7a5a', soft: '#ebf8f2', dot: '#047246' },
   { key: 'winddown',     title: 'Winding down',      hint: 'Terminated leases finishing move-out & settlement.',  accent: '#991b1b', soft: '#fee2e2', dot: '#991b1b' },
 ];
 const COL_INDEX: Record<ColKey, number> = COLS.reduce((m, c, i) => { m[c.key] = i; return m; }, {} as Record<ColKey, number>);
@@ -457,9 +457,9 @@ function Style() {
   return (
     <style jsx global>{`
       .opsk-page {
-        --green:#2e9f82; --green-d:#1a7a5a; --green-t:#d8f2e8; --green-t2:#ebf8f2;
-        --ink:#1a1916; --ink-2:#3d3b35; --ink-3:#6b6860; --mute:#9b9890;
-        --line:#e8e6e0; --line-2:#f0eeea; --paper:#f4f3ef; --paper-2:#ebe9e3;
+        --green:#047246; --green-d:#1a7a5a; --green-t:#d8efe3; --green-t2:#ebf8f2;
+        --ink:#14201a; --ink-2:#46534c; --ink-3:#5f6b63; --mute:#8a948d;
+        --line:#e4e9e5; --line-2:#f0eeea; --paper:#eef1ef; --paper-2:#ebe9e3;
         --warn-bg:#fef3c7; --warn-fg:#92400e; --sky-bg:#e0f2fe; --sky-fg:#0369a1;
         --danger-bg:#fee2e2; --danger-fg:#991b1b; --sh-sm:0 1px 2px rgba(26,25,22,.04);
         background:var(--paper); color:var(--ink); min-height:100vh; font-family:inherit; font-size:14px; line-height:1.5; font-weight:450;
@@ -502,7 +502,7 @@ function Style() {
       .opsk-page .tabs-spacer{ flex:1; min-width:8px; }
       .opsk-page .search{ position:relative; flex:1; max-width:320px; min-width:180px; }
       .opsk-page .search input{ width:100%; padding:10px 12px 10px 36px; font-size:13.5px; border:1px solid var(--line); border-radius:10px; background:#fff; outline:none; }
-      .opsk-page .search input:focus{ border-color:var(--green); box-shadow:0 0 0 3px rgba(46,159,130,.08); }
+      .opsk-page .search input:focus{ border-color:var(--green); box-shadow:0 0 0 3px rgba(4,114,70,.08); }
       .opsk-page .search .ic{ position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--mute); }
       .opsk-page .search .clear{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:0; color:var(--mute); cursor:pointer; width:24px; height:24px; border-radius:6px; display:grid; place-items:center; }
       .opsk-page .sel{ appearance:none; padding:10px 32px 10px 14px; font-size:13.5px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink-2); cursor:pointer; font-weight:500; }
@@ -520,7 +520,7 @@ function Style() {
       .opsk-page .board::-webkit-scrollbar-thumb{ background:var(--paper-2); border-radius:99px; }
       .opsk-page .lane{ flex:0 0 268px; width:268px; background:#f7f8f6; border:1px solid var(--line-2); border-radius:14px; display:flex; flex-direction:column; scroll-snap-align:start; transition:background .15s, border-color .15s, box-shadow .15s; }
       .opsk-page .lane.droppable{ border-style:dashed; border-color:#cdd5cf; }
-      .opsk-page .lane.over{ background:var(--green-t2); border-color:var(--green); box-shadow:0 0 0 3px rgba(46,159,130,.1); }
+      .opsk-page .lane.over{ background:var(--green-t2); border-color:var(--green); box-shadow:0 0 0 3px rgba(4,114,70,.1); }
       .opsk-page .lane-head{ display:flex; align-items:center; gap:8px; padding:13px 13px 10px; }
       .opsk-page .lane-head .dot{ width:9px; height:9px; flex:0 0 9px; border-radius:50%; }
       .opsk-page .lane-title{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }

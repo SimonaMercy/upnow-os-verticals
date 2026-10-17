@@ -114,7 +114,7 @@ interface Payload {
 
 /** Band accents — the house palette, one per operations pipeline. */
 const BAND_COLOR: Record<string, string> = {
-  lead: '#1e5fae', newlease: '#2e9f82', renewal: '#8250df', terminated: '#b45309',
+  lead: '#1e5fae', newlease: '#047246', renewal: '#8250df', terminated: '#b45309',
 };
 const KIND_LABEL: Record<Person['kind'], string> = {
   manager: 'Manager', landlord: 'Landlord (own account)', former: 'No longer on the roster',
@@ -388,7 +388,7 @@ export function ManagerActivityPerformance({ endpoint, backHref }: { endpoint: s
                       <td key={p.userId} style={{ padding: 0, textAlign: 'right' }}>
                         <button onClick={() => n && pickDay(d.day, p.userId)}
                           title={n ? `${p.name} — ${n} actions on ${fmtDay(d.day)}` : `${p.name} recorded nothing on ${fmtDay(d.day)}`}
-                          style={{ width: '100%', border: 0, borderRadius: 0, background: on ? '#f0faf6' : 'transparent',
+                          style={{ width: '100%', border: 0, borderRadius: 0, background: on ? '#eef7f2' : 'transparent',
                             outline: on ? `2px solid ${INK}` : undefined, outlineOffset: -2,
                             cursor: n ? 'pointer' : 'default', padding: '8px 12px', textAlign: 'right',
                             font: `${n ? 600 : 500} 12.5px ${MONO}`,
@@ -405,7 +405,7 @@ export function ManagerActivityPerformance({ endpoint, backHref }: { endpoint: s
                   <td style={{ padding: 0, textAlign: 'right' }}>
                     <button onClick={() => d.team && pickDay(d.day, null)}
                       style={{ width: '100%', border: 0, borderLeft: `1px solid ${LINE}`, borderRadius: 0,
-                        background: day === d.day && person === null ? '#f0faf6' : RAIL,
+                        background: day === d.day && person === null ? '#eef7f2' : RAIL,
                         cursor: d.team ? 'pointer' : 'default', padding: '8px 12px', textAlign: 'right',
                         font: `700 12.5px ${MONO}`, color: d.team ? INK : '#c9c5bd' }}>
                       {d.team || '—'}
@@ -617,7 +617,7 @@ export function ManagerActivityPerformance({ endpoint, backHref }: { endpoint: s
                       onClick={() => { if (!zero) { setAction(action === id ? null : id); setPage(0); } }}
                       style={{ borderTop: '1px solid #f0ede8', opacity: zero ? 0.55 : 1,
                         cursor: zero ? 'default' : 'pointer',
-                        background: action === id ? '#f0faf6' : undefined }}>
+                        background: action === id ? '#eef7f2' : undefined }}>
                       <td style={{ padding: '9px 12px', fontSize: 12.5, fontWeight: 600,
                         color: a.rework ? '#8a6a1e' : INK }}>{a.label}</td>
                       <td style={{ padding: '9px 12px', font: `500 10px ${MONO}`, letterSpacing: '.06em',
@@ -789,7 +789,7 @@ function BandRows({ band, people, max, focusPerson, focusLane, pending, open, on
                   onClick={() => l.team.steps && onPick(null, l.id)}
                   title={`${l.title} — whole team`}
                   style={{ width: '100%', border: 0, borderLeft: `1px solid ${LINE}`, borderRadius: 0,
-                    background: focusLane === l.id && focusPerson === null ? '#f0faf6' : RAIL,
+                    background: focusLane === l.id && focusPerson === null ? '#eef7f2' : RAIL,
                     cursor: l.team.steps ? 'pointer' : 'default', padding: '10px 12px', textAlign: 'right',
                     font: `700 12.5px ${MONO}`, color: l.team.steps ? INK : '#c9c5bd' }}>
                   {l.team.steps ? l.team.steps.toLocaleString('en-US') : '—'}

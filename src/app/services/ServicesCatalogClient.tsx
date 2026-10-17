@@ -14,8 +14,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { serviceImg } from '@/lib/serviceImages';
+import { serviceFallbackImg, serviceImg } from '@/lib/serviceImages';
 import { useBackClose } from '@/lib/useSlideOver';
+import { isQuoteMode } from '@/lib/homeServices/statusView';
+import { calloutCopy } from '@/lib/homeServices/copy';
 import { SiteHeader } from '@/components/upnow/SiteHeader';
 import { Footer } from '@/components/upnow/Footer';
 import {
@@ -82,16 +84,21 @@ function CheckSVG() {
 function ServiceLCard({ s, catName, catCode, idx }: {
   s: PublicService; catName: string; catCode: string; idx: number;
 }) {
-  const [imgErr, setImgErr] = useState(false);
-  const isQuote = s.pricingMode === 'quote';
+  // 0 = catalogue/stock image, 1 = local category picture, 2 = nothing loaded (tinted box).
+  const [imgStage, setImgStage] = useState(0);
+  const isQuote = isQuoteMode(s.pricingMode);
+  const quoteLike = isQuote || s.basePrice == null;
+  // Quote services: the inspection visit's real charge (or "Free inspection").
+  const callout = calloutCopy(s.minCalloutCharge);
   const dur = durLabel(s.estimatedDuration, s.estimatedDurationMax);
   const pkgChips = s.packages.slice(0, 3);
   return (
     <Link href={`/services/book/${s.code}`} className="lcard">
       <div className="ph">
-        {!imgErr && (
+        {imgStage < 2 && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={serviceImg(s.code, catCode, idx, s.imageUrl)} alt={s.name} loading="lazy" onError={() => setImgErr(true)} />
+          <img key={imgStage} src={imgStage === 0 ? serviceImg(s.code, catCode, idx, s.imageUrl) : serviceFallbackImg(catCode)}
+            alt={s.name} loading="lazy" onError={() => setImgStage((n) => n + 1)} />
         )}
         <span className="cbadge">{catName}</span>
         {s.isEmergency && (
@@ -118,13 +125,16 @@ function ServiceLCard({ s, catName, catCode, idx }: {
             {s.addons.length > 0 && <span className="amchip">{s.addons.length} extra{s.addons.length > 1 ? 's' : ''}</span>}
           </div>
         )}
-        <div className="price">
+        {/* Quote services stack the inspection line over its condition so the sentence never clips. */}
+        <div className="price" style={quoteLike ? { flexDirection: 'column', alignItems: 'flex-start', gap: 2 } : undefined}>
           <span className="amt">
-            {isQuote || s.basePrice == null
-              ? 'Free quote'
+            {quoteLike
+              ? callout.short
               : <>{s.isFromPrice ? 'From ' : ''}AED {fmtAed(Number(s.basePrice))}<small>{s.priceUnit === 'per_hour' ? '/hour' : ''}</small></>}
           </span>
-          <span className="ut">{isQuote ? 'pay after approval' : 'VAT included'}</span>
+          <span className="ut" style={quoteLike ? { textAlign: 'left', flexShrink: 1, fontWeight: 600 } : undefined}>
+            {quoteLike ? callout.sub.charAt(0).toUpperCase() + callout.sub.slice(1) : 'VAT included'}
+          </span>
         </div>
       </div>
     </Link>
@@ -169,7 +179,7 @@ function ServiceFilterSidebar({ f, cats, counts, navigate, onClose }: {
       <div className="fgroup">
         <span className="flabel">Pricing</span>
         <div className="bedrow">
-          {[{ v: '', l: 'Any' }, { v: 'fixed', l: 'Fixed price' }, { v: 'quote', l: 'Free quote' }].map(({ v, l }) => (
+          {[{ v: '', l: 'Any' }, { v: 'fixed', l: 'Fixed price' }, { v: 'quote', l: 'Quote after inspection' }].map(({ v, l }) => (
             <button key={v || 'any'} className={`bedpill${f.pricing === v ? ' on' : ''}`}
               onClick={() => go({ pricing: v, ...(v === 'quote' ? { priceMax: '' } : {}) })}>
               {l}
@@ -298,8 +308,8 @@ export default function ServicesCatalogClient() {
       pool = pool.filter(({ s, catName }) =>
         `${s.name} ${s.description ?? ''} ${catName}`.toLowerCase().includes(needle));
     }
-    if (f.pricing === 'fixed') pool = pool.filter(({ s }) => s.pricingMode !== 'quote' && s.basePrice != null);
-    if (f.pricing === 'quote') pool = pool.filter(({ s }) => s.pricingMode === 'quote' || s.basePrice == null);
+    if (f.pricing === 'fixed') pool = pool.filter(({ s }) => !isQuoteMode(s.pricingMode) && s.basePrice != null);
+    if (f.pricing === 'quote') pool = pool.filter(({ s }) => isQuoteMode(s.pricingMode) || s.basePrice == null);
     if (cap != null) pool = pool.filter(({ s }) => s.basePrice != null && Number(s.basePrice) <= cap);
     if (f.emergency) pool = pool.filter(({ s }) => s.isEmergency);
     if (f.packages) pool = pool.filter(({ s }) => s.packages.length > 0);
@@ -317,7 +327,7 @@ export default function ServicesCatalogClient() {
     const cat = consumerCats.find((c) => c.code === f.category);
     pills.push({ label: cat?.name ?? f.category, clear: { category: '' } });
   }
-  if (f.pricing) pills.push({ label: f.pricing === 'fixed' ? 'Fixed price' : 'Free quote', clear: { pricing: '' } });
+  if (f.pricing) pills.push({ label: f.pricing === 'fixed' ? 'Fixed price' : 'Quote after inspection', clear: { pricing: '' } });
   if (f.priceMax) pills.push({ label: `≤ AED ${Number(f.priceMax).toLocaleString()}`, clear: { priceMax: '' } });
   if (f.emergency) pills.push({ label: '24/7 emergency', clear: { emergency: '' } });
   if (f.packages) pills.push({ label: 'With packages', clear: { packages: '' } });
@@ -442,7 +452,7 @@ export default function ServicesCatalogClient() {
                   <p>Try widening your search or clearing a filter.</p>
                   <button type="button"
                     onClick={() => navigate({ category: '', q: '', pricing: '', priceMax: '', emergency: '', packages: '' })}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, background: '#2e9f82', color: '#fff', fontWeight: 700, fontSize: 14, border: 'none', cursor: 'pointer', marginTop: 4 }}>
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, background: '#047246', color: '#fff', fontWeight: 700, fontSize: 14, border: 'none', cursor: 'pointer', marginTop: 4 }}>
                     Reset filters
                   </button>
                 </div>
@@ -458,7 +468,7 @@ export default function ServicesCatalogClient() {
 
           {/* For Business band (commercial trio → proposal channel) */}
           {business && business.services.length > 0 && (
-            <section className="p-8 mt-10" style={{ background: '#0e1a16', borderRadius: 24 }}>
+            <section className="p-8 mt-10" style={{ background: '#14201a', borderRadius: 24 }}>
               <div className="flex items-start justify-between gap-6 flex-wrap">
                 <div className="min-w-[240px]">
                   <p className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest mb-2" style={{ color: '#9ca3af' }}>
@@ -475,7 +485,7 @@ export default function ServicesCatalogClient() {
                 <a
                   href="mailto:business@upnow.ae?subject=Business%20services%20proposal%20request"
                   className="rounded-xl px-5 py-3 text-sm font-semibold flex-shrink-0"
-                  style={{ background: '#2e9f82', color: '#fff' }}
+                  style={{ background: '#047246', color: '#fff' }}
                 >
                   Request a proposal
                 </a>

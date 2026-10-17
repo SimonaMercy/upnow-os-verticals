@@ -1,22 +1,34 @@
-/**
- * Admin · Platform agreement (SP-252) — the versioned agreement per audience.
- * Draft a version (text and/or PDF), publish it (previous current → superseded,
- * everyone in the audience re-prompted), and read the append-only acceptance
- * evidence: who accepted which version, when, from where.
- */
 'use client';
 
+/**
+ * Admin › Legal › Platform agreement (SP-252) — Genspark OS rebuild. The versioned agreement per
+ * audience: draft a version (text and/or PDF), publish it (previous current → superseded,
+ * everyone in the audience re-prompted), and read the append-only acceptance evidence.
+ *
+ * Parity with previous page (same endpoints and payloads):
+ *  - GET /api/admin/agreements — every version; loading / error / empty states.
+ *  - Audience tabs (Service providers / Customers / Rental providers) with "· vN / no current / none"
+ *    and the per-audience hint — now a kit Seg + Callout. Raw 'landlord' key never shown.
+ *  - "Draft a new version" → DraftForm (now in a kit Modal): Version, Title (provider default title),
+ *    Summary, markdown body, optional PDF via POST /api/admin/agreements/upload-url → PUT presigned
+ *    → { fileUrl, fileName, mimeType } in the payload. Create = POST /api/admin/agreements
+ *    { audience, version, title, summary|null, bodyMd|null, [file*] }; Edit draft =
+ *    PATCH /api/admin/agreements/:id (same payload minus audience). Save disabled without version+title.
+ *  - Publish (drafts only): same window.confirm copy → POST /api/admin/agreements/:id/publish {}.
+ *  - Acceptances: lazy GET /api/admin/agreements/:id/acceptances (cached per id) — who (name, email,
+ *    #id), accepted, where (context), IP, device.
+ *  - Read text (AgreementText REUSED), PDF link (fileViewUrl, new tab), created/published/effective/
+ *    superseded dates, sha256 prefix.
+ *  - Version cards → kit table rows with a labelled "Open" button that opens a Drawer holding the
+ *    KV record, agreement text, acceptance record and the Edit / Publish / PDF actions.
+ */
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, FileText, Loader2, Plus, Upload, Users } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { AgreementText, type AgreementAudience } from '@/components/upnow/PlatformAgreementPanel';
-
-const PRIMARY = '#2e9f82';
-const INK = '#1a1916';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
-const BORDER = '1px solid #ececea';
-const card = (extra?: React.CSSProperties): React.CSSProperties => ({ background: '#fff', border: BORDER, borderRadius: 16, ...extra });
+import {
+  Btn, Callout, Card, Drawer, EmptyRow, ErrorRow, Evid, Field, KV, Modal, OsPage, PageHead, Pill, ScopeStrip, Seg,
+  SkeletonRows, TableWrap, type Tone,
+} from '@/components/os/kit';
 
 interface AdminAgreement {
   id: number;
@@ -53,14 +65,12 @@ const AUDIENCES: { key: AgreementAudience; label: string; hint: string }[] = [
   // Audience key stays `landlord` (schema); the platform's user-facing term is Rental Provider.
   { key: 'landlord', label: 'Rental providers', hint: 'Schema-ready; not presented anywhere yet.' },
 ];
-/** Human label for an audience key — the raw key ('landlord') must never surface in copy. */
 const audienceLabel = (k: AgreementAudience) => AUDIENCES.find((a) => a.key === k)?.label ?? k;
-/** Singular, lowercase form for sentences: 'Rental providers' → 'rental provider'. */
 const audienceNoun = (k: AgreementAudience) => audienceLabel(k).toLowerCase().replace(/s$/, '');
-const STATUS_STYLE: Record<AdminAgreement['status'], { bg: string; fg: string; label: string }> = {
-  current: { bg: '#e8f6f1', fg: '#1d7a5f', label: 'Current' },
-  draft: { bg: '#fef6e7', fg: '#92400e', label: 'Draft' },
-  superseded: { bg: '#f3f4f6', fg: '#6b7280', label: 'Superseded' },
+const STATUS_UI: Record<AdminAgreement['status'], { tone: Tone; label: string }> = {
+  current: { tone: 'primary', label: 'Current' },
+  draft: { tone: 'amber', label: 'Draft' },
+  superseded: { tone: 'neutral', label: 'Superseded' },
 };
 const fmt = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString('en-AE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Dubai' }) : '—';
@@ -69,21 +79,19 @@ export default function AdminAgreementsPage() {
   const [audience, setAudience] = useState<AgreementAudience>('provider');
   const [rows, setRows] = useState<AdminAgreement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [acceptances, setAcceptances] = useState<Record<number, AcceptanceRow[]>>({});
-  const [showAcceptances, setShowAcceptances] = useState<number | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [editing, setEditing] = useState<AdminAgreement | null>(null);
 
-  // All setState calls happen inside promise callbacks (never synchronously in
-  // the effect body) — the react-hooks rule flags the latter.
   const load = useCallback(
     () =>
       apiGet<AdminAgreement[]>('/admin/agreements')
-        .then((list) => { setRows(list); setError(null); })
-        .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load agreements'))
+        .then((list) => { setRows(list); setError(null); setLoadFailed(false); })
+        .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Could not load agreements'); setLoadFailed(true); })
         .finally(() => setLoading(false)),
     [],
   );
@@ -91,11 +99,13 @@ export default function AdminAgreementsPage() {
 
   const mine = rows.filter((r) => r.audience === audience);
   const current = mine.find((r) => r.status === 'current') ?? null;
+  const opened = openId != null ? rows.find((r) => r.id === openId) ?? null : null;
 
   const publish = async (a: AdminAgreement) => {
+    const cur = rows.find((r) => r.audience === a.audience && r.status === 'current') ?? null;
     const ok = window.confirm(
       `Publish v${a.version} for ${audienceLabel(a.audience)}?\n\n` +
-        (current ? `v${current.version} becomes superseded and every ${audienceNoun(a.audience)} is asked to accept v${a.version} on their next visit. Earlier acceptances stay on record.` : `Every ${audienceNoun(a.audience)} will be asked to accept it on their next visit.`) +
+        (cur ? `v${cur.version} becomes superseded and every ${audienceNoun(a.audience)} is asked to accept v${a.version} on their next visit. Earlier acceptances stay on record.` : `Every ${audienceNoun(a.audience)} will be asked to accept it on their next visit.`) +
         `\n\nA published version is immutable.`,
     );
     if (!ok) return;
@@ -111,9 +121,8 @@ export default function AdminAgreementsPage() {
     }
   };
 
-  const loadAcceptances = async (id: number) => {
-    if (showAcceptances === id) { setShowAcceptances(null); return; }
-    setShowAcceptances(id);
+  const openVersion = async (id: number) => {
+    setOpenId(id);
     if (acceptances[id]) return;
     try {
       const list = await apiGet<AcceptanceRow[]>(`/admin/agreements/${id}/acceptances`);
@@ -122,163 +131,147 @@ export default function AdminAgreementsPage() {
       setError(e instanceof Error ? e.message : 'Could not load acceptances');
     }
   };
+  const closeDrawer = useCallback(() => setOpenId(null), []);
+  const closeForm = useCallback(() => { setDrafting(false); setEditing(null); }, []);
+  const hint = AUDIENCES.find((a) => a.key === audience)?.hint;
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: '8px 4px 48px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: PRIMARY }}>Legal</div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: INK, letterSpacing: '-.02em' }}>Platform agreement</h1>
-      <p style={{ color: MUTE, fontSize: 14, marginTop: 4, maxWidth: 720 }}>
-        One current version per audience. Publishing a new version re-prompts everyone; every acceptance is an append-only record —
-        who, which version and document hash, when, from where. Published versions cannot be edited: draft the next one.
-      </p>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Legal"
+        title="Platform agreement"
+        lede="One current version per audience. Publishing a new version re-prompts everyone; every acceptance is an append-only record — who, which version and document hash, when, from where."
+        actions={<Btn size="sm" variant="primary" onClick={() => { setDrafting(true); setEditing(null); }}>Draft a new version</Btn>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Legal' },
+        { label: 'Audience', value: audienceLabel(audience) },
+        { label: 'Current', value: current ? `v${current.version}` : 'None' },
+      ]} />
 
-      {error && <div style={{ marginTop: 12, background: '#fef2f2', color: '#b42318', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ marginBottom: 14 }}><Callout tone="bad" title="Something went wrong.">{error}</Callout></div>}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
-        {AUDIENCES.map((t) => {
-          const n = rows.filter((r) => r.audience === t.key).length;
-          const cur = rows.find((r) => r.audience === t.key && r.status === 'current');
-          return (
-            <button key={t.key} onClick={() => setAudience(t.key)}
-              style={{ padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: 600, border: BORDER, background: audience === t.key ? INK : '#fff', color: audience === t.key ? '#fff' : MUTE, cursor: 'pointer' }}>
-              {t.label} <span style={{ opacity: .7 }}>· {cur ? `v${cur.version}` : n ? 'no current' : 'none'}</span>
-            </button>
-          );
-        })}
+      <div style={{ marginBottom: 10 }}>
+        <Seg
+          label="Audience"
+          value={audience}
+          onChange={setAudience}
+          options={AUDIENCES.map((t) => {
+            const n = rows.filter((r) => r.audience === t.key).length;
+            const cur = rows.find((r) => r.audience === t.key && r.status === 'current');
+            return { v: t.key, l: <>{t.label} · {cur ? `v${cur.version}` : n ? 'no current' : 'none'}</> };
+          })}
+        />
       </div>
-      <p style={{ fontSize: 12.5, color: FAINT, marginTop: 8 }}>{AUDIENCES.find((a) => a.key === audience)?.hint}</p>
-
-      <div className="flex items-center justify-between" style={{ marginTop: 18 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, color: INK }}>Versions</h2>
-        <button type="button" onClick={() => { setDrafting(true); setEditing(null); }}
-          className="flex items-center gap-1.5"
-          style={{ fontSize: 13, fontWeight: 700, color: '#fff', background: PRIMARY, border: 'none', borderRadius: 10, padding: '8px 12px', cursor: 'pointer' }}>
-          <Plus size={14} /> Draft a new version
-        </button>
+      <div style={{ marginBottom: 14 }}>
+        <Callout tone="info">{hint} Published versions cannot be edited: draft the next one.</Callout>
       </div>
+
+      <TableWrap>
+        <table className="gx-tbl">
+          <thead><tr><th>Version</th><th>Title</th><th>Status</th><th>Created</th><th>Published</th><th className="num">Accepted</th><th className="act" /></tr></thead>
+          {loading ? <SkeletonRows rows={3} cols={7} /> : loadFailed ? <ErrorRow cols={7} onRetry={() => { setLoading(true); void load(); }} /> : mine.length === 0 ? (
+            <EmptyRow cols={7} title="No agreement versions for this audience yet." text="Use “Draft a new version” to write the first one." />
+          ) : (
+            <tbody>
+              {mine.map((a) => (
+                <tr key={a.id} className="click" onClick={() => void openVersion(a.id)}>
+                  <td className="mono strong">v{a.version}</td>
+                  <td className="strong">{a.title}{a.summary && <div className="sub">{a.summary}</div>}</td>
+                  <td><Pill tone={STATUS_UI[a.status].tone}>{STATUS_UI[a.status].label}</Pill></td>
+                  <td className="nowrap">{fmt(a.createdAt)}</td>
+                  <td className="nowrap">{fmt(a.publishedAt)}</td>
+                  <td className="num">{a.acceptances}</td>
+                  <td className="act" onClick={(e) => e.stopPropagation()}>
+                    <span style={{ display: 'inline-flex', gap: 6 }}>
+                      <Btn size="xs" onClick={() => void openVersion(a.id)}>Open</Btn>
+                      {a.status === 'draft' && (
+                        <Btn size="xs" variant="primary" disabled={busy === a.id} onClick={() => void publish(a)}>{busy === a.id ? 'Publishing…' : 'Publish'}</Btn>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
+        </table>
+      </TableWrap>
+
+      <Drawer
+        open={opened != null}
+        onClose={closeDrawer}
+        title={opened ? opened.title : ''}
+        sub={opened ? <>v{opened.version} · {audienceLabel(opened.audience)}</> : undefined}
+        footer={opened && <>
+          {opened.fileViewUrl && <Btn href={opened.fileViewUrl} target="_blank">Open PDF</Btn>}
+          {opened.status === 'draft' && <>
+            <Btn onClick={() => { setEditing(opened); setDrafting(false); setOpenId(null); }}>Edit draft</Btn>
+            <Btn variant="primary" disabled={busy === opened.id} onClick={() => void publish(opened)}>{busy === opened.id ? 'Publishing…' : 'Publish'}</Btn>
+          </>}
+          <Btn onClick={closeDrawer}>Close</Btn>
+        </>}
+      >
+        {opened && (
+          <>
+            <div style={{ marginBottom: 12 }}><Pill tone={STATUS_UI[opened.status].tone}>{STATUS_UI[opened.status].label}</Pill></div>
+            {opened.summary && <p className="sub" style={{ marginBottom: 12 }}>{opened.summary}</p>}
+            <KV items={[
+              { k: 'Created', v: fmt(opened.createdAt) },
+              { k: 'Published', v: fmt(opened.publishedAt) },
+              { k: 'Effective', v: fmt(opened.effectiveFrom) },
+              { k: 'Superseded', v: fmt(opened.supersededAt) },
+              { k: 'PDF', v: opened.fileName ?? '—' },
+              { k: 'Document sha256', v: opened.documentSha256 ? <span className="mono" title={opened.documentSha256}>{opened.documentSha256.slice(0, 12)}…</span> : '—' },
+            ]} />
+            {opened.bodyMd && (
+              <div style={{ marginTop: 14 }}>
+                <Card title="Agreement text" pad>
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }}><AgreementText md={opened.bodyMd} /></div>
+                </Card>
+              </div>
+            )}
+            <div style={{ marginTop: 14 }}>
+              <Card title="Acceptance record" sub={`Append-only · ${opened.acceptances} accepted`}>
+                <div className="gx-tbl-scroll">
+                  <table className="gx-tbl">
+                    <thead><tr><th>Who</th><th>Accepted</th><th>Where</th><th>IP</th><th>Device</th></tr></thead>
+                    {!acceptances[opened.id] ? <SkeletonRows rows={2} cols={5} /> : acceptances[opened.id].length === 0 ? (
+                      <EmptyRow cols={5} title="Nobody has accepted this version yet." />
+                    ) : (
+                      <tbody>
+                        {acceptances[opened.id].map((x) => (
+                          <tr key={x.id}>
+                            <td className="strong">{x.userName || '—'}<div className="sub">{x.userEmail} · #{x.userId}</div></td>
+                            <td className="nowrap">{fmt(x.acceptedAt)}</td>
+                            <td>{x.context}</td>
+                            <td className="mono">{x.ipAddress ?? '—'}</td>
+                            <td title={x.userAgent ?? ''} style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.userAgent ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    )}
+                  </table>
+                </div>
+              </Card>
+            </div>
+          </>
+        )}
+      </Drawer>
 
       {(drafting || editing) && (
         <DraftForm
-          audience={audience}
+          key={editing ? `edit-${editing.id}` : `new-${audience}`}
+          audience={editing?.audience ?? audience}
           existing={editing}
-          onCancel={() => { setDrafting(false); setEditing(null); }}
-          onSaved={async () => { setDrafting(false); setEditing(null); await load(); }}
+          onCancel={closeForm}
+          onSaved={async () => { closeForm(); await load(); }}
         />
       )}
-
-      {loading ? (
-        <div style={{ ...card({ padding: 32, marginTop: 12 }), textAlign: 'center', color: FAINT, fontSize: 13 }}>Loading…</div>
-      ) : mine.length === 0 ? (
-        <div style={{ ...card({ padding: 32, marginTop: 12 }), textAlign: 'center', color: FAINT, fontSize: 13 }}>
-          <FileText size={26} style={{ margin: '0 auto 8px', color: '#c9c6bd' }} />
-          No agreement versions for this audience yet.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-          {mine.map((a) => {
-            const st = STATUS_STYLE[a.status];
-            const open = openId === a.id;
-            return (
-              <div key={a.id} style={card({ overflow: 'hidden' })}>
-                <div className="flex items-start gap-3 flex-wrap" style={{ padding: '14px 16px' }}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span style={{ fontSize: 14.5, fontWeight: 700, color: INK }}>{a.title}</span>
-                      <span style={{ fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: '#f5f5f3', color: MUTE }}>v{a.version}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: st.bg, color: st.fg }}>{st.label}</span>
-                    </div>
-                    {a.summary && <p style={{ fontSize: 12.5, color: MUTE, marginTop: 4, lineHeight: 1.5 }}>{a.summary}</p>}
-                    <div className="flex items-center gap-3 flex-wrap" style={{ fontSize: 11.5, color: FAINT, marginTop: 6 }}>
-                      <span>Created {fmt(a.createdAt)}</span>
-                      {a.publishedAt && <span>· Published {fmt(a.publishedAt)}</span>}
-                      {a.effectiveFrom && <span>· Effective {fmt(a.effectiveFrom)}</span>}
-                      {a.supersededAt && <span>· Superseded {fmt(a.supersededAt)}</span>}
-                      {a.documentSha256 && <span title={a.documentSha256}>· sha256 {a.documentSha256.slice(0, 12)}…</span>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button type="button" onClick={() => void loadAcceptances(a.id)} className="flex items-center gap-1.5"
-                      style={{ fontSize: 12, fontWeight: 600, color: MUTE, background: '#fff', border: BORDER, borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}>
-                      <Users size={13} /> {a.acceptances} accepted
-                    </button>
-                    {a.bodyMd && (
-                      <button type="button" onClick={() => setOpenId(open ? null : a.id)}
-                        style={{ fontSize: 12, fontWeight: 600, color: MUTE, background: '#fff', border: BORDER, borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}>
-                        {open ? 'Hide text' : 'Read text'}
-                      </button>
-                    )}
-                    {a.fileViewUrl && (
-                      <a href={a.fileViewUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1"
-                        style={{ fontSize: 12, fontWeight: 600, color: MUTE, background: '#fff', border: BORDER, borderRadius: 8, padding: '6px 10px' }}>
-                        <ExternalLink size={12} /> PDF
-                      </a>
-                    )}
-                    {a.status === 'draft' && (
-                      <>
-                        <button type="button" onClick={() => { setEditing(a); setDrafting(false); }}
-                          style={{ fontSize: 12, fontWeight: 600, color: MUTE, background: '#fff', border: BORDER, borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}>
-                          Edit
-                        </button>
-                        <button type="button" disabled={busy === a.id} onClick={() => void publish(a)} className="flex items-center gap-1.5"
-                          style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: PRIMARY, border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', opacity: busy === a.id ? .6 : 1 }}>
-                          {busy === a.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={13} />} Publish
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {open && a.bodyMd && (
-                  <div style={{ borderTop: BORDER, padding: '12px 16px', background: '#fbfbfa', maxHeight: 420, overflowY: 'auto' }}>
-                    <AgreementText md={a.bodyMd} />
-                  </div>
-                )}
-                {showAcceptances === a.id && (
-                  <div style={{ borderTop: BORDER, padding: '12px 16px', background: '#fbfbfa' }}>
-                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: FAINT, marginBottom: 8 }}>
-                      Acceptance record — append-only
-                    </p>
-                    {!acceptances[a.id] ? (
-                      <p style={{ fontSize: 12.5, color: FAINT }}>Loading…</p>
-                    ) : acceptances[a.id].length === 0 ? (
-                      <p style={{ fontSize: 12.5, color: FAINT }}>Nobody has accepted this version yet.</p>
-                    ) : (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ color: FAINT, textAlign: 'left' }}>
-                              <th style={{ padding: '4px 6px', fontWeight: 600 }}>Who</th>
-                              <th style={{ padding: '4px 6px', fontWeight: 600 }}>Accepted</th>
-                              <th style={{ padding: '4px 6px', fontWeight: 600 }}>Where</th>
-                              <th style={{ padding: '4px 6px', fontWeight: 600 }}>IP</th>
-                              <th style={{ padding: '4px 6px', fontWeight: 600 }}>Device</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {acceptances[a.id].map((x) => (
-                              <tr key={x.id} style={{ borderTop: BORDER, color: INK }}>
-                                <td style={{ padding: '6px' }}>{x.userName || '—'}<span style={{ display: 'block', color: FAINT, fontSize: 11 }}>{x.userEmail} · #{x.userId}</span></td>
-                                <td style={{ padding: '6px', whiteSpace: 'nowrap' }}>{fmt(x.acceptedAt)}</td>
-                                <td style={{ padding: '6px' }}>{x.context}</td>
-                                <td style={{ padding: '6px', fontFamily: 'ui-monospace, monospace', fontSize: 11.5 }}>{x.ipAddress ?? '—'}</td>
-                                <td style={{ padding: '6px', color: MUTE, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={x.userAgent ?? ''}>{x.userAgent ?? '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    </OsPage>
   );
 }
 
-/* ── Draft / edit form ─────────────────────────────────────────────────── */
+/* ── Draft / edit form (kit Modal) ─────────────────────────────────────── */
 function DraftForm({ audience, existing, onCancel, onSaved }: {
   audience: AgreementAudience;
   existing: AdminAgreement | null;
@@ -326,36 +319,39 @@ function DraftForm({ audience, existing, onCancel, onSaved }: {
     }
   };
 
-  const input: React.CSSProperties = { width: '100%', fontSize: 13, padding: '8px 10px', border: BORDER, borderRadius: 8, color: INK, background: '#fff' };
   return (
-    <div style={card({ padding: 16, marginTop: 12, background: '#fbfbfa' })}>
-      <p style={{ fontSize: 13.5, fontWeight: 700, color: INK, marginBottom: 10 }}>{existing ? `Edit draft v${existing.version}` : `New ${audienceNoun(audience)} agreement version`}</p>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 160px) minmax(0, 1fr)' }}>
-        <label style={{ fontSize: 12, color: MUTE }}>Version<input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0" style={{ ...input, marginTop: 4 }} /></label>
-        <label style={{ fontSize: 12, color: MUTE }}>Title<input value={title} onChange={(e) => setTitle(e.target.value)} style={{ ...input, marginTop: 4 }} /></label>
-      </div>
-      <label style={{ display: 'block', fontSize: 12, color: MUTE, marginTop: 10 }}>Summary (one paragraph shown above the checkbox)
-        <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} style={{ ...input, marginTop: 4, resize: 'vertical' }} />
-      </label>
-      <label style={{ display: 'block', fontSize: 12, color: MUTE, marginTop: 10 }}>Agreement text (markdown: ## headings, paragraphs, - lists, **bold**, &gt; note)
-        <textarea value={bodyMd} onChange={(e) => setBodyMd(e.target.value)} rows={12} style={{ ...input, marginTop: 4, resize: 'vertical', fontFamily: 'ui-monospace, monospace', fontSize: 12 }} />
-      </label>
-      <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 10 }}>
-        <label className="flex items-center gap-1.5" style={{ fontSize: 12.5, fontWeight: 600, color: MUTE, border: BORDER, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', background: '#fff' }}>
-          {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {file ? 'Replace PDF' : 'Attach PDF (optional)'}
-          <input type="file" accept="application/pdf" style={{ display: 'none' }} onChange={(e) => void uploadPdf(e.target.files?.[0])} />
-        </label>
-        {file && <span style={{ fontSize: 12, color: MUTE }}>{file.fileName}</span>}
-        <span style={{ fontSize: 11.5, color: FAINT }}>Text and/or PDF — at least one is needed to publish.</span>
-      </div>
-      {error && <p style={{ fontSize: 12.5, color: '#b42318', marginTop: 8 }}>{error}</p>}
-      <div className="flex items-center gap-2" style={{ marginTop: 12 }}>
-        <button type="button" disabled={saving || !version.trim() || !title.trim()} onClick={() => void save()}
-          style={{ fontSize: 13, fontWeight: 700, color: '#fff', background: PRIMARY, border: 'none', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', opacity: saving ? .6 : 1 }}>
+    <Modal
+      open
+      onClose={onCancel}
+      width={640}
+      title={existing ? `Edit draft v${existing.version}` : `New ${audienceNoun(audience)} agreement version`}
+      footer={<>
+        <Btn onClick={onCancel}>Cancel</Btn>
+        <Btn variant="primary" disabled={saving || uploading || !version.trim() || !title.trim()} onClick={() => void save()}>
           {saving ? 'Saving…' : existing ? 'Save draft' : 'Create draft'}
-        </button>
-        <button type="button" onClick={onCancel} style={{ fontSize: 13, fontWeight: 600, color: MUTE, background: '#fff', border: BORDER, borderRadius: 10, padding: '8px 14px', cursor: 'pointer' }}>Cancel</button>
+        </Btn>
+      </>}
+    >
+      <div className="gx-two">
+        <Field label="Version" htmlFor="ag-version">
+          <input id="ag-version" className="gx-inp" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0" />
+        </Field>
+        <Field label="Title" htmlFor="ag-title">
+          <input id="ag-title" className="gx-inp" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </Field>
       </div>
-    </div>
+      <Field label="Summary" hint="One paragraph shown above the checkbox." htmlFor="ag-summary">
+        <textarea id="ag-summary" className="gx-ta" value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} />
+      </Field>
+      <Field label="Agreement text" hint="Markdown: ## headings, paragraphs, - lists, **bold**, > note." htmlFor="ag-body">
+        <textarea id="ag-body" className="gx-ta" value={bodyMd} onChange={(e) => setBodyMd(e.target.value)} rows={12} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }} />
+      </Field>
+      <Field label={file ? 'Replace PDF' : 'Attach PDF (optional)'} hint="Text and/or PDF — at least one is needed to publish." htmlFor="ag-pdf">
+        <input id="ag-pdf" type="file" accept="application/pdf" className="gx-inp" disabled={uploading} onChange={(e) => void uploadPdf(e.target.files?.[0])} />
+      </Field>
+      {uploading && <Evid>Uploading PDF…</Evid>}
+      {file && !uploading && <Evid tone="ok">Attached: {file.fileName}</Evid>}
+      {error && <div style={{ marginTop: 10 }}><Callout tone="bad">{error}</Callout></div>}
+    </Modal>
   );
 }

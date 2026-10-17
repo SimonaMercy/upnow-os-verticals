@@ -145,18 +145,18 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg">
         <input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" className="hidden" onChange={onFile} />
         {scannerModal}
-        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e8e6e0]">
-          <h3 className="text-sm font-semibold text-[#1a1916] flex items-center gap-2"><Upload size={16} className="text-[#2e9f82]" /> {title}</h3>
-          <button type="button" onClick={handleClose} className="text-[#6b6860] hover:text-[#1a1916] cursor-pointer"><X size={18} /></button>
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-[#e4e9e5]">
+          <h3 className="text-sm font-semibold text-[#14201a] flex items-center gap-2"><Upload size={16} className="text-[#047246]" /> {title}</h3>
+          <button type="button" onClick={handleClose} className="text-[#5f6b63] hover:text-[#14201a] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="px-5 py-4 space-y-3">
           {needsExpiry && (
-            <div className="border border-[#e8e6e0] rounded-xl p-3.5">
-              <label className="text-sm font-medium text-[#1a1916] flex items-center gap-2">
-                <CalendarClock size={14} className="text-[#2e9f82]" /> Expiry date
-                <span className="font-normal text-[#9b9890]">· from the document</span>
+            <div className="border border-[#e4e9e5] rounded-xl p-3.5">
+              <label className="text-sm font-medium text-[#14201a] flex items-center gap-2">
+                <CalendarClock size={14} className="text-[#047246]" /> Expiry date
+                <span className="font-normal text-[#8a948d]">· from the document</span>
               </label>
-              <p className="text-[11px] text-[#9b9890] mt-0.5">
+              <p className="text-[11px] text-[#8a948d] mt-0.5">
                 Enter the date this document expires{localSlots.length > 1 ? ' (applies to both sides)' : ''}. Set it before uploading, or edit it here anytime.
               </p>
               <div className="flex items-center gap-2 mt-2">
@@ -165,9 +165,9 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
                   value={expiry}
                   onChange={e => onExpiryChange(e.target.value)}
                   onBlur={() => { void commitExpiry(expiry); }}
-                  className="flex-1 text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]/30"
+                  className="flex-1 text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 text-[#14201a] focus:outline-none focus:ring-2 focus:ring-[#047246]/30"
                 />
-                {expirySaving && <Loader2 size={15} className="animate-spin text-[#9b9890]" />}
+                {expirySaving && <Loader2 size={15} className="animate-spin text-[#8a948d]" />}
               </div>
               {expiryErr && <div className="text-xs text-[#b91c1c] mt-1">{expiryErr}</div>}
             </div>
@@ -177,36 +177,36 @@ export function KycUploadModal({ title, ownerId, slots, onClose, onChanged }: {
             const uploading = busy === slot.canonicalKey;
             const img = isImage(slot.existing?.mimeType, slot.existing?.fileUrl);
             return (
-              <div key={slot.canonicalKey} className="border border-[#e8e6e0] rounded-xl p-3.5 flex items-center gap-3">
-                <div className="w-16 h-12 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] overflow-hidden flex items-center justify-center shrink-0 text-[#9b9890]">
+              <div key={slot.canonicalKey} className="border border-[#e4e9e5] rounded-xl p-3.5 flex items-center gap-3">
+                <div className="w-16 h-12 rounded-lg border border-[#e4e9e5] bg-[#eef1ef] overflow-hidden flex items-center justify-center shrink-0 text-[#8a948d]">
                   {has && img ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={slot.existing!.fileUrl!} alt={slot.label} className="w-full h-full object-cover" />
                   ) : has ? <FileText size={18} /> : <FileText size={18} />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-[#1a1916]">{slot.label}</div>
+                  <div className="text-sm font-medium text-[#14201a]">{slot.label}</div>
                   {has ? (
-                    <button type="button" onClick={() => openDocViewer({ fileUrl: slot.existing!.fileUrl, caption: slot.label, mimeType: slot.existing!.mimeType })} className="text-xs text-[#2e9f82] font-medium hover:underline inline-flex items-center gap-1 mt-0.5 cursor-pointer">
+                    <button type="button" onClick={() => openDocViewer({ fileUrl: slot.existing!.fileUrl, caption: slot.label, mimeType: slot.existing!.mimeType })} className="text-xs text-[#047246] font-medium hover:underline inline-flex items-center gap-1 mt-0.5 cursor-pointer">
                       <Check size={11} className="text-[#1a7a5a]" /> Uploaded · View <ExternalLink size={10} />
                     </button>
                   ) : (
-                    <div className="text-xs text-[#9b9890] mt-0.5">Not uploaded</div>
+                    <div className="text-xs text-[#8a948d] mt-0.5">Not uploaded</div>
                   )}
                   {errs[slot.canonicalKey] && <div className="text-xs text-[#b91c1c] mt-1">{errs[slot.canonicalKey]}</div>}
                 </div>
                 <button type="button" onClick={() => pick(slot)} disabled={uploading}
-                  className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full disabled:opacity-50 cursor-pointer ${has ? 'border border-[#e8e6e0] text-[#1a1916] hover:bg-[#f4f3ef]' : 'bg-[#2e9f82] text-white hover:bg-[#267a65]'}`}>
+                  className={`shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-full disabled:opacity-50 cursor-pointer ${has ? 'border border-[#e4e9e5] text-[#14201a] hover:bg-[#eef1ef]' : 'bg-[#047246] text-white hover:bg-[#267a65]'}`}>
                   {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                   {has ? 'Replace' : 'Upload'}
                 </button>
               </div>
             );
           })}
-          <p className="text-[11px] text-[#9b9890]">JPG, PNG, WebP or PDF · up to 15 MB each.</p>
+          <p className="text-[11px] text-[#8a948d]">JPG, PNG, WebP or PDF · up to 15 MB each.</p>
         </div>
-        <div className="px-5 py-3 border-t border-[#e8e6e0] flex justify-end">
-          <button type="button" onClick={handleClose} className="text-sm font-semibold px-4 py-2 rounded-full bg-[#2e9f82] text-white hover:bg-[#267a65] cursor-pointer">Done</button>
+        <div className="px-5 py-3 border-t border-[#e4e9e5] flex justify-end">
+          <button type="button" onClick={handleClose} className="text-sm font-semibold px-4 py-2 rounded-full bg-[#047246] text-white hover:bg-[#267a65] cursor-pointer">Done</button>
         </div>
       </div>
     </div>

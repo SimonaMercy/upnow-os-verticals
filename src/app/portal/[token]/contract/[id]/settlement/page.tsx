@@ -118,36 +118,36 @@ export default function PortalSettlementPage() {
   const signed = !!raw && (raw.status === 'agreed' || raw.status === 'paid' || !!raw.tenantSignature);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f4f3ef' }}>
+    <div style={{ minHeight: '100vh', background: '#eef1ef' }}>
       {/* Header */}
-      <header style={{ background: '#fff', borderBottom: '1px solid #e8e6e0', padding: '14px 20px' }}>
+      <header style={{ background: '#fff', borderBottom: '1px solid #e4e9e5', padding: '14px 20px' }}>
         <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ display: 'inline-grid', placeItems: 'center', width: 28, height: 28, borderRadius: 8, background: '#2e9f82', color: '#fff', fontWeight: 800, fontSize: 15 }}>U</span>
-          <span style={{ fontWeight: 800, fontSize: 17, color: '#0e1a16' }}>UpNow</span>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9b9890' }}>Final Settlement</span>
+          <span style={{ display: 'inline-grid', placeItems: 'center', width: 28, height: 28, borderRadius: 8, background: '#047246', color: '#fff', fontWeight: 800, fontSize: 15 }}>U</span>
+          <span style={{ fontWeight: 800, fontSize: 17, color: '#14201a' }}>UpNow</span>
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#8a948d' }}>Final Settlement</span>
         </div>
       </header>
 
       <main style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 48px' }}>
         {loading ? (
-          <div style={{ display: 'grid', placeItems: 'center', padding: '80px 0', color: '#6b6860' }}>
+          <div style={{ display: 'grid', placeItems: 'center', padding: '80px 0', color: '#5f6b63' }}>
             <Loader2 className="animate-spin" size={26} /> <span style={{ marginTop: 10, fontSize: 13 }}>Loading your settlement…</span>
           </div>
         ) : error ? (
-          <div style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 16, padding: 32, textAlign: 'center' }}>
+          <div style={{ background: '#fff', border: '1px solid #e4e9e5', borderRadius: 16, padding: 32, textAlign: 'center' }}>
             <AlertTriangle size={24} style={{ color: '#c2410c' }} />
             <p style={{ marginTop: 10, fontSize: 14, color: '#4a4842' }}>{error}</p>
           </div>
         ) : data ? (
           <>
             {signed && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0faf6', border: '1px solid #c5e8df', borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#eef7f2', border: '1px solid #c5e8df', borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
                 <CheckCircle2 size={18} style={{ color: '#1a7a5a' }} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#1a7a5a' }}>You&apos;ve signed this settlement. Thank you — no further action is needed.</span>
               </div>
             )}
             {!signed && (
-              <p style={{ fontSize: 13, color: '#6b6860', margin: '0 0 14px' }}>
+              <p style={{ fontSize: 13, color: '#5f6b63', margin: '0 0 14px' }}>
                 Please review your final settlement statement below, then confirm and sign at the bottom.
               </p>
             )}
@@ -155,7 +155,7 @@ export default function PortalSettlementPage() {
             {pdfUrl ? (
               <SecureDocCanvas fileUrl={pdfUrl} isImage={false} caption="Final settlement statement" watermark="" />
             ) : (
-              <div style={{ display: 'grid', placeItems: 'center', padding: '60px 0', color: '#6b6860' }}>
+              <div style={{ display: 'grid', placeItems: 'center', padding: '60px 0', color: '#5f6b63' }}>
                 <Loader2 className="animate-spin" size={22} /> <span style={{ marginTop: 8, fontSize: 12 }}>Preparing your settlement document…</span>
               </div>
             )}

@@ -52,7 +52,7 @@ export function PhotoLightbox({ photos, start, onClose }: { photos: GalleryPhoto
         <div className="flex gap-2 justify-center px-4 py-4 overflow-x-auto" onClick={e => e.stopPropagation()}>
           {photos.map((ph, k) => (
             <button key={ph.id} type="button" onClick={() => setI(k)} aria-label={`Photo ${k + 1}`}
-              className={`w-16 h-12 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer ${k === i ? 'border-[#2e9f82] opacity-100' : 'border-transparent opacity-50 hover:opacity-80'}`}>
+              className={`w-16 h-12 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer ${k === i ? 'border-[#047246] opacity-100' : 'border-transparent opacity-50 hover:opacity-80'}`}>
               {isVideoUrl(ph.url)
                 ? <video src={ph.url} muted playsInline preload="metadata" className="w-full h-full object-cover bg-black" />
                 /* eslint-disable-next-line @next/next/no-img-element */

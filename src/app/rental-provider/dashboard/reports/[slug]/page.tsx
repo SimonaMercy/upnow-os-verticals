@@ -1,6 +1,11 @@
 /**
  * RP report detail route — thin wrapper around the shared ReportDetailView
  * (also used by the manager portal with /api/manager/reports endpoints).
+ *
+ * Genspark OS: the default export frames the report in ReportShell
+ * (Insights › <report title from the catalog>). The slug dispatch below
+ * (ReportBody) is unchanged — every custom report component, ReportSheetView
+ * and the shared ReportDetailView get exactly the props they had before.
  */
 'use client';
 
@@ -19,8 +24,18 @@ import { MoveOutReasonsReport } from '@/components/upnow/MoveOutReasonsReport';
 import { OperationPlanReport } from '@/components/upnow/OperationPlanReport';
 import { MarketComparisonReport } from '@/components/upnow/MarketComparisonReport';
 import { BouncedChequesReport } from '@/components/upnow/BouncedChequesReport';
+import { ReportShell, reportName } from '../_shell';
 
 export default function ReportDetailPage() {
+  const params = useParams<{ slug: string }>();
+  return (
+    <ReportShell name={reportName(params.slug)}>
+      <ReportBody />
+    </ReportShell>
+  );
+}
+
+function ReportBody() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   // Custom interactive reports — not standard tables, so they render their own

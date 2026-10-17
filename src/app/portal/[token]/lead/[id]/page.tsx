@@ -90,8 +90,8 @@ export default function LeadReviewPage() {
     <Centered>
       <div style={{ textAlign: 'center' }}>
         <AlertTriangle style={{ margin: '0 auto 8px', color: '#b45309' }} />
-        <p style={{ fontWeight: 700, color: '#1a1916' }}>{error ?? 'Link not available'}</p>
-        <p style={{ fontSize: 13, color: '#9b9890', marginTop: 4 }}>Please ask your property manager to send a new link.</p>
+        <p style={{ fontWeight: 700, color: '#14201a' }}>{error ?? 'Link not available'}</p>
+        <p style={{ fontSize: 13, color: '#8a948d', marginTop: 4 }}>Please ask your property manager to send a new link.</p>
       </div>
     </Centered>
   );
@@ -143,7 +143,7 @@ export default function LeadReviewPage() {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#6b6860', fontSize: 13, background: '#f4f3ef', padding: 24 }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#5f6b63', fontSize: 13, background: '#eef1ef', padding: 24 }}>
       {children}
     </div>
   );
@@ -171,10 +171,10 @@ function AnswerBar({ answered, answeredAt, sending, error, onAnswer }: {
         {answered ? (
           <p style={{ fontSize: 13, fontWeight: 700, color: answered === 'approved' ? '#16a34a' : '#ef4444', margin: 0 }}>
             You {answered === 'approved' ? 'approved' : 'declined'} this application{answeredAt ? ` on ${day(answeredAt)}` : ''}.
-            <span style={{ fontWeight: 500, color: '#9b9890' }}> Your property manager has it. You can change your answer while this link is live.</span>
+            <span style={{ fontWeight: 500, color: '#8a948d' }}> Your property manager has it. You can change your answer while this link is live.</span>
           </p>
         ) : (
-          <p style={{ fontSize: 13, color: '#6b6860', margin: 0 }}>
+          <p style={{ fontSize: 13, color: '#5f6b63', margin: 0 }}>
             You&apos;ve reviewed the applicant, their documents and the payment plan above.
           </p>
         )}
@@ -183,14 +183,14 @@ function AnswerBar({ answered, answeredAt, sending, error, onAnswer }: {
       <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
         <button
           type="button" disabled={sending !== null} onClick={() => onAnswer('declined')}
-          style={{ ...btn, background: answered === 'declined' ? '#fff1f2' : '#fff', borderColor: answered === 'declined' ? '#fecaca' : '#e3e0d9', color: answered === 'declined' ? '#ef4444' : '#6b6860', opacity: sending ? 0.6 : 1 }}
+          style={{ ...btn, background: answered === 'declined' ? '#fff1f2' : '#fff', borderColor: answered === 'declined' ? '#fecaca' : '#e3e0d9', color: answered === 'declined' ? '#ef4444' : '#5f6b63', opacity: sending ? 0.6 : 1 }}
         >
           {sending === 'declined' ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
           {answered === 'declined' ? 'Declined' : 'Decline'}
         </button>
         <button
           type="button" disabled={sending !== null} onClick={() => onAnswer('approved')}
-          style={{ ...btn, background: answered === 'approved' ? '#16a34a' : '#2e9f82', color: '#fff', opacity: sending ? 0.6 : 1 }}
+          style={{ ...btn, background: answered === 'approved' ? '#16a34a' : '#047246', color: '#fff', opacity: sending ? 0.6 : 1 }}
         >
           {sending === 'approved' ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
           {answered === 'approved' ? 'Approved' : 'Approve'}

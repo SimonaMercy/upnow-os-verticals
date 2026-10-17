@@ -57,11 +57,11 @@ const dubaiYm = (iso: string): { year: number; month: number } => {
 const fmtStamp = (iso: string) =>
   new Date(iso).toLocaleString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 const gapTone = (d: number | null) =>
-  d == null ? '' : d >= 14 ? 'bg-[#fee2e2] text-[#991b1b]' : d >= 7 ? 'bg-[#fef3c7] text-[#92400e]' : 'bg-[#f4f3ef] text-[#6b6860]';
+  d == null ? '' : d >= 14 ? 'bg-[#fee2e2] text-[#991b1b]' : d >= 7 ? 'bg-[#fef3c7] text-[#92400e]' : 'bg-[#eef1ef] text-[#5f6b63]';
 const actorChip = (name: string) =>
   name === 'Customer' ? 'bg-[#fef3c7] text-[#854d0e]'
-    : name === 'Landlord' ? 'bg-[#d8f2e8] text-[#1a7a5a]'
-      : name === '—' ? 'bg-[#f4f3ef] text-[#9b9890]'
+    : name === 'Landlord' ? 'bg-[#d8efe3] text-[#1a7a5a]'
+      : name === '—' ? 'bg-[#eef1ef] text-[#8a948d]'
         : 'bg-[#e0f2fe] text-[#0369a1]';
 
 /** A clicked cell: which sheet (person or Overall), stage, and month (null = the
@@ -242,18 +242,18 @@ export function OperationsByStageReport({
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           {hideBack ? null : onBack ? (
-            <button onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm print:hidden">
+            <button onClick={onBack} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-sm print:hidden">
               <ArrowLeft size={14} /> All Reports
             </button>
           ) : (
-            <Link href={backHref ?? '/rental-provider/dashboard/reports'} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-sm print:hidden">
+            <Link href={backHref ?? '/rental-provider/dashboard/reports'} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-sm print:hidden">
               <ArrowLeft size={14} /> All Reports
             </Link>
           )}
           {!hideHeading && (
             <>
-              <h1 className="text-2xl font-bold text-[#1a1916] mt-1.5">{title}</h1>
-              <p className="text-sm text-[#6b6860] mt-0.5 max-w-[80ch]">
+              <h1 className="text-2xl font-bold text-[#14201a] mt-1.5">{title}</h1>
+              <p className="text-sm text-[#5f6b63] mt-0.5 max-w-[80ch]">
                 {data?.scoped
                   ? (subtitleScoped ?? 'The records you progressed at each stage, month by month — your own activity and operation pipeline. Signatures marked “on file” are never counted.')
                   : (subtitleTeam ?? 'Records progressed at each stage, month by month — an overall sheet for your whole account, then one per manager. Signatures marked “on file” are never counted.')}
@@ -268,13 +268,13 @@ export function OperationsByStageReport({
             value={year}
             onChange={e => setYear(Number(e.target.value))}
             aria-label="Year"
-            className="px-3 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-semibold text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+            className="px-3 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-semibold text-[#14201a] focus:outline-none focus:border-[#047246] cursor-pointer">
             {REPORT_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
-          <button onClick={downloadCsv} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82]">
+          <button onClick={downloadCsv} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246]">
             <Download size={14} /> CSV
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]">
             <Printer size={14} /> Print / PDF
           </button>
         </div>
@@ -283,11 +283,11 @@ export function OperationsByStageReport({
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[#6b6860] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 text-[#5f6b63] py-20 justify-center"><Loader2 size={18} className="animate-spin" /> Loading…</div>
       ) : error ? (
         <div className="flex items-center gap-2 text-red-700 py-16 justify-center"><AlertCircle size={16} /> {error}</div>
       ) : !data ? null : sheets.length === 0 ? (
-        <div className="mt-6 bg-white rounded-xl border border-[#e8e6e0] px-5 py-16 text-center text-sm text-[#9b9890]">
+        <div className="mt-6 bg-white rounded-xl border border-[#e4e9e5] px-5 py-16 text-center text-sm text-[#8a948d]">
           No operations activity recorded for {year}.
         </div>
       ) : (
@@ -296,20 +296,20 @@ export function OperationsByStageReport({
             <section key={sheet.userId} className="print:break-inside-avoid">
               {/* One sheet per manager. Label hidden in overallOnly (single
                   consolidated sheet — the section above already introduces it). */}
-              {!overallOnly && <h2 className="text-sm font-bold text-[#1a1916] mb-2">{sheet.name}</h2>}
+              {!overallOnly && <h2 className="text-sm font-bold text-[#14201a] mb-2">{sheet.name}</h2>}
               {/* table-fixed keeps every stage column on one page — no scroll —
                   and the long headers wrap; styling matches the other report sheets. */}
-              <div className="rounded-xl border border-[#e8e6e0] bg-white">
+              <div className="rounded-xl border border-[#e4e9e5] bg-white">
                 <table className="w-full table-fixed border-collapse text-[11px] leading-tight">
                   <colgroup>
                     <col style={{ width: '58px' }} />
                     {stages.map((_, i) => <col key={i} />)}
                   </colgroup>
                   <thead>
-                    <tr className="bg-[#faf9f6] border-b border-[#e8e6e0]">
-                      <th className="px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#9b9890] leading-[1.15] align-bottom text-left">Month</th>
+                    <tr className="bg-[#faf9f6] border-b border-[#e4e9e5]">
+                      <th className="px-2 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#8a948d] leading-[1.15] align-bottom text-left">Month</th>
                       {stages.map(s => (
-                        <th key={s} className="px-1.5 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#9b9890] leading-[1.15] align-bottom text-right break-words">
+                        <th key={s} className="px-1.5 py-1.5 font-semibold text-[10px] uppercase tracking-wide text-[#8a948d] leading-[1.15] align-bottom text-right break-words">
                           {s}
                         </th>
                       ))}
@@ -317,14 +317,14 @@ export function OperationsByStageReport({
                   </thead>
                   <tbody>
                     {sheet.monthly.map((cells, m) => (
-                      <tr key={m} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#fafaf8]">
-                        <td className="px-2 py-[5px] text-left font-semibold text-[#1a1916] whitespace-nowrap">{MONTHS[m]}-{yy}</td>
+                      <tr key={m} className="border-b border-[#f0ede8] last:border-0 hover:bg-[#f6f8f6]">
+                        <td className="px-2 py-[5px] text-left font-semibold text-[#14201a] whitespace-nowrap">{MONTHS[m]}-{yy}</td>
                         {cells.map((v, i) => (
                           <td key={i} className={`px-1.5 py-[5px] text-right tabular-nums ${v ? 'text-[#4a4742]' : 'text-[#c8c6c0]'}`}>
                             {v ? (
                               <button
                                 onClick={() => setDrill({ userId: sheet.userId < 0 ? null : sheet.userId, who: sheet.userId < 0 ? 'Overall' : sheet.name, stage: stages[i], month: m, count: v })}
-                                className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer print:no-underline print:text-[#4a4742]"
+                                className="font-semibold text-[#1a7a5a] underline decoration-dotted underline-offset-2 hover:text-[#047246] cursor-pointer print:no-underline print:text-[#4a4742]"
                                 title="See the records behind this number">
                                 {v}
                               </button>
@@ -335,14 +335,14 @@ export function OperationsByStageReport({
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr className="bg-[#faf9f6] border-t-2 border-[#e8e6e0] font-bold text-[#1a1916]">
+                    <tr className="bg-[#faf9f6] border-t-2 border-[#e4e9e5] font-bold text-[#14201a]">
                       <td className="px-2 py-1.5 text-left whitespace-nowrap">Year total</td>
                       {sheet.monthlyTotals.map((v, i) => (
                         <td key={i} className="px-1.5 py-1.5 text-right tabular-nums">
                           {v ? (
                             <button
                               onClick={() => setDrill({ userId: sheet.userId < 0 ? null : sheet.userId, who: sheet.userId < 0 ? 'Overall' : sheet.name, stage: stages[i], month: null, count: v })}
-                              className="underline decoration-dotted underline-offset-2 hover:text-[#2e9f82] cursor-pointer print:no-underline"
+                              className="underline decoration-dotted underline-offset-2 hover:text-[#047246] cursor-pointer print:no-underline"
                               title="See the records behind this number">
                               {v}
                             </button>
@@ -366,33 +366,33 @@ export function OperationsByStageReport({
             onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-[#f0ede8] px-5 py-3.5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-[#1a1916]">
+                <h3 className="text-sm font-bold text-[#14201a]">
                   {drill.who} — {drill.stage}
-                  <span className="text-[#9b9890] font-medium"> · {drill.month == null ? year : `${MONTHS[drill.month]} ${year}`}</span>
+                  <span className="text-[#8a948d] font-medium"> · {drill.month == null ? year : `${MONTHS[drill.month]} ${year}`}</span>
                 </h3>
-                <p className="text-xs text-[#6b6860] mt-0.5">
+                <p className="text-xs text-[#5f6b63] mt-0.5">
                   {drillData.length} record{drillData.length === 1 ? '' : 's'}
                   {drillData.length < drill.count ? ` · behind ${drill.count} action${drill.count === 1 ? '' : 's'} (a record worked on more than one day counts each time)` : ''}
                   {drill.userId == null ? ' · full history with step durations' : ` · ${drill.who}’s own steps`}
                 </p>
               </div>
-              <button onClick={() => setDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#9b9890] hover:bg-[#f4f3ef] hover:text-[#1a1916]">
+              <button onClick={() => setDrill(null)} className="w-7 h-7 rounded-lg grid place-items-center text-[#8a948d] hover:bg-[#eef1ef] hover:text-[#14201a]">
                 <X size={15} />
               </button>
             </div>
             {drillData.length === 0 ? (
-              <p className="px-5 py-10 text-sm text-[#9b9890] text-center">
+              <p className="px-5 py-10 text-sm text-[#8a948d] text-center">
                 The detail behind this number is older than the loaded window — narrow the period to see it.
               </p>
             ) : drillData.map((r, ri) => (
               <div key={ri} className="border-t border-[#f0ede8] first:border-t-0">
-                <div className="px-5 py-2.5 bg-[#fafaf8] flex items-center gap-3 flex-wrap">
-                  <span className="text-sm font-bold text-[#1a1916]">{r.label}</span>
-                  {r.journey && <span className="text-xs text-[#9b9890]">{r.journey.kind} · {r.journey.spanDays}d start to latest</span>}
+                <div className="px-5 py-2.5 bg-[#f6f8f6] flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-bold text-[#14201a]">{r.label}</span>
+                  {r.journey && <span className="text-xs text-[#8a948d]">{r.journey.kind} · {r.journey.spanDays}d start to latest</span>}
                   {(r.contractId ?? r.leadId) != null && (
                     <Link
                       href={r.contractId != null ? `${contractsBase}/${r.contractId}/v2` : `${leadsBase}/${r.leadId}`}
-                      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">
+                      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">
                       Open <ExternalLink size={11} />
                     </Link>
                   )}
@@ -400,17 +400,17 @@ export function OperationsByStageReport({
                 {/* The person's own action time(s) at this stage — visible even when
                     the journey milestones are other people's steps. */}
                 {drill.userId != null && r.times.length > 0 && (
-                  <div className="px-5 py-1.5 text-[11px] bg-[#f0faf6] text-[#1a7a5a] border-t border-[#f7f5f1]">
+                  <div className="px-5 py-1.5 text-[11px] bg-[#eef7f2] text-[#1a7a5a] border-t border-[#f7f5f1]">
                     Counted for {drill.who} — worked this stage {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                   </div>
                 )}
                 {r.visibleEvents.length > 0 ? r.visibleEvents.map((e, i) => {
                   const mine = r.times.some(t2 => Math.abs(new Date(t2).getTime() - new Date(e.at).getTime()) < 60_000);
                   return (
-                    <div key={i} className={`px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm ${mine ? 'bg-[#f0faf6]' : ''}`}>
-                      <span className="text-[11px] text-[#9b9890] tabular-nums w-28 shrink-0">{fmtStamp(e.at)}</span>
+                    <div key={i} className={`px-5 py-2 flex items-center gap-3 border-t border-[#f7f5f1] text-sm ${mine ? 'bg-[#eef7f2]' : ''}`}>
+                      <span className="text-[11px] text-[#8a948d] tabular-nums w-28 shrink-0">{fmtStamp(e.at)}</span>
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${actorChip(e.actor)}`}>{e.actor}</span>
-                      <span className="text-[#1a1916] font-medium">{e.label}</span>
+                      <span className="text-[#14201a] font-medium">{e.label}</span>
                       {e.gapDays != null && (
                         <span className={`ml-auto inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums shrink-0 ${gapTone(e.gapDays)}`}
                           title="Days since the previous step shown">
@@ -420,7 +420,7 @@ export function OperationsByStageReport({
                     </div>
                   );
                 }) : (
-                  <div className="px-5 py-2.5 text-sm text-[#6b6860]">
+                  <div className="px-5 py-2.5 text-sm text-[#5f6b63]">
                     Worked at {r.times.map(t2 => fmtStamp(t2)).join(' · ')}
                     {(r.contractId ?? r.leadId) != null ? ' — open the record for its full history.' : '.'}
                   </div>

@@ -1,26 +1,31 @@
 'use client';
 
 /**
- * Admin pipeline boards (SP-260) — the breadth view: the SAME four pipelines
- * and eleven stages the provider sees (shared stage model via
- * SpOperationsPipelines adminLens), spanning every provider, with area
- * (emirate) allocation, provider/category filters, and a live provider-load
- * strip (active jobs vs max_concurrent_jobs). Cards deep-link into the
- * SP-257 per-booking drill-down. Actions (assign/reassign) stay on the
+ * Admin › Operations › Pipeline boards (SP-260) — the breadth view: the SAME four pipelines
+ * and eleven stages the provider sees (shared stage model via SpOperationsPipelines
+ * adminLens), spanning every provider, with area (emirate) allocation, provider/category
+ * filters, and a live provider-load strip (active jobs vs max_concurrent_jobs). Cards
+ * deep-link into the SP-257 per-booking drill-down. Actions (assign/reassign) stay on the
  * dispatch queue and the drill-down — this surface is oversight.
+ *
+ * Parity with previous page (every item kept):
+ *  - GET /api/bookings (array or { data }) and GET /api/bookings/providers — both
+ *    failure-tolerant (empty lists) — for the provider-load strip.
+ *  - Provider load: active = assigned / en_route / in_progress per provider; only providers
+ *    with live jobs or job-ready; busiest first, then name; "N active / cap max",
+ *    "at capacity" (active ≥ cap), "not job-ready". Now a kit table with pills.
+ *  - <SlaBreachStrip/> (SP-253) — REUSED unchanged.
+ *  - <SpOperationsPipelines adminLens bookingsPath="/bookings"
+ *    bookingHref={(id) => /dashboard/admin/operations/:id}/> — REUSED unchanged (it owns the
+ *    boards, area allocation, provider/category filters).
+ *  - "← Dispatch queue" link → /dashboard/admin/operations (now a labelled head action).
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { apiGet } from '@/lib/api';
 import SpOperationsPipelines from '@/components/upnow/SpOperationsPipelines';
 import { SlaBreachStrip } from '@/components/upnow/SlaBreachStrip';
-
-const PRIMARY = '#2e9f82';
-const INK = '#1a1916';
-const MUTE = '#6b6860';
-const FAINT = '#9b9890';
-const BORDER = '1px solid #ececea';
+import { Btn, Card, OsPage, PageHead, Pill, ScopeStrip } from '@/components/os/kit';
 
 interface LoadBooking { id: number; status: string; serviceProviderId: number | null }
 interface Provider { id: number; businessName: string; compliant: boolean; jobReady: boolean; maxConcurrentJobs: number | null; technicians: { id: number; name: string }[] }
@@ -38,9 +43,7 @@ export default function AdminPipelinesPage() {
     ]).then(([b, p]) => { setBookings(b); setProviders(p); });
   }, []);
 
-  // Live load per provider: jobs currently on the road vs their concurrency
-  // ceiling. Busiest first; only providers with at least one live or possible
-  // job (job-ready or loaded) earn a card.
+  // Live load per provider: jobs currently on the road vs their concurrency ceiling.
   const load = useMemo(() => {
     const counts = new Map<number, number>();
     for (const b of bookings) {
@@ -53,48 +56,61 @@ export default function AdminPipelinesPage() {
       .filter((p) => p.active > 0 || p.jobReady)
       .sort((a, b) => b.active - a.active || a.businessName.localeCompare(b.businessName));
   }, [bookings, providers]);
+  const atCap = load.filter((p) => p.maxConcurrentJobs != null && p.active >= p.maxConcurrentJobs).length;
 
   return (
-    <div>
-      <div style={{ maxWidth: 1080, margin: '0 auto', padding: '8px 4px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <Link href="/dashboard/admin/operations" style={{ fontSize: 12.5, color: PRIMARY, fontWeight: 600 }}>← Dispatch queue</Link>
+    <OsPage>
+      <PageHead
+        eyebrow="Admin › Operations"
+        title="Pipeline boards"
+        lede="Every provider's jobs on the same stage model the provider sees — oversight only. Assign and reassign from the dispatch queue or the job drill-down."
+        actions={<Btn href="/dashboard/admin/operations">Dispatch queue</Btn>}
+      />
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Operations' },
+        { label: 'Vertical', value: 'Home services' },
+        { label: 'Providers on load', value: load.length },
+        { label: 'At capacity', value: atCap },
+      ]} />
+
+      {/* SP-253 · needs attention: SLA breaches recorded by the minute cron */}
+      <SlaBreachStrip />
+
+      {load.length > 0 && (
+        <div style={{ margin: '14px 0' }}>
+          <Card title="Provider load" sub="Live jobs vs capacity — busiest first">
+            <div className="gx-tbl-scroll">
+              <table className="gx-tbl">
+                <thead><tr><th>Provider</th><th className="num">Active</th><th className="num">Max concurrent</th><th>State</th></tr></thead>
+                <tbody>
+                  {load.map((p) => {
+                    const cap = p.maxConcurrentJobs;
+                    const over = cap != null && p.active >= cap;
+                    return (
+                      <tr key={p.id}>
+                        <td className="strong">{p.businessName}</td>
+                        <td className="num">{p.active}</td>
+                        <td className="num">{cap ?? '—'}</td>
+                        <td className="nowrap">
+                          {over ? <Pill tone="danger">At capacity</Pill> : <Pill tone="primary">Has capacity</Pill>}
+                          {!p.jobReady && <> <Pill tone="amber">Not job-ready</Pill></>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </div>
+      )}
 
-        {/* SP-253 · needs attention: SLA breaches recorded by the minute cron */}
-        <SlaBreachStrip />
-
-        {load.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: FAINT }}>
-              Provider load — live jobs vs capacity
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-              {load.map((p) => {
-                const cap = p.maxConcurrentJobs;
-                const over = cap != null && p.active >= cap;
-                return (
-                  <div key={p.id} style={{ border: BORDER, borderRadius: 12, padding: '8px 13px', background: '#fff', borderColor: over ? '#f3c6c6' : '#ececea' }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>{p.businessName}</div>
-                    <div style={{ fontSize: 11.5, color: over ? '#b42318' : MUTE, marginTop: 1 }}>
-                      {p.active} active{cap != null ? ` / ${cap} max` : ''}{over ? ' · at capacity' : ''}
-                      {!p.jobReady ? ' · not job-ready' : ''}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* The shared stage model — identical pipelines/stage names to the
-          provider board, so both sides call the same thing the same name. */}
+      {/* The shared stage model — identical pipelines/stage names to the provider board. */}
       <SpOperationsPipelines
         adminLens
         bookingsPath="/bookings"
         bookingHref={(id) => `/dashboard/admin/operations/${id}`}
       />
-    </div>
+    </OsPage>
   );
 }

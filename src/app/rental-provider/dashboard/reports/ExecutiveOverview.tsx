@@ -53,7 +53,7 @@ interface ExecutiveSummary {
   };
 }
 
-const GREEN = '#2e9f82';
+const GREEN = '#047246';
 const AMBER = '#d97706';
 const RED = '#dc2626';
 const GRAY = '#d4d2cc';
@@ -75,14 +75,14 @@ function KpiTile({ icon: Icon, label, value, sub, tone = 'neutral' }: {
   tone?: 'neutral' | 'good' | 'bad' | 'warn';
 }) {
   const valueCls =
-    tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#1a1916]';
+    tone === 'bad' ? 'text-[#b91c1c]' : tone === 'warn' ? 'text-[#b45309]' : tone === 'good' ? 'text-[#1a7a5a]' : 'text-[#14201a]';
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3.5">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3.5">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">
         <Icon size={12} /> {label}
       </div>
       <p className={`text-xl font-bold mt-1.5 leading-none ${valueCls}`}>{value}</p>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-1.5">{sub}</p>}
+      {sub && <p className="text-[11px] text-[#8a948d] mt-1.5">{sub}</p>}
     </div>
   );
 }
@@ -101,16 +101,16 @@ function ExceptionChip({ href, severity, children }: { href: string; severity: '
 
 function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] p-4 print:break-inside-avoid">
-      <h3 className="text-sm font-bold text-[#1a1916]">{title}</h3>
-      {sub && <p className="text-[11px] text-[#9b9890] mt-0.5 mb-2">{sub}</p>}
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] p-4 print:break-inside-avoid">
+      <h3 className="text-sm font-bold text-[#14201a]">{title}</h3>
+      {sub && <p className="text-[11px] text-[#8a948d] mt-0.5 mb-2">{sub}</p>}
       <div className="mt-2">{children}</div>
     </div>
   );
 }
 
 const tooltipStyle = {
-  borderRadius: 12, border: '1px solid #e8e6e0', fontSize: 12,
+  borderRadius: 12, border: '1px solid #e4e9e5', fontSize: 12,
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
 };
 
@@ -154,9 +154,9 @@ export default function ExecutiveOverview({
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl border border-[#e8e6e0] p-10 flex items-center justify-center mb-8">
-        <Loader2 size={18} className="animate-spin text-[#2e9f82]" />
-        <span className="ml-2 text-sm text-[#6b6860]">Loading overview…</span>
+      <div className="bg-white rounded-2xl border border-[#e4e9e5] p-10 flex items-center justify-center mb-8">
+        <Loader2 size={18} className="animate-spin text-[#047246]" />
+        <span className="ml-2 text-sm text-[#5f6b63]">Loading overview…</span>
       </div>
     );
   }
@@ -183,8 +183,8 @@ export default function ExecutiveOverview({
     <div className="mb-10">
       {/* Scope note — the headline tiles are a live snapshot; the Year filter
           only scopes the time-based figures (cashflow chart + collection rate). */}
-      <p className="text-[11px] text-[#9b9890] mb-2">
-        Headline tiles are a live snapshot <span className="font-semibold text-[#6b6860]">as of today</span> — occupancy, rent roll, arrears and balances have no year. The <span className="font-semibold text-[#6b6860]">Year</span> filter scopes the cashflow &amp; collection figures below and the default period each report opens with.
+      <p className="text-[11px] text-[#8a948d] mb-2">
+        Headline tiles are a live snapshot <span className="font-semibold text-[#5f6b63]">as of today</span> — occupancy, rent roll, arrears and balances have no year. The <span className="font-semibold text-[#5f6b63]">Year</span> filter scopes the cashflow &amp; collection figures below and the default period each report opens with.
       </p>
       {/* KPI tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
@@ -227,7 +227,7 @@ export default function ExecutiveOverview({
           </ExceptionChip>
         )}
         {!anyException && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#bbe5d6] bg-[#f0faf6] text-xs font-semibold text-[#1a7a5a]">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#bbe5d6] bg-[#eef7f2] text-xs font-semibold text-[#1a7a5a]">
             <CheckCircle2 size={12} /> No exceptions — portfolio is clean
           </span>
         )}
@@ -240,9 +240,9 @@ export default function ExecutiveOverview({
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={charts.cashflowByMonth} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={48} />
-              <Tooltip formatter={aedTooltip} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={aedTooltip} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} iconSize={9} />
               <Bar dataKey="collectedFils" name="Collected" stackId="m" fill={GREEN} radius={[0, 0, 0, 0]} />
               <Bar dataKey="overdueFils" name="Overdue" stackId="m" fill={RED} />
@@ -257,12 +257,12 @@ export default function ExecutiveOverview({
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={charts.renewalsByMonth} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9b9890' }} axisLine={false} tickLine={false} interval={0} angle={-30} textAnchor="end" height={48} />
-              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={48} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8a948d' }} axisLine={false} tickLine={false} interval={0} angle={-30} textAnchor="end" height={48} />
+              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={48} />
               <Tooltip
                 formatter={aedTooltipAs('Annual rent')}
                 labelFormatter={renewalTooltipLabel}
-                contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+                contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
               <Bar dataKey="annualRentFils" name="Annual rent" radius={[3, 3, 0, 0]}>
                 {charts.renewalsByMonth.map((r, i) => (
                   <Cell key={i} fill={r.overdue ? RED : GREEN} />
@@ -277,9 +277,9 @@ export default function ExecutiveOverview({
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={charts.agingBuckets} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
-              <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} width={48} />
-              <Tooltip formatter={aedTooltipAs('Outstanding')} contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+              <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} />
+              <YAxis tickFormatter={v => fmtAedShort(v)} tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip formatter={aedTooltipAs('Outstanding')} contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
               <Bar dataKey="amountFils" name="Outstanding" radius={[3, 3, 0, 0]}>
                 {charts.agingBuckets.map((b, i) => (
                   <Cell key={i} fill={['#fbbf24', '#f59e0b', '#ea580c', '#dc2626', '#7f1d1d'][i] ?? AMBER} />
@@ -293,9 +293,9 @@ export default function ExecutiveOverview({
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={occData} layout="vertical" margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: '#9b9890' }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="short" tick={{ fontSize: 10, fill: '#6b6860' }} axisLine={false} tickLine={false} width={120} />
-              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#fafaf8' }} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#8a948d' }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="short" tick={{ fontSize: 10, fill: '#5f6b63' }} axisLine={false} tickLine={false} width={120} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ fill: '#f6f8f6' }} />
               <Legend wrapperStyle={{ fontSize: 11 }} iconSize={9} />
               <Bar dataKey="occupied" name="Occupied" stackId="o" fill={GREEN} />
               <Bar dataKey="vacant" name="Vacant" stackId="o" fill={GRAY} radius={[0, 3, 3, 0]} />

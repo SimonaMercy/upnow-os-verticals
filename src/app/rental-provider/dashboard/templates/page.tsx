@@ -10,13 +10,40 @@
  *   1. POST /api/addendum-templates/upload-url  → presigned S3 URL
  *   2. PUT  <uploadUrl> with binary body
  *   3. POST /api/addendum-templates             → register the template
+ *
+ * Genspark OS rebuild — "Settings › Templates". Parity with previous page:
+ *  - TemplatesWorkspace stays a named export with the same `manager?: { rp }` prop —
+ *    /dashboard/manager/templates renders it (scoped endpoints /manager/templates?rp=,
+ *    canManageTemplates gate in that route; canManageLegal gates Breach/Legal here).
+ *  - GET  tplUrl()            — list (loading skeleton, error callout + "Try again", empty
+ *                               state with "Write your first addendum").
+ *  - POST tplUrl()            — NewTemplateModal (name, description, terms, default
+ *                               category + sub-category) — reused unchanged.
+ *  - PATCH tplUrl('/:id')     — EditTemplateModal (in-use → "Save as new version" + alert)
+ *                               — reused unchanged; terms templates only.
+ *  - DELETE tplUrl('/:id')    — "Remove" with the same confirm() + alert on failure.
+ *  - Preview: terms → AddendumPreviewModal; file → opens fileUrl in a new tab.
+ *  - Download: downloadAddendumPdf (terms) / downloadAddendumFile (file), one at a time.
+ *  - Tabs (now a kit Seg): Addendum · Move-in / Move-out · Breach · Legal (the last two
+ *    only when showLegalTabs; permission notice otherwise). ?tab= deep-link and the
+ *    remembered tab (localStorage templatesTab) kept.
+ *  - Rows / Grid view toggle (now labelled Seg), remembered in addendumTemplatesView.
+ *  - Columns: Name (+ description, original filename), Type (Terms / PDF / DOCX),
+ *    Default for (category › sub-category), Uploaded, In-use pill.
+ *  - Head action per tab: "New addendum" / "New move template" / none (legal tabs).
+ *  - MoveTemplatesTab and TemplateStudio reused unchanged (rendered outside the .gx
+ *    scope so gx.css resets don't restyle them).
+ *  - Category selects in both modals remain SPACE_CATEGORIES (mixed-use included).
+ *  - There is no duplicate action in the API/UI, so none is shown.
  */
 'use client';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 import { useEffect, useState } from 'react';
-import { FileText, Trash2, Loader2, AlertCircle, Plus, ExternalLink, Star, PenLine, FileType2, Pencil, Lock, ClipboardCheck, LayoutGrid, Rows3, Download, Scale, ShieldAlert } from 'lucide-react';
-import { DashboardPage } from '@/components/dashboard/DashboardWidgets';
+import { Loader2, AlertCircle, Plus, Lock } from 'lucide-react';
+import {
+  OsPage, PageHead, Seg, TableWrap, Pill, Btn, Callout, SkeletonRows, ErrorRow,
+} from '@/components/os/kit';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { SPACE_CATEGORIES, categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
 import { unitTypesForCategory, UNIT_TYPE_LABELS } from '@/components/upnow/UnitFormModal';
@@ -137,231 +164,148 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
     }
   }
 
+  const fmtUploaded = (d: string) =>
+    new Date(d).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' });
+
+  const tabOptions: { v: TemplatesTab; l: string; n?: number }[] = [
+    { v: 'addendum', l: 'Addendum', n: loading ? undefined : templates.length },
+    { v: 'move', l: 'Move-in / Move-out' },
+    ...(showLegalTabs ? [{ v: 'breach' as const, l: 'Breach' }, { v: 'legal' as const, l: 'Legal' }] : []),
+  ];
+
+  /** Labelled row / card actions — only the ones the template supports. */
+  const actionsFor = (t: AddendumTemplate) => (
+    <>
+      {t.terms && <Btn size="xs" onClick={() => setPreviewTpl(t)}>Preview</Btn>}
+      {t.fileUrl && <Btn size="xs" href={t.fileUrl} target="_blank">Preview</Btn>}
+      {t.terms && <Btn size="xs" onClick={() => setEditTpl(t)}>Edit</Btn>}
+      <Btn size="xs" onClick={() => handleDownload(t)} disabled={downloadingId != null}>
+        {downloadingId === t.id ? <><Loader2 size={11} className="animate-spin" aria-hidden /> Downloading…</> : 'Download'}
+      </Btn>
+      <Btn size="xs" variant="danger" onClick={() => handleDelete(t.id)}>Remove</Btn>
+    </>
+  );
+  const typeLabel = (t: AddendumTemplate) => (t.terms ? 'Terms' : mimeLabel(t.mimeType ?? ''));
+  const inUsePill = <Pill tone="info" title="Used on a contract — editing creates a new version">In use</Pill>;
+
+  const emptyState = (
+    <div className="gx-empty">
+      <b>No templates yet</b>
+      Write an addendum once and reuse it — set it as the default for a category and it pre-fills new layouts.
+      <div style={{ marginTop: 10 }}><Btn variant="primary" onClick={() => setShowForm(true)}>Write your first addendum</Btn></div>
+    </div>
+  );
+
   return (
-    <DashboardPage
-      title="Templates"
-      subtitle="Reusable templates for your contracts. Addendum terms attach to a contract; move templates drive move-in / move-out inspections."
-      actions={
-        tab === 'legal' || tab === 'breach' ? null : tab === 'addendum' ? (
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
-          >
-            <Plus size={16} /> New addendum
-          </button>
-        ) : (
-          <button
-            onClick={() => setShowMoveEditor(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
-          >
-            <Plus size={16} /> New move template
-          </button>
-        )
-      }
-    >
-      {/* Tab switcher */}
-      <div className="mb-5 inline-flex rounded-xl border border-[#e8e6e0] bg-[#f4f3ef] p-1">
-        <button
-          onClick={() => selectTab('addendum')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'addendum' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
-        >
-          <FileText size={14} /> Addendum
-        </button>
-        <button
-          onClick={() => selectTab('move')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'move' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
-        >
-          <ClipboardCheck size={14} /> Move-in / Move-out
-        </button>
-        {showLegalTabs && (<>
-        <button
-          onClick={() => selectTab('breach')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'breach' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
-        >
-          <ShieldAlert size={14} /> Breach
-        </button>
-        <button
-          onClick={() => selectTab('legal')}
-          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition ${tab === 'legal' ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium hover:text-[#1a1916]'}`}
-        >
-          <Scale size={14} /> Legal
-        </button>
-        </>)}
-      </div>
-
-      {(tab === 'legal' || tab === 'breach') && !showLegalTabs ? (
-        <div className="rounded-xl border border-[#e8e6e0] bg-white px-5 py-8 text-center text-sm text-[#6b6860]">This landlord hasn’t granted you the <strong>legal</strong> permission, so their letter templates aren’t available.</div>
-      ) : tab === 'legal' || tab === 'breach' ? (
-        <TemplateStudio key={tab} manager={manager} group={tab} />
-      ) : tab === 'move' ? (
-        <MoveTemplatesTab manager={manager} createOpen={showMoveEditor} onCloseCreate={() => setShowMoveEditor(false)} />
-      ) : (
-      <>
-      {err && (
-        <div className="mb-5 rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200 flex items-start gap-2">
-          <AlertCircle size={15} className="mt-0.5 shrink-0" />{err}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center gap-2 py-12 justify-center text-[#6b6860]">
-          <Loader2 size={18} className="animate-spin" /> <span className="text-sm">Loading…</span>
-        </div>
-      ) : templates.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 shadow-sm flex flex-col items-center justify-center text-center border border-[#e8e6e0]">
-          <div className="w-14 h-14 rounded-full bg-[#d8f2e8] flex items-center justify-center mb-4">
-            <FileText size={24} className="text-[#2e9f82]" />
-          </div>
-          <h3 className="font-semibold text-[#1a1916] mb-1">No templates yet</h3>
-          <p className="text-sm text-[#6b6860] max-w-xs mb-4">
-            Write an addendum once and reuse it — set it as the default for a category and it pre-fills new layouts.
-          </p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f]"
-          >
-            <PenLine size={14} /> Write your first addendum
-          </button>
-        </div>
-      ) : (
-        <>
-        {/* Toolbar: count + grid/row toggle */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-[#9b9890]">{templates.length} template{templates.length === 1 ? '' : 's'}</span>
-          <div className="inline-flex" style={{ background: '#fff', border: '1px solid #e8e6e0', borderRadius: 11, padding: 4, gap: 3 }}>
-            {([['grid', LayoutGrid, 'Grid'], ['row', Rows3, 'Rows']] as const).map(([v, Icon, label]) => (
-              <button key={v} onClick={() => selectAddView(v)} title={`${label} view`} aria-label={`${label} view`} aria-pressed={addView === v}
-                className="flex items-center justify-center"
-                style={{ width: 34, height: 34, borderRadius: 8, ...(addView === v ? { background: '#2e9f82', color: '#fff' } : { color: '#9b9890' }) }}>
-                <Icon size={17} />
-              </button>
-            ))}
-          </div>
+    <>
+      <OsPage className={tab === 'addendum' ? undefined : 'pb-0!'}>
+        <PageHead
+          eyebrow="Settings › Templates"
+          title="Templates"
+          lede="Reusable templates for your contracts. Addendum terms attach to a contract; move templates drive move-in / move-out inspections."
+          actions={
+            tab === 'legal' || tab === 'breach' ? null : tab === 'addendum'
+              ? <Btn variant="primary" onClick={() => setShowForm(true)}><Plus size={13} aria-hidden /> New addendum</Btn>
+              : <Btn variant="primary" onClick={() => setShowMoveEditor(true)}><Plus size={13} aria-hidden /> New move template</Btn>
+          }
+        />
+        <div style={{ marginBottom: 14 }}>
+          <Seg<TemplatesTab> label="Template type" value={tab} options={tabOptions} onChange={selectTab} />
         </div>
 
-        {addView === 'grid' ? (
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-            {templates.map(t => (
-              <div key={t.id} className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] p-4 flex flex-col">
-                <div className="flex items-start gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-lg bg-[#d8f2e8] flex items-center justify-center shrink-0">
-                    {t.terms ? <FileType2 size={16} className="text-[#2e9f82]" /> : <FileText size={16} className="text-[#2e9f82]" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-[#1a1916] leading-tight">{t.name}</p>
-                    {t.description && <p className="text-xs text-[#9b9890] mt-0.5 line-clamp-2">{t.description}</p>}
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5 mb-3">
-                  <span className="px-2 py-0.5 rounded-md bg-[#f4f3ef] text-[#6b6860] text-[11px]">{t.terms ? 'Terms' : mimeLabel(t.mimeType ?? '')}</span>
-                  {defaultLabel(t.spaceCategory, t.unitType) && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fef3c7] text-[#b45309] font-medium text-[11px]">
-                      <Star size={10} className="fill-[#b45309]" /> {defaultLabel(t.spaceCategory, t.unitType)}
-                    </span>
-                  )}
-                  {t.inUse && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#eef2ff] text-[#4f46e5] text-[10px] font-medium"><Lock size={10} /> In use</span>
-                  )}
-                </div>
-                <div className="mt-auto flex items-center justify-between pt-2 border-t border-[#f4f3ef]">
-                  <span className="text-[11px] text-[#9b9890]">{new Date(t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                  <div className="flex items-center gap-1">
-                    {t.terms && <button onClick={() => setPreviewTpl(t)} title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></button>}
-                    {t.fileUrl && <a href={t.fileUrl} target="_blank" rel="noopener noreferrer" title="Preview" className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6]"><ExternalLink size={15} /></a>}
-                    <button onClick={() => handleDownload(t)} title="Download PDF" disabled={downloadingId != null} className="p-1.5 rounded-lg text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-50">
-                      {downloadingId === t.id ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                    </button>
-                    {t.terms && <button onClick={() => setEditTpl(t)} title="Edit" className="p-1.5 rounded-lg text-[#1a1916] hover:bg-[#f4f3ef]"><Pencil size={14} /></button>}
-                    <button onClick={() => handleDelete(t.id)} title="Remove" className="p-1.5 rounded-lg text-[#dc2626] hover:bg-red-50"><Trash2 size={14} /></button>
-                  </div>
-                </div>
+        {(tab === 'legal' || tab === 'breach') && !showLegalTabs && (
+          <Callout tone="info">This landlord hasn’t granted you the <strong>legal</strong> permission, so their letter templates aren’t available.</Callout>
+        )}
+
+        {tab === 'addendum' && (
+          <>
+            {err && (
+              <div style={{ marginBottom: 12 }}>
+                <Callout tone="bad" title="Couldn't load templates.">
+                  {err} <Btn size="xs" onClick={() => void fetchAll()}>Try again</Btn>
+                </Callout>
               </div>
-            ))}
-          </div>
-        ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-[#e8e6e0] overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-[#f9f8f6] border-b border-[#e8e6e0]">
-              <tr>
-                <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Name</th>
-                <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Type</th>
-                <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Default for</th>
-                <th className="text-left px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Uploaded</th>
-                <th className="text-right px-4 py-3 font-semibold text-[#6b6860] text-xs uppercase tracking-wide">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.map(t => (
-                <tr key={t.id} className="border-b border-[#f4f3ef] last:border-b-0 hover:bg-[#fafaf8]">
-                  <td className="px-4 py-3">
-                    <div className="flex items-start gap-2">
-                      {t.terms ? <FileType2 size={16} className="text-[#2e9f82] mt-0.5 shrink-0" /> : <FileText size={16} className="text-[#2e9f82] mt-0.5 shrink-0" />}
-                      <div className="min-w-0">
-                        <p className="font-semibold text-[#1a1916]">{t.name}</p>
-                        {t.description && <p className="text-xs text-[#9b9890] mt-0.5">{t.description}</p>}
-                        {t.originalFilename && <p className="text-[10px] text-[#c0bdb8] mt-0.5 font-mono">{t.originalFilename}</p>}
+            )}
+            <TableWrap
+              toolbar={<>
+                <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>
+                  {loading ? 'Loading…' : `${templates.length} template${templates.length === 1 ? '' : 's'}`}
+                </span>
+                <span className="sp" />
+                <Seg<'grid' | 'row'> label="Layout" value={addView} onChange={selectAddView}
+                  options={[{ v: 'row', l: 'Rows' }, { v: 'grid', l: 'Grid' }]} />
+              </>}
+            >
+              {addView === 'row' || loading || templates.length === 0 ? (
+                <table className="gx-tbl" style={{ minWidth: 880 }}>
+                  <thead>
+                    <tr><th>Name</th><th>Type</th><th>Default for</th><th>Uploaded</th><th className="act">Actions</th></tr>
+                  </thead>
+                  {loading ? <SkeletonRows rows={4} cols={5} />
+                    : templates.length === 0 ? (err ? <ErrorRow cols={5} onRetry={() => void fetchAll()} /> : <tbody><tr><td colSpan={5}>{emptyState}</td></tr></tbody>)
+                    : (
+                      <tbody>
+                        {templates.map((t) => (
+                          <tr key={t.id}>
+                            <td>
+                              <div className="strong">{t.name}</div>
+                              {t.description && <div className="sub">{t.description}</div>}
+                              {t.originalFilename && <div className="sub mono">{t.originalFilename}</div>}
+                            </td>
+                            <td><Pill tone="neutral" dot={false}>{typeLabel(t)}</Pill></td>
+                            <td>{defaultLabel(t.spaceCategory, t.unitType) ? <Pill tone="amber">Default · {defaultLabel(t.spaceCategory, t.unitType)}</Pill> : '—'}</td>
+                            <td className="nowrap">{fmtUploaded(t.createdAt)}</td>
+                            <td className="act">
+                              <div className="gx-btn-row" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                                {t.inUse && inUsePill}
+                                {actionsFor(t)}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    )}
+                </table>
+              ) : (
+                <div style={{ display: 'grid', gap: 12, padding: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+                  {templates.map((t) => (
+                    <div key={t.id} className="gx-card" style={{ padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div>
+                        <h4 style={{ fontSize: 13 }}>{t.name}</h4>
+                        {t.description && <p style={{ fontSize: 11.5, color: 'var(--ms-ink-3)', marginTop: 2 }}>{t.description}</p>}
+                      </div>
+                      <div className="gx-chips">
+                        <Pill tone="neutral" dot={false}>{typeLabel(t)}</Pill>
+                        {defaultLabel(t.spaceCategory, t.unitType) && <Pill tone="amber">Default · {defaultLabel(t.spaceCategory, t.unitType)}</Pill>}
+                        {t.inUse && inUsePill}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--ms-ink-3)' }}>Uploaded {fmtUploaded(t.createdAt)}</div>
+                      <div className="gx-btn-row" style={{ marginTop: 'auto', paddingTop: 8, borderTop: '1px solid var(--ms-surface-3)' }}>
+                        {actionsFor(t)}
                       </div>
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#6b6860]">{t.terms ? 'Terms' : mimeLabel(t.mimeType ?? '')}</td>
-                  <td className="px-4 py-3 text-xs">
-                    {defaultLabel(t.spaceCategory, t.unitType) ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fef3c7] text-[#b45309] font-medium">
-                        <Star size={11} className="fill-[#b45309]" /> {defaultLabel(t.spaceCategory, t.unitType)}
-                      </span>
-                    ) : (
-                      <span className="text-[#c0bdb8]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#6b6860]">
-                    {new Date(t.createdAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      {t.inUse && (
-                        <span title="Used on a contract — editing creates a new version"
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#eef2ff] text-[#4f46e5] text-[10px] font-medium">
-                          <Lock size={10} /> In use
-                        </span>
-                      )}
-                      {t.terms && (
-                        <button onClick={() => setPreviewTpl(t)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
-                          <ExternalLink size={12} /> Preview
-                        </button>
-                      )}
-                      {t.terms && (
-                        <button onClick={() => setEditTpl(t)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#1a1916] hover:bg-[#f4f3ef]">
-                          <Pencil size={12} /> Edit
-                        </button>
-                      )}
-                      {t.fileUrl && (
-                        <a href={t.fileUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6]">
-                          <ExternalLink size={12} /> Preview
-                        </a>
-                      )}
-                      <button onClick={() => handleDownload(t)} disabled={downloadingId != null}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-50">
-                        {downloadingId === t.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Download
-                      </button>
-                      <button onClick={() => handleDelete(t.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-[#dc2626] hover:bg-red-50">
-                        <Trash2 size={12} /> Remove
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  ))}
+                </div>
+              )}
+            </TableWrap>
+          </>
         )}
-        </>
+      </OsPage>
+
+      {/* Legacy Tailwind editors / tabs render OUTSIDE the .gx scope — gx.css's
+          unlayered button/link resets would otherwise override their utilities. */}
+      {showLegalTabs && (tab === 'legal' || tab === 'breach') && (
+        <div style={{ maxWidth: 1420, padding: '0 22px 60px' }}>
+          <TemplateStudio key={tab} manager={manager} group={tab} />
+        </div>
+      )}
+      {tab === 'move' && (
+        <div style={{ maxWidth: 1420, padding: '0 22px 60px' }}>
+          <MoveTemplatesTab manager={manager} createOpen={showMoveEditor} onCloseCreate={() => setShowMoveEditor(false)} />
+        </div>
       )}
 
-      {showForm && (
+      {tab === 'addendum' && showForm && (
         <NewTemplateModal
           manager={manager}
           onClose={() => setShowForm(false)}
@@ -369,11 +313,11 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
         />
       )}
 
-      {previewTpl?.terms && (
+      {tab === 'addendum' && previewTpl?.terms && (
         <AddendumPreviewModal terms={previewTpl.terms} title={previewTpl.name} onClose={() => setPreviewTpl(null)} />
       )}
 
-      {editTpl && (
+      {tab === 'addendum' && editTpl && (
         <EditTemplateModal
           manager={manager}
           template={editTpl}
@@ -385,9 +329,7 @@ export function TemplatesWorkspace({ manager }: { manager?: { rp: number } }) {
           }}
         />
       )}
-      </>
-      )}
-    </DashboardPage>
+    </>
   );
 }
 
@@ -430,8 +372,8 @@ function NewTemplateModal({ manager, onClose, onCreated }: { manager?: { rp: num
     }
   }
 
-  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]';
-  const LBL = 'text-[10px] font-semibold text-[#6b6860] block mb-1 uppercase tracking-wide';
+  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] bg-white text-sm focus:outline-none focus:border-[#047246]';
+  const LBL = 'text-[10px] font-semibold text-[#5f6b63] block mb-1 uppercase tracking-wide';
 
   // All template options live in the full-screen editor's options bar.
   const options = (
@@ -524,8 +466,8 @@ function EditTemplateModal({ manager, template, onClose, onSaved }: {
     }
   }
 
-  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-sm focus:outline-none focus:border-[#2e9f82]';
-  const LBL = 'text-[10px] font-semibold text-[#6b6860] block mb-1 uppercase tracking-wide';
+  const SELECT = 'w-full px-2.5 py-1.5 rounded-lg border border-[#e4e9e5] bg-white text-sm focus:outline-none focus:border-[#047246]';
+  const LBL = 'text-[10px] font-semibold text-[#5f6b63] block mb-1 uppercase tracking-wide';
 
   const options = (
     <div className="space-y-2">

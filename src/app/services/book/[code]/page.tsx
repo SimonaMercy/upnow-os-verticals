@@ -8,6 +8,14 @@
  * inline sign-in (email → OTP, registers new customers) at the END, then
  * payment. Server-side pricing is authoritative on submit; quote-mode
  * services submit without payment. All data from GET /api/catalog/public.
+ *
+ * Quote services: the booking is an INSPECTION request. Its callout charge
+ * (catalogue minCalloutCharge) is not taken at checkout — the copy says it
+ * is payable to the professional on the visit and credited to the final bill
+ * (src/lib/homeServices/copy.ts). Slots are UAE time (Asia/Dubai) whatever the
+ * browser's zone; today's past hours are greyed out (frontend guard only —
+ * provider capacity is the backend's call). "Book again" from My Services
+ * prefills options + address via sessionStorage (src/lib/homeServices/bookAgain.ts).
  */
 'use client';
 
@@ -23,6 +31,10 @@ import { SiteHeader } from '@/components/upnow/SiteHeader';
 import { Footer } from '@/components/upnow/Footer';
 import { serviceImg } from '@/lib/serviceImages';
 import { AddressMapPicker, type PickedAddress } from '@/components/upnow/AddressMapPicker';
+import { isQuoteMode } from '@/lib/homeServices/statusView';
+import { calloutCopy, isCleaningCategory, ONE_TIME_NOTE } from '@/lib/homeServices/copy';
+import { SLOT_HOURS, bookingDays, isSlotUnavailable, leadMinutesOf, slotStartIso, DEFAULT_LEAD_MINUTES } from '@/lib/homeServices/slots';
+import { takeBookAgain } from '@/lib/homeServices/bookAgain';
 
 interface Pkg { id: number; name: string; basePrice: number | null; estimatedDuration: number | null; estimatedDurationMax: number | null }
 interface SvcAddon { id: number; code: string; name: string; price: number; priceUnit: string }
@@ -37,6 +49,11 @@ interface Svc {
   addons: SvcAddon[];
   packages: Pkg[];
   imageUrl?: string | null;
+  /** Quote services: the inspection-visit charge (AED), if the catalogue sets one. */
+  minCalloutCharge?: number | null;
+  /** Minimum notice, if the catalogue ever declares one (not in the API today). */
+  leadTimeMinutes?: number | null;
+  minLeadHours?: number | null;
   /** SP-135: this service's RESOLVED terms (platform matrix ⊕ its own override) — what the booking is snapshotted under. */
   cancellationPolicy?: CancellationPolicy | null;
 }
@@ -45,7 +62,6 @@ interface CancelTier { minHoursBefore: number; feePct: number }
 interface CancellationPolicy { reschedule: CancelTier[]; cancel: CancelTier[]; noShowFeePct: number; noShowGraceMinutes?: number; source?: 'platform' | 'service'; note?: string }
 
 const HOUR_OPTIONS = [2, 3, 4, 6, 8];
-const SLOT_HOURS = Array.from({ length: 13 }, (_, i) => 8 + i); // 08:00–20:00
 const EMIRATES = [{ value: 'dubai', label: 'Dubai' }]; // pilot launch area (sp_launch policy)
 
 const GREEN = 'var(--green)';
@@ -176,6 +192,8 @@ export default function BookServicePage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<{ id: number; total: number | null; quote: boolean } | null>(null);
+  /** Set when the page was opened from "Book again" on My Services. */
+  const [rebookFrom, setRebookFrom] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/catalog/public')
@@ -189,6 +207,34 @@ export default function BookServicePage() {
             // The service's own resolved terms win over the platform matrix (SP-135).
             if (found.cancellationPolicy) setCancelPolicy(found.cancellationPolicy);
             if (found.quantityLabel) setQty(found.quantityMin || 1);
+            // "Book again": same options, add-ons and address — a fresh date.
+            const again = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('again')
+              ? takeBookAgain(code) : null;
+            if (again) {
+              const hourly = found.priceUnit === 'per_hour';
+              const pkg = found.packages.find((p) => p.id === again.variantId)
+                ?? found.packages.find((p) => again.variantName != null && p.name.toLowerCase() === again.variantName.toLowerCase());
+              if (pkg && !hourly) setPkgId(pkg.id);
+              if (again.hours != null && HOUR_OPTIONS.includes(again.hours)) setHours(again.hours);
+              if (found.quantityLabel && again.quantity != null) {
+                setQty(Math.min(found.quantityMax ?? 99, Math.max(found.quantityMin || 1, again.quantity)));
+              }
+              const known = new Set(found.addons.map((a) => a.id));
+              const addons = (again.addonIds ?? []).filter((id) => known.has(id));
+              if (addons.length) setAddonIds(new Set(addons));
+              if (again.notes) setNotes(again.notes);
+              if (again.addressLat != null && again.addressLng != null && again.addressText) {
+                setPin({ lat: again.addressLat, lng: again.addressLng, address: again.addressText, emirate: again.emirate ?? null });
+                if (again.emirate && EMIRATES.some((e) => e.value === again.emirate)) setEmirate(again.emirate);
+              }
+              // Options are done — open straight on the date & time step.
+              const quote = isQuoteMode(found.pricingMode);
+              const hasOptions = found.packages.length > 0 || hourly || Boolean(found.quantityLabel) || (!quote && found.addons.length > 0);
+              const scheduleIdx = hasOptions && (!found.packages.length || hourly || pkg) ? 1 : 0;
+              setActiveStep(scheduleIdx);
+              setMaxReached(scheduleIdx);
+              setRebookFrom(again.fromBookingId);
+            }
             return;
           }
         }
@@ -198,22 +244,16 @@ export default function BookServicePage() {
       .finally(() => setLoading(false));
   }, [code]);
 
-  const days = useMemo(() => {
-    const out: { value: string; wd: string; num: string; mon: string }[] = [];
-    const now = new Date();
-    for (let i = 1; i <= 14; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-      out.push({
-        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-        wd: d.toLocaleDateString('en-AE', { weekday: 'short' }),
-        num: String(d.getDate()),
-        mon: d.toLocaleDateString('en-AE', { month: 'short' }),
-      });
-    }
-    return out;
-  }, []);
+  // UAE calendar days, starting today (dropped once today's last slot has
+  // gone). `nowRef` is fixed at mount so the grid doesn't shift mid-checkout.
+  const [nowAtMount] = useState(() => new Date());
+  const leadMinutes = leadMinutesOf(svc);
+  const days = useMemo(() => bookingDays(nowAtMount, 14, leadMinutes), [nowAtMount, leadMinutes]);
+  const slotOff = (d: string, h: number) => Boolean(d) && isSlotUnavailable(d, h, nowAtMount, leadMinutes);
 
-  const isQuote = svc?.pricingMode === 'quote';
+  const isQuote = isQuoteMode(svc?.pricingMode);
+  const callout = calloutCopy(svc?.minCalloutCharge);
+  const isCleaning = isCleaningCategory(catCode, svc?.code);
   const isHourly = svc?.priceUnit === 'per_hour';
   const hasLadder = (svc?.packages.length ?? 0) > 0;
   const chosenPkg = svc?.packages.find((p) => p.id === pkgId) ?? null;
@@ -269,7 +309,7 @@ export default function BookServicePage() {
   }, [estimate]);
 
   const optionsDone = Boolean(svc) && (!hasLadder || isHourly || pkgId != null);
-  const scheduleDone = Boolean(day) && hour != null;
+  const scheduleDone = Boolean(day) && hour != null && !slotOff(day, hour);
   const address = pin
     ? [addrDetails.trim(), landmark.trim() ? `Near ${landmark.trim()}` : '', pin.address].filter(Boolean).join(' — ')
     : '';
@@ -284,7 +324,7 @@ export default function BookServicePage() {
   const stepContinueOk: Record<StepKey, boolean> = stepDone;
 
   const slotDate = useMemo(
-    () => (day && hour != null ? new Date(`${day}T${String(hour).padStart(2, '0')}:00:00`) : null),
+    () => (day && hour != null ? new Date(slotStartIso(day, hour)) : null),
     [day, hour],
   );
 
@@ -359,7 +399,8 @@ export default function BookServicePage() {
     setSubmitting(true);
     setError(null);
     try {
-      const scheduledAt = new Date(`${day}T${String(hour).padStart(2, '0')}:00:00`).toISOString();
+      // Dubai wall-clock → instant (the browser may be in any timezone).
+      const scheduledAt = slotStartIso(day, hour);
       const createRes = await fetch('/api/bookings', {
         method: 'POST',
         credentials: 'include',
@@ -427,18 +468,18 @@ export default function BookServicePage() {
         <SiteHeader />
         <div className="min-h-[70vh] flex items-center justify-center px-6">
           <div className="max-w-md w-full text-center rounded-[18px] border bg-white p-10" style={{ borderColor: LINE, boxShadow: 'var(--shadow-card)' }}>
-            <div className="w-16 h-16 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: '#d8f2e8' }}>
+            <div className="w-16 h-16 rounded-full mx-auto mb-5 flex items-center justify-center" style={{ background: '#d8efe3' }}>
               <CheckCircle2 size={30} style={{ color: '#1a7a5a' }} />
             </div>
             <h1 className="text-xl font-bold mb-2" style={{ color: 'var(--ink)' }}>
-              {confirmedBooking.quote ? 'Quote request received' : 'Booking confirmed'}
+              {confirmedBooking.quote ? 'Inspection requested' : 'Booking confirmed'}
             </h1>
             <p className="text-sm mb-1" style={{ color: 'var(--mute)' }}>
               Reference <b>BK-{confirmedBooking.id}</b>
             </p>
             <p className="text-sm mb-6" style={{ color: 'var(--mute)' }}>
               {confirmedBooking.quote
-                ? 'A professional will assess the job and you’ll receive a quote to approve — you pay only after approving it.'
+                ? `A professional will inspect the job at your slot and send you an itemised quote to approve — the work is paid only after you approve it. ${callout.charge != null ? `The inspection visit (AED ${fmtAed(callout.charge)}) is payable to the professional on the visit and credited to your final bill if you go ahead.` : 'The inspection is free.'}`
                 : `Paid AED ${confirmedBooking.total != null ? fmtAed(Number(confirmedBooking.total)) : '—'} (VAT included). We’ll assign a professional and keep you posted.`}
             </p>
             <button
@@ -598,7 +639,7 @@ export default function BookServicePage() {
               <button
                 key={d.value}
                 type="button"
-                onClick={() => setDay(d.value)}
+                onClick={() => { setDay(d.value); if (hour != null && slotOff(d.value, hour)) setHour(null); }}
                 className="bk-tile flex flex-col items-center justify-center w-[62px] h-[72px] rounded-[14px] border-2 flex-shrink-0"
                 style={{
                   borderColor: on ? GREEN : LINE,
@@ -606,7 +647,7 @@ export default function BookServicePage() {
                   boxShadow: on ? 'var(--shadow-card)' : 'none',
                 }}
               >
-                <span className="text-[10px] font-semibold uppercase" style={{ color: on ? GREEN_DD : 'var(--mute)' }}>{d.wd}</span>
+                <span className="text-[10px] font-semibold uppercase" style={{ color: on ? GREEN_DD : 'var(--mute)' }}>{d.isToday ? 'Today' : d.wd}</span>
                 <span className="text-lg font-bold leading-tight tabular-nums" style={{ color: on ? GREEN_DD : 'var(--ink)' }}>{d.num}</span>
                 <span className="text-[10px]" style={{ color: 'var(--mute)' }}>{d.mon}</span>
               </button>
@@ -616,17 +657,22 @@ export default function BookServicePage() {
         <p className="text-[12px] font-semibold mt-3 mb-2" style={{ color: 'var(--mute)' }}>Start time</p>
         <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
           {SLOT_HOURS.map((h) => {
-            const on = hour === h;
+            const off = slotOff(day, h);
+            const on = hour === h && !off;
             return (
               <button
                 key={h}
                 type="button"
+                disabled={off}
                 onClick={() => setHour(h)}
+                title={off ? 'Too soon — pick a later time' : undefined}
                 className="bk-tile py-2.5 rounded-xl border-2 text-[12.5px] font-semibold tabular-nums"
                 style={{
                   borderColor: on ? GREEN : LINE,
-                  background: on ? TINT : '#fff',
-                  color: on ? GREEN_DD : 'var(--mute)',
+                  background: off ? '#f5f6f4' : on ? TINT : '#fff',
+                  color: off ? '#b7bdb8' : on ? GREEN_DD : 'var(--mute)',
+                  textDecoration: off ? 'line-through' : 'none',
+                  cursor: off ? 'not-allowed' : 'pointer',
                 }}
               >
                 {String(h).padStart(2, '0')}:00
@@ -634,6 +680,14 @@ export default function BookServicePage() {
             );
           })}
         </div>
+        <p className="text-[11px] mt-2" style={{ color: 'var(--mute)' }}>
+          Times are UAE time. {days[0]?.isToday ? `Same-day slots need at least ${leadMinutes === DEFAULT_LEAD_MINUTES ? '1 hour' : `${Math.round(leadMinutes / 60 * 10) / 10} hours`}\u2019 notice. ` : ''}The provider confirms the exact arrival time.
+        </p>
+        {isCleaning && (
+          <p className="text-[11px] mt-1" style={{ color: 'var(--mute)' }}>
+            {ONE_TIME_NOTE} — you can book again from My Services in one tap.
+          </p>
+        )}
       </>
     ),
     address: (
@@ -673,7 +727,7 @@ export default function BookServicePage() {
               value={addrDetails}
               onChange={(e) => setAddrDetails(e.target.value)}
               placeholder="e.g. Apt 1204, Tower 2, 12th floor"
-              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#047246]"
               style={{ borderColor: LINE }}
             />
           </div>
@@ -685,7 +739,7 @@ export default function BookServicePage() {
               value={landmark}
               onChange={(e) => setLandmark(e.target.value)}
               placeholder="e.g. Near Spinneys, opposite ENOC"
-              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+              className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#047246]"
               style={{ borderColor: LINE }}
             />
           </div>
@@ -702,7 +756,7 @@ export default function BookServicePage() {
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Parking, pets, access instructions…"
             rows={2}
-            className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#2e9f82]"
+            className="rounded-xl border-2 px-4 py-3 text-sm outline-none w-full transition-colors focus:border-[#047246]"
             style={{ borderColor: LINE }}
           />
         </div>
@@ -753,6 +807,12 @@ export default function BookServicePage() {
 
           {/* LEFT — step-by-step timeline (one step open at a time) */}
           <div className="min-w-0 relative">
+            {rebookFrom != null && (
+              <div className="rounded-[14px] px-4 py-3 mb-4 text-[13px] relative z-10 bg-white border" style={{ borderColor: LINE, color: 'var(--ink-2)' }}>
+                Booking again from <b>BK-{rebookFrom}</b> — your options{pin ? ', add-ons and address' : ' and add-ons'} are copied. Pick a new date and time.
+                <span className="block text-[11px] mt-0.5" style={{ color: 'var(--mute)' }}>The same professional isn&apos;t guaranteed — we assign whoever is available.</span>
+              </div>
+            )}
             {/* connector rail */}
             <div className="absolute left-[15px] top-5 bottom-8 w-px" style={{ background: LINE }} />
 
@@ -862,7 +922,8 @@ export default function BookServicePage() {
                 {/* Line items */}
                 {isQuote ? (
                   <div className="rounded-xl px-4 py-3 mb-4 text-[13px]" style={{ background: 'var(--green-tint-2)', color: 'var(--mute)' }}>
-                    Free assessment visit — a professional inspects the job and you approve a quote before any work starts.
+                    <span className="block font-semibold mb-0.5" style={{ color: 'var(--ink-2)' }}>{callout.short}</span>
+                    {callout.line}
                   </div>
                 ) : (
                   <div className="space-y-2 mb-3">
@@ -1016,7 +1077,7 @@ export default function BookServicePage() {
                   {submitting
                     ? <Loader2 size={16} className="animate-spin" />
                     : isQuote
-                      ? 'Request free quote'
+                      ? callout.cta
                       : estimate != null
                         ? <>Confirm &amp; pay · AED {fmtAed(Number(estimate))}</>
                         : 'Confirm & pay'}
@@ -1042,10 +1103,13 @@ export default function BookServicePage() {
           title="Pricing terms"
           onClose={() => setPolicyModal(null)}
           rows={[
-            'All prices include 5% VAT — no surprises at checkout.',
+            ...(isQuote
+              ? [callout.line, 'The quote you approve includes 5% VAT; you pay it in the app before the work starts.']
+              : ['All prices include 5% VAT — no surprises at checkout.']),
             ...(isHourly ? ['Hourly services are billed per hour, per professional.'] : []),
             ...(hasLadder && !isHourly ? ['The price shown applies to the selected package size.'] : []),
             ...(svc.addons.length > 0 && !isQuote ? ['Add-ons are charged together with the service.'] : []),
+            ...(isCleaning ? [`${ONE_TIME_NOTE}.`] : []),
             'The final amount is confirmed before you pay — no hidden charges.',
           ]}
         />

@@ -49,8 +49,8 @@ export default function AddendumPreviewModal({ terms, title, onClose }: {
           <ArrowLeft size={18} />
         </button>
         <div className="min-w-0">
-          <h3 className="font-semibold text-base text-[#1a1916] truncate">{title || 'Addendum preview'}</h3>
-          <p className="text-xs text-[#9b9890]">How the addendum looks on the contract, with the signature block on each page.</p>
+          <h3 className="font-semibold text-base text-[#14201a] truncate">{title || 'Addendum preview'}</h3>
+          <p className="text-xs text-[#8a948d]">How the addendum looks on the contract, with the signature block on each page.</p>
         </div>
       </div>
       <div className="flex-1 min-h-0">

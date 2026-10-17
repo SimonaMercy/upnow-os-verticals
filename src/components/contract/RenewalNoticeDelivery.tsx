@@ -189,7 +189,7 @@ export default function RenewalNoticeDelivery({ parentContractId, onResend, refr
       {viewing && (
         <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm overflow-y-auto" onClick={() => setViewing(null)}>
           <div className="max-w-4xl mx-auto my-6 px-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 bg-[#2e9f82] text-white rounded-t-2xl px-5 py-3">
+            <div className="flex items-center justify-between gap-3 bg-[#047246] text-white rounded-t-2xl px-5 py-3">
               <div className="min-w-0">
                 <div className="text-sm font-bold truncate">{viewing.subject ?? 'Renewal notice'}</div>
                 <div className="text-[11px] text-white/80 break-all">

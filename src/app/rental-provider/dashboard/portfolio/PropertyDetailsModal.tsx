@@ -1085,7 +1085,7 @@ export function PropertyDetailsModal({
                           Managing (Replace/Remove) still requires `editable`. */}
                       <button type="button" title="Download this document"
                         onClick={() => { void downloadStoredDoc(rActive.id).catch(() => alert('Download failed. Please try again.')); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: '#fff', background: '#2e9f82', border: '1px solid #2e9f82', padding: '7px 11px', borderRadius: 8, cursor: 'pointer' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: '#fff', background: '#047246', border: '1px solid #047246', padding: '7px 11px', borderRadius: 8, cursor: 'pointer' }}>
                         <Download size={14} />Download
                       </button>
                     </>

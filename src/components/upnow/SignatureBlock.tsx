@@ -284,7 +284,7 @@ export function SignatureBlock({
 
   const pos = (e: React.PointerEvent) => { const r = canvasRef.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   const down = (e: React.PointerEvent) => { drawing.current = true; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
-  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#1a1916'; ctx.lineWidth = 2.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); if (!drawn) setDrawn(true); };
+  const move = (e: React.PointerEvent) => { if (!drawing.current) return; const ctx = canvasRef.current!.getContext('2d')!; const { x, y } = pos(e); ctx.lineTo(x, y); ctx.strokeStyle = '#14201a'; ctx.lineWidth = 2.25; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); if (!drawn) setDrawn(true); };
   const up = () => { drawing.current = false; };
   const clear = () => { const c = canvasRef.current!; const ctx = c.getContext('2d')!; ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height); ctx.restore(); setDrawn(false); };
 
@@ -410,8 +410,8 @@ export function SignatureBlock({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#ecf7f1', border: '1px solid #bfe3d6', borderRadius: 16, padding: '14px 18px' }}>
         <CheckCircle2 size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#1a1916' }}>Signed as {signerRole}</div>
-          {signerName && <div style={{ fontSize: 12, color: '#6b6860' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>}
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#14201a' }}>Signed as {signerRole}</div>
+          {signerName && <div style={{ fontSize: 12, color: '#5f6b63' }}>{signerName}{onBehalfOf ? ` — on behalf of ${onBehalfOf}` : ''}</div>}
         </div>
       </div>
     );
@@ -425,8 +425,8 @@ export function SignatureBlock({
           <BadgeCheck size={20} />
         </span>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.09em', color: '#6b6860', fontWeight: 700 }}>Signing as {signerRole}</div>
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.01em', color: '#1a1916', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{signerName || '—'}</div>
+          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.09em', color: '#5f6b63', fontWeight: 700 }}>Signing as {signerRole}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.01em', color: '#14201a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{signerName || '—'}</div>
           {onBehalfOf && <div style={{ fontSize: 11.5, color: '#0b7a54', fontWeight: 600, marginTop: 2 }}>on behalf of {onBehalfOf}</div>}
         </div>
       </div>
@@ -434,12 +434,12 @@ export function SignatureBlock({
       {/* 2 — signature pad */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <span style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.08em', color: '#6b6860', fontWeight: 700 }}>Signature</span>
-          <button type="button" onClick={clear} style={{ background: 'none', border: 0, fontSize: 12, color: '#6b6860', cursor: 'pointer' }}>Clear</button>
+          <span style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.08em', color: '#5f6b63', fontWeight: 700 }}>Signature</span>
+          <button type="button" onClick={clear} style={{ background: 'none', border: 0, fontSize: 12, color: '#5f6b63', cursor: 'pointer' }}>Clear</button>
         </div>
         <canvas
           ref={canvasRef}
-          style={{ width: '100%', height: 168, border: '1px solid #d8d6d0', borderRadius: 10, background: '#fafaf8', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
+          style={{ width: '100%', height: 168, border: '1px solid #d8d6d0', borderRadius: 10, background: '#f6f8f6', touchAction: 'none', cursor: 'crosshair', display: 'block' }}
           onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
         />
         <input
@@ -452,35 +452,35 @@ export function SignatureBlock({
       {stamp && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.08em', color: '#6b6860', fontWeight: 700 }}>
+            <span style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.08em', color: '#5f6b63', fontWeight: 700 }}>
               Company stamp{stamp.required ? '' : ' (optional)'}
             </span>
             {stampImage && (
               <button type="button" onClick={() => setStampImage(null)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 0, fontSize: 12, color: '#6b6860', cursor: 'pointer' }}>
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 0, fontSize: 12, color: '#5f6b63', cursor: 'pointer' }}>
                 <X size={12} /> Remove
               </button>
             )}
           </div>
           {stampImage ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid #d8d6d0', borderRadius: 10, background: '#fafaf8', padding: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid #d8d6d0', borderRadius: 10, background: '#f6f8f6', padding: 10 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={stampImage} alt="Company stamp" style={{ maxHeight: 84, maxWidth: 160, objectFit: 'contain' }} />
-              <span style={{ fontSize: 12, color: '#6b6860' }}>This is exactly how your stamp will appear beside your signature. If it looks wrong or cut, remove it and try again.</span>
+              <span style={{ fontSize: 12, color: '#5f6b63' }}>This is exactly how your stamp will appear beside your signature. If it looks wrong or cut, remove it and try again.</span>
             </div>
           ) : (
-            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1.5px dashed #d8d6d0', borderRadius: 10, background: '#fafaf8', padding: '18px 12px', cursor: 'pointer', color: '#6b6860', fontSize: 13, fontWeight: 600 }}>
+            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1.5px dashed #d8d6d0', borderRadius: 10, background: '#f6f8f6', padding: '18px 12px', cursor: 'pointer', color: '#5f6b63', fontSize: 13, fontWeight: 600 }}>
               <Stamp size={16} />
               Upload your company stamp
               <input type="file" accept="image/png,image/jpeg,image/webp" hidden
                 onChange={e => { void onStampFile(e.target.files?.[0]); e.target.value = ''; }} />
             </label>
           )}
-          <p style={{ fontSize: 11.5, color: '#9b9890', margin: '6px 0 0' }}>
+          <p style={{ fontSize: 11.5, color: '#8a948d', margin: '6px 0 0' }}>
             {stamp.required
               ? 'Commercial contracts are signed with the company stamp — upload it as an image (PNG or JPEG).'
               : 'If your business signs with a stamp, add it here as an image (PNG or JPEG).'}
-            {' '}<strong style={{ color: '#6b6860' }}>For the cleanest result, use your digital stamp file. Photographing a paper stamp instead? Stamp it on plain white paper and capture just the stamp, in good light with no shadows.</strong>
+            {' '}<strong style={{ color: '#5f6b63' }}>For the cleanest result, use your digital stamp file. Photographing a paper stamp instead? Stamp it on plain white paper and capture just the stamp, in good light with no shadows.</strong>
           </p>
           {stampErr && <p style={{ fontSize: 12, color: '#b91c1c', margin: '4px 0 0' }}>{stampErr}</p>}
 
@@ -494,11 +494,11 @@ export function SignatureBlock({
             >
               <div style={{ width: 'min(560px, 100%)', background: '#fff', borderRadius: 16, padding: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.35)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1916', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#14201a', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <Stamp size={15} /> Crop your company stamp
                   </span>
                   <button type="button" onClick={cancelCrop} aria-label="Close"
-                    style={{ background: 'none', border: 0, color: '#6b6860', cursor: 'pointer', padding: 4 }}>
+                    style={{ background: 'none', border: 0, color: '#5f6b63', cursor: 'pointer', padding: 4 }}>
                     <X size={16} />
                   </button>
                 </div>
@@ -506,7 +506,7 @@ export function SignatureBlock({
                   ref={cropBoxRef}
                   onPointerDown={cropPointerDown} onPointerMove={cropPointerMove}
                   onPointerUp={cropPointerUp} onPointerCancel={cropPointerUp}
-                  style={{ position: 'relative', width: '100%', height: frame.h || 260, overflow: 'hidden', borderRadius: 10, border: '2px solid #2e9f82', background: '#1a1916', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
+                  style={{ position: 'relative', width: '100%', height: frame.h || 260, overflow: 'hidden', borderRadius: 10, border: '2px solid #047246', background: '#14201a', touchAction: 'none', userSelect: 'none', cursor: 'grab' }}
                 >
                   {frame.w > 0 && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -522,7 +522,7 @@ export function SignatureBlock({
                       }} />
                   )}
                 </div>
-                <p style={{ fontSize: 11.5, color: '#6b6860', margin: '8px 0 6px' }}>
+                <p style={{ fontSize: 11.5, color: '#5f6b63', margin: '8px 0 6px' }}>
                   Move the photo until your stamp fills the frame — drag with a finger, pinch or slide to zoom. Everything inside the frame goes on the contract.
                 </p>
                 <input
@@ -532,15 +532,15 @@ export function SignatureBlock({
                   step={(frame.w ? Math.max(frame.w / stampCrop.img.width, frame.h / stampCrop.img.height) : 1) / 50}
                   value={cropView.k}
                   onChange={e => cropZoomTo(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: '#2e9f82', margin: '0 0 10px' }}
+                  style={{ width: '100%', accentColor: '#047246', margin: '0 0 10px' }}
                 />
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={acceptCrop}
-                    style={{ flex: 1, background: '#2e9f82', color: '#fff', border: 0, borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
+                    style={{ flex: 1, background: '#047246', color: '#fff', border: 0, borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>
                     Confirm stamp
                   </button>
                   <button type="button" onClick={cancelCrop}
-                    style={{ background: '#fff', color: '#6b6860', border: '1px solid #e3e0d9', borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ background: '#fff', color: '#5f6b63', border: '1px solid #e3e0d9', borderRadius: 10, padding: '11px 14px', fontSize: 13.5, fontWeight: 600, cursor: 'pointer' }}>
                     Cancel
                   </button>
                 </div>
@@ -551,7 +551,7 @@ export function SignatureBlock({
       )}
 
       {/* 3 — mandatory terms */}
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#1a1916', cursor: 'pointer', padding: 12, borderRadius: 11, border: '1px solid #e3e0d9', background: '#f6fbf8' }}>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#14201a', cursor: 'pointer', padding: 12, borderRadius: 11, border: '1px solid #e3e0d9', background: '#f6fbf8' }}>
         <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 2 }} />
         <span>{termsText} {ESIGN_CONSENT_TEXT}</span>
       </label>
@@ -559,13 +559,13 @@ export function SignatureBlock({
       {/* 4 — sign button */}
       <button
         type="button" onClick={submit} disabled={!canSubmit}
-        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: canSubmit ? '#2e9f82' : '#e3e0d9', color: canSubmit ? '#fff' : '#9b9890', border: 0, borderRadius: 11, padding: '12px 18px', fontSize: 14, fontWeight: 700, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: canSubmit ? '#047246' : '#e3e0d9', color: canSubmit ? '#fff' : '#8a948d', border: 0, borderRadius: 11, padding: '12px 18px', fontSize: 14, fontWeight: 700, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
       >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <PenLine size={15} />} {submitLabel ?? `Sign as ${signerRole}`}
       </button>
-      {disabledReason && !err && <p style={{ fontSize: 11.5, color: '#6b6860', margin: '-4px 0 0', textAlign: 'center' }}>{disabledReason}</p>}
+      {disabledReason && !err && <p style={{ fontSize: 11.5, color: '#5f6b63', margin: '-4px 0 0', textAlign: 'center' }}>{disabledReason}</p>}
       {!disabledReason && !canSubmit && !err && (
-        <p style={{ fontSize: 11.5, color: '#6b6860', margin: '-4px 0 0', textAlign: 'center' }}>
+        <p style={{ fontSize: 11.5, color: '#5f6b63', margin: '-4px 0 0', textAlign: 'center' }}>
           {stampMissing && drawn && agreed && !!name.trim()
             ? 'Upload your company stamp to enable'
             : `Draw your signature${stampMissing ? ', upload your company stamp' : ''} and tick the box to enable`}

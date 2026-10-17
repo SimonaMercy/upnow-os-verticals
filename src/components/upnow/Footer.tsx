@@ -44,7 +44,6 @@ const cols = [
       { text: 'Commercial',  href: '/listings?category=commercial' },
       { text: 'Industrial',  href: '/listings?category=industrial' },
       { text: 'Land',        href: '/listings?category=land' },
-      { text: 'Mixed-use',   href: '/listings?category=mixed_use' },
       { text: 'View all spaces →', href: '/listings' },
     ],
   },

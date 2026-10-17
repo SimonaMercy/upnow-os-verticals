@@ -46,7 +46,7 @@ const pendingFor = (since: string | null): string | null => {
  *  "don't show green, only orange and red; the rows should be filled with full colour"). */
 type Tone = 'orange' | 'red' | 'neutral';
 const toneOf = (since: string | null, own?: Tone | 'green'): Tone => { if (own) return own === 'green' ? 'neutral' : own; const d = daysPending(since); return d == null ? 'neutral' : d >= 14 ? 'red' : d >= 7 ? 'orange' : 'neutral'; };
-const TONE_CLASS: Record<Tone, string> = { orange: 'bg-[#fdebc8] text-[#b45309]', red: 'bg-[#fbcaca] text-[#b91c1c]', neutral: 'bg-[#f1efe9] text-[#3d3b35]' };
+const TONE_CLASS: Record<Tone, string> = { orange: 'bg-[#fdebc8] text-[#b45309]', red: 'bg-[#fbcaca] text-[#b91c1c]', neutral: 'bg-[#f1efe9] text-[#46534c]' };
 /** The whole row carries the colour. */
 const ROW_CLASS: Record<Tone, string> = { orange: 'bg-[#fff4e5]', red: 'bg-[#fee2e2]', neutral: '' };
 const TONE_FILL: Record<Tone, { fill: string; font: string } | null> = { orange: { fill: 'FFFFF4E5', font: 'FFB45309' }, red: { fill: 'FFFEE2E2', font: 'FFB91C1C' }, neutral: null };
@@ -149,38 +149,38 @@ export function OperationPlanReport({
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5 print:mb-3">
         <div>
           {onBack ? (
-            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden"><ArrowLeft size={14} /> All Reports</button>
+            <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden"><ArrowLeft size={14} /> All Reports</button>
           ) : (
-            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] mb-2 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
+            <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] mb-2 print:hidden"><ArrowLeft size={14} /> All Reports</Link>
           )}
-          <h1 className="text-2xl font-bold text-[#26241f] flex items-center gap-2"><ListChecks size={22} className="text-[#2e9f82]" /> Operation Management Plan</h1>
-          <p className="text-sm text-[#6b6860] mt-1 max-w-3xl">
+          <h1 className="text-2xl font-bold text-[#26241f] flex items-center gap-2"><ListChecks size={22} className="text-[#047246]" /> Operation Management Plan</h1>
+          <p className="text-sm text-[#5f6b63] mt-1 max-w-3xl">
             The work on the books, section by section — {total} items. Each matter's current position, the stage it is at, what that stage calls for, the last note on it, and who handles it.
           </p>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <button onClick={downloadXlsx} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e8e6e0] bg-white text-sm font-medium text-[#3d3b35] hover:border-[#2e9f82] disabled:opacity-50"><Download size={15} /> Excel</button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#1a7a5a]"><Printer size={15} /> Print</button>
+          <button onClick={downloadXlsx} disabled={!data} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#e4e9e5] bg-white text-sm font-medium text-[#46534c] hover:border-[#047246] disabled:opacity-50"><Download size={15} /> Excel</button>
+          <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#1a7a5a]"><Printer size={15} /> Print</button>
         </div>
       </div>
 
       {error && <div className="mb-4 flex items-center gap-2 text-sm text-[#b91c1c] bg-[#fee2e2] rounded-xl px-4 py-3"><AlertCircle size={16} /> {error}</div>}
-      {loading && <div className="flex items-center gap-2 text-sm text-[#6b6860] py-10 justify-center"><Loader2 size={16} className="animate-spin" /> Loading…</div>}
+      {loading && <div className="flex items-center gap-2 text-sm text-[#5f6b63] py-10 justify-center"><Loader2 size={16} className="animate-spin" /> Loading…</div>}
 
       {!loading && data && (
         <div className="space-y-5">
           {data.sections.map(sec => (
-            <section key={sec.key} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden break-inside-avoid">
-              <div className="px-4 sm:px-5 py-3 border-b border-[#e8e6e0] bg-[#faf9f7]">
+            <section key={sec.key} className="rounded-2xl border border-[#e4e9e5] bg-white overflow-hidden break-inside-avoid">
+              <div className="px-4 sm:px-5 py-3 border-b border-[#e4e9e5] bg-[#faf9f7]">
                 <h2 className="text-base font-semibold text-[#26241f]"><span className="text-[#8a8780] font-medium mr-2">{sec.no}.</span>{sec.title}<span className="ml-2 text-xs font-medium text-[#8a8780]">{sec.rows.length}</span></h2>
               </div>
               {sec.rows.length === 0 ? (
-                <p className="py-3 pl-4 text-sm text-[#9b9890]">Nothing open.</p>
+                <p className="py-3 pl-4 text-sm text-[#8a948d]">Nothing open.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm align-top">
                     <thead>
-                      <tr className="text-left text-[#6b6860] border-b border-[#e8e6e0] text-xs">
+                      <tr className="text-left text-[#5f6b63] border-b border-[#e4e9e5] text-xs">
                         <th className="py-2 pl-4 pr-3 font-medium w-[150px]">Property</th>
                         <th className="py-2 px-3 font-medium w-[220px]">Customer / Vendor — Unit</th>
                         <th className="py-2 px-3 font-medium min-w-[280px]">Current position / issues</th>
@@ -195,16 +195,16 @@ export function OperationPlanReport({
                         const href = hrefOf(r.link, managerRp);
                         return (
                           <tr key={r.key} className={`border-b border-[#f1efe9] last:border-0 ${isGroupRow(r) ? GROUP_ROW_CLASS : ROW_CLASS[toneOf(r.since, r.tone)]}`}>
-                            <td className="py-2 pl-4 pr-3 text-[#3d3b35]">{r.property ?? '—'}</td>
+                            <td className="py-2 pl-4 pr-3 text-[#46534c]">{r.property ?? '—'}</td>
                             <td className="py-2 px-3 text-[#26241f]">
                               {r.party && <span className="font-medium">{r.party}</span>}
-                              {r.unit && <span className={r.party ? 'text-[#6b6860]' : 'font-medium'}>{r.party ? ` — ${r.unit}` : r.unit}</span>}
+                              {r.unit && <span className={r.party ? 'text-[#5f6b63]' : 'font-medium'}>{r.party ? ` — ${r.unit}` : r.unit}</span>}
                               {!r.party && !r.unit && '—'}
-                              {href && <Link href={href} className="ml-1.5 inline-flex align-middle text-[#2e9f82] print:hidden" title="Open"><ExternalLink size={12} /></Link>}
+                              {href && <Link href={href} className="ml-1.5 inline-flex align-middle text-[#047246] print:hidden" title="Open"><ExternalLink size={12} /></Link>}
                             </td>
-                            <td className="py-2 px-3 text-[#3d3b35] whitespace-pre-line">{r.system}{r.date && <div className="text-xs text-[#8a8780] mt-0.5">{fmtDate(r.date)}</div>}</td>
-                            <td className="py-2 px-3 text-[#3d3b35]">{r.nextStep}</td>
-                            <td className="py-2 px-3 text-[#3d3b35]">{r.note ? <><div className="whitespace-pre-line">{r.note.body}</div><div className="text-xs text-[#8a8780] mt-0.5">{noteSign(r.note)}</div></> : <span className="text-[#9b9890]">—</span>}</td>
+                            <td className="py-2 px-3 text-[#46534c] whitespace-pre-line">{r.system}{r.date && <div className="text-xs text-[#8a8780] mt-0.5">{fmtDate(r.date)}</div>}</td>
+                            <td className="py-2 px-3 text-[#46534c]">{r.nextStep}</td>
+                            <td className="py-2 px-3 text-[#46534c]">{r.note ? <><div className="whitespace-pre-line">{r.note.body}</div><div className="text-xs text-[#8a8780] mt-0.5">{noteSign(r.note)}</div></> : <span className="text-[#8a948d]">—</span>}</td>
                             <td className="py-2 px-3 text-[#26241f]">{r.responsible ?? '—'}</td>
                             <td className="py-2 px-3 pr-4"><span className={`inline-block text-xs font-semibold rounded-lg px-2 py-1 ${TONE_CLASS[toneOf(r.since, r.tone)]}`}>{r.state}</span>{pendingFor(r.since) && <div className="text-xs text-[#8a8780] mt-1">{pendingFor(r.since)}</div>}</td>
                           </tr>
@@ -216,7 +216,7 @@ export function OperationPlanReport({
               )}
             </section>
           ))}
-          <p className="text-xs text-[#9b9890]">As of {new Date(data.generatedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</p>
+          <p className="text-xs text-[#8a948d]">As of {new Date(data.generatedAt).toLocaleString('en-AE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</p>
         </div>
       )}
     </div>

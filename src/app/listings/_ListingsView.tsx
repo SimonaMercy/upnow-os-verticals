@@ -7,7 +7,6 @@ import { isResidentialUnitType } from '@/lib/unitTaxonomy';
 import FilterSidebarWrapper from './FilterSidebarWrapper';
 import { SiteHeader } from '@/components/upnow/SiteHeader';
 import { Footer } from '@/components/upnow/Footer';
-import HeartButton from './HeartButton';
 
 const BACKEND = process.env.BACKEND_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 const BACKEND_HOST = BACKEND.replace(/\/api$/, '');
@@ -275,7 +274,7 @@ export default async function ListingsView({ country, emirate, searchParams }: P
                   </div>
                   <h3>No spaces match your filters</h3>
                   <p>Try widening your search or clearing a filter.</p>
-                  <Link href={basePath} className="l-gcard btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, background: '#2e9f82', color: '#fff', fontWeight: 700, fontSize: 14, textDecoration: 'none', marginTop: 4 }}>
+                  <Link href={basePath} className="l-gcard btn" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 999, background: '#047246', color: '#fff', fontWeight: 700, fontSize: 14, textDecoration: 'none', marginTop: 4 }}>
                     Reset filters
                   </Link>
                 </div>
@@ -299,7 +298,6 @@ export default async function ListingsView({ country, emirate, searchParams }: P
                         <div className="ph">
                           <img src={cardImg} alt={label} loading="lazy" />
                           <span className="cbadge">{humanType(unit.unitType)}</span>
-                          <HeartButton />
                           {unit.availability === 'available' && (
                             <span className="feat-tag">
                               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

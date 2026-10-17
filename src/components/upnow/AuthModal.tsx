@@ -319,11 +319,11 @@ export function AuthModal({
 
   // ── shared bits ──
   const switchLink = (target: AuthModalMode, lead: string, cta: string) => (
-    <p style={{ textAlign: 'center', fontSize: 14, color: '#6b7a74', marginTop: 18 }}>
+    <p style={{ textAlign: 'center', fontSize: 14, color: '#5f6b63', marginTop: 18 }}>
       {lead}{' '}
       <button
         onClick={() => onModeChange(target)}
-        style={{ background: 'none', border: 'none', color: '#2e9f82', fontWeight: 600, cursor: 'pointer', fontSize: 14, padding: 0, fontFamily: 'inherit' }}
+        style={{ background: 'none', border: 'none', color: '#047246', fontWeight: 600, cursor: 'pointer', fontSize: 14, padding: 0, fontFamily: 'inherit' }}
       >
         {cta}
       </button>
@@ -331,7 +331,7 @@ export function AuthModal({
   );
 
   const heading = (text: string) => (
-    <h2 style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: '#0e1a16', margin: 0 }}>{text}</h2>
+    <h2 style={{ fontSize: 19, fontWeight: 700, letterSpacing: '-0.02em', color: '#14201a', margin: 0 }}>{text}</h2>
   );
 
   // `color` is explicit, not inherited: the modal is a DOM child of whatever
@@ -339,8 +339,8 @@ export function AuthModal({
   // the white card — invisible as you typed.
   const inputStyle = {
     width: '100%', padding: '12px 14px 12px 40px', borderRadius: 12,
-    border: '1.5px solid #e8ece9', fontSize: 15, outline: 'none', fontFamily: 'inherit',
-    color: '#0e1a16', background: 'white',
+    border: '1.5px solid #e4e9e5', fontSize: 15, outline: 'none', fontFamily: 'inherit',
+    color: '#14201a', background: 'white',
   } as const;
 
   // Six-box OTP input — shared by the sign-in and sign-up verify steps.
@@ -358,8 +358,8 @@ export function AuthModal({
           autoComplete="one-time-code"
           style={{
             width: '100%', aspectRatio: '1', textAlign: 'center', fontSize: 20, fontWeight: 700,
-            borderRadius: 12, border: `1.5px solid ${d ? '#2e9f82' : '#e8ece9'}`, outline: 'none',
-            color: '#0e1a16', fontFamily: 'inherit',
+            borderRadius: 12, border: `1.5px solid ${d ? '#047246' : '#e4e9e5'}`, outline: 'none',
+            color: '#14201a', fontFamily: 'inherit',
           }}
         />
       ))}
@@ -367,7 +367,7 @@ export function AuthModal({
   );
 
   const devOtpBox = devOtp && (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#e7f5f0', color: '#155a48', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#eef7f2', color: '#0b3d2a', padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 14 }}>
       <span>Your OTP</span>
       <b style={{ letterSpacing: 2 }}>{devOtp}</b>
     </div>
@@ -413,22 +413,22 @@ export function AuthModal({
         onClick={() => { trackSignupFunnel(role, 'intent'); setSignupRole(role); setSignupStep('form'); setSignupValue(''); setSignupError(null); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 14, padding: 14, width: '100%',
-          border: `1.5px solid ${emphasized ? '#2e9f82' : '#e8ece9'}`, borderRadius: 14,
+          border: `1.5px solid ${emphasized ? '#047246' : '#e4e9e5'}`, borderRadius: 14,
           background: 'white', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
           transition: 'border-color .15s, box-shadow .15s',
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#2e9f82'; e.currentTarget.style.boxShadow = '0 4px 16px -6px rgba(46,159,130,0.35)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = emphasized ? '#2e9f82' : '#e8ece9'; e.currentTarget.style.boxShadow = 'none'; }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#047246'; e.currentTarget.style.boxShadow = '0 4px 16px -6px rgba(4,114,70,0.35)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = emphasized ? '#047246' : '#e4e9e5'; e.currentTarget.style.boxShadow = 'none'; }}
       >
         <span style={{
           width: 42, height: 42, borderRadius: 11, flexShrink: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: emphasized ? '#2e9f82' : '#e7f5f0',
-          color: emphasized ? 'white' : '#2e9f82',
+          background: emphasized ? '#047246' : '#eef7f2',
+          color: emphasized ? 'white' : '#047246',
         }}>
           <Icon size={19} />
         </span>
-        <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: '#0e1a16' }}>{meta.title}</span>
+        <span style={{ flex: 1, fontWeight: 700, fontSize: 15, color: '#14201a' }}>{meta.title}</span>
         <ArrowRight size={16} style={{ color: '#9ca3af', flexShrink: 0 }} />
       </button>
     );
@@ -454,7 +454,7 @@ export function AuthModal({
           boxShadow: '0 24px 64px -12px rgba(0,0,0,0.35)',
           padding: 28, position: 'relative',
           // The card is always light, whatever the page behind it uses.
-          color: '#0e1a16',
+          color: '#14201a',
         }}
       >
         {dismissible && (
@@ -464,7 +464,7 @@ export function AuthModal({
             style={{
               position: 'absolute', top: 16, right: 16, width: 32, height: 32,
               borderRadius: '50%', border: 'none', background: '#f2f5f3',
-              color: '#6b7a74', cursor: 'pointer',
+              color: '#5f6b63', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >
@@ -475,10 +475,10 @@ export function AuthModal({
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}>
           <span style={{
-            width: 34, height: 34, borderRadius: 9, background: '#2e9f82', color: 'white',
+            width: 34, height: 34, borderRadius: 9, background: '#047246', color: 'white',
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 17,
           }}>U</span>
-          <span style={{ fontWeight: 800, fontSize: 19, color: '#0e1a16' }}>UpNow</span>
+          <span style={{ fontWeight: 800, fontSize: 19, color: '#14201a' }}>UpNow</span>
         </div>
 
         {mode === 'signup' ? (
@@ -486,7 +486,7 @@ export function AuthModal({
             /* ── role choice ── */
             <>
               {heading('How will you use UpNow?')}
-              <p style={{ fontSize: 13.5, color: '#6b7a74', margin: '6px 0 0', lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13.5, color: '#5f6b63', margin: '6px 0 0', lineHeight: 1.5 }}>
                 You can add another role later from your profile.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 18 }}>
@@ -505,14 +505,14 @@ export function AuthModal({
                   <button
                     type="button"
                     onClick={() => { setSignupStep('form'); setOtp(['', '', '', '', '', '']); setSignupError(null); setDevOtp(null); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7a74', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#5f6b63', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
                   >
                     <ArrowLeft size={14} /> Back
                   </button>
 
                   {heading('Enter the code')}
-                  <p style={{ fontSize: 14, color: '#6b7a74', margin: '6px 0 18px', lineHeight: 1.55 }}>
-                    Sent to <strong style={{ color: '#0e1a16' }}>{signupIdentifier}</strong> to verify your {meta.field === 'phone' ? 'phone' : 'email'}. It expires in 10 minutes.
+                  <p style={{ fontSize: 14, color: '#5f6b63', margin: '6px 0 18px', lineHeight: 1.55 }}>
+                    Sent to <strong style={{ color: '#14201a' }}>{signupIdentifier}</strong> to verify your {meta.field === 'phone' ? 'phone' : 'email'}. It expires in 10 minutes.
                   </p>
 
                   <form onSubmit={onSignupVerify}>
@@ -526,12 +526,12 @@ export function AuthModal({
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: '#6b7a74', margin: '14px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: '#5f6b63', margin: '14px 0' }}>
                       <span>Didn&apos;t get the code?</span>
                       {resendIn > 0 ? (
                         <span style={{ color: '#9ca3af' }}>Resend in {resendIn}s</span>
                       ) : (
-                        <button type="button" onClick={onSignupResend} style={{ background: 'none', border: 'none', color: '#2e9f82', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
+                        <button type="button" onClick={onSignupResend} style={{ background: 'none', border: 'none', color: '#047246', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
                           Resend code
                         </button>
                       )}
@@ -542,7 +542,7 @@ export function AuthModal({
                       disabled={signupSubmitting || otp.some((d) => !d)}
                       style={{
                         width: '100%', padding: '13px 16px', borderRadius: 999,
-                        background: '#2e9f82', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
+                        background: '#047246', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
                         cursor: (signupSubmitting || otp.some((d) => !d)) ? 'default' : 'pointer',
                         opacity: (signupSubmitting || otp.some((d) => !d)) ? 0.7 : 1,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit',
@@ -564,7 +564,7 @@ export function AuthModal({
                   <button
                     type="button"
                     onClick={() => { setSignupRole(null); setSignupValue(''); setSignupError(null); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7a74', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#5f6b63', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
                   >
                     <ArrowLeft size={14} /> Back
                   </button>
@@ -579,7 +579,7 @@ export function AuthModal({
                       </label>
                     </div>
 
-                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#36433d', marginBottom: 6 }}>
+                    <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#46534c', marginBottom: 6 }}>
                       {isPhone ? 'Phone number' : 'Email address'}
                     </label>
                     <div style={{ position: 'relative' }}>
@@ -609,7 +609,7 @@ export function AuthModal({
                       disabled={signupSubmitting}
                       style={{
                         width: '100%', marginTop: 14, padding: '13px 16px', borderRadius: 999,
-                        background: '#2e9f82', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
+                        background: '#047246', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
                         cursor: signupSubmitting ? 'default' : 'pointer', opacity: signupSubmitting ? 0.7 : 1,
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit',
                       }}
@@ -634,12 +634,12 @@ export function AuthModal({
           /* ── sign-in: identify ── */
           <>
             {heading('Welcome back')}
-            <p style={{ fontSize: 14, color: '#6b7a74', margin: '6px 0 20px', lineHeight: 1.55 }}>
+            <p style={{ fontSize: 14, color: '#5f6b63', margin: '6px 0 20px', lineHeight: 1.55 }}>
               Sign in with your phone or email — we&apos;ll send you a 6-digit code.
             </p>
 
             <form onSubmit={onRequestOtp}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#36433d', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#46534c', marginBottom: 6 }}>
                 Phone or email
               </label>
               <div style={{ position: 'relative', marginBottom: 6 }}>
@@ -668,7 +668,7 @@ export function AuthModal({
                 disabled={submitting}
                 style={{
                   width: '100%', marginTop: 14, padding: '13px 16px', borderRadius: 999,
-                  background: '#2e9f82', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
+                  background: '#047246', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
                   cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.7 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit',
                 }}
@@ -685,14 +685,14 @@ export function AuthModal({
             <button
               type="button"
               onClick={() => { setStep('identify'); setOtp(['', '', '', '', '', '']); setError(null); setDevOtp(null); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7a74', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#5f6b63', fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 14, fontFamily: 'inherit' }}
             >
               <ArrowLeft size={14} /> Use a different phone or email
             </button>
 
             {heading('Enter the code')}
-            <p style={{ fontSize: 14, color: '#6b7a74', margin: '6px 0 18px', lineHeight: 1.55 }}>
-              Sent to <strong style={{ color: '#0e1a16' }}>{buildIdentifier(identifierRaw).value || identifierRaw}</strong>. It expires in 10 minutes.
+            <p style={{ fontSize: 14, color: '#5f6b63', margin: '6px 0 18px', lineHeight: 1.55 }}>
+              Sent to <strong style={{ color: '#14201a' }}>{buildIdentifier(identifierRaw).value || identifierRaw}</strong>. It expires in 10 minutes.
             </p>
 
             <form onSubmit={onVerify}>
@@ -706,12 +706,12 @@ export function AuthModal({
                 </div>
               )}
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: '#6b7a74', margin: '14px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, color: '#5f6b63', margin: '14px 0' }}>
                 <span>Didn&apos;t get the code?</span>
                 {resendIn > 0 ? (
                   <span style={{ color: '#9ca3af' }}>Resend in {resendIn}s</span>
                 ) : (
-                  <button type="button" onClick={() => { setOtp(['', '', '', '', '', '']); onRequestOtp(); }} style={{ background: 'none', border: 'none', color: '#2e9f82', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
+                  <button type="button" onClick={() => { setOtp(['', '', '', '', '', '']); onRequestOtp(); }} style={{ background: 'none', border: 'none', color: '#047246', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit' }}>
                     Resend code
                   </button>
                 )}
@@ -722,7 +722,7 @@ export function AuthModal({
                 disabled={submitting || otp.some((d) => !d)}
                 style={{
                   width: '100%', padding: '13px 16px', borderRadius: 999,
-                  background: '#2e9f82', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
+                  background: '#047246', color: 'white', border: 'none', fontWeight: 600, fontSize: 15,
                   cursor: (submitting || otp.some((d) => !d)) ? 'default' : 'pointer',
                   opacity: (submitting || otp.some((d) => !d)) ? 0.7 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit',

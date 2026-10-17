@@ -1,22 +1,11 @@
 import type { Metadata } from "next";
-import { Manrope, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { DocViewerHost } from "@/components/upnow/DocViewerHost";
 
-const manrope = Manrope({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  display: "swap",
-});
-
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
-  display: "swap",
-  variable: "--font-serif",
-});
+// Type: MarketSpace's Plus Jakarta Sans (UI) + Roboto Serif (display), self-hosted
+// from /public/fonts/marketspace via the @font-face rules at the end of globals.css.
+// --font-sans / --font-serif are defined there, so nothing is fetched at build time.
 
 export const metadata: Metadata = {
   title: "UpNow — UAE Property & Services Marketplace",
@@ -29,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${manrope.className} ${instrumentSerif.variable}`}>
+    <html lang="en">
       <body className="antialiased">
         <Providers>{children}</Providers>
         <DocViewerHost />

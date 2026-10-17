@@ -51,10 +51,10 @@ export default function ManagerSettingsPage() {
   if (!permsLoading && needsLandlord) {
     return (
       <div className="p-6">
-        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-[18px] px-7 py-10 mt-12">
+        <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-[18px] px-7 py-10 mt-12">
           <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#eef3f1] text-[#2e6f5e]"><Building2 size={20} /></div>
-          <p className="text-base font-bold text-[#1a1916]">Select a landlord</p>
-          <p className="text-[13.5px] text-[#9b9890] mt-1.5 leading-relaxed">Settings are per landlord. Choose one from the switcher above.</p>
+          <p className="text-base font-bold text-[#14201a]">Select a landlord</p>
+          <p className="text-[13.5px] text-[#8a948d] mt-1.5 leading-relaxed">Settings are per landlord. Choose one from the switcher above.</p>
         </div>
       </div>
     );
@@ -63,34 +63,34 @@ export default function ManagerSettingsPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">Settings</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">What this landlord has delegated to you.</p>
+        <h1 className="text-2xl font-bold text-[#14201a]">Settings</h1>
+        <p className="text-sm text-[#5f6b63] mt-0.5">What this landlord has delegated to you.</p>
       </div>
       <div className="lg:grid lg:grid-cols-[220px_minmax(0,1fr)] gap-6 items-start">
-        <nav className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-2 mb-6 lg:mb-0 lg:sticky lg:top-4">
+        <nav className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm p-2 mb-6 lg:mb-0 lg:sticky lg:top-4">
           {MENU.map(group => {
             const entries = group.tabs.map(k => TABS.find(t => t.key === k)!).filter(t => granted(t.flag));
             if (!entries.length) return null;
             return (
               <div key={group.title} className="mb-2 last:mb-0">
-                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#9b9890]">{group.title}</div>
+                <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#8a948d]">{group.title}</div>
                 {entries.map(t => (
                   <button key={t.key} onClick={() => setTab(t.key)}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer ${tab === t.key ? 'bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'text-[#4a4842] hover:bg-[#f4f3ef]'}`}>
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer ${tab === t.key ? 'bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'text-[#4a4842] hover:bg-[#eef1ef]'}`}>
                     <t.Icon size={15} /> {t.label}
                   </button>
                 ))}
               </div>
             );
           })}
-          {!permsLoading && visible.length === 0 && <p className="px-3 py-3 text-[12px] text-[#9b9890]">Nothing delegated for this landlord.</p>}
+          {!permsLoading && visible.length === 0 && <p className="px-3 py-3 text-[12px] text-[#8a948d]">Nothing delegated for this landlord.</p>}
         </nav>
         <div className="min-w-0">
           {!permsLoading && !allowed ? (
-            <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e8e6e0] rounded-[18px] px-7 py-10 mt-6">
+            <div className="max-w-[460px] mx-auto text-center bg-white border border-[#e4e9e5] rounded-[18px] px-7 py-10 mt-6">
               <div className="w-12 h-12 rounded-xl grid place-items-center mx-auto mb-3.5 bg-[#ffedd5] text-[#9a3412]"><Lock size={20} /></div>
-              <p className="text-base font-bold text-[#1a1916]">Permission required</p>
-              <p className="text-[13.5px] text-[#9b9890] mt-1.5 leading-relaxed">This landlord hasn&apos;t delegated this to you.</p>
+              <p className="text-base font-bold text-[#14201a]">Permission required</p>
+              <p className="text-[13.5px] text-[#8a948d] mt-1.5 leading-relaxed">This landlord hasn&apos;t delegated this to you.</p>
             </div>
           ) : effectiveRp != null && (
             <>

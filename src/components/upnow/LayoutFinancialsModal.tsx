@@ -432,7 +432,7 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
                 <div className="flex items-start gap-2">
                   <Star size={14} className="text-[#b45309] fill-[#b45309] mt-0.5 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-[#1a1916] truncate">Suggested default · {suggested.name}</p>
+                    <p className="text-xs font-semibold text-[#14201a] truncate">Suggested default · {suggested.name}</p>
                     <p className="text-[10px] text-[#a16207] mt-0.5">
                       Your {suggested.source === 'subcategory' ? 'sub-category' : 'category'} default
                       {suggestedScope ? ` for ${suggestedScope}` : ''}. Apply it as a starting point, or write the terms below.
@@ -458,19 +458,19 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
             {(() => {
               const n = (addendumTerms.en?.filter(l => l.trim()).length ?? 0) + (addendumTerms.ar?.filter(l => l.trim()).length ?? 0);
               return (
-                <div className="flex items-center justify-between gap-3 rounded-lg border border-[#e8e6e0] bg-white px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-[#e4e9e5] bg-white px-3 py-2.5">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#1a1916] truncate">
+                    <p className="text-sm font-medium text-[#14201a] truncate">
                       {addendumTerms.name?.trim() || 'Agreement Addendum'}
                     </p>
-                    <p className="text-[11px] text-[#9b9890]">{n ? `${n} term${n === 1 ? '' : 's'} written` : 'No terms yet'}</p>
+                    <p className="text-[11px] text-[#8a948d]">{n ? `${n} term${n === 1 ? '' : 's'} written` : 'No terms yet'}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {/* Choose from a saved template… */}
                     <AddendumTemplatePicker onPick={t => setAddendumTerms(t)} manager={manager} rpQ={rpQ} />
                     {n > 0 && (
                       <button type="button" onClick={() => setPreviewOpen(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#2e9f82] text-xs font-semibold hover:bg-[#f0faf6] cursor-pointer">
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#c5e8df] text-[#047246] text-xs font-semibold hover:bg-[#eef7f2] cursor-pointer">
                         <Eye size={13} /> Preview
                       </button>
                     )}
@@ -499,21 +499,21 @@ export function LayoutFinancialsModal({ plan, manager, rpQ, feeRules, onClose, o
             {showHistory && (
               <div className="rounded-lg border border-[#fde68a] bg-white p-3 space-y-2.5">
                 {verLoading && (
-                  <div className="text-xs flex items-center gap-1.5 text-[#6b6860]">
+                  <div className="text-xs flex items-center gap-1.5 text-[#5f6b63]">
                     <Loader2 size={13} className="animate-spin" /> Loading history…
                   </div>
                 )}
                 {!verLoading && versions && versions.length === 0 && (
-                  <p className="text-xs text-[#9b9890]">No versions yet — saving terms creates v1.</p>
+                  <p className="text-xs text-[#8a948d]">No versions yet — saving terms creates v1.</p>
                 )}
                 {!verLoading && versions?.map(v => (
                   <div key={v.id} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="font-semibold text-[#1a1916] shrink-0">v{v.versionNo}</span>
+                    <span className="font-semibold text-[#14201a] shrink-0">v{v.versionNo}</span>
                     {v.addendumUrl
                       ? <a href={v.addendumUrl} target="_blank" rel="noreferrer" className="text-[#b45309] truncate flex-1 hover:underline">{v.addendumFileName ?? 'Addendum'}</a>
-                      : <span className="text-[#6b6860] flex-1">Addendum terms</span>}
-                    <span className="text-[#9b9890] shrink-0">{fmtDate(v.effectiveAt)}</span>
-                    <span className="text-[#9b9890] shrink-0">· {v.contractsCount} contract{v.contractsCount === 1 ? '' : 's'}</span>
+                      : <span className="text-[#5f6b63] flex-1">Addendum terms</span>}
+                    <span className="text-[#8a948d] shrink-0">{fmtDate(v.effectiveAt)}</span>
+                    <span className="text-[#8a948d] shrink-0">· {v.contractsCount} contract{v.contractsCount === 1 ? '' : 's'}</span>
                   </div>
                 ))}
               </div>

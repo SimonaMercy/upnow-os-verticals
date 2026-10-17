@@ -91,8 +91,8 @@ export default function TenantPortalPage() {
     <Centered>
       <div className="text-center">
         <AlertTriangle className="mx-auto mb-2 text-[#b45309]" />
-        <p className="font-semibold text-[#1a1916]">{error ?? 'Link not available'}</p>
-        <p className="text-sm text-[#9b9890] mt-1">Please ask your rental provider to send a new link.</p>
+        <p className="font-semibold text-[#14201a]">{error ?? 'Link not available'}</p>
+        <p className="text-sm text-[#8a948d] mt-1">Please ask your rental provider to send a new link.</p>
       </div>
     </Centered>
   );
@@ -101,30 +101,30 @@ export default function TenantPortalPage() {
     <div className="min-h-screen bg-[#f7f6f2]">
       {scannerModal}
       <div className="max-w-2xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#2e9f82]" /><span className="font-bold text-[#1a1916]">UpNow</span></div>
-        <h1 className="text-2xl font-bold text-[#1a1916] mt-3">Hi {greetName(data.tenant.name)},</h1>
-        <p className="text-sm text-[#6b6860] mt-1">Please upload the documents requested below.</p>
+        <div className="flex items-center gap-2 mb-1"><ShieldCheck size={18} className="text-[#047246]" /><span className="font-bold text-[#14201a]">UpNow</span></div>
+        <h1 className="text-2xl font-bold text-[#14201a] mt-3">Hi {greetName(data.tenant.name)},</h1>
+        <p className="text-sm text-[#5f6b63] mt-1">Please upload the documents requested below.</p>
 
         {/* Request-scoped: the customer uploads ONLY the documents the rental
             provider explicitly asked for — nothing else from the catalog. */}
         {(data.requestedDocuments?.length ?? 0) > 0 ? (
           <DocSection title="Requested documents" subtitle="Your rental provider asked you to provide these" docs={data.requestedDocuments!} uploading={uploading} onUpload={upload} />
         ) : (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-6 px-5 py-10 text-center">
-            <CheckCircle2 size={24} className="text-[#2e9f82] mx-auto mb-2" />
-            <p className="text-sm font-semibold text-[#1a1916]">Nothing to upload right now</p>
-            <p className="text-xs text-[#9b9890] mt-1">Your rental provider hasn&apos;t requested any documents yet. They&apos;ll show up here when they do.</p>
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-6 px-5 py-10 text-center">
+            <CheckCircle2 size={24} className="text-[#047246] mx-auto mb-2" />
+            <p className="text-sm font-semibold text-[#14201a]">Nothing to upload right now</p>
+            <p className="text-xs text-[#8a948d] mt-1">Your rental provider hasn&apos;t requested any documents yet. They&apos;ll show up here when they do.</p>
           </div>
         )}
 
-        <p className="text-xs text-[#9b9890] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}. Powered by UpNow.</p>
+        <p className="text-xs text-[#8a948d] text-center mt-6">Link expires {new Date(data.expiresAt).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE })}. Powered by UpNow.</p>
       </div>
     </div>
   );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen flex items-center justify-center gap-2 text-[#6b6860] text-sm bg-[#f7f6f2] p-6">{children}</div>;
+  return <div className="min-h-screen flex items-center justify-center gap-2 text-[#5f6b63] text-sm bg-[#f7f6f2] p-6">{children}</div>;
 }
 
 function DocSection({ title, subtitle, docs, uploading, onUpload }: {
@@ -134,35 +134,35 @@ function DocSection({ title, subtitle, docs, uploading, onUpload }: {
   // A rejected doc is NOT "done" — it must be re-uploaded.
   const done = required.filter(d => d.uploaded && d.status !== 'rejected').length;
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] mt-6 overflow-hidden">
-      <div className="px-5 py-4 border-b border-[#f4f3ef] bg-[#fafaf8] flex items-center gap-2">
-        <FileText size={16} className="text-[#2e9f82]" />
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] mt-6 overflow-hidden">
+      <div className="px-5 py-4 border-b border-[#eef1ef] bg-[#f6f8f6] flex items-center gap-2">
+        <FileText size={16} className="text-[#047246]" />
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-bold text-[#1a1916]">{title}</span>
-          <p className="text-xs text-[#9b9890]">{subtitle}</p>
+          <span className="text-sm font-bold text-[#14201a]">{title}</span>
+          <p className="text-xs text-[#8a948d]">{subtitle}</p>
         </div>
-        {required.length > 0 && <span className="text-xs text-[#6b6860] shrink-0">{done}/{required.length} required</span>}
+        {required.length > 0 && <span className="text-xs text-[#5f6b63] shrink-0">{done}/{required.length} required</span>}
       </div>
       <div className="px-5 py-4 space-y-2">
-        {docs.length === 0 && <p className="text-xs text-[#9b9890] text-center py-2">Nothing needed here.</p>}
+        {docs.length === 0 && <p className="text-xs text-[#8a948d] text-center py-2">Nothing needed here.</p>}
         {docs.map(doc => {
           const isRejected = doc.status === 'rejected';
           const ok = doc.uploaded && !isRejected;
           const busy = uploading === doc.key;
           return (
-            <div key={doc.key} className={`rounded-xl px-4 py-3 flex flex-col gap-2 ${isRejected ? 'bg-[#fff1f2] border border-[#fecaca]' : ok ? 'bg-[#f0faf6] border border-[#bbf7d0]' : doc.required ? 'bg-[#fffbeb] border border-[#fde68a]' : 'bg-[#f9f8f6] border border-[#e8e6e0]'}`}>
+            <div key={doc.key} className={`rounded-xl px-4 py-3 flex flex-col gap-2 ${isRejected ? 'bg-[#fff1f2] border border-[#fecaca]' : ok ? 'bg-[#eef7f2] border border-[#bbf7d0]' : doc.required ? 'bg-[#fffbeb] border border-[#fde68a]' : 'bg-[#f9f8f6] border border-[#e4e9e5]'}`}>
               <div className="flex items-center gap-3">
               <div className="shrink-0">{isRejected ? <AlertTriangle size={18} className="text-[#ef4444]" /> : ok ? <CheckCircle2 size={18} className="text-[#16a34a]" /> : <UploadCloud size={18} className="text-[#d97706]" />}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[#1a1916]">{doc.displayName}</p>
+                <p className="text-sm font-semibold text-[#14201a]">{doc.displayName}</p>
                 {isRejected ? (
-                  <p className="text-xs text-[#ef4444] font-medium">Rejected — re-upload required{doc.notes ? <span className="font-normal text-[#9b9890]"> · {doc.notes}</span> : ''}</p>
+                  <p className="text-xs text-[#ef4444] font-medium">Rejected — re-upload required{doc.notes ? <span className="font-normal text-[#8a948d]"> · {doc.notes}</span> : ''}</p>
                 ) : (
-                  <p className="text-xs text-[#9b9890]">{ok ? 'Uploaded' : doc.required ? 'Required' : 'Optional'}{doc.hint ? ` — ${doc.hint}` : ''}</p>
+                  <p className="text-xs text-[#8a948d]">{ok ? 'Uploaded' : doc.required ? 'Required' : 'Optional'}{doc.hint ? ` — ${doc.hint}` : ''}</p>
                 )}
               </div>
-              {doc.uploaded && doc.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })} className="text-xs text-[#2e9f82] flex items-center gap-1 cursor-pointer"><ExternalLink size={12} /> View</button>}
-              <label className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white ${busy ? 'opacity-50 pointer-events-none' : ''} ${isRejected ? 'bg-[#ef4444]' : ok ? 'bg-[#9b9890]' : 'bg-[#2e9f82]'}`}>
+              {doc.uploaded && doc.fileUrl && <button type="button" onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: doc.displayName })} className="text-xs text-[#047246] flex items-center gap-1 cursor-pointer"><ExternalLink size={12} /> View</button>}
+              <label className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white ${busy ? 'opacity-50 pointer-events-none' : ''} ${isRejected ? 'bg-[#ef4444]' : ok ? 'bg-[#8a948d]' : 'bg-[#047246]'}`}>
                 {busy ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
                 {isRejected ? 'Re-upload' : ok ? 'Replace' : 'Upload'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(doc, f); e.target.value = ''; }} />

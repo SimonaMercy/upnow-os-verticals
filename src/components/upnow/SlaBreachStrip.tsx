@@ -16,7 +16,7 @@ interface Summary { open: number; byKind: Record<Kind, number>; detectedToday: n
 interface Breach { id: number; bookingId: number; kind: Kind; dueAt: string; detectedAt: string; lateNowMin: number; resolvedAt: string | null; status: string; serviceName: string | null; providerName: string | null; urgency: string | null }
 
 const KIND_LABEL: Record<Kind, string> = { assign: 'Not assigned', acknowledge: 'Not acknowledged', arrival: 'No arrival', complete: 'Not completed' };
-const INK = '#1a1916'; const MUTE = '#6b6860'; const FAINT = '#9b9890'; const BORDER = '1px solid #ececea';
+const INK = '#14201a'; const MUTE = '#5f6b63'; const FAINT = '#8a948d'; const BORDER = '1px solid #ececea';
 const late = (m: number) => (m >= 60 * 24 ? `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h` : m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} m` : `${m} m`);
 
 export function SlaBreachStrip({ limit = 8 }: { limit?: number }) {
@@ -68,7 +68,7 @@ export function SlaBreachStrip({ limit = 8 }: { limit?: number }) {
             </Link>
           ))}
           {sum.open > rows.length && !expanded && (
-            <button onClick={() => setExpanded(true)} style={{ width: '100%', background: '#fafaf8', border: 0, padding: '7px', fontSize: 12, color: MUTE, cursor: 'pointer' }}>Show all {sum.open}</button>
+            <button onClick={() => setExpanded(true)} style={{ width: '100%', background: '#f6f8f6', border: 0, padding: '7px', fontSize: 12, color: MUTE, cursor: 'pointer' }}>Show all {sum.open}</button>
           )}
         </div>
       )}

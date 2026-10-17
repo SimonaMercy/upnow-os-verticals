@@ -125,9 +125,9 @@ async function appendPart(out: PDFDocument, part: MergePart): Promise<void> {
 
 const overlayCss: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(26,25,22,.45)', display: 'grid', placeItems: 'center', padding: 16 };
 const cardCss: React.CSSProperties = { width: 'min(540px, 100%)', maxHeight: '84vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,.28)', overflow: 'hidden' };
-const groupCss: React.CSSProperties = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#9b9890', margin: '14px 0 6px' };
-const rowCss: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, color: '#1a1916' };
-const primaryBtn: React.CSSProperties = { fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 10, border: '1px solid #2e9f82', background: '#2e9f82', color: '#fff', cursor: 'pointer' };
+const groupCss: React.CSSProperties = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#8a948d', margin: '14px 0 6px' };
+const rowCss: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, color: '#14201a' };
+const primaryBtn: React.CSSProperties = { fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 10, border: '1px solid #047246', background: '#047246', color: '#fff', cursor: 'pointer' };
 const ghostBtn: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 10, border: '1px solid #dcd8d0', background: '#fff', color: '#4a4742', cursor: 'pointer' };
 
 function DownloadDocsModal({ items, fileName, onClose }: { items: MergeDocItem[]; fileName: string; onClose: () => void }) {
@@ -195,8 +195,8 @@ function DownloadDocsModal({ items, fileName, onClose }: { items: MergeDocItem[]
     <div style={overlayCss} onClick={busy ? undefined : onClose}>
       <div style={cardCss} onClick={e => e.stopPropagation()}>
         <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid #efece6' }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1916' }}>Download documents</div>
-          <div style={{ fontSize: 12.5, color: '#6b6860', marginTop: 3 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#14201a' }}>Download documents</div>
+          <div style={{ fontSize: 12.5, color: '#5f6b63', marginTop: 3 }}>
             Pick what to include — the selection is combined into a single PDF, each document on its own pages.
           </div>
         </div>
@@ -206,10 +206,10 @@ function DownloadDocsModal({ items, fileName, onClose }: { items: MergeDocItem[]
               type="checkbox"
               checked={allSelected}
               onChange={() => setSelected(allSelected ? new Set() : new Set(items.map(i => i.id)))}
-              style={{ width: 15, height: 15, accentColor: '#2e9f82' }}
+              style={{ width: 15, height: 15, accentColor: '#047246' }}
             />
             Select all
-            <span style={{ marginLeft: 'auto', fontWeight: 600, fontSize: 12, color: '#9b9890' }}>{selected.size} of {items.length}</span>
+            <span style={{ marginLeft: 'auto', fontWeight: 600, fontSize: 12, color: '#8a948d' }}>{selected.size} of {items.length}</span>
           </label>
           {groups.map(g => (
             <div key={g.name}>
@@ -220,17 +220,17 @@ function DownloadDocsModal({ items, fileName, onClose }: { items: MergeDocItem[]
                     type="checkbox"
                     checked={selected.has(it.id)}
                     onChange={() => toggle(it.id)}
-                    style={{ width: 15, height: 15, accentColor: '#2e9f82', flexShrink: 0 }}
+                    style={{ width: 15, height: 15, accentColor: '#047246', flexShrink: 0 }}
                   />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
-                  {(it.count ?? 1) > 1 && <span style={{ fontSize: 11.5, color: '#9b9890', flexShrink: 0 }}>· {it.count} files</span>}
+                  {(it.count ?? 1) > 1 && <span style={{ fontSize: 11.5, color: '#8a948d', flexShrink: 0 }}>· {it.count} files</span>}
                 </label>
               ))}
             </div>
           ))}
         </div>
         <div style={{ padding: '12px 20px', borderTop: '1px solid #efece6', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 12, color: warning ? '#b3593a' : '#6b6860', flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: warning ? '#b3593a' : '#5f6b63', flex: 1, minWidth: 0 }}>
             {busy ? progress : warning ?? ''}
           </div>
           <button type="button" style={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>

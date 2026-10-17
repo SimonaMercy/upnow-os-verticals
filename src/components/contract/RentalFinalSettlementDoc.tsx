@@ -85,8 +85,8 @@ export function restorationBreakdownRows(
 }
 
 const STATUS_TONE: Record<string, string> = {
-  Cleared: 'text-[#1a7a5a]', Held: 'text-[#6b6860]', Bounced: 'text-[#b91c1c]',
-  Cancelled: 'text-[#9b9890] line-through', 'Not Received': 'text-[#c2410c]', Pending: 'text-[#c2410c]',
+  Cleared: 'text-[#1a7a5a]', Held: 'text-[#5f6b63]', Bounced: 'text-[#b91c1c]',
+  Cancelled: 'text-[#8a948d] line-through', 'Not Received': 'text-[#c2410c]', Pending: 'text-[#c2410c]',
 };
 
 // Small building blocks --------------------------------------------------------
@@ -102,36 +102,36 @@ function SectionHead({ n, title, right }: { n: number | string; title: string; r
 function Field({ label, value, accent }: { label: string; value: React.ReactNode; accent?: boolean }) {
   return (
     <div>
-      <div className="text-[10px] text-[#9b9890] uppercase tracking-wide">{label}</div>
-      <div className={`text-[13px] mt-0.5 px-2 py-1.5 rounded border ${accent ? 'border-[#c5e8df] bg-[#f0faf6] font-semibold text-[#1a1916]' : 'border-[#e8e6e0] bg-white text-[#1a1916]'}`}>{value ?? '—'}</div>
+      <div className="text-[10px] text-[#8a948d] uppercase tracking-wide">{label}</div>
+      <div className={`text-[13px] mt-0.5 px-2 py-1.5 rounded border ${accent ? 'border-[#c5e8df] bg-[#eef7f2] font-semibold text-[#14201a]' : 'border-[#e4e9e5] bg-white text-[#14201a]'}`}>{value ?? '—'}</div>
     </div>
   );
 }
 function ChargeCol({ n, title, rows, total, accent, footer }: { n: number; title: string; rows: { label: string; amount: number }[]; total: number; accent?: string; footer?: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-[#e8e6e0] overflow-hidden flex flex-col">
+    <div className="rounded-lg border border-[#e4e9e5] overflow-hidden flex flex-col">
       <SectionHead n={n} title={title} />
       <div className="p-2.5 space-y-1 flex-1">
         {rows.map((r, i) => (
           <div key={i} className="flex items-center justify-between gap-2 text-[12px]">
             <span className="text-[#4a4842] truncate" title={r.label}>{r.label}</span>
-            <span className="tabular-nums text-[#1a1916] shrink-0">{money(r.amount)}</span>
+            <span className="tabular-nums text-[#14201a] shrink-0">{money(r.amount)}</span>
           </div>
         ))}
         {footer && <div className="pt-1">{footer}</div>}
       </div>
-      <div className="flex items-center justify-between px-2.5 py-1.5 border-t border-[#e8e6e0] bg-[#faf9f6]">
+      <div className="flex items-center justify-between px-2.5 py-1.5 border-t border-[#e4e9e5] bg-[#faf9f6]">
         <span className="text-[11px] font-bold uppercase tracking-wide text-[#1f6b4f]">Total</span>
-        <span className={`text-[13px] font-bold tabular-nums ${accent ?? 'text-[#1a1916]'}`}>{money(total)}</span>
+        <span className={`text-[13px] font-bold tabular-nums ${accent ?? 'text-[#14201a]'}`}>{money(total)}</span>
       </div>
     </div>
   );
 }
 function SummaryRow({ label, value, tone, strong, border }: { label: string; value: string; tone?: string; strong?: boolean; border?: boolean }) {
   return (
-    <div className={`flex items-center justify-between gap-2 px-3 py-2 ${border ? 'border-t border-[#e8e6e0]' : ''}`}>
+    <div className={`flex items-center justify-between gap-2 px-3 py-2 ${border ? 'border-t border-[#e4e9e5]' : ''}`}>
       <span className={`text-[12px] ${strong ? 'font-bold text-[#1f6b4f]' : 'text-[#4a4842]'}`}>{label}</span>
-      <span className={`text-[13px] tabular-nums ${strong ? 'font-bold' : 'font-semibold'} ${tone ?? 'text-[#1a1916]'}`}>{value}</span>
+      <span className={`text-[13px] tabular-nums ${strong ? 'font-bold' : 'font-semibold'} ${tone ?? 'text-[#14201a]'}`}>{value}</span>
     </div>
   );
 }
@@ -150,17 +150,17 @@ function SignatureSide({ icon, role, name, signature, signedAt }: { icon: React.
         {img
           ? <img src={signature!} alt="Signature" className="max-h-11 object-contain object-left" />
           : typed
-            ? <span className="text-[22px] leading-none text-[#1a1916]" style={{ fontFamily: 'Segoe Script, "Snell Roundhand", cursive' }}>{signature}</span>
+            ? <span className="text-[22px] leading-none text-[#14201a]" style={{ fontFamily: 'Segoe Script, "Snell Roundhand", cursive' }}>{signature}</span>
             : <span className="text-[12px] italic text-[#b8b5ad] pb-1">Not yet signed</span>}
       </div>
       <div className="border-t border-[#c8c6be] pt-2 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#1f6b4f] uppercase tracking-wide">{icon} {role}</div>
-          <div className="text-[12px] text-[#1a1916] truncate">{name || '—'}</div>
+          <div className="text-[12px] text-[#14201a] truncate">{name || '—'}</div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-[10px] text-[#9b9890] uppercase tracking-wide">Date</div>
-          <div className={`text-[12px] ${signed && signedAt ? 'text-[#1a7a5a] font-medium' : 'text-[#9b9890]'}`}>
+          <div className="text-[10px] text-[#8a948d] uppercase tracking-wide">Date</div>
+          <div className={`text-[12px] ${signed && signedAt ? 'text-[#1a7a5a] font-medium' : 'text-[#8a948d]'}`}>
             {signed && signedAt ? fmtDate(signedAt) : '____________'}
           </div>
         </div>
@@ -226,20 +226,20 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
   const isRefund = finalBalance >= 0;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden">
       {/* Header */}
       <div className="px-6 pt-6 pb-4 border-b-2 border-[#1f6b4f]">
-        <div className="text-[10px] font-semibold text-[#6b6860] uppercase tracking-wider">Landlord / Rental Provider</div>
+        <div className="text-[10px] font-semibold text-[#5f6b63] uppercase tracking-wider">Landlord / Rental Provider</div>
         <div className="text-[17px] font-bold text-[#1f6b4f] uppercase tracking-wide leading-tight">{c.landlordName || '—'}</div>
         <div className="mt-2 text-center">
-          <h1 className="text-[26px] font-extrabold text-[#1a1916] leading-none">FINAL SETTLEMENT</h1>
-          <p className="text-[12px] italic text-[#9b9890] mt-1">Statement of Account &amp; Deposit Reconciliation</p>
+          <h1 className="text-[26px] font-extrabold text-[#14201a] leading-none">FINAL SETTLEMENT</h1>
+          <p className="text-[12px] italic text-[#8a948d] mt-1">Statement of Account &amp; Deposit Reconciliation</p>
         </div>
       </div>
 
       <div className="p-5 space-y-4">
         {/* §1 Customer & Contract Details */}
-        <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+        <div className="rounded-lg border border-[#e4e9e5] overflow-hidden">
           <SectionHead n={1} title="Customer & Contract Details" />
           <div className="p-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
             <Field label="Customer Name" value={c.tenantName || '—'} />
@@ -254,12 +254,12 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
         </div>
 
         {/* §2 Payment History */}
-        <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+        <div className="rounded-lg border border-[#e4e9e5] overflow-hidden">
           <SectionHead n={2} title="Payment History" />
           <div className="overflow-x-auto">
             <table className="w-full text-[12px] min-w-[640px]">
               <thead>
-                <tr className="bg-[#faf9f6] text-[#6b6860] text-[10px] uppercase tracking-wide">
+                <tr className="bg-[#faf9f6] text-[#5f6b63] text-[10px] uppercase tracking-wide">
                   <th className="text-left font-semibold px-3 py-1.5">Description</th>
                   <th className="text-left font-semibold px-2 py-1.5">Date</th>
                   <th className="text-right font-semibold px-2 py-1.5">Amount (AED)</th>
@@ -272,12 +272,12 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
               <tbody>
                 {data.depositRow && (
                   <tr className="border-t border-[#f0ede8]">
-                    <td className="px-3 py-1.5 font-medium text-[#1a1916]">{data.depositRow.description}</td>
-                    <td className="px-2 py-1.5 text-[#6b6860]">{fmtDate(data.depositRow.date)}</td>
+                    <td className="px-3 py-1.5 font-medium text-[#14201a]">{data.depositRow.description}</td>
+                    <td className="px-2 py-1.5 text-[#5f6b63]">{fmtDate(data.depositRow.date)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{money(data.depositRow.amount)}</td>
-                    <td className="px-2 py-1.5 text-[#6b6860]">{data.depositRow.method || (data.depositRow.mode ?? '')}</td>
-                    <td className="px-2 py-1.5 text-[#6b6860]">{data.depositRow.chequeNumber || (data.depositRow.mode ?? '') || '—'}</td>
-                    <td className={`px-2 py-1.5 ${STATUS_TONE[data.depositRow.status ?? ''] ?? 'text-[#6b6860]'}`}>{data.depositRow.status}</td>
+                    <td className="px-2 py-1.5 text-[#5f6b63]">{data.depositRow.method || (data.depositRow.mode ?? '')}</td>
+                    <td className="px-2 py-1.5 text-[#5f6b63]">{data.depositRow.chequeNumber || (data.depositRow.mode ?? '') || '—'}</td>
+                    <td className={`px-2 py-1.5 ${STATUS_TONE[data.depositRow.status ?? ''] ?? 'text-[#5f6b63]'}`}>{data.depositRow.status}</td>
                     <td className="px-3 py-1.5 text-right" />
                   </tr>
                 )}
@@ -295,20 +295,20 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
                     </tr>
                     {band.rows.map((r, ri) => (
                       <tr key={`b${bi}r${ri}`} className="border-t border-[#f0ede8]">
-                        <td className="px-3 py-1.5 text-[#1a1916]">{r.description}</td>
-                        <td className="px-2 py-1.5 text-[#6b6860]">{fmtDate(r.date)}</td>
+                        <td className="px-3 py-1.5 text-[#14201a]">{r.description}</td>
+                        <td className="px-2 py-1.5 text-[#5f6b63]">{fmtDate(r.date)}</td>
                         <td className="px-2 py-1.5 text-right tabular-nums">{money(r.amount)}</td>
-                        <td className="px-2 py-1.5 text-[#6b6860] capitalize">{(r.method || '').replace('_', ' ') || '—'}</td>
-                        <td className="px-2 py-1.5 text-[#6b6860]">{r.chequeNumber || '—'}</td>
-                        <td className={`px-2 py-1.5 ${STATUS_TONE[r.status ?? ''] ?? 'text-[#6b6860]'}`}>{r.status}</td>
+                        <td className="px-2 py-1.5 text-[#5f6b63] capitalize">{(r.method || '').replace('_', ' ') || '—'}</td>
+                        <td className="px-2 py-1.5 text-[#5f6b63]">{r.chequeNumber || '—'}</td>
+                        <td className={`px-2 py-1.5 ${STATUS_TONE[r.status ?? ''] ?? 'text-[#5f6b63]'}`}>{r.status}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums text-[#b91c1c]">{r.penalty ? money(r.penalty) : ''}</td>
                       </tr>
                     ))}
                     {/* Per-contract subtotal — sum of the amounts listed under this lease. */}
-                    <tr className="border-t border-[#e8e6e0] bg-[#faf9f6]">
+                    <tr className="border-t border-[#e4e9e5] bg-[#faf9f6]">
                       <td className="px-3 py-1 text-[11px] font-semibold text-[#4a4842]">Subtotal{band.contractNo ? ` · ${band.contractNo}` : ''}</td>
                       <td className="px-2 py-1" />
-                      <td className="px-2 py-1 text-right tabular-nums font-bold text-[#1a1916]">
+                      <td className="px-2 py-1 text-right tabular-nums font-bold text-[#14201a]">
                         {money(band.rows.reduce((a, r) => a + (r.amount || 0), 0))}
                       </td>
                       <td className="px-2 py-1" colSpan={4} />
@@ -326,17 +326,17 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
           <ChargeCol n={4} title="Property Charges" rows={restorationRows} total={restorationTotal}
             footer={restorationInspId != null && moveOutReportHref
               ? <a href={moveOutReportHref(restorationInspId)} target="_blank" rel="noreferrer" className="text-[11px] font-medium text-[#1f6b4f] hover:underline">↗ From move-out inspection report</a>
-              : (restorationTotal > 0 ? <span className="text-[11px] text-[#9b9890]">From move-out inspection</span> : undefined)} />
+              : (restorationTotal > 0 ? <span className="text-[11px] text-[#8a948d]">From move-out inspection</span> : undefined)} />
           <ChargeCol n={5} title="Additional Recoverable Charges" rows={additionalRows} total={additionalTotal} />
         </div>
 
         {/* §6 §7 */}
         <div className="grid md:grid-cols-2 gap-4">
-          <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+          <div className="rounded-lg border border-[#e4e9e5] overflow-hidden">
             <SectionHead n={6} title="Security Deposit Reconciliation" />
             <div>
               <SummaryRow label="Security Deposit (Held)" value={money(data.depositHeld)} />
-              <div className="px-3 pt-1 text-[10px] font-bold text-[#9b9890] uppercase tracking-wide">Less: Deductions</div>
+              <div className="px-3 pt-1 text-[10px] font-bold text-[#8a948d] uppercase tracking-wide">Less: Deductions</div>
               <SummaryRow label="Outstanding Utility & Service Charges" value={money(utilitiesTotal)} />
               <SummaryRow label="Property Charges" value={money(restorationTotal)} />
               <SummaryRow label="Additional Recoverable Charges" value={money(additionalTotal)} />
@@ -344,7 +344,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
               <SummaryRow label="Net Deposit Balance" value={money(netDepositBalance)} tone={netDepositBalance < 0 ? 'text-[#b91c1c]' : 'text-[#1a7a5a]'} strong border />
             </div>
           </div>
-          <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+          <div className="rounded-lg border border-[#e4e9e5] overflow-hidden">
             <SectionHead n={7} title="Final Settlement Summary" />
             <div>
               <SummaryRow label="Outstanding Rent (if any)" value={money(outstandingRent)} />
@@ -358,7 +358,7 @@ export default function RentalFinalSettlementDoc({ data, contractHref, moveOutRe
 
         {/* §9 Signatures — the actual captured e-signatures when signed, blank
             signing lines when a side hasn't signed yet. */}
-        <div className="rounded-lg border border-[#e8e6e0] overflow-hidden">
+        <div className="rounded-lg border border-[#e4e9e5] overflow-hidden">
           <SectionHead n={9} title="Signatures" />
           <div className="p-4 grid sm:grid-cols-2 gap-6">
             <SignatureSide icon={<Building2 size={12} />} role="Rental Provider / Property Manager"

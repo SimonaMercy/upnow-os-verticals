@@ -23,12 +23,12 @@ const sumNet = (lines: RFSData['lines'], cats: string[]) =>
 const GREEN = '#1f6b4f';
 const RED = '#b91c1c';
 const s = StyleSheet.create({
-  page: { paddingTop: 28, paddingBottom: 36, paddingHorizontal: 28, fontSize: 8, color: '#1a1916', fontFamily: 'Helvetica' },
+  page: { paddingTop: 28, paddingBottom: 36, paddingHorizontal: 28, fontSize: 8, color: '#14201a', fontFamily: 'Helvetica' },
   // header
-  landlordLabel: { fontSize: 7, color: '#6b6860', textTransform: 'uppercase', letterSpacing: 0.6 },
+  landlordLabel: { fontSize: 7, color: '#5f6b63', textTransform: 'uppercase', letterSpacing: 0.6 },
   landlord: { fontSize: 12, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase' },
   title: { fontSize: 18, fontFamily: 'Helvetica-Bold', textAlign: 'center', marginTop: 6 },
-  subtitle: { fontSize: 8, color: '#9b9890', textAlign: 'center', marginTop: 1 },
+  subtitle: { fontSize: 8, color: '#8a948d', textAlign: 'center', marginTop: 1 },
   headRule: { borderBottomWidth: 2, borderBottomColor: GREEN, marginTop: 8, marginBottom: 10 },
   // section header bar
   secHead: { flexDirection: 'row', alignItems: 'center', backgroundColor: GREEN, borderTopLeftRadius: 3, borderTopRightRadius: 3, paddingVertical: 3, paddingHorizontal: 5 },
@@ -38,21 +38,21 @@ const s = StyleSheet.create({
   // ("Outstanding Utility & Service Charges") stays on ONE line.
   secBadgeSm: { width: 9, height: 9, fontSize: 6, paddingTop: 1, marginRight: 3 },
   secTitleSm: { fontSize: 6.5, letterSpacing: 0.15 },
-  box: { borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 3, marginBottom: 8 },
+  box: { borderWidth: 1, borderColor: '#e4e9e5', borderRadius: 3, marginBottom: 8 },
   // §1 fields — column layout + flexGrow value box so every box in a row is the
   // SAME height (a long Customer Name no longer towers over the short date boxes).
   fieldWrap: { flexDirection: 'row', flexWrap: 'wrap', padding: 6 },
   field: { width: '25%', paddingHorizontal: 3, paddingVertical: 3, flexDirection: 'column' },
-  fieldLabel: { fontSize: 6.5, color: '#9b9890', textTransform: 'uppercase', letterSpacing: 0.3 },
-  fieldValBox: { marginTop: 1.5, borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 2, paddingVertical: 2.5, paddingHorizontal: 3, flexGrow: 1, minHeight: 16, justifyContent: 'center' },
-  fieldValBoxAccent: { borderColor: '#c5e8df', backgroundColor: '#f0faf6' },
+  fieldLabel: { fontSize: 6.5, color: '#8a948d', textTransform: 'uppercase', letterSpacing: 0.3 },
+  fieldValBox: { marginTop: 1.5, borderWidth: 1, borderColor: '#e4e9e5', borderRadius: 2, paddingVertical: 2.5, paddingHorizontal: 3, flexGrow: 1, minHeight: 16, justifyContent: 'center' },
+  fieldValBoxAccent: { borderColor: '#c5e8df', backgroundColor: '#eef7f2' },
   fieldValText: { fontSize: 8.5 },
   fieldValTextAccent: { fontFamily: 'Helvetica-Bold' },
   // §2 table
   th: { flexDirection: 'row', backgroundColor: '#faf9f6', paddingVertical: 2.5, paddingHorizontal: 5 },
-  thc: { fontSize: 6.5, color: '#6b6860', fontFamily: 'Helvetica-Bold', textTransform: 'uppercase' },
+  thc: { fontSize: 6.5, color: '#5f6b63', fontFamily: 'Helvetica-Bold', textTransform: 'uppercase' },
   tr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 0.5, borderTopColor: '#f0ede8' },
-  subtotalTr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 1, borderTopColor: '#e8e6e0', backgroundColor: '#faf9f6', fontFamily: 'Helvetica-Bold', color: '#4a4842' },
+  subtotalTr: { flexDirection: 'row', paddingVertical: 2.5, paddingHorizontal: 5, borderTopWidth: 1, borderTopColor: '#e4e9e5', backgroundColor: '#faf9f6', fontFamily: 'Helvetica-Bold', color: '#4a4842' },
   band: { backgroundColor: '#f4f2ee', paddingVertical: 2.5, paddingHorizontal: 5 },
   bandTxt: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#4a4842', textTransform: 'uppercase' },
   // paddingRight on every column keeps adjacent cells from touching (esp. the
@@ -61,14 +61,14 @@ const s = StyleSheet.create({
   cMethod: { width: '14%', paddingRight: 4 }, cRef: { width: '18%', paddingRight: 4 }, cStatus: { width: '12%', paddingRight: 4 }, cPen: { width: '11%', textAlign: 'right' },
   // charge columns
   colRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  col: { flexGrow: 1, flexBasis: 0, borderWidth: 1, borderColor: '#e8e6e0', borderRadius: 3 },
+  col: { flexGrow: 1, flexBasis: 0, borderWidth: 1, borderColor: '#e4e9e5', borderRadius: 3 },
   colBody: { padding: 5, minHeight: 54 },
   clineRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 },
-  colTotal: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#e8e6e0', backgroundColor: '#faf9f6', paddingVertical: 3, paddingHorizontal: 5 },
+  colTotal: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#e4e9e5', backgroundColor: '#faf9f6', paddingVertical: 3, paddingHorizontal: 5 },
   totalLbl: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase' },
   // §6/§7 rows
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6 },
-  sumRowB: { borderTopWidth: 1, borderTopColor: '#e8e6e0' },
+  sumRowB: { borderTopWidth: 1, borderTopColor: '#e4e9e5' },
   // signatures — mirror the tenancy contract's signature box
   sigRow: { flexDirection: 'row', gap: 24, padding: 8 },
   sigCol: { flexGrow: 1, flexBasis: 0 },
@@ -76,16 +76,16 @@ const s = StyleSheet.create({
   sigFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderTopWidth: 1, borderTopColor: '#c8c6be', paddingTop: 3, marginTop: 2 },
   sigHead: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: GREEN, textTransform: 'uppercase' },
   sigName: { fontSize: 8.5, marginTop: 1.5 },
-  sigLabel: { fontSize: 6.5, color: '#9b9890', textTransform: 'uppercase' },
+  sigLabel: { fontSize: 6.5, color: '#8a948d', textTransform: 'uppercase' },
   sigImg: { height: 28, maxWidth: 140, objectFit: 'contain', objectPosition: 'left' },
-  sigTyped: { fontSize: 15, color: '#1a1916', fontFamily: 'Helvetica-Oblique' },
+  sigTyped: { fontSize: 15, color: '#14201a', fontFamily: 'Helvetica-Oblique' },
   sigNotSigned: { fontSize: 8, color: '#b8b5ad', fontFamily: 'Helvetica-Oblique' },
   sigDate: { fontSize: 8.5, color: '#1a7a5a', fontFamily: 'Helvetica-Bold', marginTop: 1 },
-  sigDateBlank: { fontSize: 8.5, color: '#9b9890', marginTop: 1 },
+  sigDateBlank: { fontSize: 8.5, color: '#8a948d', marginTop: 1 },
 });
 
 const statusColor = (st?: string) =>
-  st === 'Cleared' ? '#1a7a5a' : st === 'Bounced' ? RED : (st === 'Not Received' || st === 'Pending') ? '#c2410c' : '#6b6860';
+  st === 'Cleared' ? '#1a7a5a' : st === 'Bounced' ? RED : (st === 'Not Received' || st === 'Pending') ? '#c2410c' : '#5f6b63';
 
 function SecHead({ n, title, small }: { n: number | string; title: string; small?: boolean }) {
   return (
@@ -126,7 +126,7 @@ function SumRow({ label, value, tone, strong, border }: { label: string; value: 
   return (
     <View style={[s.sumRow, ...(border ? [s.sumRowB] : [])]}>
       <Text style={{ fontFamily: strong ? 'Helvetica-Bold' : 'Helvetica', color: strong ? GREEN : '#4a4842' }}>{label}</Text>
-      <Text style={{ fontFamily: 'Helvetica-Bold', color: tone ?? '#1a1916' }}>{value}</Text>
+      <Text style={{ fontFamily: 'Helvetica-Bold', color: tone ?? '#14201a' }}>{value}</Text>
     </View>
   );
 }
@@ -288,7 +288,7 @@ export default function RentalFinalSettlementPdf({ data }: { data: RFSData }) {
           <View style={[s.col, { flexGrow: 1, flexBasis: 0 }]}>
             <SecHead n={6} title="Security Deposit Reconciliation" />
             <SumRow label="Security Deposit (Held)" value={money(data.depositHeld)} />
-            <Text style={{ fontSize: 6.5, color: '#9b9890', textTransform: 'uppercase', paddingHorizontal: 6, paddingTop: 2 }}>Less: Deductions</Text>
+            <Text style={{ fontSize: 6.5, color: '#8a948d', textTransform: 'uppercase', paddingHorizontal: 6, paddingTop: 2 }}>Less: Deductions</Text>
             <SumRow label="Outstanding Utility & Service Charges" value={money(utilitiesTotal)} />
             <SumRow label="Property Charges" value={money(restorationTotal)} />
             <SumRow label="Additional Recoverable Charges" value={money(additionalTotal)} />

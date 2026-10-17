@@ -1,37 +1,86 @@
 /**
- * Rental Provider — New Contract wizard (rental-provider/dashboard/contracts/new)
+ * Operations › Long-term leases › New tenancy contract — the Genspark wizard
+ * (steps left · form centre · live contract summary right).
  *
- * Multi-step form for creating a tenancy contract:
- *   Step 1: Select unit + tenant (tenant autocomplete from /contracts/tenants)
- *   Step 2: Contract terms (dates, rent, installments, payment method)
- *   Step 3: Clauses + fees (custom clauses, admin fee, Ejari fee)
- *   Step 4: Review + submit
+ * Reused by the manager route (/dashboard/manager/contracts/new re-exports this
+ * default export inside ManagerPermissionGate "Create Contracts"). It detects the
+ * /dashboard/manager path + ?rp=<landlord> and scopes every fetch to that landlord.
  *
- * On submit, calls POST /contracts which also auto-creates instalment Payment
- * records if numberOfInstallments > 0. After creation, redirects to /contracts/:id.
- *
- * Searching params: ?unitId=X pre-selects a unit (linked from portfolio page).
+ * Parity with previous page (single-scroll form + summary column; original backed up
+ * to the session scratchpad as contracts-new.orig.tsx):
+ *  Query params (all still read)
+ *   [x] ?unitId=      → GET /api/listings/units/:id → its propertyId preselects the property, then the unit
+ *   [x] ?tenantId=    → customer locked ("Pre-filled from lead" when ?leadId= is present, else "Chosen customer"); name enriched from the tenant list when
+ *   [x] ?tenantName=    ?tenantName= is absent
+ *   [x] ?startDate=   → start date + auto 12-month end date
+ *   [x] ?leadId=      → GET /api/leads/:id → issued paymentPlan drives rent / discount / deposit / fees /
+ *                       instalments / schedule (read-only), and `leadId` is sent on create
+ *   [x] ?chequeCount= → default instalments = chequeCount − 1 (min 1)
+ *   [x] ?rp=          → manager scope (below)
+ *  Data / API (unchanged endpoints + payloads)
+ *   [x] GET  /api/profiles/rental-provider/me  | manager: /api/manager/landlord-profile?rp=
+ *            → preferredStartDays (start-date picker), preferredChequeDays (schedule dates),
+ *              allowedInstallments (plan picker + snap default), rentVatMode (shown in the summary)
+ *   [x] GET  /api/properties | manager: /api/manager/properties (filtered to rentalProviderId = rp)
+ *   [x] GET  /api/contracts/tenants/list | manager: /api/manager/tenants/list?rp=   → active customers list
+ *   [x] GET  /api/contracts/tenants/search?q= | manager: /api/manager/tenants/search?rp=&q= (300 ms debounce, ≥ 2 chars)
+ *   [x] POST /api/contracts/tenants | manager: /api/manager/tenants?rp=   → inline "Create a new customer"
+ *   [x] GET  /api/properties/:pid/units | manager: /api/manager/properties/:pid/units
+ *   [x] POST /api/contracts | manager: /api/manager/contracts?rp=   → same body: unitId, tenantId, dates,
+ *            annualRent (net), listedRent/discountType/discountValue (from plan or form), securityDepositAmount,
+ *            adminFee / ejariFee / commission (blank = omitted), numberOfInstallments, modeOfPayment, notes,
+ *            customClauses, leadId (only with a lead plan)
+ *   [x] DocsLinkButton "Request documents" for the chosen customer (shared request picker)
+ *  Fields / behaviour
+ *   [x] Property select · unit list with availability pill · "Add unit" (units?propertyId=, new tab) /
+ *       "List property first" (portfolio?add=1, new tab)
+ *   [x] Customer search + dropdown + clear · active-customers quick list (filtered by search) · "Add customer"
+ *       (tenants page, new tab) · inline new-customer form (name, email, phone, individual/company + company name)
+ *   [x] Start date (PreferredDayPicker on the RP's start days) · end date (min = start) · auto 12-month end until
+ *       the end is edited by hand · 6 / 12 / 24-month presets · duration label
+ *   [x] Pricing (issued plan or unit) with strike-through discount · discount none / % / fixed (no-lead only) ·
+ *       one-off fees editable (no-lead) or read-only (lead), prefilled only while blank · payment method ·
+ *       payments / year (allowedInstallmentPlans) · SegregatedPlanView schedule (same maths: even split,
+ *       buildInstallmentDueDates snapped to cheque days, separate 5% VAT line, deposit, fees)
+ *   [x] Special clauses (Enter or Add, remove each) · notes
+ *   [x] Validation on create: unit, customer, dates, unit rental price > 0 · error banner
+ *   [x] Success → "Contract created" → Operations pipeline /operations/:id (manager: /dashboard/manager/operations/:id)
+ *   [x] No-properties guard → "List your first property" (portfolio?add=1)
+ *   [x] "New contract only — renewals are auto-offered 90 days before expiry" note
+ *  Added (Genspark): step list, live summary on every step, "Preview & create" checklist from the real
+ *  form state, validation jumps to the failing step, load errors with retry.
+ *  Changed on purpose:
+ *   - VAT preview uses isRentVatable(unitType, property.spaceCategory) — the single VAT chokepoint that
+ *     mirrors the backend (identical result to the old unit-type-only check except in a non-mixed-use
+ *     building, where the property category now wins exactly as it does on the server).
+ *   - Bedrooms are shown only for residential unit types (isResidentialUnitType).
+ *   - Cancel / back goes to /dashboard/manager/contracts for a manager (was the RP dashboard for both).
+ *   - No <form> element: Enter in a field no longer submits the contract by accident.
  */
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, Search, X, ChevronDown, FileText, PlusCircle, Building2 } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import { DocsLinkButton } from '@/components/upnow/DocsLinkButton';
 import { PreferredDayPicker } from '@/components/PreferredDayPicker';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
 import { buildSegregatedPlan, segRowsFromCustomerPlan, type SegPaymentInput } from '@/lib/segregatedPlan';
-import { deriveSpaceCategoryFromUnitType } from '@/lib/unitTaxonomy';
+import { effectiveSpaceCategory, isRentVatable, isResidentialUnitType } from '@/lib/unitTaxonomy';
 import { tenantDisplayName } from '@/lib/tenantName';
+import {
+  Btn, Callout, Card, Checklist, EmptyRow, ErrorRow, Evid, Field, KV, OsPage, PageHead, Pill, ScopeStrip,
+  SkeletonRows, TableWrap, Thumb, fmtAed, fmtDate, humanize, type Tone,
+} from '@/components/os/kit';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Property {
   id: number;
   buildingName: string;
+  spaceCategory?: string | null;
 }
 
 interface Unit {
@@ -81,6 +130,30 @@ interface FormState {
   commission: string;
 }
 
+type PlanItem = {
+  index: number;
+  amountFils: number;
+  dueDate: string;
+  description?: string;
+  type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
+};
+type LeadPlan = {
+  rentFils: number;
+  securityDepositFils: number;
+  adminFeeFils: number;
+  ejariFils: number;
+  commissionFils: number;
+  installmentCount: number;
+  discountFils?: number;
+  discountType?: 'percent' | 'fixed';
+  discountPercent?: number;
+  originalRentFils?: number;
+  totalAmountFils: number;
+  chequeCount: number;
+  items: PlanItem[];
+  notes?: string | null;
+};
+
 const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'cheque', label: 'Post-Dated Cheques' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
@@ -90,10 +163,6 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtAed(fils: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(fils);
-}
 
 function addMonths(dateStr: string, months: number): string {
   if (!dateStr) return '';
@@ -105,7 +174,6 @@ function addMonths(dateStr: string, months: number): string {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
-
 
 function calcDurationLabel(start: string, end: string): string {
   if (!start || !end) return '—';
@@ -120,26 +188,45 @@ function calcDurationLabel(start: string, end: string): string {
   return `${totalDays} days`;
 }
 
-const AVAILABILITY_CONFIG: Record<Unit['availability'], { label: string; dot: string; textColor: string; bg: string }> = {
-  available:   { label: 'Vacant',      dot: 'bg-emerald-500', textColor: 'text-emerald-700', bg: 'bg-emerald-50' },
-  reserved:    { label: 'Reserved',    dot: 'bg-amber-400',   textColor: 'text-amber-700',   bg: 'bg-amber-50' },
-  occupied:    { label: 'Occupied',    dot: 'bg-red-500',     textColor: 'text-red-700',     bg: 'bg-red-50' },
-  maintenance: { label: 'Maintenance', dot: 'bg-orange-400',  textColor: 'text-orange-700',  bg: 'bg-orange-50' },
+const AVAILABILITY: Record<Unit['availability'], { label: string; tone: Tone }> = {
+  available:   { label: 'Vacant',      tone: 'primary' },
+  reserved:    { label: 'Reserved',    tone: 'amber' },
+  occupied:    { label: 'Occupied',    tone: 'danger' },
+  maintenance: { label: 'Maintenance', tone: 'amber' },
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const unitLabel = (u: Unit) =>
+  `Unit ${u.unitNumber}${isResidentialUnitType(u.unitType) && u.bedrooms ? ` · ${u.bedrooms}BR` : ''}`;
 
-/** Request documents from the selected customer mid-creation — before the
- *  contract is even saved (a 'documents' link needs only the tenant). Delegates
- *  to the shared request-picker so the customer's upload link shows only the
- *  documents the RP picks. */
-function SendDocsLinkButton({ tenantId }: { tenantId: number }) {
-  return (
-    <div className="mt-2">
-      <DocsLinkButton tenantId={tenantId} label="Request documents" />
-    </div>
-  );
+/** Fill the one-off fee fields with the suggested default (lead plan or the unit's
+ *  configured fees) — only while a field is still blank, so the RP's own edits are
+ *  never clobbered. Blank = fee not charged; nothing is auto-derived on the backend. */
+function prefillFees(f: FormState, u: Unit | undefined, plan: LeadPlan | null): FormState {
+  if (!u && !plan) return f;
+  const a = plan ? plan.adminFeeFils / 100 : Number(u?.adminFee) || 0;
+  const e = plan ? plan.ejariFils / 100 : Number(u?.ejariFeeFils) || 0;
+  const c = plan ? plan.commissionFils / 100 : Number(u?.commission) || 0;
+  const next = {
+    ...f,
+    adminFee:   f.adminFee === ''   && a ? String(a) : f.adminFee,
+    ejariFee:   f.ejariFee === ''   && e ? String(e) : f.ejariFee,
+    commission: f.commission === '' && c ? String(c) : f.commission,
+  };
+  return next.adminFee === f.adminFee && next.ejariFee === f.ejariFee && next.commission === f.commission ? f : next;
 }
+
+type StepId = 'customer' | 'unit' | 'period' | 'rent' | 'fees' | 'clauses' | 'review';
+const STEPS: { id: StepId; t: string; d: string }[] = [
+  { id: 'customer', t: 'Customer',           d: 'Who the lease is issued to' },
+  { id: 'unit',     t: 'Property & unit',    d: 'The space being let' },
+  { id: 'period',   t: 'Rental period',      d: 'Start, end and duration' },
+  { id: 'rent',     t: 'Rent & instalments', d: 'Rent, discount and payment plan' },
+  { id: 'fees',     t: 'Fees & deposit',     d: 'Security deposit and one-off fees' },
+  { id: 'clauses',  t: 'Clauses & notes',    d: 'Special terms on the contract' },
+  { id: 'review',   t: 'Preview & create',   d: 'Checklist, then create the draft' },
+];
+
+// ─── Small parts ─────────────────────────────────────────────────────────────
 
 /** Inline "create a new customer" form for the contract wizard. Creates the
  *  customer (account + tenant profile) and hands the new tenant back so the
@@ -154,7 +241,6 @@ function NewCustomerForm({ postUrl, onCreated, onCancel }: {
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
   const submit = async () => {
     if (!name.trim()) { setErr('Name is required'); return; }
     if (!email.trim()) { setErr('Email is required'); return; }
@@ -174,32 +260,38 @@ function NewCustomerForm({ postUrl, onCreated, onCancel }: {
     finally { setBusy(false); }
   };
   return (
-    <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#1a1916]">New customer</p>
-        <button type="button" onClick={onCancel} className="text-xs text-[#9b9890] hover:text-[#1a1916]">Cancel</button>
+    <Card title="New customer" sub="They'll sign in with this email via a one-time code — no password needed."
+      right={<Btn size="xs" onClick={onCancel}>Cancel</Btn>} pad>
+      <div className="gx-two">
+        <Field label="Full name *" htmlFor="nc-name"><input id="nc-name" className="gx-inp" value={name} onChange={e => setName(e.target.value)} /></Field>
+        <Field label="Email *" htmlFor="nc-email"><input id="nc-email" className="gx-inp" type="email" value={email} onChange={e => setEmail(e.target.value)} /></Field>
+        <Field label="Phone (optional)" htmlFor="nc-phone"><input id="nc-phone" className="gx-inp" value={phone} onChange={e => setPhone(e.target.value)} /></Field>
+        <Field label="Customer type" htmlFor="nc-type">
+          <select id="nc-type" className="gx-sel" value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')}>
+            <option value="individual">Individual</option>
+            <option value="company">Company</option>
+          </select>
+        </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" className={field} />
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" className={field} />
-        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone (optional)" className={field} />
-        <select value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')} className={field}>
-          <option value="individual">Individual</option>
-          <option value="company">Company</option>
-        </select>
-        {entityType === 'company' && (
-          <input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Company name" className={`${field} col-span-2`} />
-        )}
-      </div>
-      {err && <p className="text-xs text-red-600">{err}</p>}
-      <button type="button" onClick={submit} disabled={busy}
-        className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-[#2e9f82] text-white disabled:opacity-60">
-        {busy ? 'Creating…' : 'Create customer'}
-      </button>
-      <p className="text-[11px] text-[#9b9890]">They&apos;ll sign in with this email via a one-time code — no password needed.</p>
+      {entityType === 'company' && (
+        <Field label="Company name" htmlFor="nc-company"><input id="nc-company" className="gx-inp" value={companyName} onChange={e => setCompanyName(e.target.value)} /></Field>
+      )}
+      {err && <div style={{ marginBottom: 10 }}><Callout tone="bad">{err}</Callout></div>}
+      <Btn variant="primary" onClick={submit} disabled={busy}>{busy ? 'Creating…' : 'Create customer'}</Btn>
+    </Card>
+  );
+}
+
+function SumRow({ k, v, strong }: { k: string; v: React.ReactNode; strong?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--ms-surface-3)', fontSize: 11.5 }}>
+      <span style={{ color: 'var(--ms-ink-3)' }}>{k}</span>
+      <span style={{ fontWeight: strong ? 800 : 600, textAlign: 'right' }}>{v}</span>
     </div>
   );
 }
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function NewContractPage() {
   const router = useRouter();
@@ -210,8 +302,8 @@ export default function NewContractPage() {
   const qStartDate  = searchParams.get('startDate')  ?? '';
   const qLeadId     = searchParams.get('leadId')     ?? '';
   const qChequeCount = searchParams.get('chequeCount') ?? '';
-  // Context-aware create-customer endpoint: manager (re-export) posts via the
-  // manager route + ?rp; the RP posts to the contracts endpoint.
+  // Context-aware endpoints: manager (re-export) goes via the manager routes + ?rp;
+  // the RP uses its own.
   const pathname = usePathname();
   const isManager = (pathname ?? '').startsWith('/dashboard/manager');
   const rpParam = searchParams.get('rp') ?? '';
@@ -221,41 +313,21 @@ export default function NewContractPage() {
   const tenantSearchUrl = (q: string) => isManager
     ? `/api/manager/tenants/search?rp=${rpParam}&q=${encodeURIComponent(q)}`
     : `/api/contracts/tenants/search?q=${encodeURIComponent(q)}`;
-  const unitsUrl = (pid: string | number) => isManager
+  const unitsUrl = useCallback((pid: string | number) => isManager
     ? `/api/manager/properties/${pid}/units`
-    : `/api/properties/${pid}/units`;
+    : `/api/properties/${pid}/units`, [isManager]);
   const submitUrl = isManager ? `/api/manager/contracts?rp=${rpParam}` : '/api/contracts';
+  const backHref = isManager ? '/dashboard/manager/contracts' : '/rental-provider/dashboard';
   const [showNewCustomer, setShowNewCustomer] = useState(false);
 
   // Live plan brought over from the lead (when available) — drives the prefilled amounts
   // AND the cheque schedule preview, so the contract matches what was issued to the tenant.
-  type PlanItem = {
-    index: number;
-    amountFils: number;
-    dueDate: string;
-    description?: string;
-    type?: 'fee' | 'first_bundle' | 'security_deposit' | 'installment' | 'extra_installment';
-  };
-  const [planFromLead, setPlanFromLead] = useState<null | {
-    rentFils: number;
-    securityDepositFils: number;
-    adminFeeFils: number;
-    ejariFils: number;
-    commissionFils: number;
-    installmentCount: number;
-    discountFils?: number;
-    discountType?: 'percent' | 'fixed';
-    discountPercent?: number;
-    originalRentFils?: number;
-    totalAmountFils: number;
-    chequeCount: number;
-    items: PlanItem[];
-    notes?: string | null;
-  }>(null);
+  const [planFromLead, setPlanFromLead] = useState<LeadPlan | null>(null);
 
   // Track whether end date was auto-set so we can re-auto when start changes
-  const autoEndDateRef = useRef(true);
+  const [autoEndDate, setAutoEndDate] = useState(true);
 
+  const [step, setStep] = useState<StepId>('customer');
   const [preferredStartDays, setPreferredStartDays] = useState<number[]>([]);
   // RP's configured cheque days — the schedule preview snaps each due date to the
   // nearest of these, matching what the backend stamps (Settings → Rules).
@@ -267,7 +339,11 @@ export default function NewContractPage() {
   const [rentVatMode, setRentVatMode] = useState<'annual' | 'installment'>('installment');
   const [properties, setProperties] = useState<Property[]>([]);
   const [propertiesLoaded, setPropertiesLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [unitsState, setUnitsState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [unitsReload, setUnitsReload] = useState(0);
   const [tenantResults, setTenantResults] = useState<Tenant[]>([]);
   const [activeTenants, setActiveTenants] = useState<Tenant[]>([]);
   const [tenantSearch, setTenantSearch] = useState('');
@@ -325,17 +401,20 @@ export default function NewContractPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load properties + tenants on mount; pre-fill if query params present
+  // Load properties + tenants on mount (and on "Try again"); pre-fill if query params present
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
       fetch(propertiesUrl, { credentials: 'include' }).then(r => r.json()),
       fetch(tenantsListUrl, { credentials: 'include' }).then(r => r.json()),
     ]).then(([propDataRaw, tenantData]) => {
+      if (cancelled) return;
       // Manager properties span all managed landlords — scope to the selected one.
       const propData = (isManager && Array.isArray(propDataRaw) && rpParam)
         ? propDataRaw.filter((p: { rentalProviderId?: number }) => p.rentalProviderId === Number(rpParam))
         : propDataRaw;
       if (Array.isArray(propData)) setProperties(propData);
+      setLoadFailed(false);
       setPropertiesLoaded(true);
       if (Array.isArray(tenantData)) {
         const labelled = (tenantData as Tenant[]).map(labelTenant);
@@ -348,36 +427,34 @@ export default function NewContractPage() {
           }
         }
       }
-      // Pre-fill unit: find which property owns this unit, set propertyId
+      // Pre-fill unit: fetch the unit to learn its propertyId, then select that property
+      // (the units effect then auto-selects ?unitId once that property's units load).
       if (qUnitId && Array.isArray(propData)) {
-        const pid = propData[0]?.id; // will refine below once units load per property
-        // Fetch unit info directly to get its propertyId
         fetch(`/api/listings/units/${qUnitId}`, { credentials: 'include' })
           .then(r => r.ok ? r.json() : null)
           .then((data: { unit?: { propertyId?: number } } | null) => {
             const pid = data?.unit?.propertyId;
-            if (pid) setForm(f => ({ ...f, propertyId: String(pid) }));
+            if (pid && !cancelled) {
+              setUnitsState('loading');
+              setForm(f => ({ ...f, propertyId: String(pid), unitId: '' }));
+            }
           })
           .catch(() => undefined);
       }
-    }).catch(() => undefined);
+    }).catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadKey]);
 
   // When a leadId is in the URL, fetch the lead and pre-fill from its issued payment plan.
   // This keeps the contract issue page consistent with what the RP issued + the tenant saw.
   useEffect(() => {
     if (!qLeadId) return;
-    fetch(`/api/leads/${qLeadId}`, { credentials: 'include' })
+    // Managers read the lead through the manager API (same swap as leads/[id] leadUrl()).
+    const leadApi = isManager ? `/api/manager/leads/${qLeadId}?rp=${rpParam}` : `/api/leads/${qLeadId}`;
+    fetch(leadApi, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then((lead: null | {
-        paymentPlan?: null | {
-          rentFils: number; securityDepositFils: number; adminFeeFils: number; ejariFils: number;
-          commissionFils: number; installmentCount: number; discountFils?: number;
-          discountType?: 'percent' | 'fixed'; discountPercent?: number; originalRentFils?: number;
-          totalAmountFils: number; chequeCount: number; items: PlanItem[]; notes?: string | null;
-        };
-      }) => {
+      .then((lead: null | { paymentPlan?: null | LeadPlan }) => {
         const p = lead?.paymentPlan;
         if (!p) return;
         setPlanFromLead({
@@ -404,67 +481,67 @@ export default function NewContractPage() {
         }));
       })
       .catch(() => undefined);
-  }, [qLeadId]);
+  }, [qLeadId, isManager, rpParam]);
 
-  // Prefill the editable one-off fee fields with the suggested default (lead plan
-  // or the unit's configured fees) — only while a field is still blank, so the RP's
-  // own edits are never clobbered. Whatever ends up here is exactly what's stored;
-  // nothing is auto-derived on the backend. Blank = fee not charged.
+  // Load units when the property changes (the property picker clears the old list);
+  // auto-select the ?unitId unit when it belongs to this property.
   useEffect(() => {
-    const u = units.find(un => String(un.id) === form.unitId);
-    const a = planFromLead ? planFromLead.adminFeeFils / 100 : Number(u?.adminFee) || 0;
-    const e = planFromLead ? planFromLead.ejariFils / 100 : Number(u?.ejariFeeFils) || 0;
-    const c = planFromLead ? planFromLead.commissionFils / 100 : Number(u?.commission) || 0;
-    if (!u && !planFromLead) return;
-    setForm(f => ({
-      ...f,
-      adminFee:   f.adminFee === ''   && a ? String(a) : f.adminFee,
-      ejariFee:   f.ejariFee === ''   && e ? String(e) : f.ejariFee,
-      commission: f.commission === '' && c ? String(c) : f.commission,
-    }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.unitId, units, planFromLead]);
-
-  // Load units when property changes; auto-select unit from query param
-  useEffect(() => {
-    if (!form.propertyId) { setUnits([]); return; }
+    if (!form.propertyId) return;
+    let cancelled = false;
     fetch(unitsUrl(form.propertyId), { credentials: 'include' })
       .then(r => r.json())
       .then(data => {
-        if (Array.isArray(data)) {
-          setUnits(data);
-          // Only auto-select if query param matches a unit in this property
-          if (qUnitId && data.some((u: Unit) => String(u.id) === qUnitId)) {
-            setForm(f => ({ ...f, unitId: qUnitId }));
-          }
+        if (cancelled) return;
+        const list: Unit[] = Array.isArray(data) ? data : [];
+        setUnits(list);
+        setUnitsState('ok');
+        // Only auto-select if query param matches a unit in this property
+        if (qUnitId && list.some((u) => String(u.id) === qUnitId)) {
+          setForm(f => ({ ...f, unitId: qUnitId }));
         }
       })
-      .catch(() => undefined);
-    setForm(f => ({ ...f, unitId: '' }));
-  }, [form.propertyId, qUnitId]);
+      .catch(() => { if (!cancelled) setUnitsState('error'); });
+    return () => { cancelled = true; };
+  }, [form.propertyId, qUnitId, unitsUrl, unitsReload]);
+
+  // Prefill the editable one-off fee fields whenever the suggestion changes (unit
+  // picked, its units reloaded, or the lead plan arrived) — adjusted during render
+  // rather than in an effect. Only blank fields are filled (see prefillFees).
+  const selectedUnit = units.find(u => String(u.id) === form.unitId);
+  const feeKey = `${form.unitId}|${selectedUnit ? `${selectedUnit.adminFee}|${selectedUnit.ejariFeeFils}|${selectedUnit.commission}` : '-'}|${planFromLead ? `${planFromLead.adminFeeFils}|${planFromLead.ejariFils}|${planFromLead.commissionFils}` : '-'}`;
+  const [seenFeeKey, setSeenFeeKey] = useState('');
+  if (feeKey !== seenFeeKey) {
+    setSeenFeeKey(feeKey);
+    if (selectedUnit || planFromLead) setForm(f => prefillFees(f, selectedUnit, planFromLead));
+  }
+
+  const changeProperty = (pid: string) => {
+    setUnits([]);
+    setUnitsState(pid ? 'loading' : 'idle');
+    setForm(f => ({ ...f, propertyId: pid, unitId: '' }));
+  };
 
   // When start date changes and end date was auto-set, recalculate end date
   const applyStartDate = (newStart: string) => {
     setForm(f => {
-      const newEnd = autoEndDateRef.current && newStart ? addMonths(newStart, 12) : f.contractEndDate;
+      const newEnd = autoEndDate && newStart ? addMonths(newStart, 12) : f.contractEndDate;
       return { ...f, contractStartDate: newStart, contractEndDate: newEnd };
     });
   };
-  const handleStartDateChange = (e: React.ChangeEvent<HTMLInputElement>) => applyStartDate(e.target.value);
 
   const handleEndDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    autoEndDateRef.current = false; // user manually set end date
+    setAutoEndDate(false); // user manually set end date
     setForm(f => ({ ...f, contractEndDate: e.target.value }));
   };
 
   // Tenant search with debounce
-  const searchTenants = useCallback((q: string) => {
+  const searchTenants = (q: string) => {
     if (!q || q.length < 2) { setTenantResults([]); return; }
     fetch(tenantSearchUrl(q), { credentials: 'include' })
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setTenantResults((data as Tenant[]).map(labelTenant)); })
       .catch(() => undefined);
-  }, []);
+  };
 
   const handleTenantInput = (val: string) => {
     setTenantSearch(val);
@@ -481,6 +558,13 @@ export default function NewContractPage() {
     setTenantResults([]);
   };
 
+  const clearTenant = () => {
+    setTenantSearch('');
+    setForm(f => ({ ...f, tenantId: '', tenantName: '' }));
+    setTenantResults([]);
+    setTenantDropdownOpen(false);
+  };
+
   const set = (field: keyof FormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => setForm(f => ({ ...f, [field]: e.target.value }));
@@ -491,30 +575,35 @@ export default function NewContractPage() {
     setForm(f => ({ ...f, contractEndDate: addMonths(f.contractStartDate, months) }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addClause = () => {
+    const trimmed = clauseInput.trim();
+    if (trimmed) { setCustomClauses(prev => [...prev, trimmed]); setClauseInput(''); }
+  };
+
+  const fail = (msg: string, at: StepId) => { setError(msg); setStep(at); };
+
+  const handleSubmit = async () => {
     setError(null);
 
-    if (!form.unitId) { setError('Please select a unit.'); return; }
-    if (!form.tenantId) { setError('Please select a customer.'); return; }
+    if (!form.unitId) { fail('Please select a unit.', 'unit'); return; }
+    if (!form.tenantId) { fail('Please select a customer.', 'customer'); return; }
     if (!form.contractStartDate || !form.contractEndDate) {
-      setError('Please fill in contract dates.'); return;
+      fail('Please fill in contract dates.', 'period'); return;
     }
-    const selectedUnit = units.find(u => String(u.id) === form.unitId);
-    const listedRent = Number(selectedUnit?.rentalPrice ?? 0);
-    if (listedRent <= 0) {
-      setError('The selected unit has no rental price set. Please update the unit first.'); return;
+    const su = units.find(u => String(u.id) === form.unitId);
+    const listedRentCheck = Number(su?.rentalPrice ?? 0);
+    if (listedRentCheck <= 0) {
+      fail('The selected unit has no rental price set. Please update the unit first.', 'unit'); return;
     }
 
     setSubmitting(true);
     try {
-      const su = units.find(u => String(u.id) === form.unitId);
       // If the lead has an issued plan, use those amounts so the contract matches.
       // Otherwise compute from the unit defaults.
       const rentFromUnit = Number(su?.rentalPrice ?? 0);
-      const discRaw = Number(form.discountValue) || 0;
-      const discAmt = form.discountType === 'percent' ? Math.round(rentFromUnit * discRaw) / 100
-                    : form.discountType === 'fixed'   ? Math.min(discRaw, rentFromUnit)
+      const discRawS = Number(form.discountValue) || 0;
+      const discAmt = form.discountType === 'percent' ? Math.round(rentFromUnit * discRawS) / 100
+                    : form.discountType === 'fixed'   ? Math.min(discRawS, rentFromUnit)
                     : 0;
       const effectiveRent = planFromLead
         ? planFromLead.rentFils / 100
@@ -539,8 +628,8 @@ export default function NewContractPage() {
                     : planFromLead.discountFils / 100,
                 }
               : {})
-          : (form.discountType !== 'none' && discRaw > 0
-              ? { listedRent: rentFromUnit, discountType: form.discountType, discountValue: discRaw }
+          : (form.discountType !== 'none' && discRawS > 0
+              ? { listedRent: rentFromUnit, discountType: form.discountType, discountValue: discRawS }
               : {})),
         // The units API serializes numerics as strings ("5600.00") — coerce,
         // or the contracts DTO rejects the whole POST with a 400.
@@ -588,9 +677,9 @@ export default function NewContractPage() {
     }
   };
 
-  // ─── Live summary calculations ────────────────────────────────────────────
+  // ─── Live summary calculations (unchanged maths) ──────────────────────────
 
-  const selectedUnit  = units.find(u => String(u.id) === form.unitId);
+  const selectedProperty = properties.find(p => String(p.id) === form.propertyId);
   // Prefer the lead's issued payment plan as the source of truth (so the contract matches what
   // the RP shared with the tenant). Fall back to the unit defaults when no plan is supplied.
   const listedRent    = planFromLead ? (planFromLead.rentFils + (planFromLead.discountFils ?? 0)) / 100
@@ -607,18 +696,20 @@ export default function NewContractPage() {
                           : 0;
   const annualRent    = planFromLead ? planFromLead.rentFils / 100 : Math.max(0, listedRent - discountAmt);
   const secDeposit    = planFromLead ? planFromLead.securityDepositFils / 100 : Number(selectedUnit?.securityDeposit) || 0;
-  // Editable, RP-confirmed values (prefilled by the effect above from the suggestion).
+  // Editable, RP-confirmed values (prefilled above from the suggestion).
   const adminFee      = Number(form.adminFee)   || 0;
   const ejariFee      = Number(form.ejariFee)   || 0;
   const commission    = Number(form.commission) || 0;
   const installments  = Number(form.numberOfInstallments) || 4;
   const chequeAmount  = installments > 0 ? annualRent / installments : 0;
-  // Rent VAT (commercial/industrial units = 5%; residential exempt) — collected as
-  // separate VAT cheque(s). Shown so the form reflects the tax (rate is authoritative
-  // on the server at creation).
-  const rentVatable   = selectedUnit ? deriveSpaceCategoryFromUnitType(selectedUnit.unitType) !== 'residential' : false;
+  // Rent VAT (commercial/industrial = 5%; residential exempt) — collected as separate
+  // VAT cheque(s). Read-only preview: the authoritative rate is set on the server at
+  // creation via the same effectiveSpaceCategory rule.
+  const rentVatable   = selectedUnit ? isRentVatable(selectedUnit.unitType, selectedProperty?.spaceCategory) : false;
+  const taxCategory   = selectedUnit ? effectiveSpaceCategory(selectedUnit.unitType, selectedProperty?.spaceCategory) : null;
   const rentVat       = rentVatable ? Math.round(annualRent * 5) / 100 : 0;
   const durationLabel = calcDurationLabel(form.contractStartDate, form.contractEndDate);
+  const datesValid    = !!form.contractStartDate && !!form.contractEndDate && durationLabel !== 'Invalid range';
   // Cheque due dates for the preview — spread over the ACTUAL term and snapped to
   // the RP's configured cheque days, exactly as the backend stamps them.
   const previewDueDates = buildInstallmentDueDates(
@@ -648,719 +739,617 @@ export default function NewContractPage() {
     return rows;
   })());
 
+  const taxLabel = selectedUnit
+    ? (rentVatable ? `${humanize(taxCategory)} · 5% VAT` : 'Residential · VAT exempt')
+    : '—';
+  const methodLabel = PAYMENT_METHODS.find(m => m.value === form.modeOfPayment)?.label ?? humanize(form.modeOfPayment);
+  const availability = selectedUnit ? (AVAILABILITY[selectedUnit.availability] ?? AVAILABILITY.available) : null;
+
+  // ─── Wizard state ──────────────────────────────────────────────────────────
+
+  const stepIdx = STEPS.findIndex(s => s.id === step);
+  const complete: Record<StepId, boolean> = {
+    customer: !!form.tenantId,
+    unit: !!form.unitId,
+    period: datesValid,
+    rent: annualRent > 0,
+    fees: !!form.unitId && stepIdx > 4,
+    clauses: stepIdx > 5,
+    review: false,
+  };
+  const next = STEPS[stepIdx + 1]?.id;
+  const prev = STEPS[stepIdx - 1]?.id;
+
+  const checks: { l: React.ReactNode; sub?: React.ReactNode; state: 'pass' | 'fail' | 'wait' }[] = [
+    { l: 'Customer selected', sub: form.tenantId ? form.tenantName || `Customer #${form.tenantId}` : 'Choose or create the customer in step 1.', state: form.tenantId ? 'pass' : 'fail' },
+    { l: 'Unit selected', sub: selectedUnit ? `${unitLabel(selectedUnit)}${selectedProperty ? ` · ${selectedProperty.buildingName}` : ''}` : 'Choose the property and unit in step 2.', state: selectedUnit ? 'pass' : 'fail' },
+    ...(selectedUnit ? [{
+      l: 'Unit has a rental price',
+      sub: Number(selectedUnit.rentalPrice ?? 0) > 0 ? `${fmtAed(Number(selectedUnit.rentalPrice))} / yr listed` : 'Set the rent on the unit first — the contract cannot be created without it.',
+      state: (Number(selectedUnit.rentalPrice ?? 0) > 0 ? 'pass' : 'fail') as 'pass' | 'fail',
+    }, {
+      l: `Unit availability: ${availability!.label}`,
+      sub: selectedUnit.availability === 'available' ? 'The unit is vacant.' : 'Check this unit is free for the new lease period before issuing.',
+      state: (selectedUnit.availability === 'available' ? 'pass' : 'wait') as 'pass' | 'wait',
+    }] : []),
+    {
+      l: 'Contract dates',
+      sub: !form.contractStartDate || !form.contractEndDate ? 'Set the start and end date in step 3.'
+        : datesValid ? `${fmtDate(form.contractStartDate)} → ${fmtDate(form.contractEndDate)} · ${durationLabel}` : 'The end date must be after the start date.',
+      state: datesValid ? 'pass' : 'fail',
+    },
+    {
+      l: 'Payment plan',
+      sub: planFromLead
+        ? `From the issued payment plan on lead #${qLeadId} · ${installments} payment${installments === 1 ? '' : 's'} · ${methodLabel}`
+        : `${installments} payment${installments === 1 ? '' : 's'} · ${methodLabel}${annualRent > 0 ? ` · ${fmtAed(chequeAmount)} per cheque` : ''}`,
+      state: annualRent > 0 ? 'pass' : 'wait',
+    },
+    { l: 'Tax treatment', sub: selectedUnit ? `${taxLabel}${rentVat > 0 ? ` · ${fmtAed(rentVat)} VAT on rent, collected as separate cheque(s)` : ''}` : 'Follows the unit type once a unit is chosen.', state: selectedUnit ? 'pass' : 'wait' },
+    {
+      l: 'Security deposit',
+      sub: secDeposit > 0 ? `${fmtAed(secDeposit)} (PDC)` : 'No security deposit on this unit or plan.',
+      state: secDeposit > 0 ? 'pass' : 'wait',
+    },
+    {
+      l: 'One-off fees confirmed',
+      sub: [adminFee > 0 && `Admin ${fmtAed(adminFee)}`, ejariFee > 0 && `Registration ${fmtAed(ejariFee)}`, commission > 0 && `Commission ${fmtAed(commission)}`]
+        .filter(Boolean).join(' · ') || 'No one-off fees will be charged (blank = not charged).',
+      state: 'pass',
+    },
+    ...(customClauses.length > 0 ? [{ l: `${customClauses.length} special clause${customClauses.length === 1 ? '' : 's'}`, state: 'pass' as const }] : []),
+  ];
+  const blocking = checks.filter(c => c.state === 'fail').length;
+
   // ─── Success screen ───────────────────────────────────────────────────────
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f7f6f2]">
-        <div className="bg-white rounded-2xl p-10 shadow text-center max-w-sm w-full">
-          <div className="w-14 h-14 bg-[#d8f2e8] rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-[#2e9f82]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+      <OsPage>
+        <PageHead eyebrow="Operations" title="Contract created" lede="Opening it in the Operations pipeline, where you issue it, collect payments and signatures, and activate the tenancy." />
+        <Card pad>
+          <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+            <Loader2 size={15} className="animate-spin" aria-hidden /> Redirecting to the pipeline…
           </div>
-          <h2 className="text-xl font-bold text-[#1a1916] mb-2">Contract Created</h2>
-          <p className="text-sm text-[#6b6860]">Redirecting to dashboard…</p>
-        </div>
-      </div>
+        </Card>
+      </OsPage>
     );
   }
+
+  const head = (
+    <PageHead
+      eyebrow="Operations"
+      title="New tenancy contract"
+      lede="New contracts only — renewals are auto-triggered 90 days before expiry. Creating saves a draft and opens it in the Operations pipeline."
+      actions={<Btn href={backHref}>Cancel</Btn>}
+    />
+  );
 
   // ─── No properties guard ──────────────────────────────────────────────────
 
   if (propertiesLoaded && properties.length === 0) {
     return (
-      <div className="min-h-screen bg-[#f7f6f2] p-4 md:p-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center gap-3 mb-6">
-            <Link
-              href="/rental-provider/dashboard"
-              className="w-9 h-9 rounded-xl bg-white shadow-sm border border-[#e8e6e0] flex items-center justify-center hover:bg-[#f4f3ef] transition-colors"
-            >
-              <ArrowLeft size={16} className="text-[#1a1916]" />
-            </Link>
-            <div>
-              <h1 className="text-xl font-bold text-[#1a1916]">New Tenancy Contract</h1>
-              <p className="text-xs text-[#6b6860] mt-0.5">New contracts only — renewals are auto-triggered 90 days before expiry</p>
-            </div>
+      <OsPage>
+        {head}
+        <Card pad>
+          <div className="gx-empty">
+            <b>No properties yet</b>
+            You need to list a property and add at least one unit before you can create a tenancy contract.
+            <div style={{ marginTop: 12 }}><Btn variant="primary" href="/rental-provider/dashboard/portfolio?add=1">List your first property</Btn></div>
           </div>
-          <div className="bg-white rounded-2xl p-10 shadow-sm text-center max-w-md mx-auto">
-            <div className="w-14 h-14 bg-[#f0faf6] rounded-full flex items-center justify-center mx-auto mb-4">
-              <Building2 size={24} className="text-[#2e9f82]" />
-            </div>
-            <h2 className="text-lg font-bold text-[#1a1916] mb-2">No Properties Yet</h2>
-            <p className="text-sm text-[#6b6860] mb-6">
-              You need to list a property and add at least one unit before you can create a tenancy contract.
-            </p>
-            <Link
-              href="/rental-provider/dashboard/portfolio?add=1"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-              style={{ background: '#2e9f82' }}
-            >
-              <PlusCircle size={15} /> List Your First Property
-            </Link>
-          </div>
-        </div>
-      </div>
+        </Card>
+      </OsPage>
     );
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
+  const filteredActive = activeTenants.filter(t =>
+    !tenantSearch ||
+    t.user.name.toLowerCase().includes(tenantSearch.toLowerCase()) ||
+    t.user.email.toLowerCase().includes(tenantSearch.toLowerCase())
+  );
+
   return (
-    <div className="min-h-screen bg-[#f7f6f2] p-4 md:p-6">
-      <div className="max-w-6xl mx-auto">
+    <OsPage>
+      {head}
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Operations' },
+        { label: 'Vertical', value: 'Spaces · Long-term lease' },
+        { label: 'Source', value: qLeadId ? `Lead #${qLeadId}${planFromLead ? ' · issued plan' : ''}` : 'Direct' },
+        { label: 'Type', value: 'New contract' },
+        ...(isManager ? [{ label: 'Scope', value: `Managed landlord #${rpParam || '—'}` }] : []),
+      ]} />
 
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <Link
-            href="/rental-provider/dashboard"
-            className="w-9 h-9 rounded-xl bg-white shadow-sm border border-[#e8e6e0] flex items-center justify-center hover:bg-[#f4f3ef] transition-colors"
-          >
-            <ArrowLeft size={16} className="text-[#1a1916]" />
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold text-[#1a1916]">New Tenancy Contract</h1>
-            <p className="text-xs text-[#6b6860] mt-0.5">New contracts only — renewals are auto-triggered 90 days before expiry</p>
-          </div>
+      {loadFailed && (
+        <div style={{ marginBottom: 14 }}>
+          <Callout tone="bad" title="Couldn't load your properties and customers.">
+            <span style={{ marginLeft: 6 }}><Btn size="xs" onClick={() => { setLoadFailed(false); setReloadKey(k => k + 1); }}>Try again</Btn></span>
+          </Callout>
         </div>
+      )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 items-start">
-
-          {/* ── Left: Form ── */}
-          <form onSubmit={handleSubmit} className="space-y-4" id="contract-form">
-
-            {/* Property & Unit */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-sm text-[#1a1916]">Property &amp; Unit</h2>
-                {form.propertyId ? (
-                  <Link href={`/rental-provider/dashboard/units?propertyId=${form.propertyId}`} target="_blank"
-                    className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                    <PlusCircle size={12} /> Add Unit
-                  </Link>
-                ) : (
-                  <Link href="/rental-provider/dashboard/portfolio?add=1" target="_blank"
-                    className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                    <PlusCircle size={12} /> List Property First
-                  </Link>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Property *</label>
-                <div className="relative">
-                  <select
-                    className="w-full appearance-none rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 pr-9 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                    value={form.propertyId}
-                    onChange={set('propertyId')}
-                    required
-                  >
-                    <option value="">Select property…</option>
-                    {properties.map(p => (
-                      <option key={p.id} value={String(p.id)}>{p.buildingName}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Unit *</label>
-                {units.length > 0 ? (
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {units.map(u => {
-                      const cfg = AVAILABILITY_CONFIG[u.availability] ?? AVAILABILITY_CONFIG.available;
-                      const isSelected = form.unitId === String(u.id);
-                      return (
-                        <button
-                          key={u.id}
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, unitId: String(u.id) }))}
-                          className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 text-left transition-all ${
-                            isSelected
-                              ? 'border-[#2e9f82] bg-[#f0faf6]'
-                              : 'border-[#e8e6e0] bg-[#f7f6f2] hover:border-[#c5e8df]'
-                          }`}
-                        >
-                          <div>
-                            <span className="block text-sm font-semibold text-[#1a1916]">
-                              Unit {u.unitNumber}
-                              {u.bedrooms ? ` · ${u.bedrooms}BR` : ''}
-                              {u.unitType ? ` · ${u.unitType.charAt(0).toUpperCase() + u.unitType.slice(1)}` : ''}
-                            </span>
-                            {u.rentalPrice != null && (
-                              <span className="block text-xs text-[#6b6860] mt-0.5">
-                                AED {Number(u.rentalPrice).toLocaleString()}/yr
-                              </span>
-                            )}
-                          </div>
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.textColor}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-                            {cfg.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#9b9890]">
-                    {form.propertyId ? 'No units found for this property' : 'Select property first'}
-                  </div>
-                )}
-              </div>
+      <section className="gx-card">
+        <div className="gx-wz">
+          <nav className="gx-wz-steps" aria-label="New contract steps">
+            {STEPS.map((sx, i) => (
+              <button key={sx.id} type="button" className={`gx-wz-s${complete[sx.id] ? ' done' : ''}`}
+                aria-current={sx.id === step ? 'step' : undefined} onClick={() => setStep(sx.id)}>
+                <span className="n">{complete[sx.id] ? '✓' : i + 1}</span>
+                <span><span className="t">{sx.t}</span><span className="d">{sx.d}</span></span>
+              </button>
+            ))}
+            <div className="max-[760px]:hidden" style={{ marginTop: 12, padding: '0 8px', fontSize: 10.5, color: 'var(--ms-ink-3)', lineHeight: 1.45 }}>
+              Jump to any step. Nothing is saved until you create the contract in the last step.
             </div>
+          </nav>
 
-            {/* Tenant */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-sm text-[#1a1916]">Customer</h2>
-                {!qTenantId && (
-                  <Link href="/rental-provider/dashboard/tenants" target="_blank"
-                    className="flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                    <PlusCircle size={12} /> Add Customer
-                  </Link>
-                )}
-              </div>
+          <div className="gx-wz-main">
+            <h2 style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>{stepIdx + 1}. {STEPS[stepIdx].t}</h2>
+            <p style={{ fontSize: 12, color: 'var(--ms-ink-3)', marginBottom: 14 }}>{STEPS[stepIdx].d}</p>
 
-              {/* If tenant was passed from lead — show locked card, no search */}
-              {qTenantId ? (
-                <div className="flex items-center gap-3 rounded-xl border border-[#c5e8df] bg-[#f0faf6] px-4 py-3">
-                  <div className="w-8 h-8 rounded-full bg-[#2e9f82] flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {form.tenantName ? form.tenantName.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase() : '?'}
+            {/* 1 · CUSTOMER */}
+            {step === 'customer' && (
+              qTenantId ? (
+                // Tenant passed from the lead — locked card, no search
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', border: '1px solid var(--ms-tint)', background: 'var(--ms-tint-light)', borderRadius: 10 }}>
+                    <Thumb text={form.tenantName || '?'} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{form.tenantName || 'Loading…'}</div>
+                      <div style={{ fontSize: 11, color: 'var(--ms-ink-3)' }}>Customer #{qTenantId}</div>
+                    </div>
+                    <Pill tone="primary">{qLeadId ? 'Pre-filled from lead' : 'Chosen customer'}</Pill>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#1a1916] truncate">{form.tenantName || 'Loading…'}</p>
-                    <p className="text-[11px] text-[#2e9f82]">Pre-filled from lead</p>
-                  </div>
-                </div>
+                  <div style={{ marginTop: 10 }}><Evid>{qLeadId
+                    ? 'The customer comes from the lead and cannot be changed here.'
+                    : 'This contract was started for this customer. To pick someone else, start again from Leases › New contract.'}</Evid></div>
+                </>
               ) : (
                 <>
-                  <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Search by name or email *</label>
-                  <div className="relative">
-                    <div className="relative flex items-center">
-                      <Search size={14} className="absolute left-3 text-[#9b9890]" />
-                      <input
-                        type="text"
-                        placeholder="Type name or email…"
-                        value={tenantSearch}
-                        onChange={e => handleTenantInput(e.target.value)}
-                        onFocus={() => { if (tenantResults.length > 0) setTenantDropdownOpen(true); }}
-                        className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] pl-9 pr-9 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                        autoComplete="off"
-                      />
-                      {tenantSearch && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTenantSearch('');
-                            setForm(f => ({ ...f, tenantId: '', tenantName: '' }));
-                            setTenantResults([]);
-                            setTenantDropdownOpen(false);
-                          }}
-                          className="absolute right-3 text-[#9b9890] hover:text-[#1a1916]"
-                        >
-                          <X size={14} />
-                        </button>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <Btn size="sm" href="/rental-provider/dashboard/tenants" target="_blank">Add customer (opens Customers)</Btn>
+                  </div>
+                  <Field label="Search by name or email *" htmlFor="cust-search" hint="Type at least 2 characters to search all your customers.">
+                    <div style={{ position: 'relative' }}>
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                        <Search size={14} aria-hidden style={{ position: 'absolute', left: 10, color: 'var(--ms-ink-3)' }} />
+                        <input id="cust-search" type="text" className="gx-inp" placeholder="Type name or email…" autoComplete="off"
+                          style={{ paddingLeft: 30, paddingRight: 30 }} value={tenantSearch}
+                          onChange={e => handleTenantInput(e.target.value)}
+                          onFocus={() => { if (tenantResults.length > 0) setTenantDropdownOpen(true); }} />
+                        {tenantSearch && (
+                          <button type="button" className="gx-x" onClick={clearTenant} aria-label="Clear customer" style={{ position: 'absolute', right: 6 }}>
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                      {tenantDropdownOpen && tenantResults.length > 0 && (
+                        <div role="listbox" aria-label="Matching customers" style={{ position: 'absolute', zIndex: 20, marginTop: 4, width: '100%', background: 'var(--ms-surface)', border: '1px solid var(--ms-border)', borderRadius: 10, boxShadow: 'var(--ms-shadow-lg)', overflow: 'hidden' }}>
+                          {tenantResults.map(t => (
+                            <button key={t.id} type="button" role="option" aria-selected={String(t.id) === form.tenantId} onClick={() => selectTenant(t)}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, background: 'transparent', cursor: 'pointer' }}
+                              onMouseOver={e => { e.currentTarget.style.background = 'var(--ms-surface-2)'; }}
+                              onMouseOut={e => { e.currentTarget.style.background = 'transparent'; }}>
+                              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{t.user.name}</span>
+                              <span style={{ display: 'block', fontSize: 11, color: 'var(--ms-ink-3)' }}>{t.user.email}</span>
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {tenantDropdownOpen && tenantResults.length > 0 && (
-                      <div className="absolute z-20 mt-1 w-full bg-white border border-[#e8e6e0] rounded-xl shadow-lg overflow-hidden">
-                        {tenantResults.map(t => (
-                          <button
-                            key={t.id}
-                            type="button"
-                            onClick={() => selectTenant(t)}
-                            className="w-full text-left px-4 py-2.5 hover:bg-[#f4f3ef] transition-colors"
-                          >
-                            <span className="block text-sm font-medium text-[#1a1916]">{t.user.name}</span>
-                            <span className="block text-xs text-[#6b6860]">{t.user.email}</span>
-                          </button>
-                        ))}
+                  </Field>
+
+                  {form.tenantId && (
+                    <>
+                      <Evid tone="ok">Selected: <b>{form.tenantName}</b></Evid>
+                      <div className="gx-btn-row" style={{ marginTop: 8 }}>
+                        <DocsLinkButton tenantId={Number(form.tenantId)} label="Request documents" />
+                        <Btn size="sm" onClick={clearTenant}>Choose a different customer</Btn>
                       </div>
-                    )}
-              </div>
-              {form.tenantId && (
-                <>
-                  <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {form.tenantName}</p>
-                  <SendDocsLinkButton tenantId={Number(form.tenantId)} />
+                    </>
+                  )}
+
+                  {/* Customer not in the system yet — create one inline */}
+                  {!form.tenantId && (
+                    showNewCustomer ? (
+                      <div style={{ marginTop: 4 }}>
+                        <NewCustomerForm
+                          postUrl={createTenantUrl}
+                          onCancel={() => setShowNewCustomer(false)}
+                          onCreated={(t) => {
+                            setForm(f => ({ ...f, tenantId: String(t.id), tenantName: t.name }));
+                            setTenantSearch(t.name);
+                            setShowNewCustomer(false);
+                            setTenantDropdownOpen(false);
+                            setTenantResults([]);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <Btn size="sm" onClick={() => setShowNewCustomer(true)}>Customer not listed? Create a new customer</Btn>
+                    )
+                  )}
+
+                  {/* Active customers quick list */}
+                  {!form.tenantId && (
+                    <div style={{ marginTop: 14 }}>
+                      <div className="gx-lb">Active customers — select one</div>
+                      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+                        <TableWrap>
+                          <table className="gx-tbl">
+                            <thead><tr><th>Customer</th><th>Email</th><th className="act" /></tr></thead>
+                            {!propertiesLoaded && !loadFailed ? <SkeletonRows rows={3} cols={3} />
+                              : loadFailed ? <ErrorRow cols={3} onRetry={() => { setLoadFailed(false); setReloadKey(k => k + 1); }} />
+                              : filteredActive.length === 0 ? (
+                                <EmptyRow cols={3} title={activeTenants.length === 0 ? 'No active customers yet' : 'No active customer matches'}
+                                  text={activeTenants.length === 0 ? 'Create a new customer above.' : 'Try the search above or create a new customer.'} />
+                              ) : (
+                                <tbody>
+                                  {filteredActive.map(t => (
+                                    <tr key={t.id} className="click" onClick={() => selectTenant(t)}>
+                                      <td className="strong"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Thumb text={t.user.name} />{t.user.name}</span></td>
+                                      <td>{t.user.email}</td>
+                                      <td className="act"><Btn size="xs" onClick={() => selectTenant(t)}>Select</Btn></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              )}
+                          </table>
+                        </TableWrap>
+                      </div>
+                    </div>
+                  )}
                 </>
-              )}
+              )
+            )}
 
-              {/* Customer not in the system yet — create one inline */}
-              {!form.tenantId && (
-                showNewCustomer ? (
-                  <NewCustomerForm
-                    postUrl={createTenantUrl}
-                    onCancel={() => setShowNewCustomer(false)}
-                    onCreated={(t) => {
-                      setForm(f => ({ ...f, tenantId: String(t.id), tenantName: t.name }));
-                      setTenantSearch(t.name);
-                      setShowNewCustomer(false);
-                      setTenantDropdownOpen(false);
-                      setTenantResults([]);
-                    }}
-                  />
-                ) : (
-                  <button type="button" onClick={() => setShowNewCustomer(true)}
-                    className="mt-2 inline-flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                    <PlusCircle size={13} /> Customer not listed? Create a new customer
-                  </button>
-                )
-              )}
-
-              {/* Active tenants quick list */}
-              {!form.tenantId && activeTenants.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-[11px] font-medium text-[#9b9890] mb-2">Active customers — click to select</p>
-                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                    {activeTenants
-                      .filter(t =>
-                        !tenantSearch ||
-                        t.user.name.toLowerCase().includes(tenantSearch.toLowerCase()) ||
-                        t.user.email.toLowerCase().includes(tenantSearch.toLowerCase())
-                      )
-                      .map(t => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => selectTenant(t)}
-                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-[#f7f6f2] border border-[#e8e6e0] hover:border-[#2e9f82] hover:bg-[#f0faf6] transition-all text-left"
-                        >
-                          <div className="w-7 h-7 rounded-full bg-[#d8f2e8] flex items-center justify-center text-xs font-bold text-[#2e9f82] shrink-0">
-                            {t.user.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-semibold text-[#1a1916] truncate">{t.user.name}</p>
-                            <p className="text-[10px] text-[#9b9890] truncate">{t.user.email}</p>
-                          </div>
-                        </button>
-                      ))}
+            {/* 2 · PROPERTY & UNIT */}
+            {step === 'unit' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <Field label="Property *" htmlFor="prop-sel">
+                      <select id="prop-sel" className="gx-sel" value={form.propertyId} onChange={e => changeProperty(e.target.value)}>
+                        <option value="">{propertiesLoaded ? 'Select property…' : 'Loading properties…'}</option>
+                        {properties.map(p => <option key={p.id} value={String(p.id)}>{p.buildingName}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                  <div style={{ marginBottom: 13 }}>
+                    {form.propertyId
+                      ? <Btn size="sm" href={`/rental-provider/dashboard/units?propertyId=${form.propertyId}`} target="_blank">Add unit (new tab)</Btn>
+                      : <Btn size="sm" href="/rental-provider/dashboard/portfolio?add=1" target="_blank">List property first (new tab)</Btn>}
                   </div>
                 </div>
-              )}
-                </>
-              )}
-            </div>
 
-            {/* Rental Period */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-              <h2 className="font-semibold text-sm text-[#1a1916]">Rental Period</h2>
+                <div className="gx-lb">Unit *</div>
+                <TableWrap>
+                  <table className="gx-tbl">
+                    <thead><tr><th>Unit</th><th>Type</th><th className="num">Rent / yr</th><th>Availability</th><th className="act" /></tr></thead>
+                    {!form.propertyId ? (
+                      <EmptyRow cols={5} title="Select property first" text="Its units appear here." />
+                    ) : unitsState === 'loading' ? <SkeletonRows rows={4} cols={5} />
+                      : unitsState === 'error' ? <ErrorRow cols={5} onRetry={() => { setUnitsState('loading'); setUnitsReload(n => n + 1); }} />
+                      : units.length === 0 ? (
+                        <EmptyRow cols={5} title="No units found for this property" text="Use “Add unit” to create one, then come back." />
+                      ) : (
+                        <tbody>
+                          {units.map(u => {
+                            const cfg = AVAILABILITY[u.availability] ?? AVAILABILITY.available;
+                            const isSelected = form.unitId === String(u.id);
+                            return (
+                              <tr key={u.id} className="click" onClick={() => setForm(f => ({ ...f, unitId: String(u.id) }))}
+                                style={isSelected ? { background: 'var(--ms-tint-light)' } : undefined}>
+                                <td className="strong">{unitLabel(u)}{u.unitName ? <span className="sub">{u.unitName}</span> : null}</td>
+                                <td>{u.unitType ? humanize(u.unitType) : '—'}</td>
+                                <td className="num">{u.rentalPrice != null ? fmtAed(Number(u.rentalPrice)) : '—'}</td>
+                                <td><Pill tone={cfg.tone}>{cfg.label}</Pill></td>
+                                <td className="act">
+                                  <Btn size="xs" variant={isSelected ? 'primary' : undefined} onClick={() => setForm(f => ({ ...f, unitId: String(u.id) }))}>
+                                    {isSelected ? 'Selected' : 'Select'}
+                                  </Btn>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      )}
+                  </table>
+                </TableWrap>
+                {selectedUnit && Number(selectedUnit.rentalPrice ?? 0) <= 0 && (
+                  <div style={{ marginTop: 10 }}><Callout tone="warn" title="No rental price.">This unit has no rent set — update the unit before creating a contract for it.</Callout></div>
+                )}
+              </>
+            )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Start Date *</label>
-                  <PreferredDayPicker
-                    value={form.contractStartDate}
-                    preferredDays={preferredStartDays}
-                    onChange={applyStartDate}
-                    placeholder="Pick start date"
-                    inputClassName="rounded-xl border-[#e8e6e0] bg-[#f7f6f2] py-2.5 text-sm focus:ring-2 focus:ring-[#2e9f82]"
-                  />
+            {/* 3 · RENTAL PERIOD */}
+            {step === 'period' && (
+              <>
+                <div className="gx-two">
+                  <Field label="Start date *" hint={preferredStartDays.length ? `Your rules allow starts on day ${preferredStartDays.join(', ')} of the month.` : undefined}>
+                    <PreferredDayPicker
+                      value={form.contractStartDate}
+                      preferredDays={preferredStartDays}
+                      onChange={applyStartDate}
+                      placeholder="Pick start date"
+                      inputClassName="rounded-lg border-[#d3dbd5] bg-white py-2 text-sm focus:ring-2 focus:ring-[#047246]"
+                    />
+                  </Field>
+                  <Field label="End date *" htmlFor="end-date" hint={autoEndDate ? 'Set automatically to 12 months from the start until you change it.' : undefined}>
+                    <input id="end-date" type="date" className="gx-inp" value={form.contractEndDate} onChange={handleEndDateChange} min={form.contractStartDate} />
+                  </Field>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#6b6860] mb-1.5">End Date *</label>
-                  <input
-                    type="date"
-                    value={form.contractEndDate}
-                    onChange={handleEndDateChange}
-                    required
-                    min={form.contractStartDate}
-                    className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                  />
-                </div>
-              </div>
-
-              {/* Duration presets */}
-              <div>
-                <p className="text-xs text-[#9b9890] mb-2">Quick duration (from start date)</p>
-                <div className="flex gap-2">
-                  {[{ label: '6 Months', months: 6 }, { label: '12 Months', months: 12 }, { label: '24 Months', months: 24 }].map(p => (
-                    <button
-                      key={p.months}
-                      type="button"
-                      disabled={!form.contractStartDate}
-                      onClick={() => applyPreset(p.months)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] bg-[#f7f6f2] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {p.label}
-                    </button>
+                <div className="gx-lb">Quick duration (from start date)</div>
+                <div className="gx-chips" role="group" aria-label="Quick duration">
+                  {[{ label: '6 months', months: 6 }, { label: '12 months', months: 12 }, { label: '24 months', months: 24 }].map(p => (
+                    <button key={p.months} type="button" className="gx-chip" disabled={!form.contractStartDate}
+                      aria-pressed={!!form.contractStartDate && form.contractEndDate === addMonths(form.contractStartDate, p.months)}
+                      onClick={() => applyPreset(p.months)}>{p.label}</button>
                   ))}
                 </div>
-              </div>
+                {form.contractStartDate && form.contractEndDate && (
+                  <div style={{ marginTop: 12 }}>
+                    <Evid tone={datesValid ? 'ok' : 'bad'}>Duration: <b>{durationLabel}</b></Evid>
+                  </div>
+                )}
+              </>
+            )}
 
-              {/* Duration indicator */}
-              {form.contractStartDate && form.contractEndDate && (
-                <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-2.5">
-                  <span className="text-xs font-medium text-[#6b6860]">Duration:</span>
-                  <span className="text-sm font-bold text-[#2e9f82]">{durationLabel}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Financial Terms */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-              <h2 className="font-semibold text-sm text-[#1a1916]">Financial Terms</h2>
-
-              {!form.unitId ? (
-                <p className="text-sm text-[#9b9890]">Select a unit above to see pricing.</p>
-              ) : (
-                <>
-                  {/* Read-only amounts: from the issued plan when present, else unit defaults */}
-                  <div className="rounded-xl border border-[#e8e6e0] overflow-hidden">
-                    <div className="bg-[#f4f3ef] px-4 py-2 border-b border-[#e8e6e0]">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#9b9890]">
-                        {planFromLead ? 'Pricing (from issued payment plan)' : 'Unit Pricing'}
-                      </p>
-                    </div>
-                    <div className="divide-y divide-[#f4f3ef]">
-                      {/* Annual Rent — show original → discounted when plan has a discount */}
-                      <div className="flex justify-between items-center px-4 py-2.5">
-                        <span className="text-xs text-[#6b6860]">Annual Rent</span>
-                        <span className="text-xs font-semibold text-[#1a1916]">
-                          {planFromLead?.originalRentFils ? (
+            {/* 4 · RENT & INSTALMENTS */}
+            {step === 'rent' && (
+              <>
+                {!form.unitId ? (
+                  <div style={{ marginBottom: 14 }}>
+                    <Callout tone="info" title="Select a unit to see pricing.">
+                      <span style={{ marginLeft: 6 }}><Btn size="xs" onClick={() => setStep('unit')}>Choose unit</Btn></span>
+                    </Callout>
+                  </div>
+                ) : (
+                  <>
+                    <Card title={planFromLead ? 'Pricing (from issued payment plan)' : 'Unit pricing'} pad>
+                      <KV items={[
+                        {
+                          k: 'Annual rent',
+                          v: planFromLead?.originalRentFils ? (
                             <>
-                              <span className="line-through text-[#9b9890] mr-1.5">{fmtAed(planFromLead.originalRentFils / 100)}</span>
-                              <span className="text-[#16a34a]">{fmtAed(planFromLead.rentFils / 100)}</span>
-                              <span className="ml-1 text-[10px] text-[#16a34a] font-normal">
+                              <span style={{ textDecoration: 'line-through', color: 'var(--ms-ink-3)', marginRight: 6 }}>{fmtAed(planFromLead.originalRentFils / 100)}</span>
+                              <span style={{ color: 'var(--ms-primary-dark)' }}>{fmtAed(planFromLead.rentFils / 100)}</span>
+                              <span style={{ marginLeft: 4, fontSize: 10.5, color: 'var(--ms-primary-dark)', fontWeight: 500 }}>
                                 ({planFromLead.discountType === 'percent'
                                   ? `${planFromLead.discountPercent}% off`
                                   : `AED ${((planFromLead.discountFils ?? 0) / 100).toLocaleString('en-AE')} off`})
                               </span>
                             </>
-                          ) : (
-                            annualRent > 0 ? fmtAed(annualRent) : <span className="text-[#c0bdb8]">—</span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center px-4 py-2.5">
-                        <span className="text-xs text-[#6b6860]">Security Deposit</span>
-                        <span className="text-xs font-semibold text-[#1a1916]">
-                          {secDeposit > 0 ? fmtAed(secDeposit) : <span className="text-[#c0bdb8]">—</span>}
-                        </span>
-                      </div>
-                      {/* One-off fees — editable (prefilled from the unit/lead suggestion).
-                          Lead-driven plans are final, so they show read-only there. */}
-                      {planFromLead ? (
-                        ([['Admin Fee', adminFee], ['Contract Registration Fee', ejariFee], ['Commission', commission]] as [string, number][]).map(([label, val]) => (
-                          <div key={label} className="flex justify-between items-center px-4 py-2.5">
-                            <span className="text-xs text-[#6b6860]">{label}</span>
-                            <span className="text-xs font-semibold text-[#1a1916]">
-                              {val > 0 ? fmtAed(val) : <span className="text-[#c0bdb8]">—</span>}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        ([
-                          ['Admin Fee', 'adminFee'],
-                          ['Contract Registration Fee', 'ejariFee'],
-                          ['Commission', 'commission'],
-                        ] as [string, 'adminFee' | 'ejariFee' | 'commission'][]).map(([label, key]) => (
-                          <div key={label} className="flex justify-between items-center gap-3 px-4 py-2">
-                            <span className="text-xs text-[#6b6860]">{label}</span>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-[#9b9890]">AED</span>
-                              <input
-                                type="number" min={0} step="0.01" inputMode="decimal"
-                                value={form[key]}
-                                placeholder="0"
-                                onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))}
-                                className="w-28 rounded-lg border border-[#e8e6e0] bg-white px-2.5 py-1.5 text-xs text-right text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                              />
-                            </div>
-                          </div>
-                        ))
-                      )}
-                      <p className="px-4 pb-2 pt-0.5 text-[10px] leading-snug text-[#9b9890]">
-                        Suggested from the unit/lead — edit as needed. Blank means the fee isn’t charged; nothing is auto-added.
-                      </p>
-                    </div>
-                  </div>
+                          ) : (annualRent > 0 ? fmtAed(annualRent) : '—'),
+                        },
+                        { k: 'Tax treatment', v: taxLabel },
+                      ]} />
+                    </Card>
 
-                  {/* Discount input — only when the contract is being created without a lead plan.
-                      When the lead's payment plan is in play, its discount is final and read-only. */}
-                  {!planFromLead && (
-                    <div>
-                      <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Discount (optional)</label>
-                      <div className="flex gap-2 mb-2">
-                        {(['none', 'percent', 'fixed'] as const).map(t => (
-                          <button key={t} type="button"
-                            onClick={() => setForm(f => ({ ...f, discountType: t, discountValue: t === 'none' ? '' : f.discountValue }))}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                              form.discountType === t
-                                ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]'
-                                : 'border-[#e8e6e0] bg-[#f7f6f2] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'
-                            }`}>
-                            {t === 'none' ? 'No Discount' : t === 'percent' ? '% Off' : 'Fixed AED'}
-                          </button>
-                        ))}
+                    {/* Discount input — only without a lead plan. With the lead's plan its discount is final and read-only. */}
+                    {!planFromLead ? (
+                      <div style={{ marginTop: 14 }}>
+                        <div className="gx-lb">Discount (optional)</div>
+                        <div className="gx-chips" role="group" aria-label="Discount type" style={{ marginBottom: 8 }}>
+                          {(['none', 'percent', 'fixed'] as const).map(t => (
+                            <button key={t} type="button" className="gx-chip" aria-pressed={form.discountType === t}
+                              onClick={() => setForm(f => ({ ...f, discountType: t, discountValue: t === 'none' ? '' : f.discountValue }))}>
+                              {t === 'none' ? 'No discount' : t === 'percent' ? '% off' : 'Fixed AED'}
+                            </button>
+                          ))}
+                        </div>
+                        {form.discountType !== 'none' && (
+                          <Field label={form.discountType === 'percent' ? 'Discount (%)' : 'Discount (AED)'} htmlFor="disc-val">
+                            <input id="disc-val" type="number" min="0" step={form.discountType === 'percent' ? '0.1' : '1'} className="gx-inp" style={{ maxWidth: 200 }}
+                              value={form.discountValue} onChange={set('discountValue')}
+                              placeholder={form.discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'} />
+                          </Field>
+                        )}
+                        {discountAmt > 0 && listedRent > 0 && (
+                          <Card pad>
+                            <SumRow k="Listed rent" v={<span style={{ textDecoration: 'line-through', color: 'var(--ms-ink-3)' }}>{fmtAed(listedRent)}</span>} />
+                            <SumRow k="Discount" v={<span style={{ color: 'var(--ms-danger)' }}>− {fmtAed(discountAmt)} ({((discountAmt / listedRent) * 100).toFixed(1)}%)</span>} />
+                            <SumRow k="Contract value" v={<span style={{ color: 'var(--ms-primary-dark)' }}>{fmtAed(annualRent)}</span>} strong />
+                          </Card>
+                        )}
                       </div>
-                      {form.discountType !== 'none' && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number" min="0" step={form.discountType === 'percent' ? '0.1' : '1'}
-                            value={form.discountValue} onChange={set('discountValue')}
-                            placeholder={form.discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'}
-                            className="flex-1 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                          />
-                          <span className="text-xs font-semibold text-[#6b6860]">{form.discountType === 'percent' ? '%' : 'AED'}</span>
-                        </div>
-                      )}
-                      {discountAmt > 0 && listedRent > 0 && (
-                        <div className="mt-2 rounded-xl bg-[#f0faf6] border border-[#c5e8df] px-4 py-2.5 space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-[#6b6860]">Listed rent</span>
-                            <span className="text-[#9b9890] line-through">{fmtAed(listedRent)}</span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-[#6b6860]">Discount</span>
-                            <span className="text-[#b91c1c] font-medium">− {fmtAed(discountAmt)} ({((discountAmt / listedRent) * 100).toFixed(1)}%)</span>
-                          </div>
-                          <div className="flex justify-between text-sm font-bold pt-1 border-t border-[#c5e8df]">
-                            <span className="text-[#1a1916]">Contract value</span>
-                            <span className="text-[#2e9f82]">{fmtAed(annualRent)}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {planFromLead && (
-                    <p className="text-[11px] text-[#6b6860] bg-[#f0f9ff] border border-[#bae6fd] rounded-lg px-3 py-2">
-                      Discount and pricing come from the issued payment plan. To change them, edit the plan on the lead.
-                    </p>
-                  )}
-                </>
-              )}
+                    ) : (
+                      <div style={{ marginTop: 14 }}>
+                        <Callout tone="info">Discount and pricing come from the issued payment plan. To change them, edit the plan on the lead.</Callout>
+                      </div>
+                    )}
+                  </>
+                )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Payment Method</label>
-                  <div className="relative">
-                    <select value={form.modeOfPayment} onChange={set('modeOfPayment')}
-                      className="w-full appearance-none rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 pr-9 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]">
+                <div className="gx-two" style={{ marginTop: 14 }}>
+                  <Field label="Payment method" htmlFor="pay-method">
+                    <select id="pay-method" className="gx-sel" value={form.modeOfPayment} onChange={set('modeOfPayment')}>
                       {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
-                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Payments / Year</label>
-                  <div className="relative">
-                    <select value={form.numberOfInstallments} onChange={set('numberOfInstallments')}
-                      className="w-full appearance-none rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 pr-9 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]">
+                  </Field>
+                  <Field label="Payments / year" htmlFor="pay-count" hint={allowedInstallments.length ? 'Limited to the plans in your Settings → Rules.' : undefined}>
+                    <select id="pay-count" className="gx-sel" value={form.numberOfInstallments} onChange={set('numberOfInstallments')}>
                       {allowedInstallmentPlans(allowedInstallments, [Number(form.numberOfInstallments)]).map(p => (
                         <option key={p.value} value={p.value}>{p.longLabel}</option>
                       ))}
                     </select>
-                    <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
+                  </Field>
+                </div>
+
+                {/* Cheque schedule — the shared segregated four-group view. From a lead it
+                    mirrors the issued plan's exact items (bundle, extras, deposit); otherwise
+                    it even-splits the rent with a separate VAT line, matching the contract. */}
+                {(planFromLead || annualRent > 0) && (
+                  <>
+                    <div className="gx-lb" style={{ marginTop: 4 }}>Cheque schedule preview</div>
+                    <SegregatedPlanView plan={previewSeg} />
+                  </>
+                )}
+              </>
+            )}
+
+            {/* 5 · FEES & DEPOSIT */}
+            {step === 'fees' && (
+              !form.unitId ? (
+                <Callout tone="info" title="Select a unit first.">
+                  The deposit and fee suggestions come from the unit{qLeadId ? ' or the lead’s plan' : ''}.
+                  <span style={{ marginLeft: 6 }}><Btn size="xs" onClick={() => setStep('unit')}>Choose unit</Btn></span>
+                </Callout>
+              ) : (
+                <>
+                  <Card title="Security deposit" sub={planFromLead ? 'From the issued payment plan' : 'From the unit'} pad>
+                    <KV items={[{ k: 'Security deposit (PDC)', v: secDeposit > 0 ? fmtAed(secDeposit) : '—' }]} />
+                  </Card>
+                  <div style={{ marginTop: 14 }}>
+                    <Card title="One-off fees" sub="AED · Suggested from the unit/lead — edit as needed. Blank means the fee isn’t charged; nothing is auto-added." pad>
+                      {/* Lead-driven plans are final, so their fees are read-only. */}
+                      {planFromLead ? (
+                        <KV items={[
+                          { k: 'Admin fee', v: adminFee > 0 ? fmtAed(adminFee) : '—' },
+                          { k: 'Contract registration fee', v: ejariFee > 0 ? fmtAed(ejariFee) : '—' },
+                          { k: 'Commission', v: commission > 0 ? fmtAed(commission) : '—' },
+                        ]} />
+                      ) : (
+                        <div className="gx-cols gx-cols-3">
+                          {([
+                            ['Admin fee (AED)', 'adminFee'],
+                            ['Contract registration fee (AED)', 'ejariFee'],
+                            ['Commission (AED)', 'commission'],
+                          ] as [string, 'adminFee' | 'ejariFee' | 'commission'][]).map(([label, key]) => (
+                            <Field key={key} label={label} htmlFor={`fee-${key}`}>
+                              <input id={`fee-${key}`} type="number" min={0} step="0.01" inputMode="decimal" className="gx-inp"
+                                value={form[key]} placeholder="0"
+                                onChange={(e) => setForm(f => ({ ...f, [key]: e.target.value }))} />
+                            </Field>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
                   </div>
-                </div>
-              </div>
+                </>
+              )
+            )}
 
-              {/* Cheque schedule — the shared segregated four-group view. From a lead it
-                  mirrors the issued plan's exact items (bundle, extras, deposit); otherwise
-                  it even-splits the rent with a separate VAT line, matching the contract. */}
-              {(planFromLead || annualRent > 0) && <SegregatedPlanView plan={previewSeg} />}
-
-              {/* Custom Clauses */}
-              <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Special Clauses</label>
-                <p className="text-[11px] text-[#9b9891] mb-3">Add custom terms or conditions to append to the contract.</p>
-                <div className="flex gap-2 mb-3">
-                  <input
-                    type="text"
-                    value={clauseInput}
-                    onChange={e => setClauseInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const trimmed = clauseInput.trim();
-                        if (trimmed) { setCustomClauses(prev => [...prev, trimmed]); setClauseInput(''); }
-                      }
-                    }}
-                    placeholder="Type a clause and press Enter or click Add…"
-                    className="flex-1 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = clauseInput.trim();
-                      if (trimmed) { setCustomClauses(prev => [...prev, trimmed]); setClauseInput(''); }
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] transition-colors whitespace-nowrap"
-                  >+ Add</button>
-                </div>
+            {/* 6 · CLAUSES & NOTES */}
+            {step === 'clauses' && (
+              <>
+                <Field label="Special clauses" htmlFor="clause-in" hint="Add custom terms or conditions to append to the contract.">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input id="clause-in" type="text" className="gx-inp" value={clauseInput}
+                      onChange={e => setClauseInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addClause(); } }}
+                      placeholder="Type a clause and press Enter or click Add…" />
+                    <Btn variant="primary" onClick={addClause} disabled={!clauseInput.trim()}>Add clause</Btn>
+                  </div>
+                </Field>
                 {customClauses.length > 0 && (
-                  <ol className="space-y-2">
-                    {customClauses.map((clause, i) => (
-                      <li key={i} className="flex items-start gap-3 bg-[#f7f6f2] border border-[#e8e6e0] rounded-xl px-4 py-2.5">
-                        <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-[#2e9f82] text-white text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
-                        <span className="flex-1 text-sm text-[#1a1916]">{clause}</span>
-                        <button
-                          type="button"
-                          onClick={() => setCustomClauses(prev => prev.filter((_, j) => j !== i))}
-                          className="shrink-0 text-[#c0bdb8] hover:text-red-500 transition-colors"
-                          aria-label="Remove clause"
-                        ><X size={14} /></button>
-                      </li>
-                    ))}
-                  </ol>
+                  <TableWrap>
+                    <table className="gx-tbl">
+                      <thead><tr><th style={{ width: 36 }}>#</th><th>Clause</th><th className="act" /></tr></thead>
+                      <tbody>
+                        {customClauses.map((clause, i) => (
+                          <tr key={i}>
+                            <td className="mono">{i + 1}</td>
+                            <td style={{ whiteSpace: 'normal' }}>{clause}</td>
+                            <td className="act"><Btn size="xs" variant="danger" onClick={() => setCustomClauses(prev => prev.filter((_, j) => j !== i))}>Remove</Btn></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </TableWrap>
                 )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Notes</label>
-                <textarea rows={3} placeholder="Any additional notes…"
-                  value={form.notes} onChange={set('notes')}
-                  className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82] resize-none"
-                />
-              </div>
-            </div>
-
-            {/* Error banner */}
-            {error && (
-              <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-                <X size={15} className="mt-0.5 shrink-0" />
-                {error}
-              </div>
+                <div style={{ marginTop: 14 }}>
+                  <Field label="Notes" htmlFor="notes">
+                    <textarea id="notes" rows={3} className="gx-ta" placeholder="Any additional notes…" value={form.notes} onChange={set('notes')} />
+                  </Field>
+                </div>
+              </>
             )}
 
-            {/* Actions */}
-            <div className="flex gap-3">
-              <Link href="/rental-provider/dashboard"
-                className="flex-1 text-center py-3 rounded-xl border border-[#e8e6e0] text-sm font-semibold text-[#6b6860] hover:bg-[#f4f3ef] transition-colors">
-                Cancel
-              </Link>
-              <button type="submit" disabled={submitting}
-                className="flex-1 py-3 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60"
-                style={{ background: '#2e9f82' }}>
-                {submitting ? 'Creating…' : 'Create Contract'}
-              </button>
-            </div>
-          </form>
-
-          {/* ── Right: Live Summary Panel ── */}
-          <div className="lg:sticky lg:top-6 space-y-4">
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-              {/* Panel header */}
-              <div className="px-5 py-4 border-b border-[#f0ede8]" style={{ background: '#2e9f82' }}>
-                <div className="flex items-center gap-2">
-                  <FileText size={15} className="text-white/80" />
-                  <span className="text-sm font-bold text-white">Contract Summary</span>
+            {/* 7 · PREVIEW & CREATE */}
+            {step === 'review' && (
+              <>
+                <div className="gx-lb">Preview &amp; validate</div>
+                <Checklist items={checks} />
+                <div style={{ marginTop: 12 }}>
+                  {blocking === 0
+                    ? <Evid tone="ok">Ready to create. The contract is saved as a draft — you issue it to the customer from the Operations pipeline.</Evid>
+                    : <Evid tone="warn">{blocking} required item{blocking === 1 ? '' : 's'} missing. Click a step on the left to fix it.</Evid>}
                 </div>
-                {form.contractStartDate && form.contractEndDate && (
-                  <p className="text-xs text-white/70 mt-1">{durationLabel}</p>
-                )}
-              </div>
-
-              <div className="px-5 py-4 space-y-0">
-                {/* Unit row */}
-                {selectedUnit && (
-                  <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                    <span className="text-xs text-[#9b9890]">Unit</span>
-                    <span className="text-xs font-semibold text-[#1a1916]">
-                      {selectedUnit.unitNumber}
-                      {selectedUnit.bedrooms ? ` · ${selectedUnit.bedrooms}BR` : ''}
-                    </span>
+                {(planFromLead || annualRent > 0) && (
+                  <div style={{ marginTop: 14 }}>
+                    <div className="gx-lb">Payment schedule</div>
+                    <SegregatedPlanView plan={previewSeg} />
                   </div>
                 )}
-
-                {/* Tax treatment — derived from the unit type so a mixed-use
-                    building's units show their own basis (residential = exempt,
-                    commercial = 5% VAT). The authoritative rate is computed on the
-                    server at creation; this is a read-only preview. */}
-                {selectedUnit && (() => {
-                  const vatable = deriveSpaceCategoryFromUnitType(selectedUnit.unitType) !== 'residential';
-                  return (
-                    <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                      <span className="text-xs text-[#9b9890]">Tax treatment</span>
-                      <span className={`text-xs font-semibold ${vatable ? 'text-[#b45309]' : 'text-[#2e9f82]'}`}>
-                        {vatable ? 'Commercial · 5% VAT' : 'Residential · VAT exempt'}
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                {/* Dates row */}
-                {form.contractStartDate && (
-                  <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                    <span className="text-xs text-[#9b9890]">Period</span>
-                    <span className="text-xs font-semibold text-[#1a1916]">
-                      {form.contractStartDate} → {form.contractEndDate || '…'}
-                    </span>
-                  </div>
-                )}
-
-                {/* Annual rent — strike the listed price when a discount applies */}
-                <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                  <span className="text-xs text-[#9b9890]">Annual Rent</span>
-                  <span className="text-sm font-bold text-[#1a1916]">
-                    {annualRent > 0 ? (
-                      <>
-                        {discountAmt > 0 && (
-                          <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(listedRent)}</span>
-                        )}
-                        {fmtAed(annualRent)}
-                      </>
-                    ) : '—'}
-                  </span>
+                <div style={{ marginTop: 14 }}>
+                  <Callout tone="warn" title="New contract only.">Renewals are automatically offered to customers 90 days before the contract expires, not created manually.</Callout>
                 </div>
-                {discountAmt > 0 && (
-                  <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                    <span className="text-xs text-[#9b9890]">Discount</span>
-                    <span className="text-xs font-semibold text-[#b91c1c]">− {fmtAed(discountAmt)}</span>
-                  </div>
-                )}
-
-                {/* Per cheque */}
-                {annualRent > 0 && (
-                  <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                    <span className="text-xs text-[#9b9890]">
-                      Per Cheque ({installments}×)
-                    </span>
-                    <span className="text-xs font-semibold text-[#2e9f82]">
-                      {fmtAed(chequeAmount)}
-                    </span>
-                  </div>
-                )}
-
-                {/* Security deposit */}
-                <div className="flex justify-between items-center py-2.5 border-b border-[#f4f3ef]">
-                  <span className="text-xs text-[#9b9890]">Security Deposit <span className="text-[10px] text-[#b0ada8]">(PDC)</span></span>
-                  <span className="text-xs font-semibold text-[#1a1916]">
-                    {secDeposit > 0 ? fmtAed(secDeposit) : '—'}
-                  </span>
+                {error && <div style={{ marginTop: 12 }}><Callout tone="bad" title="Not created.">{error}</Callout></div>}
+                <div className="gx-btn-row" style={{ marginTop: 14 }}>
+                  <Btn variant="primary" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Creating…' : 'Create contract'}</Btn>
+                  <span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Opens the draft in the Operations pipeline.</span>
                 </div>
-
-              </div>
-            </div>
-
-            {/* Tenant badge */}
-            {form.tenantId && (
-              <div className="bg-white rounded-2xl px-5 py-4 shadow-sm flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-[#d8f2e8] flex items-center justify-center text-sm font-bold text-[#2e9f82]">
-                  {form.tenantName.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-[#1a1916]">{form.tenantName}</p>
-                  <p className="text-[10px] text-[#9b9890]">Customer selected</p>
-                </div>
-              </div>
+              </>
             )}
 
-            {/* Contract type note */}
-            <div className="bg-[#fffbeb] border border-amber-200 rounded-xl px-4 py-3">
-              <p className="text-xs font-semibold text-amber-800 mb-1">New contract only</p>
-              <p className="text-[10px] text-amber-700 leading-relaxed">
-                Renewals are automatically offered to customers 90 days before the contract expires, not created manually.
-              </p>
+            {/* Errors surface on whichever step validation sent you to */}
+            {error && step !== 'review' && <div style={{ marginTop: 12 }}><Callout tone="bad">{error}</Callout></div>}
+
+            {/* footer nav */}
+            <div className="gx-btn-row" style={{ marginTop: 18, borderTop: '1px solid var(--ms-surface-3)', paddingTop: 14 }}>
+              <Btn href={backHref}>Cancel</Btn>
+              <span style={{ flex: 1 }} />
+              {prev && <Btn onClick={() => setStep(prev)}>Back</Btn>}
+              {next && <Btn variant="primary" onClick={() => setStep(next)}>Continue</Btn>}
             </div>
           </div>
 
+          {/* Live contract summary */}
+          <aside className="gx-wz-prev" aria-label="Contract summary">
+            <div className="gx-lb" style={{ marginBottom: 8 }}>Contract summary</div>
+            <div className="gx-card" style={{ padding: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Thumb text={form.tenantName || '?'} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.3 }}>{form.tenantName || 'No customer yet'}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)' }}>{form.tenantId ? 'Customer selected' : 'Step 1'}</div>
+                </div>
+              </div>
+              <SumRow k="Unit" v={selectedUnit ? unitLabel(selectedUnit) : '—'} />
+              {selectedProperty && <SumRow k="Property" v={selectedProperty.buildingName} />}
+              <SumRow k="Tax treatment" v={<span style={{ color: rentVatable ? 'var(--ms-amber-text)' : undefined }}>{taxLabel}</span>} />
+              <SumRow k="Period" v={form.contractStartDate ? `${form.contractStartDate} → ${form.contractEndDate || '…'}` : '—'} />
+              {form.contractStartDate && form.contractEndDate && <SumRow k="Duration" v={durationLabel} />}
+              <SumRow k="Annual rent" strong v={annualRent > 0 ? (
+                <>
+                  {discountAmt > 0 && <span style={{ fontWeight: 400, color: 'var(--ms-ink-3)', textDecoration: 'line-through', marginRight: 5, fontSize: 10.5 }}>{fmtAed(listedRent)}</span>}
+                  {fmtAed(annualRent)}
+                </>
+              ) : '—'} />
+              {discountAmt > 0 && <SumRow k="Discount" v={<span style={{ color: 'var(--ms-danger)' }}>− {fmtAed(discountAmt)}</span>} />}
+              {annualRent > 0 && <SumRow k={`Per cheque (${installments}×)`} v={<span style={{ color: 'var(--ms-primary-dark)' }}>{fmtAed(chequeAmount)}</span>} />}
+              {rentVat > 0 && <SumRow k="VAT on rent (5%)" v={fmtAed(rentVat)} />}
+              <SumRow k="Security deposit (PDC)" v={secDeposit > 0 ? fmtAed(secDeposit) : '—'} />
+              {adminFee > 0 && <SumRow k="Admin fee" v={fmtAed(adminFee)} />}
+              {ejariFee > 0 && <SumRow k="Registration fee" v={fmtAed(ejariFee)} />}
+              {commission > 0 && <SumRow k="Commission" v={fmtAed(commission)} />}
+              <SumRow k="Payment method" v={methodLabel} />
+              <div style={{ marginTop: 10, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                <Pill tone="neutral" dot={false}>Draft</Pill>
+                {planFromLead && <Pill tone="info" dot={false}>Issued plan</Pill>}
+                {availability && <Pill tone={availability.tone}>{availability.label}</Pill>}
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ms-ink-3)', lineHeight: 1.5 }}>
+              {checks.filter(c => c.state === 'pass').length} of {checks.length} checks passing
+              {rentVatable && <><br />Rent VAT is collected {rentVatMode === 'annual' ? 'as one cheque for the year' : 'beside each rent cheque'} (Settings → Rules).</>}
+              <br />New contract only — renewals are auto-offered 90 days before expiry.
+            </div>
+          </aside>
         </div>
-      </div>
-    </div>
+      </section>
+    </OsPage>
   );
 }
-
-

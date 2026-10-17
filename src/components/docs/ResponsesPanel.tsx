@@ -49,9 +49,9 @@ export function ResponsesPanel({ responses, spec }: Props) {
               style={{
                 padding: '5px 14px',
                 borderRadius: 7,
-                border: `1px solid ${isActive ? s.border : '#e8e6e0'}`,
+                border: `1px solid ${isActive ? s.border : '#e4e9e5'}`,
                 backgroundColor: isActive ? s.bg : '#ffffff',
-                color: isActive ? s.text : '#6b6860',
+                color: isActive ? s.text : '#5f6b63',
                 fontWeight: isActive ? 700 : 500,
                 fontSize: 13,
                 cursor: 'pointer',
@@ -67,7 +67,7 @@ export function ResponsesPanel({ responses, spec }: Props) {
 
       {/* Description */}
       {current?.description && (
-        <p style={{ fontSize: 14, color: '#6b6860', marginBottom: 12, marginTop: 0 }}>
+        <p style={{ fontSize: 14, color: '#5f6b63', marginBottom: 12, marginTop: 0 }}>
           {current.description}
         </p>
       )}
@@ -78,7 +78,7 @@ export function ResponsesPanel({ responses, spec }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             <code style={{
               fontSize: 11, fontFamily: 'monospace', backgroundColor: '#f6f8fa',
-              padding: '3px 9px', borderRadius: 5, border: '1px solid #e8e6e0', color: '#6b6860',
+              padding: '3px 9px', borderRadius: 5, border: '1px solid #e4e9e5', color: '#5f6b63',
             }}>
               {contentEntries[0][0]}
             </code>
@@ -92,12 +92,12 @@ export function ResponsesPanel({ responses, spec }: Props) {
           ) : hasSchema && schema ? (
             <SchemaTree schema={schema} spec={spec} />
           ) : (
-            <p style={{ fontSize: 13, color: '#9b9890', fontStyle: 'italic' }}>No schema defined</p>
+            <p style={{ fontSize: 13, color: '#8a948d', fontStyle: 'italic' }}>No schema defined</p>
           )}
         </>
       ) : (
         !current?.description && (
-          <p style={{ fontSize: 13, color: '#9b9890', fontStyle: 'italic' }}>No response body</p>
+          <p style={{ fontSize: 13, color: '#8a948d', fontStyle: 'italic' }}>No response body</p>
         )
       )}
     </div>

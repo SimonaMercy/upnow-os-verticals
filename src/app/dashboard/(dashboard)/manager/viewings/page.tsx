@@ -14,5 +14,5 @@ export default function ManagerViewingsRedirect() {
     const rp = params.get('rp');
     router.replace(`/dashboard/manager/leads${rp ? `?rp=${rp}` : ''}`);
   }, [router, params]);
-  return <div className="p-6 text-sm text-[#9b9890]">Redirecting to Leads…</div>;
+  return <div className="p-6 text-sm text-[#8a948d]">Redirecting to Leads…</div>;
 }

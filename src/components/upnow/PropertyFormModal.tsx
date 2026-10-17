@@ -25,10 +25,10 @@ export const PROPERTY_FORM_SECTIONS: { id: PropSectionId; num: number; label: st
 export function PropSectionHeader({ num, label, desc }: { num: number; label: string; desc: string }) {
   return (
     <div className="flex gap-3 mb-4">
-      <span className="w-[30px] h-[30px] shrink-0 rounded-[9px] bg-[#d8f2e8] text-[#1a7a5a] flex items-center justify-center text-[13px] font-extrabold">{num}</span>
+      <span className="w-[30px] h-[30px] shrink-0 rounded-[9px] bg-[#d8efe3] text-[#1a7a5a] flex items-center justify-center text-[13px] font-extrabold">{num}</span>
       <div>
-        <div className="text-[16px] font-extrabold tracking-tight text-[#1a1916] leading-tight">{label}</div>
-        <div className="text-[12.5px] text-[#9b9890] mt-0.5">{desc}</div>
+        <div className="text-[16px] font-extrabold tracking-tight text-[#14201a] leading-tight">{label}</div>
+        <div className="text-[12.5px] text-[#8a948d] mt-0.5">{desc}</div>
       </div>
     </div>
   );
@@ -382,10 +382,10 @@ export function BuildingSearch({
   return (
     <div ref={wrapperRef} className="relative">
       <div className="relative">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a948d] pointer-events-none" />
         <input
           type="text"
-          className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-10 py-2.5 text-sm bg-white focus:outline-none focus:border-[#2e9f82] transition-colors"
+          className="w-full border border-[#e4e9e5] rounded-lg pl-9 pr-10 py-2.5 text-sm bg-white focus:outline-none focus:border-[#047246] transition-colors"
           placeholder="Type a building name, tower or street…"
           value={query}
           onChange={handleChange}
@@ -393,18 +393,18 @@ export function BuildingSearch({
           autoComplete="off"
         />
         {(loading || picking) && (
-          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#9b9890]" />
+          <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-[#8a948d]" />
         )}
       </div>
       {showDropdown && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e8e6e0] rounded-xl shadow-xl overflow-hidden">
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-[#e4e9e5] rounded-xl shadow-xl overflow-hidden">
           <ul className="max-h-60 overflow-y-auto">
 
             {/* ── Local (system) results ── */}
             {hasLocal && (
               <>
-                <li className="px-3 py-1.5 bg-[#f4f3ef]">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">From your system</span>
+                <li className="px-3 py-1.5 bg-[#eef1ef]">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d]">From your system</span>
                 </li>
                 {localSuggestions.map(s => (
                   <li key={`local_${s.id}`}>
@@ -413,12 +413,12 @@ export function BuildingSearch({
                       className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#f0fdf8] border-b border-[#f0eeea] last:border-0 transition-colors"
                       onClick={() => handlePickLocal(s)}
                     >
-                      <MapPin size={14} className="mt-0.5 text-[#2e9f82] shrink-0" />
+                      <MapPin size={14} className="mt-0.5 text-[#047246] shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#1a1916] truncate">{s.name}</p>
-                        <p className="text-xs text-[#9b9890] leading-tight truncate">{s.label || 'No address stored'}</p>
+                        <p className="text-sm font-medium text-[#14201a] truncate">{s.name}</p>
+                        <p className="text-xs text-[#8a948d] leading-tight truncate">{s.label || 'No address stored'}</p>
                       </div>
-                      <span className="ml-auto text-[9px] font-semibold text-[#2e9f82] bg-[#d8f2e8] px-1.5 py-0.5 rounded-full shrink-0 self-center">Saved</span>
+                      <span className="ml-auto text-[9px] font-semibold text-[#047246] bg-[#d8efe3] px-1.5 py-0.5 rounded-full shrink-0 self-center">Saved</span>
                     </button>
                   </li>
                 ))}
@@ -428,9 +428,9 @@ export function BuildingSearch({
             {/* ── UpNow Database results ── */}
             {hasCache && (
               <>
-                <li className="px-3 py-1.5 bg-[#f4f3ef] flex items-center gap-1.5">
-                  <Database size={10} className="text-[#2e9f82]" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">UpNow Database</span>
+                <li className="px-3 py-1.5 bg-[#eef1ef] flex items-center gap-1.5">
+                  <Database size={10} className="text-[#047246]" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d]">UpNow Database</span>
                 </li>
                 {cacheResults.map(hit => (
                   <li key={`cache_${hit.id}`}>
@@ -439,12 +439,12 @@ export function BuildingSearch({
                       className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#f0fdf8] border-b border-[#f0eeea] last:border-0 transition-colors"
                       onClick={() => handlePickCache(hit)}
                     >
-                      <MapPin size={14} className="mt-0.5 text-[#2e9f82] shrink-0" />
+                      <MapPin size={14} className="mt-0.5 text-[#047246] shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#1a1916] truncate">{hit.name}</p>
-                        <p className="text-xs text-[#9b9890] leading-tight truncate">{hit.fullAddress || 'No address stored'}</p>
+                        <p className="text-sm font-medium text-[#14201a] truncate">{hit.name}</p>
+                        <p className="text-xs text-[#8a948d] leading-tight truncate">{hit.fullAddress || 'No address stored'}</p>
                       </div>
-                      <span className="ml-auto text-[9px] font-semibold text-[#2e9f82] bg-[#d8f2e8] px-1.5 py-0.5 rounded-full shrink-0 self-center">Cached</span>
+                      <span className="ml-auto text-[9px] font-semibold text-[#047246] bg-[#d8efe3] px-1.5 py-0.5 rounded-full shrink-0 self-center">Cached</span>
                     </button>
                   </li>
                 ))}
@@ -455,21 +455,21 @@ export function BuildingSearch({
             {hasGoogle && (
               <>
                 {hasLocal && (
-                  <li className="px-3 py-1.5 bg-[#f4f3ef]">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9b9890]">Google Places</span>
+                  <li className="px-3 py-1.5 bg-[#eef1ef]">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#8a948d]">Google Places</span>
                   </li>
                 )}
                 {suggestions.map(s => (
                   <li key={s.placeId}>
                     <button
                       type="button"
-                      className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#f4f3ef] border-b border-[#f0eeea] last:border-0 transition-colors"
+                      className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-[#eef1ef] border-b border-[#f0eeea] last:border-0 transition-colors"
                       onClick={() => handlePickGoogle(s)}
                     >
-                      <MapPin size={14} className="mt-0.5 text-[#9b9890] shrink-0" />
+                      <MapPin size={14} className="mt-0.5 text-[#8a948d] shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#1a1916] truncate">{s.main}</p>
-                        <p className="text-xs text-[#9b9890] leading-tight truncate">{s.secondary}</p>
+                        <p className="text-sm font-medium text-[#14201a] truncate">{s.main}</p>
+                        <p className="text-xs text-[#8a948d] leading-tight truncate">{s.secondary}</p>
                       </div>
                     </button>
                   </li>
@@ -480,15 +480,15 @@ export function BuildingSearch({
             {/* ── No results ── */}
             {!hasLocal && !hasGoogle && searched && (
               <li className="px-4 py-3 text-center">
-                <p className="text-sm text-[#6b6860]">No results for &ldquo;{query}&rdquo;</p>
-                <p className="text-xs text-[#9b9890] mt-0.5">Try a different name or fill in below</p>
+                <p className="text-sm text-[#5f6b63]">No results for &ldquo;{query}&rdquo;</p>
+                <p className="text-xs text-[#8a948d] mt-0.5">Try a different name or fill in below</p>
               </li>
             )}
           </ul>
           <button
             type="button"
             onClick={handleManual}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium text-[#2e9f82] hover:bg-[#f4f3ef] border-t border-[#e8e6e0] transition-colors cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium text-[#047246] hover:bg-[#eef1ef] border-t border-[#e4e9e5] transition-colors cursor-pointer"
           >
             Enter address manually ↓
           </button>
@@ -508,6 +508,12 @@ export const SPACE_CATEGORIES = [
   { id: 'land',        label: 'Land',        icon: '🌍', desc: 'Plot of land' },
   { id: 'mixed_use',   label: 'Mixed-use',   icon: '🏬', desc: 'Combined residential + commercial' },
 ];
+
+// Categories offered when CREATING a property or browsing the public marketplace.
+// Mixed-use was retired for new listings on 2026-10-11 (MarketSpace removed it);
+// it stays in SPACE_CATEGORIES so existing mixed-use properties keep their label,
+// filters, fee rules and VAT handling (effectiveSpaceCategory) everywhere else.
+export const NEW_SPACE_CATEGORIES = SPACE_CATEGORIES.filter((c) => c.id !== 'mixed_use');
 
 // Category ids that are valid in the DB enum but no longer offered on the form
 // (villa/townhouse folded into Residential; retail/warehouse into Commercial/
@@ -638,13 +644,13 @@ export const PROPERTY_FEATURES = [
 
 function FieldLabel({ label, required }: { label: string; required?: boolean }) {
   return (
-    <label className="block text-xs font-medium text-[#6b6860] mb-1">
+    <label className="block text-xs font-medium text-[#5f6b63] mb-1">
       {label} {required && <span className="text-red-500">*</span>}
     </label>
   );
 }
 
-const INPUT   = 'w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82]';
+const INPUT   = 'w-full border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#047246]';
 const SELECT  = cn(INPUT, 'appearance-none');
 const DISABLED_CLS = 'opacity-50 cursor-not-allowed';
 
@@ -676,19 +682,19 @@ export function DocSlotCard({
   return (
     <div
       className="rounded-lg border px-3 py-2.5"
-      style={{ borderColor: hasAny ? '#22c55e' : '#e8e6e0', background: hasAny ? 'color-mix(in srgb, #22c55e 5%, white)' : 'white' }}
+      style={{ borderColor: hasAny ? '#22c55e' : '#e4e9e5', background: hasAny ? 'color-mix(in srgb, #22c55e 5%, white)' : 'white' }}
     >
       <div className="flex items-center gap-2.5">
         {hasAny
           ? <Check size={16} className="shrink-0" style={{ color: '#16a34a' }} />
           : <FileText size={16} className="shrink-0 text-[#c8c6c0]" />}
-        <span className="text-sm font-medium text-[#1a1916]">{label}</span>
+        <span className="text-sm font-medium text-[#14201a]">{label}</span>
         {required
           ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#fde8e8] text-[#b91c1c]">Required</span>
-          : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#f4f3ef] text-[#9b9890]">Optional</span>}
+          : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[#eef1ef] text-[#8a948d]">Optional</span>}
         {hasAny && <span className="text-[11px] text-[#16a34a] font-medium">{count} file{count === 1 ? '' : 's'}</span>}
         <label className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
-          style={{ background: hasAny && !multiple ? '#f4f3ef' : '#2e9f82', color: hasAny && !multiple ? '#6b6860' : '#fff' }}>
+          style={{ background: hasAny && !multiple ? '#eef1ef' : '#047246', color: hasAny && !multiple ? '#5f6b63' : '#fff' }}>
           <input type="file" accept={PROPERTY_DOC_ACCEPT} multiple={multiple} className="sr-only"
             onChange={e => { onAdd(e.target.files); e.target.value = ''; }} />
           <Upload size={13} /> {btnLabel}
@@ -698,28 +704,28 @@ export function DocSlotCard({
         <div className="mt-2 space-y-1.5">
           {existing.map(d => (
             <div key={`e${d.id}`} className="flex items-center gap-2 text-xs">
-              <FileText size={13} className="text-[#2e9f82] shrink-0" />
+              <FileText size={13} className="text-[#047246] shrink-0" />
               <span className="truncate flex-1 text-[#44423c]">{d.displayName || 'Document'}</span>
-              <span className="text-[10px] text-[#9b9890] shrink-0">on file</span>
+              <span className="text-[10px] text-[#8a948d] shrink-0">on file</span>
               {d.fileUrl && (
                 <button type="button" onClick={() => onView({ url: d.fileUrl!, name: d.displayName || label })}
-                  className="text-[#2e9f82] font-medium hover:underline shrink-0">View</button>
+                  className="text-[#047246] font-medium hover:underline shrink-0">View</button>
               )}
               {onRemoveExisting && (
                 <button type="button" onClick={() => onRemoveExisting(d.id)} title="Remove"
-                  className="w-5 h-5 rounded-full bg-[#f4f3ef] grid place-items-center text-[#9b9890] hover:text-[#b91c1c] shrink-0"><Trash2 size={11} /></button>
+                  className="w-5 h-5 rounded-full bg-[#eef1ef] grid place-items-center text-[#8a948d] hover:text-[#b91c1c] shrink-0"><Trash2 size={11} /></button>
               )}
             </div>
           ))}
           {queued.map((f, i) => (
             <div key={`q${i}`} className="flex items-center gap-2 text-xs">
-              <Upload size={13} className="text-[#2e9f82] shrink-0" />
+              <Upload size={13} className="text-[#047246] shrink-0" />
               <span className="truncate flex-1 text-[#44423c]">{f.name}</span>
-              <span className="text-[10px] text-[#9b9890] shrink-0">ready to upload</span>
+              <span className="text-[10px] text-[#8a948d] shrink-0">ready to upload</span>
               <button type="button" onClick={() => onView({ url: URL.createObjectURL(f), mime: f.type, name: f.name })}
-                className="text-[#2e9f82] font-medium hover:underline shrink-0">View</button>
+                className="text-[#047246] font-medium hover:underline shrink-0">View</button>
               <button type="button" onClick={() => onRemoveQueued(i)} title="Remove"
-                className="w-5 h-5 rounded-full bg-[#f4f3ef] grid place-items-center text-[#9b9890] hover:text-[#b91c1c] shrink-0"><X size={11} /></button>
+                className="w-5 h-5 rounded-full bg-[#eef1ef] grid place-items-center text-[#8a948d] hover:text-[#b91c1c] shrink-0"><X size={11} /></button>
             </div>
           ))}
         </div>
@@ -773,10 +779,10 @@ export function PropertyDocCard({
   const pillCls = 'inline-flex items-center gap-1.5 text-[11.5px] font-semibold rounded-lg px-2.5 py-1.5';
   const pillStyle = { color: '#1a6b4d', background: '#e6f7f1', border: '1px solid #bfe0cd' } as const;
   return (
-    <div className="rounded-xl border px-3.5 py-3" style={{ borderColor: has ? '#bfe0cd' : '#e8e6e0', background: has ? '#f5fbf8' : '#fff' }}>
+    <div className="rounded-xl border px-3.5 py-3" style={{ borderColor: has ? '#bfe0cd' : '#e4e9e5', background: has ? '#f5fbf8' : '#fff' }}>
       <div className={cn('flex items-center', inline ? 'gap-3' : 'gap-2.5')}>
         <span className={cn(inline ? 'w-[34px] h-[34px]' : 'w-8 h-8', 'shrink-0 rounded-[9px] flex items-center justify-center')}
-          style={{ background: has ? '#d8f2e8' : '#f4f3ef', color: has ? '#1a7a5a' : '#9b9890' }}>
+          style={{ background: has ? '#d8efe3' : '#eef1ef', color: has ? '#1a7a5a' : '#8a948d' }}>
           {stacked ? DOC_STACK_SVG : DOC_FILE_SVG}
         </span>
         <div className="flex-1 min-w-0">
@@ -784,7 +790,7 @@ export function PropertyDocCard({
             <>
               <div className="flex items-center gap-2">
                 <span className="text-[13.5px] font-bold text-[#2b342e] truncate">{label}</span>
-                {!has && <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-[#9b9890] bg-[#f4f3ef] px-1.5 py-0.5 rounded">Optional</span>}
+                {!has && <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-wide text-[#8a948d] bg-[#eef1ef] px-1.5 py-0.5 rounded">Optional</span>}
               </div>
               <div className="text-[11.5px] text-[#8a938c] mt-0.5 leading-snug">{description}</div>
             </>
@@ -793,7 +799,7 @@ export function PropertyDocCard({
               <div className="text-[13px] font-bold text-[#2b342e] truncate">{label}</div>
               {has
                 ? <div className="text-[11px] font-bold text-[#1a7a5a] mt-0.5">{count} file{count === 1 ? '' : 's'} attached</div>
-                : <span className="inline-block text-[9.5px] font-bold uppercase tracking-wide text-[#9b9890] bg-[#f4f3ef] px-1.5 py-0.5 rounded mt-1">Optional</span>}
+                : <span className="inline-block text-[9.5px] font-bold uppercase tracking-wide text-[#8a948d] bg-[#eef1ef] px-1.5 py-0.5 rounded mt-1">Optional</span>}
             </>
           )}
         </div>
@@ -1221,16 +1227,16 @@ export function PropertyFields({
         <div>
           <FieldLabel label="Category" required />
           {isEdit ? (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] text-sm text-[#3d3b35]">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#e4e9e5] bg-[#eef1ef] text-sm text-[#46534c]">
               <span className="flex-1">{categoryDisplayLabel(value.spaceCategory)}</span>
-              <span className="text-[10px] text-[#9b9890] font-medium">Locked</span>
+              <span className="text-[10px] text-[#8a948d] font-medium">Locked</span>
             </div>
           ) : (
             <>
               <select className={cn(SELECT, errors.spaceCategory && 'border-red-400')}
                 value={value.spaceCategory} onChange={e => upd('spaceCategory', e.target.value)}>
                 <option value="">Select category</option>
-                {SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                {NEW_SPACE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
               {errors.spaceCategory && <p className="text-xs text-red-500 mt-1">{errors.spaceCategory}</p>}
             </>
@@ -1253,17 +1259,17 @@ export function PropertyFields({
                   onClick={() => upd('leasingType', opt.id)}
                   className={cn(
                     'text-left rounded-xl border px-3.5 py-3 transition-colors cursor-pointer',
-                    on ? 'border-[#2e9f82] bg-[#e6f7f1]' : 'border-[#e8e6e0] bg-white hover:border-[#c5c2bc]',
+                    on ? 'border-[#047246] bg-[#e6f7f1]' : 'border-[#e4e9e5] bg-white hover:border-[#c5c2bc]',
                   )}
                 >
                   <span className="flex items-center gap-2">
-                    <span className={cn('w-[18px] h-[18px] shrink-0 rounded-full border-2 flex items-center justify-center', on ? 'border-[#2e9f82]' : 'border-[#cdd5cf]')}>
-                      <span className={cn('w-2 h-2 rounded-full', on ? 'bg-[#2e9f82]' : 'bg-transparent')} />
+                    <span className={cn('w-[18px] h-[18px] shrink-0 rounded-full border-2 flex items-center justify-center', on ? 'border-[#047246]' : 'border-[#cdd5cf]')}>
+                      <span className={cn('w-2 h-2 rounded-full', on ? 'bg-[#047246]' : 'bg-transparent')} />
                     </span>
-                    <span className={cn('text-sm font-bold', on ? 'text-[#1f6655]' : 'text-[#1a1916]')}>{opt.label}</span>
+                    <span className={cn('text-sm font-bold', on ? 'text-[#1f6655]' : 'text-[#14201a]')}>{opt.label}</span>
                   </span>
                   <span className="block text-[12px] text-[#7d8780] mt-1.5 leading-snug">{opt.desc}</span>
-                  <span className="block text-[11px] text-[#9b9890] font-semibold mt-2">Attach · {opt.attach}</span>
+                  <span className="block text-[11px] text-[#8a948d] font-semibold mt-2">Attach · {opt.attach}</span>
                 </button>
               );
             })}
@@ -1320,15 +1326,15 @@ export function PropertyFields({
         <div>
           {!sectioned && <FieldLabel label="Search Building / Address" />}
           {autoFilled ? (
-            <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8f2e8] rounded-lg px-3 py-2 mb-2">
+            <div className="flex items-center gap-2 text-xs text-[#1a7a5a] bg-[#d8efe3] rounded-lg px-3 py-2 mb-2">
               <CheckCircle2 size={13} className="shrink-0" />
               <span>Fields auto-filled from search — review and adjust below</span>
             </div>
           ) : (!sectioned && (
-            <p className="text-[10px] text-[#9b9890] mb-2">Search to auto-fill all fields below, or fill in manually</p>
+            <p className="text-[10px] text-[#8a948d] mb-2">Search to auto-fill all fields below, or fill in manually</p>
           ))}
           <BuildingSearch onSelect={handleSearchSelect} onManualEntry={() => setAutoFilled(false)} />
-          <p className="text-[10px] text-[#9b9890] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
+          <p className="text-[10px] text-[#8a948d] mt-1 mb-3">Powered by Google Places · UAE buildings &amp; addresses</p>
           {showMap ? (
             <MapPicker
               latitude={value.latitude} longitude={value.longitude}
@@ -1338,7 +1344,7 @@ export function PropertyFields({
             <button
               type="button"
               onClick={() => setShowMap(true)}
-              className="w-full h-[220px] rounded-xl border border-dashed border-[#e8e6e0] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#9b9890] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
+              className="w-full h-[220px] rounded-xl border border-dashed border-[#e4e9e5] bg-[#f9f8f5] flex flex-col items-center justify-center gap-2 text-[#8a948d] hover:border-[#047246] hover:text-[#047246] transition-colors cursor-pointer"
             >
               <MapPin size={20} className="opacity-40" />
               <span className="text-xs">Search above to pin location, or click to open map</span>
@@ -1488,7 +1494,7 @@ export function PropertyFields({
               onChange={e => upd('numberOfUnits', e.target.value.replace(/[^0-9]/g, ''))}
             />
             {unitCount != null && (
-              <p className="text-[11px] text-[#9b9890] mt-1">{unitCount} unit{unitCount === 1 ? '' : 's'} added so far · managed in the unit forms</p>
+              <p className="text-[11px] text-[#8a948d] mt-1">{unitCount} unit{unitCount === 1 ? '' : 's'} added so far · managed in the unit forms</p>
             )}
           </div>
         </div>
@@ -1517,7 +1523,7 @@ export function PropertyFields({
                   onClick={() => toggleFeature(feat)}
                   className={cn(
                     'inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors cursor-pointer',
-                    on ? 'border-[#2e9f82] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]',
+                    on ? 'border-[#047246] bg-[#e6f7f1] text-[#1f6655]' : 'border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]',
                   )}
                 >
                   {on && <Check size={12} className="shrink-0" />}
@@ -1533,20 +1539,20 @@ export function PropertyFields({
 
       {/* ══ SECTION 4 — Property documents (same slot pattern as KYC / contract docs) ══ */}
       {renderSection('doc', <>
-        {!sectioned && <p className="text-[11px] font-bold uppercase tracking-wider text-[#9b9890]">Property documents</p>}
+        {!sectioned && <p className="text-[11px] font-bold uppercase tracking-wider text-[#8a948d]">Property documents</p>}
 
         {/* Property structure flag. The title deed / head-lease / management
             agreement itself is asked up top, driven by the leasing model. */}
-        <label className="flex items-start gap-2.5 border border-[#e8e6e0] rounded-xl px-4 py-3.5 cursor-pointer hover:border-[#c5c2bc]">
+        <label className="flex items-start gap-2.5 border border-[#e4e9e5] rounded-xl px-4 py-3.5 cursor-pointer hover:border-[#c5c2bc]">
           <input
             type="checkbox"
             checked={value.isStandaloneUnit}
             onChange={e => upd('isStandaloneUnit', e.target.checked)}
-            className="mt-0.5 w-[18px] h-[18px] accent-[#2e9f82]"
+            className="mt-0.5 w-[18px] h-[18px] accent-[#047246]"
           />
           <span>
-            <span className="block text-sm font-bold text-[#1a1916]">Standalone property <span className="font-medium text-[#8a938c]">— the property is a single unit</span></span>
-            <span className="block text-[11px] text-[#9b9890] mt-1 leading-relaxed">
+            <span className="block text-sm font-bold text-[#14201a]">Standalone property <span className="font-medium text-[#8a938c]">— the property is a single unit</span></span>
+            <span className="block text-[11px] text-[#8a948d] mt-1 leading-relaxed">
               On — a villa or single standalone unit held as one whole (its title deed / agreement is the one above).
               Off — a multi-unit building; units are managed separately, each with its own deed in the unit form.
             </span>
@@ -1748,22 +1754,22 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
 
         {/* ── Header ── */}
         <header className="flex items-center gap-3.5 px-5 sm:px-6 py-4 sm:py-5 border-b border-[#eef1ec] shrink-0">
-          <div className="w-[42px] h-[42px] shrink-0 rounded-xl bg-[#d8f2e8] text-[#1a7a5a] flex items-center justify-center">
+          <div className="w-[42px] h-[42px] shrink-0 rounded-xl bg-[#d8efe3] text-[#1a7a5a] flex items-center justify-center">
             <Home size={22} />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-[18px] sm:text-[20px] font-extrabold tracking-tight text-[#1a1916] leading-tight">{title ?? 'Add Property'}</h1>
+            <h1 className="text-[18px] sm:text-[20px] font-extrabold tracking-tight text-[#14201a] leading-tight">{title ?? 'Add Property'}</h1>
             {isEdit ? (
               <p className="text-[13px] text-[#5a635c] mt-0.5 truncate">
-                Editing <span className="font-bold text-[#1a1916]">{form.buildingName || 'this property'}</span>
-                {form.spaceCategory && <span className="text-[#9b9890]"> · {categoryDisplayLabel(form.spaceCategory)}</span>}
+                Editing <span className="font-bold text-[#14201a]">{form.buildingName || 'this property'}</span>
+                {form.spaceCategory && <span className="text-[#8a948d]"> · {categoryDisplayLabel(form.spaceCategory)}</span>}
               </p>
             ) : (
-              <p className="text-[13px] text-[#9b9890] mt-0.5">Add once — then add units to it anytime</p>
+              <p className="text-[13px] text-[#8a948d] mt-0.5">Add once — then add units to it anytime</p>
             )}
           </div>
           <button type="button" onClick={requestClose}
-            className="w-[34px] h-[34px] shrink-0 rounded-[10px] border border-[#e8e6e0] flex items-center justify-center text-[#6b6860] hover:bg-[#f4f3ef] cursor-pointer transition-colors">
+            className="w-[34px] h-[34px] shrink-0 rounded-[10px] border border-[#e4e9e5] flex items-center justify-center text-[#5f6b63] hover:bg-[#eef1ef] cursor-pointer transition-colors">
             <X size={18} />
           </button>
         </header>
@@ -1784,19 +1790,19 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
                     onClick={() => scrollToSection(s.id)}
                     className={cn(
                       'flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-[13.5px] text-left cursor-pointer transition-colors',
-                      on ? 'bg-[#d8f2e8] text-[#1a7a5a] font-bold' : 'text-[#5a635c] font-semibold hover:bg-[#f4f3ef]',
+                      on ? 'bg-[#d8efe3] text-[#1a7a5a] font-bold' : 'text-[#5a635c] font-semibold hover:bg-[#eef1ef]',
                     )}
                   >
                     <span className={cn('w-[26px] h-[26px] shrink-0 rounded-[8px] flex items-center justify-center text-[12px] font-bold transition-colors',
-                      on ? 'bg-[#2e9f82] text-white' : 'bg-[#eef1ec] text-[#8d978f]')}>{s.num}</span>
+                      on ? 'bg-[#047246] text-white' : 'bg-[#eef1ec] text-[#8d978f]')}>{s.num}</span>
                     <span className="flex-1">{s.label}</span>
                   </button>
                 );
               })}
               <div className="mt-auto px-2.5 pt-3.5">
-                <div className="text-[11px] text-[#9b9890] mb-1.5 font-semibold">Setup progress</div>
+                <div className="text-[11px] text-[#8a948d] mb-1.5 font-semibold">Setup progress</div>
                 <div className="h-1.5 rounded bg-[#edf0ec] overflow-hidden">
-                  <div className="h-full bg-[#2e9f82] rounded transition-all duration-300" style={{ width: `${progressPct}%` }} />
+                  <div className="h-full bg-[#047246] rounded transition-all duration-300" style={{ width: `${progressPct}%` }} />
                 </div>
                 <div className="text-[10.5px] text-[#a0a8a1] mt-1.5">Required fields keep this moving.</div>
               </div>
@@ -1828,7 +1834,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
                   <PropSectionHeader num={5} label="Property photos" desc="First image becomes the cover. Drag thumbnails to reorder." />
 
                   {/* Suggested shots — guides RPs to capture a complete, accurate set. */}
-                  <div className="mb-4 rounded-xl border border-[#e8e6e0] bg-[#fbfcfb] px-4 py-3.5">
+                  <div className="mb-4 rounded-xl border border-[#e4e9e5] bg-[#fbfcfb] px-4 py-3.5">
                     <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#1a7a5a] mb-2">
                       <Camera size={13} className="shrink-0" /> Suggested shots for an accurate listing
                     </div>
@@ -1837,10 +1843,10 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
                         'Front exterior', 'Back / side exterior', 'Main entrance', 'Reception / lobby',
                         'Parking area', 'Shared amenities (pool, gym)', 'Common corridor', 'View from the building',
                       ].map(s => (
-                        <li key={s} className="text-[11px] text-[#5a635c] bg-white border border-[#e8e6e0] rounded-full px-2.5 py-1">{s}</li>
+                        <li key={s} className="text-[11px] text-[#5a635c] bg-white border border-[#e4e9e5] rounded-full px-2.5 py-1">{s}</li>
                       ))}
                     </ul>
-                    <p className="text-[11px] text-[#9b9890] mt-2.5 leading-relaxed">
+                    <p className="text-[11px] text-[#8a948d] mt-2.5 leading-relaxed">
                       Tip: one clear photo each of the <strong>front</strong>, <strong>back/side</strong>, <strong>main entrance</strong> and <strong>reception</strong> gives tenants a complete picture. Shoot in landscape, in daylight — the first photo becomes the cover.
                     </p>
                   </div>
@@ -1857,7 +1863,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
 
           {/* ── Footer ── */}
           <footer className="flex items-center gap-3 px-5 sm:px-6 py-4 border-t border-[#eef1ec] bg-[#fbfcfb] shrink-0">
-            <span className="hidden sm:block text-[11.5px] text-[#9b9890]">You can edit everything after saving.</span>
+            <span className="hidden sm:block text-[11.5px] text-[#8a948d]">You can edit everything after saving.</span>
             <div className="flex-1" />
             <button type="button" onClick={requestClose}
               className="text-sm font-bold text-[#3a443d] bg-white border border-[#e2e7e1] px-5 py-3 rounded-[11px] cursor-pointer hover:bg-[#f4f6f3] transition-colors">
@@ -1865,7 +1871,7 @@ export function PropertyFormModal({ open, initial, onClose, onSave, title, prope
             </button>
             <button type="submit" disabled={saving}
               className="inline-flex items-center justify-center gap-2 text-sm font-bold text-white px-6 py-3 rounded-[11px] cursor-pointer disabled:opacity-50 transition-[filter] hover:brightness-105"
-              style={{ background: '#2e9f82', boxShadow: '0 6px 16px rgba(46,159,130,0.28)' }}>
+              style={{ background: '#047246', boxShadow: '0 6px 16px rgba(4,114,70,0.28)' }}>
               {saving && <Loader2 size={14} className="animate-spin" />}
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Property'}
             </button>

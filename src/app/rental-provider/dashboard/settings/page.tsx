@@ -1,9 +1,89 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
+/**
+ * Settings — Genspark OS rebuild of the landlord's Settings workspace
+ * (/rental-provider/dashboard/settings) and, through the same component, My Profile
+ * (/rental-provider/dashboard/profile renders <RpSettings view="profile"/>).
+ *
+ * Parity with previous page (every item kept, same endpoints and payloads):
+ *  Section menu + deep links
+ *  - Left section list (now a kit Card), grouped Leasing / Maintenance / Buildings /
+ *    Contracts / Legal / Account; same labels (Rules, Coverage, Items, Restoration list,
+ *    Building inspections, AMC categories, Periods & fees, Team, Email, WhatsApp,
+ *    Notifications). WhatsApp entry hidden unless useWhatsappEnabled().
+ *  - ?tab=<fee_rules|maintenance|maintenance_list|restoration|building_inspections|
+ *    categories|legal|team|email|whatsapp|notifications> restored on mount; switching
+ *    writes ?tab= with history.replaceState. Every link into settings found in the repo
+ *    (tab=team / maintenance / categories / building_inspections / fee_rules / email /
+ *    whatsapp / notifications, and the bare /settings) still lands on the same section.
+ *    New: #hash deep links scroll to a card (e.g. ?tab=fee_rules#rules-market-review).
+ *  - view="profile" (My Profile page): no menu, the business profile alone.
+ *  Rules (fee_rules)
+ *  - GET /api/fee-rules (on entering the tab) → per category map over UAE_DEFAULTS
+ *    (residential, commercial, industrial, land, mixed_use kept for back-compat).
+ *  - PUT /api/fee-rules { spaceCategory, rules: FEE_ORDER.map(rule) } — "Save changes"
+ *    and the preview's "Save <Category> · <New|Renewal>" button.
+ *  - Property type switch (Residential / Commercial / Industrial / Land — no Mixed-use tab)
+ *    + the mixed-use explainer; New / Renewal contract switch, renewal banner; security
+ *    deposit not applied on renewals. Fee rows: on/off, AED vs % of rent, value, No VAT
+ *    vs +5% VAT; VAT on Rent row (Exempt / rate → vatApplicable + vatRate, value 0).
+ *    Fee maths unchanged (base, VAT, total; rent VAT excluded from upfront total and
+ *    shown as a recurring note). "Reset/Load UAE defaults". Live preview with annual rent.
+ *  - Renewal: Annual rent increment — PATCH /api/profiles/rental-provider/me
+ *    { renewalRentIncrementPct } (0–100 or null) with preview.
+ *  - Contract Start Days { preferredStartDays }, Cheque Due Days { preferredChequeDays }
+ *    (1–28 chips, Clear all, Save).
+ *  - Penalty & charge rules (9 rules): toggle + mode (Fixed / % / Months / Daily) + value,
+ *    same validation messages, same _Enabled/_Fee/_Pct/_Months/_Daily payload, one Save each.
+ *  - Payment Installment Plans { allowedInstallments | null }, Clear all, Save Plans.
+ *  - Rent VAT collection { rentVatMode } saved on click.
+ *  - Market Rate Review { marketRateReviewPeriod, marketRateReviewDueDay } (1–28) + schedule line.
+ *  - Bills from Email { billsEmailCheckEveryHours }.
+ *  - WhatsApp Reminders: GET /api/whatsapp/chats?kind=group&pageSize=100, GET
+ *    /api/amc/reminders/preview, PATCH { remindersWhatsappChatId, remindersSendAt },
+ *    POST /api/amc/reminders/send ("Send now"), last-post line, both message previews.
+ *  Embedded sections (child components REUSED unchanged, same props)
+ *  - MaintenanceCoveragePanel, MaintenanceListWorkspace embedded, RestorationListWorkspace
+ *    embedded, BuildingInspectionsSettings embedded, AmcCategoriesView (base /amc,
+ *    listHref /rental-provider/dashboard/amc, embedded), JurisdictionSettingsForm
+ *    (legalApi.config('/legal') / updateRpConfig / resetRpConfig) + FeeBookEditor,
+ *    TeamPanel, EmailSettingsPanel, WhatsAppSettingsPanel (only when WhatsApp is on),
+ *    BrowserAlertsCard, KycDocumentsPanel (×2). They are Tailwind components, so they are
+ *    rendered OUTSIDE the .gx reset scope (whose unlayered element resets would override
+ *    their utilities); kit-built cards each carry their own .gx scope.
+ *  Notifications
+ *  - Customer Correspondence CC list (max 5, validation, Enter/comma adds, "Add my account
+ *    email", Save → PATCH { ccEmails | null }, same saved / cleared / none copy).
+ *  - Notification Preferences: GET /api/notifications/preferences, PUT
+ *    { eventCode, inAppEnabled, emailEnabled } on toggle with revert on failure; only
+ *    WIRED_NOTIF_KEYS rendered.
+ *  Profile (view="profile")
+ *  - GET /api/profiles/rental-provider/me seeds everything above + profile fields.
+ *  - Save Profile → PATCH profile { entityType, contactAddress, company/individual fields,
+ *    companyType, parentBrokerageName, legalNoticesAddress, vatTrn } then PATCH /api/auth/me
+ *    { phone } when changed, then refresh() and KYC panel reload.
+ *  - KYC Documents (excludes POA keys, downloadable); Authorized Signatory & POA card
+ *    (toggle persists hasPoa at once; Save Signatory & POA; inline POA documents);
+ *    "Invite as manager" → modal with editable PERM_GROUPS permissions (POA defaults,
+ *    reset) → POST /api/invitations { email, firstName, lastName, phone, role: 'manager',
+ *    metadata }; Banking Details (multiple accounts, Primary = first, add / remove,
+ *    blank rows dropped) → PATCH { bankAccounts }.
+ *  - Avatar, Website and About were local-only before (never in any payload); they stay
+ *    local-only and now say so in a hint instead of looking saved.
+ *  Dropped
+ *  - The "Invite Team Member" modal: nothing ever opened it (no setShowInvite(true)) and
+ *    its submit was a 600 ms timeout that saved nothing. Team invites live in TeamPanel.
+ *  Manager portal: /dashboard/manager/settings is its own page and imports nothing from
+ *  this file. /prototype/os/rp/settings re-exports the default export; the profile page
+ *  imports RpSettings — both exports are kept.
+ */
+
+import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Globe, Mail, Phone, MapPin, FileText, Building2, User, Users, CreditCard, Flag, Lock, Bell, ShieldCheck, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature, Scale } from 'lucide-react';
+import {
+  MessageCircle, Save, Send, X, Loader2, Plus, Percent, RotateCcw, Camera, Mail, Building2, User, Users, Lock,
+  Bell, Wrench, ClipboardList, ClipboardCheck, Receipt, FileSignature, Scale,
+} from 'lucide-react';
 import { TeamPanel, PERM_GROUPS, metaDefaults } from '@/components/dashboard/rp/TeamPanel';
 import { EmailSettingsPanel } from '@/components/email/EmailSettingsPanel';
 import { WhatsAppSettingsPanel } from '@/components/whatsapp/WhatsAppSettingsPanel';
@@ -20,6 +100,7 @@ import { AmcCategoriesView } from '@/components/amc/AmcCategoriesView';
 import { KycDocumentsPanel } from '@/components/dashboard/KycDocumentsPanel';
 import { INSTALLMENT_PLANS, installmentLabel } from '@/lib/installmentPlans';
 import { categoryDisplayLabel } from '@/components/upnow/PropertyFormModal';
+import { PageHead, ScopeStrip, Card, Pill, Btn, Callout, Evid, KV, Modal, Field } from '@/components/os/kit';
 
 /* ─────────────────────────────────────────────────────────────
    General settings types
@@ -142,38 +223,159 @@ function fmtN(n: number) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Shared components
+   Local primitives (kit-styled; the kit itself is not edited)
 ───────────────────────────────────────────────────────────── */
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+
+/** On/off switch — a real switch for assistive tech. */
+function Toggle({ value, onChange, label, disabled }: { value: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={value}
+      aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!value)}
-      className={`relative inline-flex rounded-full transition-colors cursor-pointer flex-shrink-0 ${value ? 'bg-[#2e9f82]' : 'bg-[#c9c7c1]'}`}
-      style={{ height: 22, width: 40 }}
+      style={{
+        position: 'relative', display: 'inline-flex', flexShrink: 0, width: 40, height: 22, padding: 0, border: 0,
+        borderRadius: 999, cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+        background: value ? 'var(--ms-primary)' : 'var(--ms-border-strong)', transition: 'background .15s',
+      }}
     >
-      <span className={`inline-block w-4 h-4 rounded-full bg-white shadow transition-transform absolute top-[3px] ${value ? 'translate-x-[19px]' : 'translate-x-[3px]'}`} />
+      <span aria-hidden style={{
+        position: 'absolute', top: 3, left: value ? 21 : 3, width: 16, height: 16, borderRadius: '50%',
+        background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,.25)', transition: 'left .15s',
+      }} />
     </button>
   );
 }
 
-function SaveButton({ saving, label = 'Save Changes' }: { saving: boolean; label?: string }) {
+/** Labelled primary Save button with its own busy state. */
+function SaveBtn({ saving, label, onClick, type = 'button', disabled }: {
+  saving: boolean; label: string; onClick?: () => void; type?: 'button' | 'submit'; disabled?: boolean;
+}) {
   return (
-    <button
-      type="submit"
-      disabled={saving}
-      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
-      style={{ background: '#2e9f82' }}
-    >
-      {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+    <Btn variant="primary" size="sm" type={type} onClick={onClick} disabled={saving || disabled}>
+      {saving ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Save size={13} aria-hidden />}
       {saving ? 'Saving…' : label}
-    </button>
+    </Btn>
   );
 }
+
+/** Inline success / error line next to a Save button. */
+function SaveNote({ error, saved, savedText = 'Saved.' }: { error?: string | null; saved?: boolean; savedText?: ReactNode }) {
+  if (error) return <span role="alert" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ms-danger)' }}>{error}</span>;
+  if (saved) return <span role="status" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ms-primary)' }}><span aria-hidden>✓ </span>{savedText}</span>;
+  return null;
+}
+
+/** Card footer row: status on the left, buttons on the right. */
+function CardFoot({ children, note }: { children: ReactNode; note?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>{note}</div>
+      <div className="gx-btn-row">{children}</div>
+    </div>
+  );
+}
+
+/** Segmented control made of pressed/unpressed buttons (a choice, not tabs). */
+function PressSeg<T extends string>({ value, options, onChange, label, disabled }: {
+  value: T; options: { v: T; l: ReactNode }[]; onChange: (v: T) => void; label: string; disabled?: boolean;
+}) {
+  return (
+    <div className="gx-seg" role="group" aria-label={label} style={{ flexWrap: 'nowrap' }}>
+      {options.map((o) => {
+        const on = o.v === value;
+        return (
+          <button key={o.v} type="button" aria-pressed={on} disabled={disabled} onClick={() => onChange(o.v)}
+            style={{
+              ...(on ? { background: 'var(--ms-surface)', color: 'var(--ms-primary-dark)', fontWeight: 700, boxShadow: 'var(--ms-shadow)' } : null),
+              ...(disabled ? { cursor: 'not-allowed', opacity: 0.55 } : null),
+            }}>
+            {o.l}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Input with a prefix / suffix unit ("AED", "%", "months"). */
+function Affix({ pre, post, children, block }: { pre?: ReactNode; post?: ReactNode; children: ReactNode; block?: boolean }) {
+  const aff: CSSProperties = {
+    padding: '0 9px', display: 'flex', alignItems: 'center', background: 'var(--ms-surface-2)',
+    color: 'var(--ms-ink-3)', fontSize: 11, fontWeight: 700, letterSpacing: '.03em', whiteSpace: 'nowrap',
+  };
+  return (
+    <span style={{
+      display: block ? 'flex' : 'inline-flex', alignItems: 'stretch', height: 32, border: '1px solid var(--ms-border-strong)',
+      borderRadius: 8, overflow: 'hidden', background: 'var(--ms-surface)', width: block ? '100%' : undefined,
+    }}>
+      {pre != null && <span style={aff}>{pre}</span>}
+      {children}
+      {post != null && <span style={aff}>{post}</span>}
+    </span>
+  );
+}
+const affixInput: CSSProperties = {
+  border: 0, outline: 0, padding: '0 9px', width: 80, textAlign: 'right', fontWeight: 700, fontSize: 13,
+  background: 'transparent', color: 'var(--ms-ink)', fontVariantNumeric: 'tabular-nums', minWidth: 0,
+};
+
+/** Grey body copy inside kit cards. */
+const Lede = ({ children, style }: { children: ReactNode; style?: CSSProperties }) => (
+  <p style={{ fontSize: 12, color: 'var(--ms-ink-3)', lineHeight: 1.55, ...style }}>{children}</p>
+);
+
+/** A heading for a section whose body is an embedded (non-kit) panel. */
+function SectionTitle({ title, sub }: { title: string; sub?: ReactNode }) {
+  return (
+    <div className="gx">
+      <h3 style={{ fontSize: 14 }}>{title}</h3>
+      {sub && <Lede style={{ marginTop: 3 }}>{sub}</Lede>}
+    </div>
+  );
+}
+
+/** Day-of-month chips 1–28. */
+function DayChips({ days, onToggle, label }: { days: number[]; onToggle: (d: number) => void; label: string }) {
+  return (
+    <div className="gx-chips" role="group" aria-label={label}>
+      {Array.from({ length: 28 }, (_, i) => i + 1).map((day) => (
+        <button key={day} type="button" className="gx-chip" aria-pressed={days.includes(day)} onClick={() => onToggle(day)}
+          style={{ width: 36, padding: '5px 0', textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+          {day}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const ordinal = (d: number) => {
+  const t = d % 100;
+  const s = t >= 11 && t <= 13 ? 'th' : (['st', 'nd', 'rd'][(d % 10) - 1] ?? 'th');
+  return `${d}${s}`;
+};
 
 /* ─────────────────────────────────────────────────────────────
-   Fee row (new design)
+   Fee row — one table row per fee type (maths unchanged)
 ───────────────────────────────────────────────────────────── */
+function FeeName({ toggle, title, muted, tags, desc }: { toggle: ReactNode; title: string; muted: boolean; tags: ReactNode; desc: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 250 }}>
+      {toggle}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 700, fontSize: 12.5, color: muted ? 'var(--ms-ink-3)' : 'var(--ms-ink)' }}>{title}</span>
+          {tags}
+        </div>
+        <span className="sub" style={{ whiteSpace: 'normal', maxWidth: 360 }}>{desc}</span>
+      </div>
+    </div>
+  );
+}
+
 function FeeRow({ rule, rent, onChange, isRenewal }: {
   rule: FeeRuleDto;
   rent: number;
@@ -194,35 +396,32 @@ function FeeRow({ rule, rent, onChange, isRenewal }: {
       vatApplicable: v, vatRate: v ? (rule.vatRate || 5) : 0,
     });
     return (
-      <div className={`grid grid-cols-1 xl:grid-cols-[minmax(220px,1fr)_auto] gap-4 py-[18px] px-6 border-b border-[#eef1ee] last:border-b-0 transition-opacity ${on ? '' : 'opacity-[0.82]'}`}
-        style={on ? undefined : { background: 'repeating-linear-gradient(135deg,#fff 0 8px,#fcfcfb 8px 16px)' }}>
-        <div className="flex gap-3.5 items-start">
-          <Toggle value={on} onChange={setOn} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`font-bold text-[15px] whitespace-nowrap ${on ? 'text-[#0e1a16]' : 'text-[#6b7a74]'}`}>{meta.title}</span>
-              <span className="inline-flex items-center text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border text-[#6b7a74] bg-[#f6f7f4] border-[#e6ebe7]">{meta.tag}</span>
-            </div>
-            <p className="text-[12.5px] text-[#6b7a74] mt-0.5 leading-[1.4]">{meta.description}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 justify-end flex-wrap xl:justify-end">
-          <div className={`inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white ${on ? '' : 'opacity-40 pointer-events-none'}`}>
+      <tr style={on ? undefined : { opacity: 0.82 }}>
+        <td>
+          <FeeName
+            toggle={<Toggle value={on} onChange={setOn} label={`Charge ${meta.title}`} />}
+            title={meta.title} muted={!on}
+            tags={<Pill tone="outline" dot={false}>{meta.tag}</Pill>}
+            desc={meta.description}
+          />
+        </td>
+        <td><span className="strong">Rate on rent</span><span className="sub">Added to each rent cheque</span></td>
+        <td>
+          <Affix post="% of rent">
             <input
-              type="text"
-              inputMode="decimal"
+              type="text" inputMode="decimal" aria-label="VAT rate on rent" disabled={!on}
               value={rule.vatRate}
               onChange={e => onChange({ ...rule, isActive: true, valueType: 'percentage', value: 0, vatApplicable: true, vatRate: parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0 })}
-              className="w-16 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent"
+              style={{ ...affixInput, width: 56 }}
             />
-            <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">% of rent</span>
-          </div>
-          <div className="min-w-[110px] text-right tabular-nums">
-            <div className="text-[17px] font-bold text-[#0e1a16]">{on ? `AED ${fmtN(vatOnRent)}` : 'Exempt'}</div>
-            <div className="text-[11px] text-[#6b7a74] mt-0.5">{on ? `${rule.vatRate}% × AED ${fmtN(rent)}` : 'No VAT on rent'}</div>
-          </div>
-        </div>
-      </div>
+          </Affix>
+        </td>
+        <td><span className="sub" style={{ marginTop: 6 }}>It is the VAT</span></td>
+        <td className="num">
+          <span className="strong" style={{ fontSize: 13.5 }}>{on ? `AED ${fmtN(vatOnRent)}` : 'Exempt'}</span>
+          <span className="sub">{on ? `${rule.vatRate}% × AED ${fmtN(rent)}` : 'No VAT on rent'}</span>
+        </td>
+      </tr>
     );
   }
 
@@ -233,126 +432,57 @@ function FeeRow({ rule, rent, onChange, isRenewal }: {
   const total  = base + vatAmt;
 
   return (
-    <div
-      className={`grid grid-cols-1 xl:grid-cols-[minmax(220px,1fr)_auto] gap-4 py-[18px] px-6 border-b border-[#eef1ee] last:border-b-0 transition-opacity ${off ? 'opacity-[0.82]' : ''}`}
-      style={off ? { background: 'repeating-linear-gradient(135deg,#fff 0 8px,#fcfcfb 8px 16px)' } : undefined}
-    >
-      {/* Left: toggle + name block */}
-      <div className="flex gap-3.5 items-start">
-        <Toggle
-          value={rule.isActive && !disabled}
-          onChange={v => !disabled && onChange({ ...rule, isActive: v })}
+    <tr style={off ? { opacity: 0.82 } : undefined}>
+      <td>
+        <FeeName
+          toggle={<Toggle value={rule.isActive && !disabled} disabled={disabled} onChange={v => !disabled && onChange({ ...rule, isActive: v })} label={`Charge ${meta.title}`} />}
+          title={meta.title} muted={off}
+          tags={<>
+            {meta.refundable && !disabled && <Pill tone="primary" dot={false}>Refundable</Pill>}
+            {!meta.refundable && <Pill tone={meta.tagStyle === 'green' ? 'primary' : 'outline'} dot={false}>{meta.tag}</Pill>}
+            {disabled && <Pill tone="amber" dot={false}>Not applied to renewals</Pill>}
+          </>}
+          desc={disabled ? 'Not collected on renewals — the original deposit carries forward.' : meta.description}
         />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`font-bold text-[15px] whitespace-nowrap ${off ? 'text-[#6b7a74]' : 'text-[#0e1a16]'}`}>
-              {meta.title}
-            </span>
-            {meta.refundable && !disabled && (
-              <span className="inline-flex items-center text-[10.5px] font-bold uppercase tracking-wide text-[#1f7e66] bg-[#e7f5f0] px-2 py-0.5 rounded-full">
-                Refundable
-              </span>
-            )}
-            {!meta.refundable && (
-              <span className={`inline-flex items-center text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-                meta.tagStyle === 'green'
-                  ? 'text-[#1f7e66] bg-[#e7f5f0] border-transparent'
-                  : 'text-[#6b7a74] bg-[#f6f7f4] border-[#e6ebe7]'
-              }`}>
-                {meta.tag}
-              </span>
-            )}
-            {disabled && (
-              <span className="inline-flex items-center text-[10.5px] font-bold uppercase tracking-wide text-[#a85b15] bg-[#fdf3e3] px-2 py-0.5 rounded-full">
-                Not applied to renewals
-              </span>
-            )}
-          </div>
-          <p className="text-[12.5px] text-[#6b7a74] mt-0.5 leading-[1.4]">
-            {disabled
-              ? 'Not collected on renewals — the original deposit carries forward.'
-              : meta.description}
-          </p>
-        </div>
-      </div>
-
-      {/* Right: controls + result */}
-      <div className={`flex items-center gap-4 justify-end flex-wrap xl:justify-end ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-        {/* Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Type pill */}
-          <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
-            <button
-              type="button"
-              onClick={() => onChange({ ...rule, valueType: 'fixed_aed' })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${
-                rule.valueType === 'fixed_aed' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'
-              }`}
-            >AED</button>
-            <button
-              type="button"
-              onClick={() => onChange({ ...rule, valueType: 'percentage' })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${
-                rule.valueType === 'percentage' ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'
-              }`}
-            >% of rent</button>
-          </div>
-
-          {/* Value input */}
-          <div className="inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white">
-            {rule.valueType === 'fixed_aed' && (
-              <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">AED</span>
-            )}
-            <input
-              type="text"
-              inputMode="decimal"
-              value={rule.value}
-              onChange={e => onChange({ ...rule, value: parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0 })}
-              className="w-20 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent"
-            />
-            {rule.valueType === 'percentage' && (
-              <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">%</span>
-            )}
-          </div>
-
-          {/* VAT pill */}
-          <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
-            <button
-              type="button"
-              onClick={() => onChange({ ...rule, vatApplicable: false, vatRate: 0 })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${
-                !rule.vatApplicable ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'
-              }`}
-            >No VAT</button>
-            <button
-              type="button"
-              onClick={() => onChange({ ...rule, vatApplicable: true, vatRate: 5 })}
-              className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${
-                rule.vatApplicable ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'
-              }`}
-            >+5% VAT</button>
-          </div>
-        </div>
-
-        {/* Result */}
-        <div className="min-w-[110px] text-right tabular-nums">
-          <div className="text-[17px] font-bold text-[#0e1a16]">
-            {off ? '—' : `AED ${fmtN(total)}`}
-          </div>
-          <div className="text-[11px] text-[#6b7a74] mt-0.5">
-            {off ? '—' : rule.valueType === 'fixed_aed'
-              ? `AED ${fmtN(base)}${rule.vatApplicable ? ` + AED ${fmtN(vatAmt)} VAT` : ''}`
-              : `${rule.value}% × AED ${fmtN(rent)}${rule.vatApplicable ? ` + ${rule.vatRate}% VAT` : ''}`
-            }
-          </div>
-        </div>
-      </div>
-    </div>
+      </td>
+      <td>
+        <PressSeg<FeeValueType>
+          label={`${meta.title} charged as`} disabled={disabled} value={rule.valueType}
+          options={[{ v: 'fixed_aed', l: 'AED' }, { v: 'percentage', l: '% of rent' }]}
+          onChange={vt => onChange({ ...rule, valueType: vt })}
+        />
+      </td>
+      <td>
+        <Affix pre={rule.valueType === 'fixed_aed' ? 'AED' : undefined} post={rule.valueType === 'percentage' ? '%' : undefined}>
+          <input
+            type="text" inputMode="decimal" aria-label={`${meta.title} value`} disabled={disabled}
+            value={rule.value}
+            onChange={e => onChange({ ...rule, value: parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0 })}
+            style={affixInput}
+          />
+        </Affix>
+      </td>
+      <td>
+        <PressSeg<'none' | 'vat'>
+          label={`${meta.title} VAT`} disabled={disabled} value={rule.vatApplicable ? 'vat' : 'none'}
+          options={[{ v: 'none', l: 'No VAT' }, { v: 'vat', l: '+5% VAT' }]}
+          onChange={v => onChange(v === 'vat' ? { ...rule, vatApplicable: true, vatRate: 5 } : { ...rule, vatApplicable: false, vatRate: 0 })}
+        />
+      </td>
+      <td className="num">
+        <span className="strong" style={{ fontSize: 13.5 }}>{off ? '—' : `AED ${fmtN(total)}`}</span>
+        <span className="sub">
+          {off ? '—' : rule.valueType === 'fixed_aed'
+            ? `AED ${fmtN(base)}${rule.vatApplicable ? ` + AED ${fmtN(vatAmt)} VAT` : ''}`
+            : `${rule.value}% × AED ${fmtN(rent)}${rule.vatApplicable ? ` + ${rule.vatRate}% VAT` : ''}`}
+        </span>
+      </td>
+    </tr>
   );
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Fee preview panel (sticky right column)
+   Fee preview panel (sticky right column) — maths unchanged
 ───────────────────────────────────────────────────────────── */
 function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onSave, onLoadDefaults, saving, saved, error }: {
   rules: CategoryMap;
@@ -384,136 +514,79 @@ function FeePreviewPanel({ rules, rent, setRent, contractType, propertyType, onS
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   return (
-    <div>
-      <div className="bg-white border border-[#e6ebe7] rounded-[14px] overflow-hidden">
-        {/* Header */}
-        <div className="flex justify-between items-center px-[18px] py-3.5 border-b border-[#eef1ee]">
-          <span className="font-bold text-[13px] tracking-[.04em] uppercase text-[#2b3a34]">Live preview</span>
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[#1f7e66] font-semibold">
-            <span className="w-[7px] h-[7px] rounded-full bg-[#2e9f82] animate-pulse" />
-            Updates as you type
-          </span>
-        </div>
-
-        <div className="p-[18px]">
-          {/* Annual rent input */}
-          <div className="mb-3.5">
-            <div className="flex justify-between items-baseline mb-1.5">
-              <span className="text-[11.5px] font-semibold text-[#6b7a74] uppercase tracking-[.04em]">Annual rent</span>
-              <span className="text-[11px] text-[#6b7a74]">of the lease being signed</span>
-            </div>
-            <div className="flex items-center border border-[#e6ebe7] rounded-[10px] overflow-hidden bg-white">
-              <span className="px-3 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-bold tracking-[.04em]" style={{ height: 46, display: 'flex', alignItems: 'center' }}>AED</span>
+    <div style={{ display: 'grid', gap: 12 }}>
+      <Card title="Live preview" sub="What the customer is billed up front" right={<Pill tone="primary">Updates as you type</Pill>}>
+        <div className="gx-pad">
+          <Field label="Annual rent" htmlFor="fee-preview-rent" hint="Of the lease being signed — used for this preview only.">
+            <Affix pre="AED" block>
               <input
+                id="fee-preview-rent"
                 type="text"
                 inputMode="numeric"
                 value={rent.toLocaleString('en-US')}
                 onChange={e => setRent(parseInt(e.target.value.replace(/\D/g, '')) || 0)}
-                className="flex-1 border-0 px-3 text-[18px] font-bold outline-none bg-transparent tabular-nums"
-                style={{ height: 46, letterSpacing: '-0.01em' }}
+                style={{ ...affixInput, width: '100%', flex: 1, textAlign: 'left', fontSize: 16 }}
               />
-            </div>
-          </div>
+            </Affix>
+          </Field>
 
-          {/* Context rows */}
-          <div>
-            <div className="flex justify-between items-center text-[12px] py-1.5 border-b border-dashed border-[#eef1ee]">
-              <span className="font-semibold text-[#2b3a34]">Contract</span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${contractType === 'new' ? 'bg-[#e7f5f0] text-[#1f7e66]' : 'bg-[#0e1a16] text-white'}`}>
-                {contractType === 'new' ? 'New contract' : 'Renewal'}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-[12px] py-1.5">
-              <span className="font-semibold text-[#2b3a34]">Property type</span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#f6f7f4] border border-[#e6ebe7] text-[#2b3a34]">
-                {cap(propertyType)}
-              </span>
-            </div>
-          </div>
+          <KV items={[
+            { k: 'Contract', v: <Pill tone={contractType === 'new' ? 'primary' : 'dark'} dot={false}>{contractType === 'new' ? 'New contract' : 'Renewal'}</Pill> },
+            { k: 'Property type', v: <Pill tone="outline" dot={false}>{cap(propertyType)}</Pill> },
+          ]} />
 
-          {/* Breakdown */}
-          <div className="mt-3.5 border-t border-[#eef1ee] pt-2">
-            {lines.map(l => (
-              <div key={l.ft} className={`grid grid-cols-[1fr_auto] gap-2.5 items-baseline py-2 tabular-nums ${l.renewalDeposit ? 'opacity-40' : ''}`}>
-                <div>
-                  <span className={`text-[13px] ${l.meta.refundable && !l.renewalDeposit && l.rule.isActive ? 'text-[#1f7e66]' : 'text-[#2b3a34]'}`}>
-                    {l.meta.title}
-                  </span>
-                  {l.meta.refundable && !l.renewalDeposit && <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">Refundable at end of contract</span>}
-                  {l.renewalDeposit && <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">Not charged on renewal</span>}
-                  {!l.renewalDeposit && !l.rule.isActive && <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">Disabled</span>}
-                  {!l.renewalDeposit && l.rule.isActive && l.rule.vatApplicable && <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">incl. {l.rule.vatRate}% VAT</span>}
-                </div>
-                <div className={`text-[14px] font-semibold ${l.meta.refundable && !l.renewalDeposit && l.rule.isActive ? 'text-[#1f7e66]' : 'text-[#0e1a16]'} ${l.renewalDeposit ? 'line-through' : ''}`}>
-                  {l.renewalDeposit || !l.rule.isActive ? '—' : `AED ${fmtN(l.total)}`}
-                </div>
-              </div>
-            ))}
-          </div>
+          <table className="gx-tbl" style={{ marginTop: 12 }}>
+            <tbody>
+              {lines.map(l => {
+                const green = l.meta.refundable && !l.renewalDeposit && l.rule.isActive;
+                return (
+                  <tr key={l.ft} style={l.renewalDeposit ? { opacity: 0.45 } : undefined}>
+                    <td style={{ paddingLeft: 0 }}>
+                      <span className="strong" style={green ? { color: 'var(--ms-primary-dark)' } : undefined}>{l.meta.title}</span>
+                      {l.meta.refundable && !l.renewalDeposit && <span className="sub">Refundable at end of contract</span>}
+                      {l.renewalDeposit && <span className="sub">Not charged on renewal</span>}
+                      {!l.renewalDeposit && !l.rule.isActive && <span className="sub">Disabled</span>}
+                      {!l.renewalDeposit && l.rule.isActive && l.rule.vatApplicable && <span className="sub">incl. {l.rule.vatRate}% VAT</span>}
+                    </td>
+                    <td className="num strong" style={{ paddingRight: 0, ...(green ? { color: 'var(--ms-primary-dark)' } : null), ...(l.renewalDeposit ? { textDecoration: 'line-through' } : null) }}>
+                      {l.renewalDeposit || !l.rule.isActive ? '—' : `AED ${fmtN(l.total)}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
 
-          {/* Total card */}
-          <div className="mt-1.5 p-3.5 bg-[#e7f5f0] rounded-[10px] grid grid-cols-[1fr_auto] items-baseline gap-2.5">
-            <div>
-              <span className="text-[12px] font-bold uppercase tracking-[.06em] text-[#1f7e66]">Total billed to customer</span>
-              <span className="block text-[11px] text-[#1f7e66] opacity-85 mt-0.5 font-medium">
-                {refundable > 0 ? `Incl. AED ${fmtN(refundable)} refundable deposit` : 'No refundable amount'}
-              </span>
-            </div>
-            <span className="text-[22px] font-extrabold text-[#1f7e66] tabular-nums" style={{ letterSpacing: '-0.015em' }}>
-              AED {fmtN(total)}
-            </span>
+          <div className="gx-kpi dark" style={{ marginTop: 10 }}>
+            <div className="k">Total billed to customer</div>
+            <div className="v">AED {fmtN(total)}</div>
+            <div className="d">{refundable > 0 ? `Incl. AED ${fmtN(refundable)} refundable deposit` : 'No refundable amount'}</div>
           </div>
 
           {/* Recurring rent VAT note (charged on each rent cheque, not upfront) */}
           {rules.rent_vat?.isActive && rules.rent_vat?.vatApplicable && rules.rent_vat?.vatRate > 0 && (
-            <div className="mt-1.5 p-2.5 bg-[#f6f7f4] rounded-[10px] grid grid-cols-[1fr_auto] items-baseline gap-2.5 border border-[#e6ebe7]">
-              <span className="text-[12px] font-semibold text-[#2b3a34]">
-                + {rules.rent_vat.vatRate}% VAT on rent
-                <span className="block text-[11px] text-[#6b7a74] font-medium mt-0.5">Added to each rent cheque</span>
-              </span>
-              <span className="text-[14px] font-bold text-[#0e1a16] tabular-nums">
-                AED {fmtN(Math.round((rent * rules.rent_vat.vatRate) / 100))}/yr
-              </span>
+            <div style={{ marginTop: 8 }}>
+              <Evid>
+                <strong>+ {rules.rent_vat.vatRate}% VAT on rent — AED {fmtN(Math.round((rent * rules.rent_vat.vatRate) / 100))}/yr.</strong> Added to each rent cheque.
+              </Evid>
             </div>
           )}
 
-          {/* Actions */}
-          <div className="mt-3.5 grid gap-2">
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={saving}
-              className="flex items-center justify-center gap-2 w-full px-3.5 py-3 rounded-[9px] text-[14px] font-semibold text-white cursor-pointer disabled:opacity-50"
-              style={{ background: '#2e9f82' }}
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? 'Saving…' : `Save ${cap(propertyType)} · ${contractType === 'new' ? 'New' : 'Renewal'}`}
-            </button>
-            <button
-              type="button"
-              onClick={onLoadDefaults}
-              className="flex items-center justify-center gap-2 w-full px-3.5 py-3 rounded-[9px] text-[14px] font-semibold border border-[#e6ebe7] text-[#0e1a16] bg-white cursor-pointer hover:border-[#0e1a16]"
-            >
-              <RotateCcw size={14} /> Load UAE defaults
-            </button>
-            {error && <p className="text-xs text-red-600 text-center">{error}</p>}
-            {saved && !saving && <p className="text-xs text-[#2e9f82] text-center font-semibold">✓ Saved</p>}
+          <div style={{ display: 'grid', gap: 7, marginTop: 12 }}>
+            <SaveBtn saving={saving} onClick={onSave} label={`Save ${cap(propertyType)} · ${contractType === 'new' ? 'New' : 'Renewal'}`} />
+            <Btn size="sm" onClick={onLoadDefaults}><RotateCcw size={13} aria-hidden /> Load UAE defaults</Btn>
+            <div style={{ textAlign: 'center' }}><SaveNote error={error} saved={saved && !saving} /></div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      {/* Help card */}
-      <div className="mt-3.5 bg-white border border-[#e6ebe7] rounded-[12px] p-3.5 text-[12.5px] text-[#2b3a34] leading-[1.5]">
-        <h4 className="text-[12px] uppercase tracking-[.06em] text-[#6b7a74] font-bold mb-1.5">Need help?</h4>
+      <Callout tone="info" title="Need help?">
         These defaults reflect typical UAE practice (Contract Registration, agency commission, 5% VAT on services). Always verify with your accountant for jurisdiction-specific rules.
-      </div>
+      </Callout>
     </div>
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Main page
-───────────────────────────────────────────────────────────── */
 type MainTab = 'general' | 'fee_rules' | 'maintenance' | 'maintenance_list' | 'restoration' | 'building_inspections' | 'categories' | 'legal' | 'team' | 'email' | 'whatsapp' | 'notifications';
 
 // POA document keys — surfaced inline in the POA card and excluded from the
@@ -598,7 +671,8 @@ const PENALTY_MODE_LABEL: Record<PenaltyValueType, string> = {
 };
 const penaltyModes = (cfg: PenaltyRuleCfg): PenaltyValueType[] => cfg.modes ?? ['aed', 'pct'];
 
-function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }: {
+/** One penalty rule as a table row — toggle, mode, value and its own Save. */
+function PenaltyRow({ cfg, state, saving, saved, error, onChange, onSave }: {
   cfg: PenaltyRuleCfg;
   state: PenaltyState;
   saving: boolean;
@@ -612,56 +686,38 @@ function PenaltyRuleCard({ cfg, state, saving, saved, error, onChange, onSave }:
   const modeLabel = (m: PenaltyValueType) => (m === 'pct' ? (cfg.pctLabel ?? '% of rent') : PENALTY_MODE_LABEL[m]);
   const setVal = (patch: Partial<PenaltyState>) => onChange({ ...state, ...patch });
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm">
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
-          <h2 className="font-semibold text-base text-[#1a1916]">{cfg.title}</h2>
-          <p className="text-xs text-[#9b9890] mt-0.5">{cfg.description}</p>
+    <tr>
+      <td style={{ minWidth: 260 }}>
+        <span className="strong">{cfg.title}</span>
+        <span className="sub" style={{ whiteSpace: 'normal', maxWidth: 420 }}>{cfg.description}</span>
+      </td>
+      <td><Toggle value={enabled} onChange={(v) => setVal({ enabled: v })} label={`Enable ${cfg.title}`} /></td>
+      <td>
+        {!enabled ? <span className="sub" style={{ marginTop: 4 }}>Off</span>
+          : modes.length > 1
+            ? <PressSeg<PenaltyValueType> label={`${cfg.title} charged as`} value={valueType} options={modes.map(m => ({ v: m, l: modeLabel(m) }))} onChange={(m) => setVal({ valueType: m })} />
+            : <span className="sub" style={{ marginTop: 4 }}>{modeLabel(modes[0])}</span>}
+      </td>
+      <td style={{ minWidth: 150 }}>
+        {!enabled ? <span className="sub" style={{ marginTop: 4 }}>—</span>
+          : valueType === 'daily'
+            /* 'daily' is computed at settlement, so it shows a note instead */
+            ? <span className="sub" style={{ whiteSpace: 'normal', maxWidth: 220 }}>Annual rent ÷ 365 × days overstayed, billed at move-out settlement.</span>
+            : (
+              <Affix pre={valueType === 'aed' ? 'AED' : undefined} post={valueType === 'pct' ? '%' : valueType === 'months' ? 'months' : undefined}>
+                <input type="text" inputMode="decimal" value={value} aria-label={`${cfg.title} amount`}
+                  onChange={(e) => setVal({ value: e.target.value.replace(/[^0-9.]/g, '') })}
+                  placeholder="0" style={affixInput} />
+              </Affix>
+            )}
+      </td>
+      <td className="act">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <SaveBtn saving={saving} onClick={onSave} label="Save" />
+          <span style={{ whiteSpace: 'normal', maxWidth: 200, textAlign: 'right' }}><SaveNote error={error} saved={saved && !saving} /></span>
         </div>
-        <Toggle value={enabled} onChange={(v) => setVal({ enabled: v })} />
-      </div>
-
-      {enabled && (
-        <div className="flex items-center gap-2 flex-wrap mb-3">
-          {/* Mode pills — one per allowed value type */}
-          {modes.length > 1 && (
-            <div className="inline-flex bg-[#f6f7f4] rounded-[9px] p-[3px] border border-[#e6ebe7]">
-              {modes.map((m) => (
-                <button key={m} type="button" onClick={() => setVal({ valueType: m })}
-                  className={`px-2.5 py-1.5 rounded-[6px] text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all ${valueType === m ? 'bg-white text-[#0e1a16] shadow-sm' : 'text-[#6b7a74]'}`}>{modeLabel(m)}</button>
-              ))}
-            </div>
-          )}
-          {/* Value input — 'daily' is computed at settlement, so it shows a note instead */}
-          {valueType === 'daily' ? (
-            <p className="text-[12.5px] text-[#6b7a74] font-medium">Annual rent ÷ 365 × days overstayed, billed at move-out settlement.</p>
-          ) : (
-            <div className="inline-flex items-stretch border border-[#e6ebe7] rounded-[9px] overflow-hidden bg-white">
-              {valueType === 'aed' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">AED</span>}
-              <input type="text" inputMode="decimal" value={value}
-                onChange={(e) => setVal({ value: e.target.value.replace(/[^0-9.]/g, '') })}
-                placeholder="0"
-                className="w-24 border-0 py-[7px] px-2.5 text-[14px] font-semibold outline-none text-right bg-transparent tabular-nums" />
-              {valueType === 'pct' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">%</span>}
-              {valueType === 'months' && <span className="px-2.5 bg-[#f6f7f4] text-[#6b7a74] text-[12px] font-semibold flex items-center tracking-wide">months</span>}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 flex-wrap">
-        {error && <p className="text-xs text-red-600 flex-1">{error}</p>}
-        {saved && !saving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-        <button
-          type="button" onClick={onSave} disabled={saving}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
-          style={{ background: '#2e9f82' }}
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 }
 
@@ -681,14 +737,40 @@ const SETTINGS_MENU: { title: string; tabs: MainTab[] }[] = [
   // WhatsApp = the landlord's own numbers, next to their own mailbox: both are connected once, here.
   { title: 'Account', tabs: ['team', 'email', 'whatsapp', 'notifications'] },
 ];
-const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }> }> = {
+const TAB_META: Record<MainTab, { label: string; Icon: React.ComponentType<{ size?: number }>; desc: string }> = {
   // Two maintenance tabs read as one thing to the owner (12 Sep) — say what each is:
   // coverage = what is offered per property type and who does it; items = what a customer can raise.
-  general: { label: 'Profile', Icon: User }, fee_rules: { label: 'Rules', Icon: Percent }, maintenance: { label: 'Coverage', Icon: Wrench },
-  maintenance_list: { label: 'Items', Icon: ClipboardList }, restoration: { label: 'Restoration list', Icon: Receipt },
-  building_inspections: { label: 'Building inspections', Icon: ClipboardCheck },
-  categories: { label: 'AMC categories', Icon: FileSignature }, legal: { label: 'Periods & fees', Icon: Scale }, team: { label: 'Team', Icon: Users }, email: { label: 'Email', Icon: Mail }, whatsapp: { label: 'WhatsApp', Icon: MessageCircle }, notifications: { label: 'Notifications', Icon: Bell },
+  general:              { label: 'Profile', Icon: User, desc: 'Your business details and KYC documents.' },
+  fee_rules:            { label: 'Rules', Icon: Percent, desc: 'Fees, VAT, penalties, payment plans and schedules applied to new leases and renewals.' },
+  maintenance:          { label: 'Coverage', Icon: Wrench, desc: 'What maintenance is offered per property type, and who does it.' },
+  maintenance_list:     { label: 'Items', Icon: ClipboardList, desc: 'The maintenance items a customer can raise.' },
+  restoration:          { label: 'Restoration list', Icon: Receipt, desc: 'Restoration items and their charges, used at move-out.' },
+  building_inspections: { label: 'Building inspections', Icon: ClipboardCheck, desc: "The walk-through checklists, each building's frequency and inspector." },
+  categories:           { label: 'AMC categories', Icon: FileSignature, desc: 'The categories your AMC and vendor contracts are filed under.' },
+  legal:                { label: 'Periods & fees', Icon: Scale, desc: 'Notice periods, appeal windows and filing fees for breaches and legal cases.' },
+  team:                 { label: 'Team', Icon: Users, desc: 'Who works on your account and what each person can do.' },
+  email:                { label: 'Email', Icon: Mail, desc: 'Your own mailbox, used to write to customers and leads.' },
+  whatsapp:             { label: 'WhatsApp', Icon: MessageCircle, desc: 'Your own WhatsApp numbers, connected once here.' },
+  notifications:        { label: 'Notifications', Icon: Bell, desc: 'Who is copied on customer email, the updates you receive, and browser alerts.' },
 };
+
+/** Jump links inside Rules — each card has a stable id, so ?tab=fee_rules#<id> deep-links too. */
+const RULES_ANCHORS: { id: string; label: string }[] = [
+  { id: 'rules-fees', label: 'Fees & VAT' },
+  { id: 'rules-start-days', label: 'Start days' },
+  { id: 'rules-cheque-days', label: 'Cheque days' },
+  { id: 'rules-penalties', label: 'Penalties' },
+  { id: 'rules-installments', label: 'Installment plans' },
+  { id: 'rules-rent-vat', label: 'Rent VAT collection' },
+  { id: 'rules-market-review', label: 'Market rate review' },
+  { id: 'rules-bills', label: 'Bills from email' },
+  { id: 'rules-reminders', label: 'WhatsApp reminders' },
+];
+
+const CONTRACT_OPTS: { value: ContractType; label: string; tag: string; desc: string }[] = [
+  { value: 'new',     label: 'New contract',     tag: 'All fees',   desc: 'First-time lease for a unit. Includes the refundable security deposit.' },
+  { value: 'renewal', label: 'Renewal contract', tag: 'No deposit', desc: 'Renewing an existing lease. Security deposit carries over — only fees apply.' },
+];
 
 /** One component, two pages: /settings (tabs) and /profile (the business profile alone). */
 export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile' }) {
@@ -702,6 +784,7 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   useEffect(() => {
     if (view === 'profile') return;
     const t = new URLSearchParams(window.location.search).get('tab');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot ?tab= restore after hydration (window is client-only)
     if (t && (MAIN_TABS as string[]).includes(t)) setMainTab(t as MainTab);
   }, [view]);
 
@@ -875,13 +958,6 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   const [ccSaved,    setCcSaved]    = useState(false);
   const [ccError,    setCcError]    = useState<string | null>(null);
 
-  const [showInvite, setShowInvite]     = useState(false);
-  const [invName, setInvName]           = useState('');
-  const [invEmail, setInvEmail]         = useState('');
-  const [invRole, setInvRole]           = useState('asset_manager');
-  const [invNote, setInvNote]           = useState('');
-  const [sendingInvite, setSendingInvite] = useState(false);
-
   // ── Fee rules state ─────────────────────────────────────────
   const [feesLoading, setFeesLoading]   = useState(false);
   const [feeTab, setFeeTab]             = useState<FeeCategory>('residential');
@@ -991,10 +1067,12 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
   }, []);
 
   // Keep the editable phone field in sync with the auth session
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the auth session into the editable field
   useEffect(() => { setPhone(user?.phone ?? ''); }, [user?.phone]);
 
   useEffect(() => {
     if (mainTab !== 'fee_rules' || feesLoading) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag for the fetch started here
     setFeesLoading(true);
     fetch('/api/fee-rules', { credentials: 'include' })
       .then(r => r.json())
@@ -1531,1236 +1609,667 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
     }
   }
 
-  const handleSendInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!invName.trim() || !invEmail.trim()) return;
-    setSendingInvite(true);
-    await new Promise(r => setTimeout(r, 600));
-    setSendingInvite(false);
-    setShowInvite(false);
-    setInvName(''); setInvEmail(''); setInvNote('');
+  // Deep links to a card inside a section: ?tab=fee_rules#rules-market-review.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80);
+    return () => window.clearTimeout(t);
+  }, [mainTab]);
+
+  // Stable close handler — the kit Modal re-runs its focus effect when onClose changes.
+  const closePoaInvite = useCallback(() => setPoaInviteOpen(false), []);
+
+  const tabMeta = TAB_META[mainTab];
+  const tabGroup = SETTINGS_MENU.find(g => g.tabs.includes(mainTab))?.title;
+  const contractOpt = CONTRACT_OPTS.find(o => o.value === contractType)!;
+  const togglePreferredDay = (day: number) => {
+    setPreferredDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b));
+    setDaysSaved(false);
   };
+  const toggleChequeDay = (day: number) => {
+    setChequeDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b));
+    setChequeSaved(false);
+  };
+  const accountTypeLabel =
+    profileType === 'individual' ? 'Individual Landlord' :
+    companyType === 'brokerage'  ? 'Property Management'       :
+    companyType === 'agents'     ? 'Property Management Agent' :
+                                   'Landlord Company';
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-[#1a1916]">{view === 'profile' ? 'My Profile' : 'Settings'}</h1>
-        <p className="text-sm text-[#6b6860] mt-0.5">{view === 'profile' ? 'Your business details and KYC documents.' : 'How your business runs on UpNow.'}</p>
-      </div>
+    // The page is NOT one .gx scope: embedded Tailwind panels (Team, Email, KYC…) must sit
+    // outside the kit's unlayered element resets. Each kit-built block carries its own .gx.
+    // view="profile" is embedded by the Business › Profile & verification page, which
+    // carries its own page head and padding — so no second head here.
+    <div className={view === 'settings' ? 'gx-body' : undefined}>
+      {view === 'settings' && (
+        <div className="gx">
+          <PageHead
+            eyebrow="Settings"
+            title="Settings"
+            lede="How your business runs on UpNow. Each card saves on its own."
+            actions={<>
+              <Btn href="/rental-provider/dashboard/templates">Addendum templates</Btn>
+              <Btn href="/rental-provider/dashboard/profile">My profile</Btn>
+            </>}
+          />
+          <ScopeStrip items={[
+            { label: 'Workspace', value: 'Settings' },
+            { label: 'Section', value: <b>{tabGroup ? `${tabGroup} › ` : ''}{tabMeta.label}</b> },
+            { label: 'Sets', value: tabMeta.desc },
+          ]} />
+        </div>
+      )}
 
       {/* Settings menu on the left, grouped (owner, 12 Sep: seven pills in a row looked cluttered);
           the profile has its own page, so no Profile entry here. */}
-      <div className={view === 'settings' ? 'lg:grid lg:grid-cols-[220px_minmax(0,1fr)] gap-6 items-start' : ''}>
+      <div className={view === 'settings' ? 'lg:grid lg:grid-cols-[220px_minmax(0,1fr)] gap-[14px] items-start' : ''}>
       {view === 'settings' && (
-        <nav className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm p-2 mb-6 lg:mb-0 lg:sticky lg:top-4">
-          {SETTINGS_MENU.map(group => (
-            <div key={group.title} className="mb-2 last:mb-0">
-              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#9b9890]">{group.title}</div>
-              {group.tabs.filter(t => t !== 'whatsapp' || waOn).map(t => { const { label, Icon } = TAB_META[t]; const on = mainTab === t; return (
-                <button key={t} onClick={() => selectTab(t)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors cursor-pointer ${on ? 'bg-[#eef9f4] text-[#1a7a5a] font-semibold' : 'text-[#4a4842] hover:bg-[#f4f3ef]'}`}>
-                  <Icon size={15} /> {label}
-                </button>
-              ); })}
-            </div>
-          ))}
+        <nav aria-label="Settings sections" className="gx lg:sticky lg:top-4 mb-[14px] lg:mb-0">
+          <Card>
+            {SETTINGS_MENU.map(group => (
+              <div key={group.title}>
+                <div className="gx-lb" style={{ padding: '10px 13px 4px', margin: 0 }}>{group.title}</div>
+                {group.tabs.filter(t => t !== 'whatsapp' || waOn).map(t => {
+                  const { label, Icon } = TAB_META[t];
+                  const on = mainTab === t;
+                  return (
+                    <button key={t} type="button" onClick={() => selectTab(t)} className="gx-qitem"
+                      aria-current={on ? 'page' : undefined}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 13px', fontSize: 12.5,
+                        fontWeight: on ? 700 : 500, color: on ? 'var(--ms-primary-dark)' : 'var(--ms-ink-2)',
+                        ...(on ? { background: 'var(--ms-tint-pale)', borderLeftColor: 'var(--ms-primary)' } : null),
+                      }}>
+                      <Icon size={14} /> {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </Card>
         </nav>
       )}
-      <div className="min-w-0">
+      <div className="min-w-0" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, alignContent: 'start' }}>
 
-      {/* ── Lists that moved in from the sidebar (owner, 12 Sep) ── */}
+      {/* ── Lists that moved in from the sidebar (owner, 12 Sep) — reused unchanged ── */}
       {mainTab === 'maintenance_list' && <MaintenanceListWorkspace embedded />}
       {mainTab === 'restoration' && <RestorationListWorkspace embedded />}
       {mainTab === 'building_inspections' && <BuildingInspectionsSettings embedded />}
       {mainTab === 'categories' && <AmcCategoriesView base="/amc" listHref="/rental-provider/dashboard/amc" embedded />}
 
-      {/* ── Team tab ───────────────────────────────────────────── */}
-      {/* ── Maintenance tab — what's offered, per property type, and who does it.
-             The item list itself is managed on the Maintenance List page. ── */}
+      {/* ── Maintenance coverage — what's offered, per property type, and who does it ── */}
       {mainTab === 'maintenance' && <MaintenanceCoveragePanel />}
 
-      {/* ── Legal tab — the landlord's own notice periods, appeal window and filing-fee rule ── */}
+      {/* ── Legal — the landlord's own notice periods, appeal window and filing-fee rule ── */}
       {mainTab === 'legal' && (
-        <div className="space-y-4">
-          <div>
-            <h2 className="font-semibold text-base text-[#1a1916] mb-1">Periods & fees for breaches and legal cases</h2>
-            <p className="text-xs text-[#9b9890]">Every warning deadline, notice deadline, appeal window and pre-filled filing fee on your cases comes from here. Nothing is fixed in code.</p>
-          </div>
+        <>
+          <SectionTitle
+            title="Periods & fees for breaches and legal cases"
+            sub="Every warning deadline, notice deadline, appeal window and pre-filled filing fee on your cases comes from here. Nothing is fixed in code."
+          />
           <JurisdictionSettingsForm scope="landlord" load={() => legalApi.config('/legal')} save={(b) => legalApi.updateRpConfig(b)} reset={() => legalApi.resetRpConfig()} />
-          <div className="pt-4">
-            <h2 className="font-semibold text-base text-[#1a1916] mb-1">Legal fee book</h2>
-            <p className="text-xs text-[#9b9890]">What each step costs and who is paid. Lines marked recoverable are charged to the customer once paid.</p>
-          </div>
+          <SectionTitle
+            title="Legal fee book"
+            sub="What each step costs and who is paid. Lines marked recoverable are charged to the customer once paid."
+          />
           <FeeBookEditor />
-        </div>
+        </>
       )}
 
       {mainTab === 'team' && <TeamPanel />}
 
-      {/* ── Email tab — the landlord's own mailbox ── */}
+      {/* ── Email — the landlord's own mailbox ── */}
       {mainTab === 'email' && <EmailSettingsPanel />}
 
-      {/* ── WhatsApp tab — the landlord's own numbers (only where WhatsApp is switched on) ── */}
+      {/* ── WhatsApp — the landlord's own numbers (only where WhatsApp is switched on) ── */}
       {mainTab === 'whatsapp' && waOn && <WhatsAppSettingsPanel />}
 
-      {/* ── Notifications tab ──────────────────────────────────── */}
+      {/* ── Notifications ── */}
       {mainTab === 'notifications' && (
-        <div className="space-y-6">
-        {/* Correspondence — who gets copied on customer email */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <h2 className="font-semibold text-base text-[#1a1916] mb-1">Customer Correspondence</h2>
-          <p className="text-xs text-[#9b9890] mb-4">
-            Emails to your customers are sent by UpNow from <strong>noreply@upnow.ae</strong>. Add
-            addresses here and they are copied on every email your customers receive — payment
-            plans, renewal offers, contracts, settlements — so you hold exactly what they hold.
-            Customers can see the CC line and reply to all.
-          </p>
+        <>
+          {/* Correspondence — who gets copied on customer email */}
+          <div className="gx" id="notif-cc">
+            <Card title="Customer Correspondence" sub="Copies of every email your customers receive">
+              <div className="gx-pad">
+                <Lede>
+                  Emails to your customers are sent by UpNow from <strong>noreply@upnow.ae</strong>. Add
+                  addresses here and they are copied on every email your customers receive — payment
+                  plans, renewal offers, contracts, settlements — so you hold exactly what they hold.
+                  Customers can see the CC line and reply to all.
+                </Lede>
 
-          <label className="block text-xs font-medium text-[#6b6860] mb-1.5">
-            CC on customer emails <span className="text-[#9b9890] font-normal">(up to {CC_MAX})</span>
-          </label>
+                <label className="gx-lb" htmlFor="cc-draft" style={{ marginTop: 12 }}>
+                  CC on customer emails <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>(up to {CC_MAX})</span>
+                </label>
 
-          {ccEmails.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2.5">
-              {ccEmails.map(addr => (
-                <span
-                  key={addr}
-                  className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full bg-[#e7f5f0] text-[#1f7e66] text-xs font-medium"
-                >
-                  {addr}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${addr}`}
-                    onClick={() => { setCcEmails(ccEmails.filter(a => a !== addr)); setCcSaved(false); setCcError(null); }}
-                    className="rounded-full p-0.5 hover:bg-[#c9e8dc] transition-colors cursor-pointer"
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
+                {ccEmails.length > 0 && (
+                  <div className="gx-chips" style={{ marginBottom: 8 }}>
+                    {ccEmails.map(addr => (
+                      <span key={addr} className="gx-pill primary" style={{ paddingRight: 4, fontSize: 11.5 }}>
+                        {addr}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${addr}`}
+                          title={`Remove ${addr}`}
+                          onClick={() => { setCcEmails(ccEmails.filter(a => a !== addr)); setCcSaved(false); setCcError(null); }}
+                          style={{ display: 'inline-flex', border: 0, background: 'transparent', padding: 2, borderRadius: 999, cursor: 'pointer' }}
+                        >
+                          <X size={12} aria-hidden />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="gx-btn-row">
+                  <label className="gx-field" style={{ flex: 1, minWidth: 240 }}>
+                    <Mail size={14} aria-hidden />
+                    <input
+                      id="cc-draft"
+                      type="email"
+                      value={ccDraft}
+                      onChange={e => { setCcDraft(e.target.value); setCcSaved(false); setCcError(null); }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCcDraft(); }
+                      }}
+                      disabled={ccEmails.length >= CC_MAX}
+                      placeholder={ccEmails.length >= CC_MAX ? `Limit of ${CC_MAX} reached` : 'leasing@yourcompany.ae — press Enter to add'}
+                    />
+                  </label>
+                  {user?.email && !ccEmails.includes(user.email.toLowerCase()) && ccEmails.length < CC_MAX && (
+                    <Btn size="sm" onClick={() => { setCcEmails([...ccEmails, user.email!.toLowerCase()]); setCcSaved(false); setCcError(null); }}>
+                      Add my account email
+                    </Btn>
+                  )}
+                  <SaveBtn saving={ccSaving} onClick={saveCcEmails} label="Save" />
+                </div>
+
+                <div style={{ minHeight: 18, marginTop: 8 }}>
+                  {ccError && <SaveNote error={ccError} />}
+                  {ccSaved && !ccError && (
+                    <SaveNote saved savedText={ccEmails.length
+                      ? `Saved. ${ccEmails.length === 1 ? 'This address' : 'These addresses'} will be copied on every customer email.`
+                      : 'Cleared. You will no longer receive a copy of customer emails.'} />
+                  )}
+                  {!ccSaved && !ccError && !ccEmails.length && !profileLoading && (
+                    <Lede>No copies — you currently do not receive the emails your customers are sent.</Lede>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Only the wired toggles — see SHOW_NOTIF_PREFS / WIRED_NOTIF_KEYS. */}
+          {SHOW_NOTIF_PREFS && (
+            <div className="gx" id="notif-prefs">
+              <Card title="Notification Preferences" sub="In the app and by email — saved as you switch">
+                <div className="gx-pad">
+                  {notifErr && <div style={{ marginBottom: 10 }}><SaveNote error={notifErr} /></div>}
+                  <div style={{ display: 'grid', gap: 12 }}>
+                    {WIRED_NOTIF_KEYS.map(key => (
+                      <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <div>
+                          <p style={{ fontSize: 12.5, fontWeight: 600 }}>{NOTIF_LABELS[key].title}</p>
+                          <p style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>{NOTIF_LABELS[key].description}</p>
+                        </div>
+                        <Toggle value={notifs[key]} onChange={v => setNotif(key, v)} label={NOTIF_LABELS[key].title} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[240px]">
-              <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-              <input
-                type="email"
-                value={ccDraft}
-                onChange={e => { setCcDraft(e.target.value); setCcSaved(false); setCcError(null); }}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCcDraft(); }
-                }}
-                disabled={ccEmails.length >= CC_MAX}
-                className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82] disabled:bg-[#f4f3ef] disabled:cursor-not-allowed"
-                placeholder={ccEmails.length >= CC_MAX ? `Limit of ${CC_MAX} reached` : 'leasing@yourcompany.ae — press Enter to add'}
-              />
-            </div>
-            {user?.email && !ccEmails.includes(user.email.toLowerCase()) && ccEmails.length < CC_MAX && (
-              <button
-                type="button"
-                onClick={() => { setCcEmails([...ccEmails, user.email!.toLowerCase()]); setCcSaved(false); setCcError(null); }}
-                className="px-3 py-2 rounded-lg text-sm font-semibold border border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] transition-colors cursor-pointer"
-              >
-                Add my account email
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={saveCcEmails}
-              disabled={ccSaving}
-              className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#2e9f82] text-white hover:bg-[#26856d] transition-colors cursor-pointer disabled:opacity-60"
-            >
-              {ccSaving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-
-          <div className="min-h-4 mt-2">
-            {ccError && <p className="text-xs text-[#c0392b]">{ccError}</p>}
-            {ccSaved && !ccError && (
-              <p className="text-xs text-[#2e9f82]">
-                {ccEmails.length
-                  ? `Saved. ${ccEmails.length === 1 ? 'This address' : 'These addresses'} will be copied on every customer email.`
-                  : 'Cleared. You will no longer receive a copy of customer emails.'}
-              </p>
-            )}
-            {!ccSaved && !ccError && !ccEmails.length && !profileLoading && (
-              <p className="text-xs text-[#9b9890]">No copies — you currently do not receive the emails your customers are sent.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Hidden until the toggles persist — see SHOW_NOTIF_PREFS. */}
-        {SHOW_NOTIF_PREFS && (
-        <div className="bg-white rounded-2xl p-6 shadow-sm">
-          <h2 className="font-semibold text-base text-[#1a1916] mb-1">Notification Preferences</h2>
-          <p className="text-xs text-[#9b9890] mb-4">Choose which updates you want to be notified about — in the app and by email. Saved as you switch.</p>
-          {notifErr && <p className="text-xs text-red-600 mb-3">{notifErr}</p>}
-          <div className="space-y-4">
-            {WIRED_NOTIF_KEYS.map(key => (
-              <div key={key} className="flex items-center justify-between py-1">
-                <div>
-                  <p className="text-sm font-medium text-[#1a1916]">{NOTIF_LABELS[key].title}</p>
-                  <p className="text-xs text-[#9b9890]">{NOTIF_LABELS[key].description}</p>
-                </div>
-                <Toggle value={notifs[key]} onChange={v => setNotif(key, v)} />
-              </div>
-            ))}
-          </div>
-        </div>
-        )}
-
-        {/* Browser alerts — WhatsApp / email notifications from this browser while a portal tab is open. */}
-        <BrowserAlertsCard showWhatsapp={waOn} />
-        </div>
+          {/* Browser alerts — WhatsApp / email notifications from this browser while a portal tab is open. */}
+          <BrowserAlertsCard showWhatsapp={waOn} />
+        </>
       )}
 
-      {/* ── General tab ────────────────────────────────────────── */}
+      {/* ── Profile (My Profile page) ── */}
       {mainTab === 'general' && (
-        <div className="space-y-6">
-          {/* Profile */}
-          <form onSubmit={handleSaveBiz} className="bg-white rounded-2xl shadow-sm overflow-hidden">
-            {profileLoading && (
-              <div className="flex items-center justify-center gap-3 py-16 text-[#6b6860]">
-                <Loader2 size={18} className="animate-spin" />
-                <span className="text-sm">Loading profile…</span>
-              </div>
-            )}
-            {/* Cover */}
-            {!profileLoading && <div className="h-24 w-full" style={{ background: 'linear-gradient(135deg, #d8f2e8 0%, #b4e4d0 100%)' }} />}
-
-            {!profileLoading && <div className="px-6 pb-6">
-              {/* Avatar + name + type toggle row */}
-              <div className="flex items-end justify-between gap-4 -mt-10 mb-5 flex-wrap">
-                <div className="flex items-end gap-4">
-                  {/* Avatar */}
-                  <div className="relative flex-shrink-0">
-                    <div
-                      className="w-20 h-20 rounded-2xl border-4 border-white shadow-md flex items-center justify-center overflow-hidden"
-                      style={{ background: avatarPreview ? 'transparent' : '#2e9f82' }}
-                    >
+        <>
+          <form onSubmit={handleSaveBiz} className="gx" id="profile-business">
+            <Card
+              title={profileLoading ? 'Business profile' : (profileType === 'company' ? (bizName || 'Your Company') : (ownerName || 'Your Name'))}
+              sub={profileLoading ? 'Loading…' : (bizEmirate || 'UAE')}
+              right={!profileLoading && (
+                <Pill tone="primary" dot={false} title="Account type is locked in during onboarding">
+                  {profileType === 'individual' ? <User size={11} aria-hidden /> : <Building2 size={11} aria-hidden />}
+                  {accountTypeLabel}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 500, opacity: 0.75, marginLeft: 4 }}>
+                    <Lock size={9} aria-hidden /> Set during onboarding
+                  </span>
+                </Pill>
+              )}
+            >
+              {profileLoading ? (
+                <div className="gx-pad" aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+                  {[0, 1, 2, 3].map(i => <div key={i} className="gx-skel" style={{ height: 30, width: i % 2 ? '60%' : '100%' }} />)}
+                </div>
+              ) : (
+                <div className="gx-pad">
+                  {/* Avatar — a local preview only (never uploaded, as before) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                    <span style={{
+                      width: 56, height: 56, borderRadius: 12, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: avatarPreview ? 'transparent' : 'var(--ms-primary)', color: '#fff', flexShrink: 0,
+                    }}>
                       {avatarPreview
-                        ? <img src={avatarPreview} alt="avatar" className="w-full h-full object-cover" />
-                        : profileType === 'company'
-                          ? <Building2 size={32} className="text-white" />
-                          : <User size={32} className="text-white" />
-                      }
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={avatarPreview} alt="Profile picture preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : profileType === 'company' ? <Building2 size={24} aria-hidden /> : <User size={24} aria-hidden />}
+                    </span>
+                    <div>
+                      <Btn size="sm" onClick={() => avatarInputRef.current?.click()}><Camera size={13} aria-hidden /> Choose picture</Btn>
+                      <div className="gx-hint">Preview only — the picture is not saved to your profile yet.</div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => avatarInputRef.current?.click()}
-                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-[#e8e6e0] shadow flex items-center justify-center cursor-pointer hover:bg-[#f4f3ef] transition-colors"
-                    >
-                      <Camera size={12} className="text-[#6b6860]" />
-                    </button>
                     <input
                       ref={avatarInputRef}
                       type="file"
                       accept="image/*"
                       className="hidden"
+                      aria-label="Choose profile picture"
                       onChange={e => {
                         const file = e.target.files?.[0];
                         if (file) setAvatarPreview(URL.createObjectURL(file));
                       }}
                     />
                   </div>
-                  <div className="pb-1">
-                    <p className="font-bold text-lg text-[#1a1916] leading-tight">
-                      {profileType === 'company' ? (bizName || 'Your Company') : (ownerName || 'Your Name')}
-                    </p>
-                    <p className="text-xs text-[#9b9890]">{bizEmirate || 'UAE'}</p>
-                  </div>
-                </div>
 
-                {/* Account type — locked in during onboarding, displayed read-only here */}
-                {(() => {
-                  const label =
-                    profileType === 'individual' ? 'Individual Landlord' :
-                    companyType === 'brokerage'  ? 'Property Management'       :
-                    companyType === 'agents'     ? 'Property Management Agent' :
-                                                   'Landlord Company';
-                  const Ico = profileType === 'individual' ? User : Building2;
-                  return (
-                    <div className="inline-flex items-center gap-2 bg-[#eaf5f0] text-[#166651] px-3 py-1.5 rounded-full text-xs font-semibold tracking-wide uppercase">
-                      <Ico size={13} />
-                      {label}
-                      <span className="flex items-center gap-1 text-[10px] text-[#166651]/70 normal-case font-medium ml-1 pl-2 border-l border-[#166651]/20">
-                        <Lock size={9} /> Set during onboarding
+                  {/* ── Individual fields ── */}
+                  {profileType === 'individual' && (
+                    <>
+                      <div className="gx-two">
+                        <Field label="Full Name" htmlFor="pf-name" hint={<><Lock size={9} aria-hidden /> From your account</>}>
+                          <input id="pf-name" className="gx-inp" readOnly value={user?.name ?? ''} style={{ background: 'var(--ms-surface-2)', color: 'var(--ms-ink-3)', cursor: 'not-allowed' }} />
+                        </Field>
+                        <Field label="Emirates ID No." htmlFor="pf-eid">
+                          <input id="pf-eid" className="gx-inp" value={emiratesId} onChange={e => setEmiratesId(e.target.value)} placeholder="784-XXXX-XXXXXXX-X" style={{ fontFamily: 'ui-monospace, Menlo, monospace' }} />
+                        </Field>
+                      </div>
+                      <div className="gx-two">
+                        <Field label="Phone" htmlFor="pf-phone">
+                          <input id="pf-phone" className="gx-inp" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" />
+                        </Field>
+                        <Field label="Email" htmlFor="pf-email" hint={<><Lock size={9} aria-hidden /> From your account</>}>
+                          <input id="pf-email" className="gx-inp" readOnly value={user?.email ?? ''} style={{ background: 'var(--ms-surface-2)', color: 'var(--ms-ink-3)', cursor: 'not-allowed' }} />
+                        </Field>
+                      </div>
+                      <div className="gx-two">
+                        <Field label="Nationality" htmlFor="pf-nat">
+                          <input id="pf-nat" className="gx-inp" value={nationality} onChange={e => setNationality(e.target.value)} placeholder="Emirati" />
+                        </Field>
+                        <Field label="Emirate" htmlFor="pf-emirate">
+                          <select id="pf-emirate" className="gx-sel" value={bizEmirate} onChange={e => setBizEmirate(e.target.value)}>
+                            <option value="">Select emirate…</option>
+                            {EMIRATES_LIST.map(e => <option key={e}>{e}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                      <Field label="Address" htmlFor="pf-addr">
+                        <input id="pf-addr" className="gx-inp" value={bizAddress} onChange={e => setBizAddress(e.target.value)} placeholder="Building, Street, Area" />
+                      </Field>
+                      <Field label="About" htmlFor="pf-about" hint={`${bizDesc.length}/500 · Shown here only — not saved to your profile yet.`}>
+                        <textarea id="pf-about" className="gx-ta" value={bizDesc} onChange={e => setBizDesc(e.target.value)} rows={3} maxLength={500} placeholder="Brief note about your portfolio, areas you manage, etc." />
+                      </Field>
+                    </>
+                  )}
+
+                  {/* ── Company fields ── */}
+                  {profileType === 'company' && (
+                    <>
+                      <div className="gx-two">
+                        <Field label="Company Name" htmlFor="pf-company">
+                          <input id="pf-company" className="gx-inp" value={bizName} onChange={e => setBizName(e.target.value)} placeholder="UpNow Real Estate LLC" />
+                        </Field>
+                        <Field label="Trade License No." htmlFor="pf-tl">
+                          <input id="pf-tl" className="gx-inp" value={tradeLicense} onChange={e => setTradeLicense(e.target.value)} placeholder="DED-XXXXXXXX" />
+                        </Field>
+                      </div>
+                      {/* Parent brokerage — only for Agents Company */}
+                      {companyType === 'agents' && (
+                        <Field label="Parent Brokerage" htmlFor="pf-parent">
+                          <input id="pf-parent" className="gx-inp" value={parentBrokerageName} onChange={e => setParentBrokerageName(e.target.value)} placeholder="The brokerage you operate under" />
+                        </Field>
+                      )}
+                      <div className="gx-two">
+                        <Field label="Phone" htmlFor="pf-phone">
+                          <input id="pf-phone" className="gx-inp" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" />
+                        </Field>
+                        <Field label="Business Email" htmlFor="pf-email" hint={<><Lock size={9} aria-hidden /> From your account</>}>
+                          <input id="pf-email" className="gx-inp" readOnly value={user?.email ?? ''} style={{ background: 'var(--ms-surface-2)', color: 'var(--ms-ink-3)', cursor: 'not-allowed' }} />
+                        </Field>
+                      </div>
+                      <div className="gx-two">
+                        <Field label="Website" htmlFor="pf-web" hint="Shown here only — not saved to your profile yet.">
+                          <input id="pf-web" className="gx-inp" value={bizWebsite} onChange={e => setBizWebsite(e.target.value)} placeholder="www.company.ae" />
+                        </Field>
+                        <Field label="Emirate" htmlFor="pf-emirate">
+                          <select id="pf-emirate" className="gx-sel" value={bizEmirate} onChange={e => setBizEmirate(e.target.value)}>
+                            <option value="">Select emirate…</option>
+                            {EMIRATES_LIST.map(e => <option key={e}>{e}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                      <Field label="Office Address" htmlFor="pf-addr">
+                        <input id="pf-addr" className="gx-inp" value={bizAddress} onChange={e => setBizAddress(e.target.value)} placeholder="Building, Street, Area" />
+                      </Field>
+                      <Field label="About the Company" htmlFor="pf-about" hint={`${bizDesc.length}/500 · Shown here only — not saved to your profile yet.`}>
+                        <textarea id="pf-about" className="gx-ta" value={bizDesc} onChange={e => setBizDesc(e.target.value)} rows={3} maxLength={500} placeholder="Brief description of your company, specialisations, and areas served…" />
+                      </Field>
+                    </>
+                  )}
+
+                  {/* TRN + Legal Notices Address — general profile fields (Authorized
+                      Signatory & POA live in their own card below). */}
+                  <div style={{ borderTop: '1px solid var(--ms-surface-3)', paddingTop: 13, marginTop: 4 }}>
+                    <Field label="TRN (Tax Registration Number)" htmlFor="pf-trn">
+                      <input id="pf-trn" className="gx-inp" value={vatTrn} onChange={e => { setVatTrn(e.target.value.replace(/[^0-9]/g, '')); setBizSaved(false); }} inputMode="numeric" maxLength={15} placeholder="15-digit TRN — leave blank if not VAT-registered" style={{ fontFamily: 'ui-monospace, Menlo, monospace' }} />
+                    </Field>
+                    <Field label="Legal Notices Address" htmlFor="pf-legal">
+                      <input id="pf-legal" className="gx-inp" value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} placeholder="Address where legal correspondence should be sent" />
+                    </Field>
+                  </div>
+
+                  <CardFoot note={<>
+                    <SaveNote error={bizError} saved={bizSaved && !savingBiz} savedText="Profile saved." />
+                    {!bizError && !(bizSaved && !savingBiz) && (
+                      <span className="gx-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 0 }}>
+                        <Lock size={10} aria-hidden /> Email changes require account verification.
                       </span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* ── Individual fields ── */}
-              {profileType === 'individual' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Full Name <Lock size={10} className="text-[#c9c7c1]" />
-                      </label>
-                      <div className="relative">
-                        <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#c9c7c1]" />
-                        <input readOnly value={user?.name ?? ''} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-[#f9f8f6] text-[#9b9890] cursor-not-allowed" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Emirates ID No.</label>
-                      <div className="relative">
-                        <CreditCard size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={emiratesId} onChange={e => setEmiratesId(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="784-XXXX-XXXXXXX-X" />
-                      </div>
-                    </div>
-                  </div>
-                  {/* Read-only account fields from auth */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Phone
-                      </label>
-                      <div className="relative">
-                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Email <Lock size={10} className="text-[#c9c7c1]" />
-                      </label>
-                      <div className="relative">
-                        <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#c9c7c1]" />
-                        <input readOnly value={user?.email ?? ''} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-[#f9f8f6] text-[#9b9890] cursor-not-allowed" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Nationality</label>
-                      <div className="relative">
-                        <Flag size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={nationality} onChange={e => setNationality(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Emirati" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Emirate</label>
-                      <div className="relative">
-                        <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <select value={bizEmirate} onChange={e => setBizEmirate(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82] cursor-pointer">
-                          <option value="">Select emirate…</option>
-                          {['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','Fujairah','Umm Al Quwain'].map(e => <option key={e}>{e}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Address</label>
-                    <div className="relative">
-                      <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                      <input value={bizAddress} onChange={e => setBizAddress(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Building, Street, Area" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">About</label>
-                    <textarea value={bizDesc} onChange={e => setBizDesc(e.target.value)} rows={3} maxLength={500} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-[#2e9f82]" placeholder="Brief note about your portfolio, areas you manage, etc." />
-                    <p className="text-right text-xs text-[#9b9890] mt-1">{bizDesc.length}/500</p>
-                  </div>
+                    )}
+                  </>}>
+                    <SaveBtn type="submit" saving={savingBiz} label="Save Profile" />
+                  </CardFoot>
                 </div>
               )}
+            </Card>
+          </form>
 
-              {/* ── Company fields ── */}
-              {profileType === 'company' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Company Name</label>
-                      <div className="relative">
-                        <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={bizName} onChange={e => setBizName(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="UpNow Real Estate LLC" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Trade License No.</label>
-                      <div className="relative">
-                        <FileText size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={tradeLicense} onChange={e => setTradeLicense(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="DED-XXXXXXXX" />
-                      </div>
-                    </div>
+          {/* KYC Documents — landlord identity, licensing, banking and (when assigned) POA
+              documents. Reuses KycDocumentsPanel (presigned-S3 upload flow); remounts via
+              docsReloadKey after a profile save so a POA toggle is picked up immediately. */}
+          <section className="gx-card" id="profile-kyc">
+            <div className="gx gx-card-hd">
+              <div>
+                <h3>KYC Documents</h3>
+                <div className="sub">
+                  Upload your identity and licensing documents for verification.
+                  {hasPoa && ' Power of Attorney documents are attached in the Authorized Signatory & POA section below.'}
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '13px 16px' }}>
+              <KycDocumentsPanel
+                key={docsReloadKey}
+                profileApiPath="/profiles/rental-provider/me"
+                ownerType="rental_provider"
+                compact
+                excludeKeys={POA_DOC_KEYS}
+                allowDownload
+              />
+            </div>
+          </section>
+
+          {/* Authorized Signatory & Power of Attorney — its own card, saved independently. */}
+          <form onSubmit={handleSavePoa} className="gx-card" id="profile-poa">
+            <div className="gx gx-card-hd">
+              <div>
+                <h3>Authorized Signatory &amp; Power of Attorney</h3>
+                <div className="sub">Record who signs on your behalf and attach their Power of Attorney documents.</div>
+              </div>
+            </div>
+            <div className="gx gx-pad">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '9px 12px', borderRadius: 10, border: '1px solid var(--ms-border)', background: 'var(--ms-surface-2)' }}>
+                <p style={{ fontSize: 12.5, fontWeight: 600 }}>A Power of Attorney holder acts on my behalf</p>
+                <Toggle value={hasPoa} onChange={toggleHasPoa} label="A Power of Attorney holder acts on my behalf" />
+              </div>
+
+              {hasPoa && (
+                <div style={{ marginTop: 14 }}>
+                  <Field label="Authorized Signatory Name" htmlFor="poa-name">
+                    <input id="poa-name" className="gx-inp" value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} placeholder="Person who signs on your behalf" />
+                  </Field>
+                  <div className="gx-two">
+                    <Field label="POA Holder Phone" htmlFor="poa-phone">
+                      <input id="poa-phone" className="gx-inp" value={poaPersonPhone} onChange={e => { setPoaPersonPhone(e.target.value); setPoaSaved(false); }} placeholder="+971 50 123 4567" />
+                    </Field>
+                    <Field label="POA Holder Email" htmlFor="poa-email">
+                      <input id="poa-email" className="gx-inp" value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} placeholder="signatory@example.com" />
+                    </Field>
                   </div>
-                  {/* Parent brokerage — only for Agents Company */}
-                  {companyType === 'agents' && (
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Parent Brokerage</label>
-                      <div className="relative">
-                        <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input
-                          value={parentBrokerageName}
-                          onChange={e => setParentBrokerageName(e.target.value)}
-                          className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]"
-                          placeholder="The brokerage you operate under"
-                        />
+
+                  {/* Invite the holder to act on the landlord's behalf inside the app */}
+                  <Callout tone="info" title="Let them act on your behalf.">
+                    Invite as a manager — a popup lets you review and edit their permissions (POA pre-selected) before sending. Their ID documents stay shared.
+                    <div className="gx-btn-row" style={{ marginTop: 8 }}>
+                      <Btn variant="primary" size="sm" onClick={() => { setInviteMsg(null); setPoaInviteOpen(true); }}>
+                        <Send size={13} aria-hidden /> Invite as manager
+                      </Btn>
+                      {inviteMsg && <span role="status" style={{ fontSize: 11.5, color: 'var(--ms-primary-dark)' }}>{inviteMsg}</span>}
+                    </div>
+                  </Callout>
+
+                  <div className="gx-lb" style={{ marginTop: 14 }}>Required Documents</div>
+                </div>
+              )}
+            </div>
+
+            {/* POA documents — attached directly here (embedded panel, outside the .gx scope) */}
+            {hasPoa && (
+              <div style={{ padding: '0 16px' }}>
+                <KycDocumentsPanel
+                  key={`poa-${docsReloadKey}`}
+                  profileApiPath="/profiles/rental-provider/me"
+                  ownerType="rental_provider"
+                  compact
+                  onlyKeys={POA_DOC_KEYS}
+                  allowDownload
+                />
+              </div>
+            )}
+
+            <div className="gx gx-pad">
+              {hasPoa && (
+                <Lede style={{ fontSize: 11 }}>
+                  The holder’s Emirates ID, Passport &amp; Visa are shared with their manager account once they’re invited and linked. Each document can be downloaded — the POA pack is often needed off-platform (Ejari, the bank, a notary).
+                </Lede>
+              )}
+              <CardFoot note={<SaveNote error={poaError} saved={poaSaved && !savingPoa} />}>
+                <SaveBtn type="submit" saving={savingPoa} label="Save Signatory & POA" />
+              </CardFoot>
+            </div>
+          </form>
+
+          {/* Banking Details — its own card; a landlord may hold multiple accounts. */}
+          <form onSubmit={handleSaveBank} className="gx" id="profile-banking">
+            <Card title="Banking Details" sub="Accounts you collect rent into. You can add more than one — the first is treated as your primary account.">
+              <div className="gx-pad">
+                {bankAccounts.length === 0 && (
+                  <div className="gx-empty" style={{ padding: '14px 0' }}><b>No bank accounts added yet.</b>Add the account your rent is paid into.</div>
+                )}
+
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {bankAccounts.map((acct, i) => {
+                    const update = (patch: Partial<BankAccount>) => {
+                      setBankAccounts(prev => prev.map(b => b.id === acct.id ? { ...b, ...patch } : b));
+                      setBankSaved(false);
+                    };
+                    const fid = (f: string) => `bank-${acct.id}-${f}`;
+                    return (
+                      <div key={acct.id} style={{ border: '1px solid var(--ms-border)', borderRadius: 10, padding: '11px 13px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                          <span className="strong" style={{ fontWeight: 700, fontSize: 12.5 }}>Account {i + 1}</span>
+                          {i === 0 && <Pill tone="primary" dot={false}>Primary</Pill>}
+                          <span style={{ marginLeft: 'auto' }}>
+                            <Btn size="xs" variant="danger" onClick={() => { setBankAccounts(prev => prev.filter(b => b.id !== acct.id)); setBankSaved(false); }}>
+                              Remove
+                            </Btn>
+                          </span>
+                        </div>
+                        <div className="gx-two">
+                          <Field label="Account Holder Name" htmlFor={fid('name')}>
+                            <input id={fid('name')} className="gx-inp" value={acct.accountName} onChange={e => update({ accountName: e.target.value })} placeholder="Name on bank account" />
+                          </Field>
+                          <Field label="Bank Name" htmlFor={fid('bank')}>
+                            <input id={fid('bank')} className="gx-inp" value={acct.bankName} onChange={e => update({ bankName: e.target.value })} placeholder="e.g. Emirates NBD" />
+                          </Field>
+                          <Field label="IBAN" htmlFor={fid('iban')}>
+                            <input id={fid('iban')} className="gx-inp" value={acct.iban} onChange={e => update({ iban: e.target.value })} placeholder="AE07 0331 2345 6789 0123 456" style={{ fontFamily: 'ui-monospace, Menlo, monospace' }} />
+                          </Field>
+                          <Field label="Account No. (optional)" htmlFor={fid('no')}>
+                            <input id={fid('no')} className="gx-inp" value={acct.accountNumber} onChange={e => update({ accountNumber: e.target.value })} placeholder="1234567890" style={{ fontFamily: 'ui-monospace, Menlo, monospace' }} />
+                          </Field>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <Btn size="sm" onClick={() => { setBankAccounts(prev => [...prev, newBankAccount()]); setBankSaved(false); }}>
+                    <Plus size={13} aria-hidden /> Add bank account
+                  </Btn>
+                </div>
+
+                <CardFoot note={<SaveNote error={bankError} saved={bankSaved && !savingBank} savedText="Banking details saved." />}>
+                  <SaveBtn type="submit" saving={savingBank} label="Save Banking Details" />
+                </CardFoot>
+              </div>
+            </Card>
+          </form>
+        </>
+      )}
+
+      {/* ── Rules (fee rules, schedules, penalties, plans, VAT, reviews, reminders) ── */}
+      {mainTab === 'fee_rules' && (
+        <>
+          <nav aria-label="On this page" className="gx">
+            <div className="gx-chips">
+              {RULES_ANCHORS.map(a => <a key={a.id} href={`#${a.id}`} className="gx-chip">{a.label}</a>)}
+            </div>
+          </nav>
+
+          {/* Fees: contract type × property type, with the live preview on the right */}
+          <div id="rules-fees" className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-[14px] items-start" style={{ scrollMarginTop: 16 }}>
+            <div className="gx min-w-0">
+              <Card
+                title={contractType === 'new' ? 'New Contract Fees' : 'Renewal Contract Fees'}
+                sub="Customise each fee — UpNow defaults follow standard UAE practice."
+              >
+                <div className="gx-pad" style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span className="gx-lb" style={{ margin: 0 }}>Contract</span>
+                    <PressSeg<ContractType>
+                      label="Contract type" value={contractType}
+                      options={CONTRACT_OPTS.map(o => ({ v: o.value, l: o.label }))}
+                      onChange={setContractType}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span className="gx-lb" style={{ margin: 0 }}>Property type</span>
+                    <PressSeg<FeeCategory>
+                      label="Property type" value={feeTab}
+                      options={FEE_TAB_CATEGORIES.map(cat => ({ v: cat, l: categoryDisplayLabel(cat) }))}
+                      onChange={cat => { setFeeTab(cat); setFeesSaved(false); }}
+                    />
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ms-ink-3)' }}>
+                      <Pill tone="outline" dot={false}>{contractOpt.tag}</Pill> {contractOpt.desc}
+                    </span>
+                  </div>
+
+                  {/* Mixed-use explainer — there is no separate mixed-use rate; a mixed-use
+                      building's units are priced per unit against these Residential /
+                      Commercial rules (resolved from the unit type). */}
+                  <Callout tone="info">
+                    <strong>Mixed-use buildings</strong> use these rules per unit — a residential unit follows your <strong>Residential</strong> rates (rent VAT-exempt) and a commercial unit follows your <strong>Commercial</strong> rates (5% rent VAT). There is no separate mixed-use rate to set.
+                  </Callout>
+
+                  {contractType === 'renewal' && (
+                    <Callout tone="warn" title="Renewal logic:">
+                      the refundable security deposit is collected once on the original contract and carries forward, so it&apos;s excluded here. Update only the fees that should re-charge on renewal.
+                    </Callout>
+                  )}
+
+                  {/* Phase 6 — Annual rent increment default. Pre-fills the New Annual Rent
+                      field on the Propose Renewal modal; the RP can still override per renewal. */}
+                  {contractType === 'renewal' && (
+                    <div style={{ border: '1px solid var(--ms-border)', borderRadius: 10, padding: '11px 13px', background: 'var(--ms-surface-2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <label className="gx-lb" htmlFor="renewal-inc-pct">Annual rent increment</label>
+                          <Lede style={{ fontSize: 11.5 }}>When you open Propose Renewal, the New Annual Rent field starts at the previous rent bumped by this percentage.</Lede>
+                        </div>
+                        <div className="gx-btn-row">
+                          <Affix post="%">
+                            <input
+                              id="renewal-inc-pct"
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="0.5"
+                              value={renewalIncPct}
+                              onChange={e => { setRenewalIncPct(e.target.value); setRenewalIncSaved(false); }}
+                              placeholder="0"
+                              style={{ ...affixInput, width: 72 }}
+                            />
+                          </Affix>
+                          <SaveBtn saving={renewalIncSaving} onClick={saveRenewalIncrement} label="Save" />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                        {renewalIncPct && !Number.isNaN(Number(renewalIncPct)) && Number(renewalIncPct) > 0 ? (
+                          <Lede style={{ fontSize: 11.5 }}>
+                            Preview: AED {previewRent.toLocaleString('en-AE')} →{' '}
+                            <b style={{ color: 'var(--ms-ink)' }}>AED {Math.round(previewRent * (1 + Number(renewalIncPct) / 100)).toLocaleString('en-AE')}</b>
+                          </Lede>
+                        ) : <span />}
+                        <SaveNote error={renewalIncError} saved={renewalIncSaved && !renewalIncSaving} />
                       </div>
                     </div>
                   )}
-                  {/* Read-only account fields from auth */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Phone
-                      </label>
-                      <div className="relative">
-                        <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="+971 50 123 4567" className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1 flex items-center gap-1">
-                        Business Email <Lock size={10} className="text-[#c9c7c1]" />
-                      </label>
-                      <div className="relative">
-                        <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#c9c7c1]" />
-                        <input readOnly value={user?.email ?? ''} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-[#f9f8f6] text-[#9b9890] cursor-not-allowed" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Website</label>
-                      <div className="relative">
-                        <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <input value={bizWebsite} onChange={e => setBizWebsite(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="www.company.ae" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-[#6b6860] block mb-1">Emirate</label>
-                      <div className="relative">
-                        <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                        <select value={bizEmirate} onChange={e => setBizEmirate(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2e9f82] cursor-pointer">
-                          <option value="">Select emirate…</option>
-                          {['Dubai','Abu Dhabi','Sharjah','Ajman','Ras Al Khaimah','Fujairah','Umm Al Quwain'].map(e => <option key={e}>{e}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">Office Address</label>
-                    <div className="relative">
-                      <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                      <input value={bizAddress} onChange={e => setBizAddress(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Building, Street, Area" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">About the Company</label>
-                    <textarea value={bizDesc} onChange={e => setBizDesc(e.target.value)} rows={3} maxLength={500} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-[#2e9f82]" placeholder="Brief description of your company, specialisations, and areas served…" />
-                    <p className="text-right text-xs text-[#9b9890] mt-1">{bizDesc.length}/500</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Legal Notices Address — general profile field (Authorized
-                  Signatory & POA now live in their own card below). */}
-              <div className="mt-6 pt-5 border-t border-[#eef0ec]">
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">TRN (Tax Registration Number)</label>
-                <div className="relative mb-4">
-                  <FileText size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9b9890]" />
-                  <input value={vatTrn} onChange={e => { setVatTrn(e.target.value.replace(/[^0-9]/g, '')); setBizSaved(false); }} inputMode="numeric" maxLength={15} className="w-full border border-[#e8e6e0] rounded-lg pl-9 pr-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="15-digit TRN — leave blank if not VAT-registered" />
-                </div>
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">Legal Notices Address</label>
-                <input value={legalNoticesAddress} onChange={e => { setLegalNoticesAddress(e.target.value); setBizSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Address where legal correspondence should be sent" />
-              </div>
-
-              <div className="flex items-center gap-3 mt-5 flex-wrap">
-                {bizError && <p className="text-xs text-red-600 flex-1">{bizError}</p>}
-                {bizSaved && !savingBiz && <p className="text-xs text-[#2e9f82] flex-1">Profile saved.</p>}
-                <p className="text-xs text-[#9b9890] flex items-center gap-1">
-                  <Lock size={11} /> Email changes require account verification.
-                </p>
-                <SaveButton saving={savingBiz} label="Save Profile" />
-              </div>
-            </div>}
-          </form>
-
-          {/* KYC Documents — landlord / rental-provider identity, licensing,
-              banking and (when assigned) Power of Attorney documents. Reuses the
-              shared KycDocumentsPanel which drives the presigned-S3 upload flow.
-              Remounts via docsReloadKey after a profile save so a POA toggle is
-              picked up immediately. */}
-          <div className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
-                <ShieldCheck size={18} className="text-[#166651]" />
-              </div>
-              <div>
-                <h2 className="font-semibold text-base text-[#1a1916]">KYC Documents</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  Upload your identity and licensing documents for verification.
-                  {hasPoa && ' Power of Attorney documents are attached in the Authorized Signatory & POA section below.'}
-                </p>
-              </div>
-            </div>
-            <KycDocumentsPanel
-              key={docsReloadKey}
-              profileApiPath="/profiles/rental-provider/me"
-              ownerType="rental_provider"
-              compact
-              excludeKeys={POA_DOC_KEYS}
-              allowDownload
-            />
-          </div>
-
-          {/* Authorized Signatory & Power of Attorney — its own card, saved
-              independently. When a POA holder acts on the landlord's behalf, the
-              required POA documents can be attached right here. */}
-          <form onSubmit={handleSavePoa} className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
-                <FileText size={18} className="text-[#166651]" />
-              </div>
-              <div className="flex-1">
-                <h2 className="font-semibold text-base text-[#1a1916]">Authorized Signatory &amp; Power of Attorney</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">Record who signs on your behalf and attach their Power of Attorney documents.</p>
-              </div>
-            </div>
-
-            {/* Switch */}
-            <div className="flex items-center justify-between gap-3 py-2.5 px-3.5 rounded-xl border border-[#e8e6e0] bg-[#fbfbf8]">
-              <p className="text-sm font-medium text-[#3d3b35]">A Power of Attorney holder acts on my behalf</p>
-              <Toggle value={hasPoa} onChange={toggleHasPoa} />
-            </div>
-
-            {hasPoa && (
-              <div className="space-y-4 mt-4 pl-3.5 border-l-2 border-[#e7f5f0]">
-                <div>
-                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Authorized Signatory Name</label>
-                  <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Phone</label>
-                    <input value={poaPersonPhone} onChange={e => { setPoaPersonPhone(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="+971 50 123 4567" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-[#6b6860] block mb-1">POA Holder Email</label>
-                    <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
-                  </div>
                 </div>
 
-                {/* Invite the holder to act on the landlord's behalf inside the app */}
-                <div className="p-4 rounded-xl border border-[#dbeee6] bg-[#f4fbf8]">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <Users size={18} className="text-[#166651] mt-0.5 flex-shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#1a1916]">Let them act on your behalf</p>
-                        <p className="text-xs text-[#6b6860] mt-0.5">Invite as a manager — a popup lets you review and edit their permissions (POA pre-selected) before sending. Their ID documents stay shared.</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setInviteMsg(null); setPoaInviteOpen(true); }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer flex-shrink-0"
-                      style={{ background: '#2e9f82' }}
-                    >
-                      <Send size={14} /> Invite as manager
-                    </button>
+                {/* Fee rows */}
+                {feesLoading ? (
+                  <div className="gx-pad" aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+                    {FEE_ORDER.map(ft => <div key={ft} className="gx-skel" style={{ height: 38 }} />)}
                   </div>
-                  {inviteMsg && <p className="text-xs text-[#166651] mt-2">{inviteMsg}</p>}
-                </div>
-
-                {/* POA documents — attached directly here */}
-                <div className="pt-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#9b9890] mb-2">Required Documents</p>
-                  <KycDocumentsPanel
-                    key={`poa-${docsReloadKey}`}
-                    profileApiPath="/profiles/rental-provider/me"
-                    ownerType="rental_provider"
-                    compact
-                    onlyKeys={POA_DOC_KEYS}
-                    allowDownload
-                  />
-                  <p className="text-[11px] text-[#9b9890] mt-2">The holder’s Emirates ID, Passport &amp; Visa are shared with their manager account once they’re invited and linked. Each document can be downloaded — the POA pack is often needed off-platform (Ejari, the bank, a notary).</p>
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center gap-3 mt-5 flex-wrap">
-              {poaError && <p className="text-xs text-red-600 flex-1">{poaError}</p>}
-              {poaSaved && !savingPoa && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-              <SaveButton saving={savingPoa} label="Save Signatory & POA" />
-            </div>
-          </form>
-
-          {/* Banking Details — its own card; a landlord may hold multiple
-              accounts. Saved independently of the profile form. */}
-          <form onSubmit={handleSaveBank} className="bg-white rounded-2xl p-6 shadow-sm">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#eaf5f0] flex items-center justify-center flex-shrink-0">
-                <CreditCard size={18} className="text-[#166651]" />
-              </div>
-              <div className="flex-1">
-                <h2 className="font-semibold text-base text-[#1a1916]">Banking Details</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">Accounts you collect rent into. You can add more than one — the first is treated as your primary account.</p>
-              </div>
-            </div>
-
-            {bankAccounts.length === 0 && (
-              <p className="text-sm text-[#9b9890] py-3">No bank accounts added yet.</p>
-            )}
-
-            <div className="space-y-3">
-              {bankAccounts.map((acct, i) => {
-                const update = (patch: Partial<BankAccount>) => {
-                  setBankAccounts(prev => prev.map(b => b.id === acct.id ? { ...b, ...patch } : b));
-                  setBankSaved(false);
-                };
-                return (
-                  <div key={acct.id} className="rounded-xl border border-[#e8e6e0] p-4 relative">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#166651]">
-                        Account {i + 1}
-                        {i === 0 && <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-[#e7f5f0] text-[#1f7e66]">Primary</span>}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => { setBankAccounts(prev => prev.filter(b => b.id !== acct.id)); setBankSaved(false); }}
-                        className="text-[#9b9890] hover:text-[#b91c1c] cursor-pointer"
-                        aria-label="Remove account"
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Account Holder Name</label>
-                        <input value={acct.accountName} onChange={e => update({ accountName: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Name on bank account" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Bank Name</label>
-                        <input value={acct.bankName} onChange={e => update({ bankName: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="e.g. Emirates NBD" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-[#6b6860] block mb-1">IBAN</label>
-                        <input value={acct.iban} onChange={e => update({ iban: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="AE07 0331 2345 6789 0123 456" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-[#6b6860] block mb-1">Account No. <span className="text-[#c9c7c1]">(optional)</span></label>
-                        <input value={acct.accountNumber} onChange={e => update({ accountNumber: e.target.value })} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-[#2e9f82]" placeholder="1234567890" />
-                      </div>
-                    </div>
+                ) : (
+                  <div className="gx-tbl-scroll" style={{ borderTop: '1px solid var(--ms-surface-3)' }}>
+                    <table className="gx-tbl" style={{ minWidth: 880 }}>
+                      <thead>
+                        <tr><th>Fee</th><th>Charged as</th><th>Value</th><th>VAT</th><th className="num">Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {FEE_ORDER.map(ft => (
+                          <FeeRow
+                            key={ft}
+                            rule={feeRules[ft]}
+                            rent={previewRent}
+                            onChange={r => setRule(ft, r)}
+                            isRenewal={contractType === 'renewal'}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => { setBankAccounts(prev => [...prev, newBankAccount()]); setBankSaved(false); }}
-              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#2e9f82] cursor-pointer hover:underline"
-            >
-              <Plus size={15} /> Add bank account
-            </button>
-
-            <div className="flex items-center gap-3 mt-5 flex-wrap">
-              {bankError && <p className="text-xs text-red-600 flex-1">{bankError}</p>}
-              {bankSaved && !savingBank && <p className="text-xs text-[#2e9f82] flex-1">Banking details saved.</p>}
-              <SaveButton saving={savingBank} label="Save Banking Details" />
-            </div>
-          </form>
-
-        </div>
-      )}
-
-      {/* ── Fee Rules tab ───────────────────────────────────────── */}
-      {mainTab === 'fee_rules' && (
-        <div>
-          {/* Contract scheduling — moved from General */}
-          <div className="space-y-6 mb-5">
-            {/* Contract Date Configuration */}
-            <form onSubmit={handleSaveDays} className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="mb-4">
-                <h2 className="font-semibold text-base text-[#1a1916]">Contract Start Days</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  Select the days of the month when contracts can start. Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
-                </p>
-              </div>
-  
-              <div className="flex flex-wrap gap-2 mb-4">
-                {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
-                  const active = preferredDays.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => {
-                        setPreferredDays(prev =>
-                          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
-                        );
-                        setDaysSaved(false);
-                      }}
-                      className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
-                        ${active
-                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
-                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
-                    >
-                      {day}
-                    </button>
-                  );
-                })}
-              </div>
-  
-              {preferredDays.length > 0 && (
-                <p className="text-xs text-[#2e9f82] mb-3">
-                  Selected: {preferredDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each month
-                </p>
-              )}
-  
-              <div className="flex items-center gap-3 flex-wrap">
-                {daysError  && <p className="text-xs text-red-600 flex-1">{daysError}</p>}
-                {daysSaved  && !daysSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-                {preferredDays.length > 0 && (
-                  <button type="button" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}
-                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
-                    Clear all
-                  </button>
                 )}
-                <SaveButton saving={daysSaving} label="Save Start Days" />
-              </div>
-            </form>
-  
-            {/* Cheque / Installment Due Days */}
-            <form onSubmit={handleSaveChequeDays} className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="mb-4">
-                <h2 className="font-semibold text-base text-[#1a1916]">Cheque Due Days</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  Select the days of the month your cheque / installment payments should fall on (e.g. 1st, 10th, 25th). Auto-generated payment plans snap each recurring cheque to the nearest of these days, so collections land on a consistent day every period. Leave empty to use the contract start day.
-                </p>
-              </div>
-  
-              <div className="flex flex-wrap gap-2 mb-4">
-                {Array.from({ length: 28 }, (_, i) => i + 1).map(day => {
-                  const active = chequeDays.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => {
-                        setChequeDays(prev =>
-                          prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort((a, b) => a - b),
-                        );
-                        setChequeSaved(false);
-                      }}
-                      className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
-                        ${active
-                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
-                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
-                    >
-                      {day}
-                    </button>
-                  );
-                })}
-              </div>
-  
-              {chequeDays.length > 0 && (
-                <p className="text-xs text-[#2e9f82] mb-3">
-                  Cheques due on the {chequeDays.map(d => `${d}${['st','nd','rd'][((d%10)-1)]||'th'}`).join(', ')} of each period
-                </p>
-              )}
-  
-              <div className="flex items-center gap-3 flex-wrap">
-                {chequeError && <p className="text-xs text-red-600 flex-1">{chequeError}</p>}
-                {chequeSaved && !chequeSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-                {chequeDays.length > 0 && (
-                  <button type="button" onClick={() => { setChequeDays([]); setChequeSaved(false); }}
-                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
-                    Clear all
-                  </button>
-                )}
-                <SaveButton saving={chequeSaving} label="Save Cheque Days" />
-              </div>
-            </form>
 
-            {/* Penalty & charge rules — 2 configurations per row. Early Termination
-                (months of rent) and Late Move-out (daily prorate) carry purpose-built
-                modes; the access-card / name-change / unit-transfer rules are flat/%. */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-            {PENALTY_RULES.map(cfg => (
-              <PenaltyRuleCard
-                key={cfg.key}
-                cfg={cfg}
-                state={penalties[cfg.key]}
-                saving={penaltySavingKey === cfg.key}
-                saved={penaltySavedKey === cfg.key}
-                error={penaltyErrorKey === cfg.key ? penaltyErrorMsg : null}
-                onChange={(s) => updatePenalty(cfg.key, s)}
-                onSave={() => savePenaltyRule(cfg.key)}
-              />
-            ))}
+                <div className="gx-pad" style={{ borderTop: '1px solid var(--ms-surface-3)', background: 'var(--ms-surface-2)', borderRadius: '0 0 12px 12px' }}>
+                  <CardFoot note={<span style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Changes apply to future contracts only — existing leases are unaffected.</span>}>
+                    <SaveNote error={feesError} saved={feesSaved && !feesSaving} />
+                    <Btn size="sm" onClick={loadDefaults}><RotateCcw size={13} aria-hidden /> Reset to UAE defaults</Btn>
+                    <SaveBtn saving={feesSaving} onClick={handleSaveFees} label="Save changes" />
+                  </CardFoot>
+                </div>
+              </Card>
             </div>
 
-            {/* Payment Installment Plans */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="mb-4">
-                <h2 className="font-semibold text-base text-[#1a1916]">Payment Installment Plans</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  Choose which cheque-split plans you offer. Only the selected plans appear wherever a
-                  payment schedule is set up — your contract forms, the customer booking flow and the
-                  public listing. Select none to allow every plan.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 mb-4">
-                {INSTALLMENT_PLANS.map(p => {
-                  const active = allowedInst.includes(p.value);
-                  return (
-                    <button
-                      key={p.value}
-                      type="button"
-                      onClick={() => {
-                        setAllowedInst(prev =>
-                          prev.includes(p.value) ? prev.filter(v => v !== p.value) : [...prev, p.value].sort((a, b) => a - b),
-                        );
-                        setInstSaved(false);
-                      }}
-                      className={`px-3.5 py-2 rounded-lg text-sm font-semibold border transition-colors cursor-pointer
-                        ${active
-                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
-                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
-                    >
-                      {p.value} · {p.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <p className={`text-xs mb-3 ${allowedInst.length ? 'text-[#2e9f82]' : 'text-[#9b9890]'}`}>
-                {allowedInst.length === 0
-                  ? 'All plans available — no restriction.'
-                  : `Offered: ${allowedInst.map(v => installmentLabel(v)).join(', ')}.`}
-              </p>
-
-              <div className="flex items-center gap-3 flex-wrap">
-                {instError && <p className="text-xs text-red-600 flex-1">{instError}</p>}
-                {instSaved && !instSaving && <p className="text-xs text-[#2e9f82] flex-1">Saved.</p>}
-                {allowedInst.length > 0 && (
-                  <button type="button" onClick={() => { setAllowedInst([]); setInstSaved(false); }}
-                    className="text-xs text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
-                    Clear all
-                  </button>
-                )}
-                <button
-                  type="button" onClick={saveAllowedInstallments} disabled={instSaving}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer disabled:opacity-50 ml-auto"
-                  style={{ background: '#2e9f82' }}
-                >
-                  {instSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  {instSaving ? 'Saving…' : 'Save Plans'}
-                </button>
-              </div>
-            </div>
-
-            {/* Rent VAT collection */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="mb-4">
-                <h2 className="font-semibold text-base text-[#1a1916]">Rent VAT collection</h2>
-                <p className="text-xs text-[#9b9890] mt-0.5">
-                  How the 5% VAT on VATable (commercial / industrial) rent is collected. Rent and fee
-                  cheques are always <strong>net</strong> — VAT is a separate cheque. Rent VAT follows
-                  this setting; fee VAT (admin / Contract Registration / commission) is always one separate cheque.
-                  Applies to new contracts and renewals; VAT-exempt (residential) leases are unaffected.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {([
-                  { value: 'installment' as const, label: 'One VAT cheque per rent cheque', sub: 'Matches quarterly VAT filing' },
-                  { value: 'annual'      as const, label: 'One annual VAT cheque',          sub: 'Single annual tax invoice' },
-                ]).map(opt => {
-                  const active = vatMode === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      disabled={vatSaving}
-                      onClick={() => saveVatMode(opt.value)}
-                      className={`px-3.5 py-2 rounded-lg text-sm font-semibold border transition-colors cursor-pointer disabled:opacity-60 text-left
-                        ${active
-                          ? 'bg-[#2e9f82] border-[#2e9f82] text-white'
-                          : 'bg-white border-[#e8e6e0] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'}`}
-                    >
-                      {opt.label}
-                      <span className={`block text-[10px] font-normal ${active ? 'text-white/80' : 'text-[#9b9890]'}`}>{opt.sub}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="h-4">
-                {vatSaving && <p className="text-xs text-[#9b9890]">Saving…</p>}
-                {vatSaved && !vatSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
-              </div>
-            </div>
-
-            {/* Market rate review schedule (owner, 7 Oct 2026): "Each quarter manager will review the
-                market rates and update the rates in the unit mix before sending the renewal." Its own
-                card — the rates serve new leases and renewals alike ("keep this separate … it's for new
-                and renewal both"). Whether a period is reviewed is read off the rates actually set
-                (Units page) and shown on Units and in the Operation Plan report. */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex-1 min-w-[240px]">
-                  <h2 className="font-semibold text-base text-[#1a1916]">Market Rate Review</h2>
-                  <p className="text-xs text-[#9b9890] mt-0.5">
-                    How often the manager reviews the market rates and updates the asking rents in the unit mix, for new leases and renewals alike. A period counts as reviewed once a layout&apos;s rate is set in it — shown on the Units page and in the Operation Plan.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <select
-                    id="market-review-period"
-                    aria-label="How often"
-                    value={reviewPeriod}
-                    onChange={e => { setReviewPeriod(e.target.value as 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'); setReviewSaved(false); }}
-                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                  >
-                    <option value="monthly">Every month</option>
-                    <option value="quarterly">Every quarter</option>
-                    <option value="half_yearly">Every half-year</option>
-                    <option value="yearly">Every year</option>
-                  </select>
-                  <span className="text-[12px] text-[#6b6860]">by day</span>
-                  <input
-                    id="market-review-due-day"
-                    aria-label="Due day of the first month"
-                    type="number"
-                    min={1}
-                    max={28}
-                    step="1"
-                    value={reviewDueDay}
-                    onChange={e => { setReviewDueDay(e.target.value); setReviewSaved(false); }}
-                    className="w-20 text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveMarketRateReview}
-                    disabled={reviewSaving}
-                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
-                    style={{ background: '#2e9f82' }}
-                  >
-                    {reviewSaving ? 'Saving…' : 'Save'}
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
-                {(() => {
-                  const day = Number(reviewDueDay) || 15;
-                  const months = reviewPeriod === 'quarterly' ? ['Jan', 'Apr', 'Jul', 'Oct'] : reviewPeriod === 'half_yearly' ? ['Jan', 'Jul'] : ['Jan'];
-                  return <p className="text-xs text-[#6b6860]">Rates updated by <b className="text-[#1a1916]">{reviewPeriod === 'monthly' ? `day ${day} of every month` : months.map(m => `${day} ${m}`).join(' · ')}</b>.</p>;
-                })()}
-                {reviewError && <p className="text-xs text-red-600">{reviewError}</p>}
-                {reviewSaved && !reviewSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
-              </div>
-            </div>
-
-            {/* Bills from email (0382/0385). Owner, 8 Oct 2026: the bills were filed after every
-                mailbox check — "it should not be each 5 minutes, let's have some flexible time to
-                sync". The landlord picks how often the mailbox is checked for bills; the AMC page
-                shows the last and next check and has a "Check now" button. */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex-1 min-w-[240px]">
-                  <h2 className="font-semibold text-base text-[#1a1916]">Bills from Email</h2>
-                  <p className="text-xs text-[#9b9890] mt-0.5">
-                    How often the connected mailbox is checked for DEWA and e&amp; bills, which are then filed on the AMC contract holding the account number. The AMC page shows the last and next check and can check at once.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[12px] text-[#6b6860]">Check</span>
-                  <select
-                    id="bills-email-every"
-                    aria-label="How often the mailbox is checked for bills"
-                    value={billsEvery}
-                    onChange={e => { setBillsEvery(e.target.value); setBillsSaved(false); }}
-                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                  >
-                    <option value="1">Every hour</option>
-                    <option value="3">Every 3 hours</option>
-                    <option value="6">Every 6 hours</option>
-                    <option value="12">Every 12 hours</option>
-                    <option value="24">Once a day</option>
-                    <option value="168">Once a week</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={saveBillsFromEmail}
-                    disabled={billsSaving}
-                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
-                    style={{ background: '#2e9f82' }}
-                  >
-                    {billsSaving ? 'Saving…' : 'Save'}
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
-                <p className="text-xs text-[#6b6860]">Bills are filed on their contracts <b className="text-[#1a1916]">{billsEvery === '1' ? 'every hour' : billsEvery === '24' ? 'once a day' : billsEvery === '168' ? 'once a week' : `every ${billsEvery} hours`}</b>.</p>
-                {billsError && <p className="text-xs text-red-600">{billsError}</p>}
-                {billsSaved && !billsSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
-              </div>
-            </div>
-
-            {/* Reminders to WhatsApp (0386). Owner, 8 Oct 2026: "Let's have reminders from AMC currently …
-                Account, Bill, Due date, Link to pay." The AMC bills reminder is posted to the chosen group
-                at the chosen time through the portal's own WhatsApp line; the preview is the exact text. */}
-            <div className="bg-white rounded-2xl p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex-1 min-w-[240px]">
-                  <h2 className="font-semibold text-base text-[#1a1916]">WhatsApp Reminders</h2>
-                  <p className="text-xs text-[#9b9890] mt-0.5">
-                    Posted once a day to one of your WhatsApp groups: the AMC bills to pay (account, bill, due date and a link to pay), then, when there are any, the contracts awaiting your signature with your signing link. Pick the group and the time; the text below is what goes out.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <select
-                    id="reminders-group"
-                    aria-label="WhatsApp group"
-                    value={remChat}
-                    onChange={e => { setRemChat(e.target.value); setRemSaved(false); }}
-                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82] max-w-[260px]"
-                  >
-                    <option value="">Off — no group</option>
-                    {remGroups.map(g => <option key={g.id} value={String(g.id)}>{g.name}</option>)}
-                  </select>
-                  <span className="text-[12px] text-[#6b6860]">at</span>
-                  <input
-                    id="reminders-time"
-                    aria-label="Time of day"
-                    type="time"
-                    value={remTime}
-                    onChange={e => { setRemTime(e.target.value); setRemSaved(false); }}
-                    className="text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveReminders}
-                    disabled={remSaving}
-                    className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
-                    style={{ background: '#2e9f82' }}
-                  >
-                    {remSaving ? 'Saving…' : 'Save'}
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
-                <p className="text-xs text-[#6b6860]">
-                  {remChat ? <>Posted to <b className="text-[#1a1916]">{remGroups.find(g => String(g.id) === remChat)?.name ?? 'the group'}</b> every day at <b className="text-[#1a1916]">{remTime}</b> Dubai time.</> : 'Off until a group is picked.'}
-                  {remPreview?.last && <> Last post {new Date(remPreview.last.at).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}{remPreview.last.chatName ? ` to ${remPreview.last.chatName}` : ''}: {remPreview.last.status === 'sent' ? 'posted' : `not sent${remPreview.last.error ? ` — ${remPreview.last.error}` : ''}`}.</>}
-                </p>
-                {remError && <p className="text-xs text-red-600">{remError}</p>}
-                {remSaved && !remSaving && <p className="text-xs text-[#2e9f82]">Saved.</p>}
-              </div>
-              {remPreview && (
-                <div className="mt-4 rounded-xl border border-[#e8e6e0] bg-[#f6f5f0] p-4">
-                  <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-                    <p className="text-xs font-semibold text-[#1a1916]">AMC bills reminder for today — {remPreview.bills} {remPreview.bills === 1 ? 'bill' : 'bills'}{remPreview.overdue ? `, ${remPreview.overdue} overdue` : ''}</p>
-                    <div className="flex items-center gap-2">
-                      {remSendNote && <span className="text-xs text-[#6b6860]">{remSendNote}</span>}
-                      <button type="button" onClick={sendReminderNow} disabled={remSending || !remChat}
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium border border-[#2e9f82] text-[#2e9f82] bg-white cursor-pointer disabled:opacity-50">
-                        {remSending ? 'Sending…' : 'Send now'}
-                      </button>
-                    </div>
-                  </div>
-                  <pre id="reminders-preview" className="text-[12.5px] leading-relaxed whitespace-pre-wrap break-words font-sans text-[#1a1916] m-0">{remPreview.message}</pre>
-                </div>
-              )}
-              {remPreview?.signatures && (
-                <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#f6f5f0] p-4">
-                  <p className="text-xs font-semibold text-[#1a1916] mb-2">Second message — {remPreview.signatures.count} {remPreview.signatures.count === 1 ? 'contract' : 'contracts'} awaiting your signature. The link is your own signing link; a fresh one is issued when the message is posted if the last one has expired.</p>
-                  <pre id="reminders-signatures-preview" className="text-[12.5px] leading-relaxed whitespace-pre-wrap break-words font-sans text-[#1a1916] m-0">{remPreview.signatures.message}</pre>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Contract type switcher */}
-          <div className="grid grid-cols-2 gap-2 p-1.5 bg-white border border-[#e6ebe7] rounded-[14px] mb-5">
-            {([
-              { value: 'new'     as ContractType, label: 'New contract',     tag: 'All fees',  desc: 'First-time lease for a unit. Includes the refundable security deposit.' },
-              { value: 'renewal' as ContractType, label: 'Renewal contract', tag: 'No deposit', desc: 'Renewing an existing lease. Security deposit carries over — only fees apply.' },
-            ]).map(opt => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setContractType(opt.value)}
-                className={`flex gap-3 items-start text-left px-4 py-3.5 rounded-[10px] cursor-pointer transition-colors ${contractType === opt.value ? 'bg-[#e7f5f0]' : 'hover:bg-[#f6f7f4]'}`}
-              >
-                <span className={`flex-shrink-0 w-[18px] h-[18px] rounded-full border flex items-center justify-center mt-0.5 transition-colors ${contractType === opt.value ? 'border-[#2e9f82] bg-[#2e9f82]' : 'border-[#e6ebe7] bg-white'}`}>
-                  {contractType === opt.value && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                </span>
-                <span>
-                  <span className={`font-bold text-[14.5px] flex items-center gap-2 flex-wrap ${contractType === opt.value ? 'text-[#1f7e66]' : 'text-[#0e1a16]'}`}>
-                    {opt.label}
-                    <span className="text-[10.5px] font-bold uppercase tracking-[.05em] px-1.5 py-0.5 rounded-full border border-[#e6ebe7] bg-white text-[#1f7e66]">
-                      {opt.tag}
-                    </span>
-                  </span>
-                  <span className="block text-[12.5px] text-[#6b7a74] mt-0.5 leading-[1.4]">{opt.desc}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {/* Two-column layout */}
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_380px] gap-5 items-start">
-            {/* Left: fees card */}
-            <div className="bg-white border border-[#e6ebe7] rounded-[14px] overflow-hidden">
-              {/* Card header */}
-              <div className="flex justify-between items-center gap-4 px-6 py-[18px] border-b border-[#eef1ee] flex-wrap">
-                <div>
-                  <h2 className="font-bold text-[16px] text-[#0e1a16]" style={{ letterSpacing: '-0.01em' }}>
-                    {contractType === 'new' ? 'New Contract Fees' : 'Renewal Contract Fees'}
-                  </h2>
-                  <p className="text-[13px] text-[#6b7a74] mt-0.5">Customise each fee — UpNow defaults follow standard UAE practice.</p>
-                </div>
-                {/* Property type segmented */}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-[13px] font-semibold text-[#2b3a34]">Property type</span>
-                  <div className="inline-flex p-[3px] bg-white border border-[#e6ebe7] rounded-[10px] gap-px">
-                    {FEE_TAB_CATEGORIES.map(cat => (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => { setFeeTab(cat); setFeesSaved(false); }}
-                        className={`px-3.5 py-[7px] rounded-[7px] text-[13px] font-semibold cursor-pointer flex items-center gap-1.5 transition-all ${
-                          feeTab === cat ? 'bg-[#0e1a16] text-white' : 'text-[#6b7a74] hover:text-[#0e1a16]'
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full opacity-50 ${feeTab === cat ? 'bg-white' : 'bg-current'}`} />
-                        {categoryDisplayLabel(cat)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Mixed-use explainer — there is no separate mixed-use rate; a
-                  mixed-use building's units are priced per unit against these
-                  Residential / Commercial rules (resolved from the unit type). */}
-              <div className="mx-6 mt-3.5 flex gap-3 items-start p-3.5 rounded-[12px] border border-[#dbe7e2]" style={{ background: '#f4f9f7' }}>
-                <span className="flex-shrink-0 w-[22px] h-[22px] rounded-full flex items-center justify-center font-extrabold text-[12px] text-[#1f7a5e]" style={{ background: '#cdeadf' }}>i</span>
-                <p className="text-[13px] text-[#2b4a40] leading-[1.45]">
-                  <strong className="text-[#194437]">Mixed-use buildings</strong> use these rules per unit — a residential unit follows your <strong>Residential</strong> rates (rent VAT-exempt) and a commercial unit follows your <strong>Commercial</strong> rates (5% rent VAT). There is no separate mixed-use rate to set.
-                </p>
-              </div>
-
-              {/* Renewal banner */}
-              {contractType === 'renewal' && (
-                <div className="mx-6 mt-3.5 flex gap-3 items-start p-3.5 rounded-[12px] border border-[#f3e1bc]" style={{ background: 'linear-gradient(180deg,#fdf3e3 0%,#fef9ec 100%)' }}>
-                  <span className="flex-shrink-0 w-[22px] h-[22px] rounded-full flex items-center justify-center font-extrabold text-[12px] text-[#a85b15]" style={{ background: '#f3d08a' }}>!</span>
-                  <p className="text-[13px] text-[#76480f] leading-[1.45]">
-                    <strong className="text-[#5a3608]">Renewal logic:</strong> the refundable security deposit is collected once on the original contract and carries forward, so it&apos;s excluded here. Update only the fees that should re-charge on renewal.
-                  </p>
-                </div>
-              )}
-
-              {/* Phase 6 — Annual rent increment default. Pre-fills the New
-                  Annual Rent field on the Propose Renewal modal. RP can still
-                  override per renewal. Lives here (Fee Rules → Renewal) because
-                  that's where every other renewal-only knob lives. */}
-              {contractType === 'renewal' && (
-                <div className="mx-6 mt-3.5 p-4 rounded-[12px] border border-[#e8e6e0] bg-[#fbfbf8]">
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="flex-1 min-w-[220px]">
-                      <h3 className="text-[13px] font-semibold text-[#1a1916]">Annual rent increment</h3>
-                      <p className="text-[11px] text-[#6b6860] mt-0.5 leading-snug">
-                        When you open Propose Renewal, the New Annual Rent field starts at the previous rent bumped by this percentage.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="relative">
-                        <input
-                          id="renewal-inc-pct"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="0.5"
-                          value={renewalIncPct}
-                          onChange={e => { setRenewalIncPct(e.target.value); setRenewalIncSaved(false); }}
-                          placeholder="0"
-                          className="w-24 text-sm pl-3 pr-8 py-2 border border-[#e8e6e0] rounded-xl bg-white focus:outline-none focus:border-[#2e9f82]"
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#9b9890]">%</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={saveRenewalIncrement}
-                        disabled={renewalIncSaving}
-                        className="px-3 py-2 rounded-xl text-xs font-medium text-white cursor-pointer disabled:opacity-50"
-                        style={{ background: '#2e9f82' }}
-                      >
-                        {renewalIncSaving ? 'Saving…' : 'Save'}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 mt-2 flex-wrap">
-                    {renewalIncPct && !Number.isNaN(Number(renewalIncPct)) && Number(renewalIncPct) > 0 ? (
-                      <p className="text-[11px] text-[#6b6860]">
-                        Preview: AED {previewRent.toLocaleString('en-AE')} →{' '}
-                        <b className="text-[#1a1916]">AED {Math.round(previewRent * (1 + Number(renewalIncPct) / 100)).toLocaleString('en-AE')}</b>
-                      </p>
-                    ) : <span />}
-                    {renewalIncError && <p className="text-[11px] text-red-600">{renewalIncError}</p>}
-                    {renewalIncSaved && !renewalIncSaving && <p className="text-[11px] text-[#2e9f82]">Saved.</p>}
-                  </div>
-                </div>
-              )}
-
-              {/* Fee rows */}
-              {feesLoading ? (
-                <div className="flex items-center gap-3 py-10 justify-center text-[#6b7a74]">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span className="text-sm">Loading…</span>
-                </div>
-              ) : (
-                <div className={contractType === 'renewal' ? 'mt-3.5' : ''}>
-                  {FEE_ORDER.map(ft => (
-                    <FeeRow
-                      key={ft}
-                      rule={feeRules[ft]}
-                      rent={previewRent}
-                      onChange={r => setRule(ft, r)}
-                      isRenewal={contractType === 'renewal'}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Footer */}
-              <div className="flex justify-between items-center gap-3 px-6 py-3.5 border-t border-[#eef1ee] flex-wrap" style={{ background: '#fcfcfa' }}>
-                <span className="text-[12px] text-[#6b7a74]">
-                  Changes apply to future contracts only — existing leases are unaffected.
-                </span>
-                <div className="flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={loadDefaults}
-                    className="flex items-center gap-2 px-3.5 py-2.5 rounded-[9px] text-[13.5px] font-semibold text-[#2b3a34] bg-transparent cursor-pointer hover:bg-[#f6f7f4] transition-colors"
-                  >
-                    <RotateCcw size={13} /> Reset to UAE defaults
-                  </button>
-                  <button
-                    type="button"
-                    disabled={feesSaving}
-                    onClick={handleSaveFees}
-                    className="flex items-center gap-2 px-3.5 py-2.5 rounded-[9px] text-[13.5px] font-semibold text-white cursor-pointer disabled:opacity-50"
-                    style={{ background: '#2e9f82' }}
-                  >
-                    {feesSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                    {feesSaving ? 'Saving…' : 'Save changes'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: preview panel */}
-            <div className="xl:sticky xl:top-6">
+            <div className="gx xl:sticky xl:top-4">
               <FeePreviewPanel
                 rules={feeRules}
                 rent={previewRent}
@@ -2775,120 +2284,354 @@ export function RpSettings({ view = 'settings' }: { view?: 'settings' | 'profile
               />
             </div>
           </div>
-        </div>
+
+          {/* Contract scheduling */}
+          <div className="gx gx-cols gx-cols-2e">
+            <form onSubmit={handleSaveDays} id="rules-start-days" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Contract Start Days" sub="Days of the month a contract can start">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    Customers will only be able to pick these days in the booking calendar. Leave empty to allow any date.
+                  </Lede>
+                  <DayChips days={preferredDays} onToggle={togglePreferredDay} label="Contract start days" />
+                  {preferredDays.length > 0 && (
+                    <Lede style={{ marginTop: 10, color: 'var(--ms-primary-dark)' }}>
+                      Selected: {preferredDays.map(ordinal).join(', ')} of each month
+                    </Lede>
+                  )}
+                  <CardFoot note={<SaveNote error={daysError} saved={daysSaved && !daysSaving} />}>
+                    {preferredDays.length > 0 && <Btn size="sm" variant="ghost" onClick={() => { setPreferredDays([]); setDaysSaved(false); }}>Clear all</Btn>}
+                    <SaveBtn type="submit" saving={daysSaving} label="Save Start Days" />
+                  </CardFoot>
+                </div>
+              </Card>
+            </form>
+
+            <form onSubmit={handleSaveChequeDays} id="rules-cheque-days" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Cheque Due Days" sub="Days of the month installments fall on">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    Select the days your cheque / installment payments should fall on (e.g. 1st, 10th, 25th). Auto-generated payment plans snap each recurring cheque to the nearest of these days, so collections land on a consistent day every period. Leave empty to use the contract start day.
+                  </Lede>
+                  <DayChips days={chequeDays} onToggle={toggleChequeDay} label="Cheque due days" />
+                  {chequeDays.length > 0 && (
+                    <Lede style={{ marginTop: 10, color: 'var(--ms-primary-dark)' }}>
+                      Cheques due on the {chequeDays.map(ordinal).join(', ')} of each period
+                    </Lede>
+                  )}
+                  <CardFoot note={<SaveNote error={chequeError} saved={chequeSaved && !chequeSaving} />}>
+                    {chequeDays.length > 0 && <Btn size="sm" variant="ghost" onClick={() => { setChequeDays([]); setChequeSaved(false); }}>Clear all</Btn>}
+                    <SaveBtn type="submit" saving={chequeSaving} label="Save Cheque Days" />
+                  </CardFoot>
+                </div>
+              </Card>
+            </form>
+          </div>
+
+          {/* Penalty & charge rules. Early Termination (months of rent) and Late Move-out
+              (daily prorate) carry purpose-built modes; the others are flat / %. */}
+          <div className="gx" id="rules-penalties" style={{ scrollMarginTop: 16 }}>
+            <Card title="Penalty & charge rules" sub="Seeded as editable deductions at settlement and as contract charges. Each rule saves on its own.">
+              <div className="gx-tbl-scroll">
+                <table className="gx-tbl" style={{ minWidth: 900 }}>
+                  <thead>
+                    <tr><th>Rule</th><th>On</th><th>Charged as</th><th>Amount</th><th className="act">Save</th></tr>
+                  </thead>
+                  <tbody>
+                    {PENALTY_RULES.map(cfg => (
+                      <PenaltyRow
+                        key={cfg.key}
+                        cfg={cfg}
+                        state={penalties[cfg.key]}
+                        saving={penaltySavingKey === cfg.key}
+                        saved={penaltySavedKey === cfg.key}
+                        error={penaltyErrorKey === cfg.key ? penaltyErrorMsg : null}
+                        onChange={(s) => updatePenalty(cfg.key, s)}
+                        onSave={() => savePenaltyRule(cfg.key)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+
+          <div className="gx gx-cols gx-cols-2e">
+            {/* Payment Installment Plans */}
+            <div id="rules-installments" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Payment Installment Plans" sub="The cheque-split plans you offer">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    Only the selected plans appear wherever a payment schedule is set up — your contract forms, the customer booking flow and the public listing. Select none to allow every plan.
+                  </Lede>
+                  <div className="gx-chips" role="group" aria-label="Installment plans offered">
+                    {INSTALLMENT_PLANS.map(p => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        className="gx-chip"
+                        aria-pressed={allowedInst.includes(p.value)}
+                        onClick={() => {
+                          setAllowedInst(prev =>
+                            prev.includes(p.value) ? prev.filter(v => v !== p.value) : [...prev, p.value].sort((a, b) => a - b),
+                          );
+                          setInstSaved(false);
+                        }}
+                      >
+                        {p.value} · {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Lede style={{ marginTop: 10, ...(allowedInst.length ? { color: 'var(--ms-primary-dark)' } : null) }}>
+                    {allowedInst.length === 0
+                      ? 'All plans available — no restriction.'
+                      : `Offered: ${allowedInst.map(v => installmentLabel(v)).join(', ')}.`}
+                  </Lede>
+                  <CardFoot note={<SaveNote error={instError} saved={instSaved && !instSaving} />}>
+                    {allowedInst.length > 0 && <Btn size="sm" variant="ghost" onClick={() => { setAllowedInst([]); setInstSaved(false); }}>Clear all</Btn>}
+                    <SaveBtn saving={instSaving} onClick={saveAllowedInstallments} label="Save Plans" />
+                  </CardFoot>
+                </div>
+              </Card>
+            </div>
+
+            {/* Rent VAT collection — saved the moment an option is picked */}
+            <div id="rules-rent-vat" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Rent VAT collection" sub="Saved as soon as you pick an option">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    How the 5% VAT on VATable (commercial / industrial) rent is collected. Rent and fee
+                    cheques are always <strong>net</strong> — VAT is a separate cheque. Rent VAT follows
+                    this setting; fee VAT (admin / Contract Registration / commission) is always one separate cheque.
+                    Applies to new contracts and renewals; VAT-exempt (residential) leases are unaffected.
+                  </Lede>
+                  <div className="gx-chips" role="group" aria-label="Rent VAT collection">
+                    {([
+                      { value: 'installment' as const, label: 'One VAT cheque per rent cheque', sub: 'Matches quarterly VAT filing' },
+                      { value: 'annual'      as const, label: 'One annual VAT cheque',          sub: 'Single annual tax invoice' },
+                    ]).map(opt => {
+                      const active = vatMode === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className="gx-chip"
+                          aria-pressed={active}
+                          disabled={vatSaving}
+                          onClick={() => saveVatMode(opt.value)}
+                          style={{ borderRadius: 10, textAlign: 'left', padding: '7px 12px' }}
+                        >
+                          {opt.label}
+                          <span style={{ display: 'block', fontSize: 10.5, fontWeight: 500, opacity: 0.8 }}>{opt.sub}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ minHeight: 18, marginTop: 8 }}>
+                    {vatSaving && <Lede>Saving…</Lede>}
+                    <SaveNote saved={vatSaved && !vatSaving} />
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          <div className="gx gx-cols gx-cols-2e">
+            {/* Market rate review schedule (owner, 7 Oct 2026). Its own card — the rates serve
+                new leases and renewals alike. Whether a period is reviewed is read off the rates
+                actually set (Units page) and shown on Units and in the Operation Plan report. */}
+            <div id="rules-market-review" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Market Rate Review" sub="For new leases and renewals alike">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    How often the manager reviews the market rates and updates the asking rents in the unit mix. A period counts as reviewed once a layout&apos;s rate is set in it — shown on the Units page and in the Operation Plan.
+                  </Lede>
+                  <div className="gx-two">
+                    <Field label="How often" htmlFor="market-review-period">
+                      <select
+                        id="market-review-period"
+                        className="gx-sel"
+                        value={reviewPeriod}
+                        onChange={e => { setReviewPeriod(e.target.value as 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'); setReviewSaved(false); }}
+                      >
+                        <option value="monthly">Every month</option>
+                        <option value="quarterly">Every quarter</option>
+                        <option value="half_yearly">Every half-year</option>
+                        <option value="yearly">Every year</option>
+                      </select>
+                    </Field>
+                    <Field label="By day (of the first month)" htmlFor="market-review-due-day" hint="1 – 28">
+                      <input
+                        id="market-review-due-day"
+                        className="gx-inp"
+                        type="number"
+                        min={1}
+                        max={28}
+                        step="1"
+                        value={reviewDueDay}
+                        onChange={e => { setReviewDueDay(e.target.value); setReviewSaved(false); }}
+                      />
+                    </Field>
+                  </div>
+                  {(() => {
+                    const day = Number(reviewDueDay) || 15;
+                    const months = reviewPeriod === 'quarterly' ? ['Jan', 'Apr', 'Jul', 'Oct'] : reviewPeriod === 'half_yearly' ? ['Jan', 'Jul'] : ['Jan'];
+                    return <Evid>Rates updated by <strong>{reviewPeriod === 'monthly' ? `day ${day} of every month` : months.map(m => `${day} ${m}`).join(' · ')}</strong>.</Evid>;
+                  })()}
+                  <CardFoot note={<SaveNote error={reviewError} saved={reviewSaved && !reviewSaving} />}>
+                    <SaveBtn saving={reviewSaving} onClick={saveMarketRateReview} label="Save" />
+                  </CardFoot>
+                </div>
+              </Card>
+            </div>
+
+            {/* Bills from email (0382/0385) — how often the mailbox is checked for bills;
+                the AMC page shows the last and next check and has a "Check now" button. */}
+            <div id="rules-bills" style={{ scrollMarginTop: 16, minWidth: 0 }}>
+              <Card title="Bills from Email" sub="DEWA and e& bills filed on AMC contracts">
+                <div className="gx-pad">
+                  <Lede style={{ marginBottom: 10 }}>
+                    How often the connected mailbox is checked for DEWA and e&amp; bills, which are then filed on the AMC contract holding the account number. The AMC page shows the last and next check and can check at once.
+                  </Lede>
+                  <Field label="Check the mailbox" htmlFor="bills-email-every">
+                    <select
+                      id="bills-email-every"
+                      className="gx-sel"
+                      value={billsEvery}
+                      onChange={e => { setBillsEvery(e.target.value); setBillsSaved(false); }}
+                    >
+                      <option value="1">Every hour</option>
+                      <option value="3">Every 3 hours</option>
+                      <option value="6">Every 6 hours</option>
+                      <option value="12">Every 12 hours</option>
+                      <option value="24">Once a day</option>
+                      <option value="168">Once a week</option>
+                    </select>
+                  </Field>
+                  <Evid>Bills are filed on their contracts <strong>{billsEvery === '1' ? 'every hour' : billsEvery === '24' ? 'once a day' : billsEvery === '168' ? 'once a week' : `every ${billsEvery} hours`}</strong>.</Evid>
+                  <CardFoot note={<SaveNote error={billsError} saved={billsSaved && !billsSaving} />}>
+                    <SaveBtn saving={billsSaving} onClick={saveBillsFromEmail} label="Save" />
+                  </CardFoot>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          {/* Reminders to WhatsApp (0386) — the AMC bills reminder (and contracts awaiting
+              signature) posted to the chosen group at the chosen time; the preview is the exact text. */}
+          <div className="gx" id="rules-reminders" style={{ scrollMarginTop: 16 }}>
+            <Card title="WhatsApp Reminders" sub="Posted once a day to one of your WhatsApp groups">
+              <div className="gx-pad">
+                <Lede style={{ marginBottom: 10 }}>
+                  The AMC bills to pay (account, bill, due date and a link to pay), then, when there are any, the contracts awaiting your signature with your signing link. Pick the group and the time; the text below is what goes out.
+                </Lede>
+                <div className="gx-two">
+                  <Field label="WhatsApp group" htmlFor="reminders-group">
+                    <select
+                      id="reminders-group"
+                      className="gx-sel"
+                      value={remChat}
+                      onChange={e => { setRemChat(e.target.value); setRemSaved(false); }}
+                    >
+                      <option value="">Off — no group</option>
+                      {remGroups.map(g => <option key={g.id} value={String(g.id)}>{g.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Time of day (Dubai)" htmlFor="reminders-time">
+                    <input
+                      id="reminders-time"
+                      className="gx-inp"
+                      type="time"
+                      value={remTime}
+                      onChange={e => { setRemTime(e.target.value); setRemSaved(false); }}
+                    />
+                  </Field>
+                </div>
+                <Evid>
+                  {remChat ? <>Posted to <strong>{remGroups.find(g => String(g.id) === remChat)?.name ?? 'the group'}</strong> every day at <strong>{remTime}</strong> Dubai time.</> : 'Off until a group is picked.'}
+                  {remPreview?.last && <> Last post {new Date(remPreview.last.at).toLocaleString('en-AE', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}{remPreview.last.chatName ? ` to ${remPreview.last.chatName}` : ''}: {remPreview.last.status === 'sent' ? 'posted' : `not sent${remPreview.last.error ? ` — ${remPreview.last.error}` : ''}`}.</>}
+                </Evid>
+                <CardFoot note={<SaveNote error={remError} saved={remSaved && !remSaving} />}>
+                  <SaveBtn saving={remSaving} onClick={saveReminders} label="Save" />
+                </CardFoot>
+
+                {remPreview && (
+                  <div style={{ marginTop: 14, border: '1px solid var(--ms-border)', borderRadius: 10, background: 'var(--ms-surface-2)', padding: '11px 13px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                      <p style={{ fontSize: 12, fontWeight: 700 }}>AMC bills reminder for today — {remPreview.bills} {remPreview.bills === 1 ? 'bill' : 'bills'}{remPreview.overdue ? `, ${remPreview.overdue} overdue` : ''}</p>
+                      <div className="gx-btn-row">
+                        {remSendNote && <span role="status" style={{ fontSize: 11.5, color: 'var(--ms-ink-3)' }}>{remSendNote}</span>}
+                        <Btn size="sm" onClick={sendReminderNow} disabled={remSending || !remChat} title={!remChat ? 'Pick a group first' : undefined}>
+                          <Send size={13} aria-hidden /> {remSending ? 'Sending…' : 'Send now'}
+                        </Btn>
+                      </div>
+                    </div>
+                    <pre id="reminders-preview" style={{ margin: 0, fontFamily: 'inherit', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--ms-ink)' }}>{remPreview.message}</pre>
+                  </div>
+                )}
+                {remPreview?.signatures && (
+                  <div style={{ marginTop: 10, border: '1px solid var(--ms-border)', borderRadius: 10, background: 'var(--ms-surface-2)', padding: '11px 13px' }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Second message — {remPreview.signatures.count} {remPreview.signatures.count === 1 ? 'contract' : 'contracts'} awaiting your signature. The link is your own signing link; a fresh one is issued when the message is posted if the last one has expired.</p>
+                    <pre id="reminders-signatures-preview" style={{ margin: 0, fontFamily: 'inherit', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--ms-ink)' }}>{remPreview.signatures.message}</pre>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        </>
       )}
 
       {/* POA holder invite popup — editable permissions */}
-      {poaInviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/40" onClick={() => setPoaInviteOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8" onClick={e => e.stopPropagation()}>
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#eef0ec]">
-              <h3 className="font-semibold text-base text-[#1a1916]">Invite to act as manager</h3>
-              <button type="button" onClick={() => setPoaInviteOpen(false)} aria-label="Close" className="text-[#9b9890] hover:text-[#3d3b35] cursor-pointer">
-                <X size={18} />
-              </button>
-            </div>
+      <Modal
+        open={poaInviteOpen}
+        onClose={closePoaInvite}
+        title="Invite to act as manager"
+        width={520}
+        footer={
+          <>
+            {inviteMsg && <span role="alert" style={{ fontSize: 11.5, color: 'var(--ms-danger)', marginRight: 'auto' }}>{inviteMsg}</span>}
+            {!inviteMsg && !Object.values(poaPerms).some(Boolean) && <span style={{ fontSize: 11, color: 'var(--ms-ink-3)', marginRight: 'auto' }}>Select at least one permission.</span>}
+            <Btn onClick={closePoaInvite}>Cancel</Btn>
+            <Btn
+              variant="primary"
+              onClick={handleSendPoaInvite}
+              disabled={sendingPoaInvite || !poaPersonEmail.trim() || !Object.values(poaPerms).some(Boolean)}
+            >
+              {sendingPoaInvite ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Send size={13} aria-hidden />}
+              {sendingPoaInvite ? 'Sending…' : 'Send invitation'}
+            </Btn>
+          </>
+        }
+      >
+        <div className="gx-two">
+          <Field label="Name" htmlFor="poa-inv-name">
+            <input id="poa-inv-name" className="gx-inp" value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} placeholder="Person who signs on your behalf" />
+          </Field>
+          <Field label="Email" htmlFor="poa-inv-email">
+            <input id="poa-inv-email" className="gx-inp" value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} placeholder="signatory@example.com" />
+          </Field>
+        </div>
 
-            <div className="px-6 py-5 max-h-[68vh] overflow-y-auto">
-              {/* Recipient */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-                <div>
-                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Name</label>
-                  <input value={authorizedSignatoryName} onChange={e => { setAuthorizedSignatoryName(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="Person who signs on your behalf" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-[#6b6860] block mb-1">Email</label>
-                  <input value={poaPersonEmail} onChange={e => { setPoaPersonEmail(e.target.value); setPoaSaved(false); }} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#2e9f82]" placeholder="signatory@example.com" />
-                </div>
-              </div>
-
-              {/* Permissions */}
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-xs font-semibold text-[#1a1916]">Permissions</p>
-                <button type="button" onClick={() => setPoaPerms({ ...POA_INVITE_DEFAULTS })} className="text-[11px] text-[#2e9f82] underline cursor-pointer hover:text-[#1f7e66]">
-                  Reset to POA defaults
-                </button>
-              </div>
-              <div className="space-y-4">
-                {PERM_GROUPS.map(group => (
-                  <div key={group.label}>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-[#9b9890] mb-1.5">{group.label}</p>
-                    <div className="space-y-2">
-                      {group.perms.map(perm => (
-                        <div key={perm.key} className="flex items-center justify-between gap-3">
-                          <span className="text-[13px] text-[#3d3b35]">{perm.label}</span>
-                          <Toggle value={!!poaPerms[perm.meta]} onChange={v => setPoaPerms(p => ({ ...p, [perm.meta]: v }))} />
-                        </div>
-                      ))}
-                    </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '4px 0 8px' }}>
+          <p style={{ fontSize: 12.5, fontWeight: 700 }}>Permissions</p>
+          <Btn size="xs" variant="ghost" onClick={() => setPoaPerms({ ...POA_INVITE_DEFAULTS })}>Reset to POA defaults</Btn>
+        </div>
+        <div style={{ display: 'grid', gap: 14 }}>
+          {PERM_GROUPS.map(group => (
+            <div key={group.label}>
+              <div className="gx-lb">{group.label}</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {group.perms.map(perm => (
+                  <div key={perm.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--ms-ink-2)' }}>{perm.label}</span>
+                    <Toggle value={!!poaPerms[perm.meta]} onChange={v => setPoaPerms(p => ({ ...p, [perm.meta]: v }))} label={perm.label} />
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#eef0ec]">
-              {inviteMsg && <p className="text-xs text-red-600 mr-auto">{inviteMsg}</p>}
-              {!Object.values(poaPerms).some(Boolean) && <p className="text-[11px] text-[#9b9890] mr-auto">Select at least one permission.</p>}
-              <button type="button" onClick={() => setPoaInviteOpen(false)} className="px-4 py-2 rounded-lg text-sm font-medium border border-[#e8e6e0] text-[#3d3b35] cursor-pointer hover:bg-[#f4f3ef]">
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSendPoaInvite}
-                disabled={sendingPoaInvite || !poaPersonEmail.trim() || !Object.values(poaPerms).some(Boolean)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: '#2e9f82' }}
-              >
-                {sendingPoaInvite ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                {sendingPoaInvite ? 'Sending…' : 'Send invitation'}
-              </button>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
-
-      {/* Invite Modal */}
-      {showInvite && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowInvite(false)}>
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl mx-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-lg text-[#1a1916]">Invite Team Member</h3>
-              <button onClick={() => setShowInvite(false)} className="cursor-pointer text-[#6b6860]"><X size={20} /></button>
-            </div>
-            <form onSubmit={handleSendInvite} className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">Full Name</label>
-                <input value={invName} onChange={e => setInvName(e.target.value)} required className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm" placeholder="Jane Smith" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">Email</label>
-                <input type="email" value={invEmail} onChange={e => setInvEmail(e.target.value)} required className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm" placeholder="jane@company.ae" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">Role</label>
-                <select value={invRole} onChange={e => setInvRole(e.target.value)} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm bg-white">
-                  <option value="asset_manager">Asset Manager</option>
-                  <option value="viewing_agent">Viewing Agent</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[#6b6860] block mb-1">Note (optional)</label>
-                <textarea value={invNote} onChange={e => setInvNote(e.target.value)} rows={2} className="w-full border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm resize-none" placeholder="Responsible for Marina cluster" />
-              </div>
-              <div className="flex gap-3 pt-1">
-                <button type="button" onClick={() => setShowInvite(false)} className="flex-1 border border-[#e8e6e0] text-[#3d3b35] rounded-lg py-2.5 text-sm font-medium cursor-pointer hover:bg-[#f4f3ef]">Cancel</button>
-                <button type="submit" disabled={sendingInvite} className="flex-1 flex items-center justify-center gap-2 text-sm text-white rounded-lg py-2.5 font-medium cursor-pointer disabled:opacity-50" style={{ background: '#2e9f82' }}>
-                  {sendingInvite ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                  {sendingInvite ? 'Sending…' : 'Send Invite'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      </Modal>
       </div>
       </div>
     </div>

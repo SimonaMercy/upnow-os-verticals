@@ -9,9 +9,9 @@
  * built from the same query rendering the same event differently.
  *
  * Every token is lifted from the canvas rather than approximated:
- * page #fafaf8 · panels #fff · rules #e8e6e0 · ink #1a1916 · mid #4f4c44 ·
- * dim #6b6860 · faint #9b9890 · jade #2e9f82 · deep #1a5a4a · amber #e8a020 ·
- * red #d43f3f. Square corners throughout; Spline Sans Mono for every control,
+ * page #f6f8f6 · panels #fff · rules #e4e9e5 · ink #14201a · mid #46534c ·
+ * dim #5f6b63 · faint #8a948d · jade #047246 · deep #0f4f36 · amber #e8a020 ·
+ * red #c2413b. Square corners throughout; Spline Sans Mono for every control,
  * figure and micro-label; Public Sans for prose.
  */
 'use client';
@@ -20,9 +20,9 @@ import { useState } from 'react';
 import { APP_TIME_ZONE } from '@/lib/datetime';
 
 /* ── tokens ───────────────────────────────────────────────────────────────── */
-export const A = '#2e9f82', DEEP = '#1a5a4a', AMB = '#e8a020', RED = '#d43f3f';
-export const INK = '#1a1916', MID = '#4f4c44', DIM = '#6b6860', FAINT = '#9b9890', LINE = '#e8e6e0';
-export const PANEL = '#fff', PAGE = '#fafaf8', RAIL = '#f9f8f6', TINT = '#edf7f3', TINT_RULE = '#cfe8dd';
+export const A = '#047246', DEEP = '#0f4f36', AMB = '#e8a020', RED = '#c2413b';
+export const INK = '#14201a', MID = '#46534c', DIM = '#5f6b63', FAINT = '#8a948d', LINE = '#e4e9e5';
+export const PANEL = '#fff', PAGE = '#f6f8f6', RAIL = '#f9f8f6', TINT = '#edf7f3', TINT_RULE = '#cfe8dd';
 export const MONO = "'Spline Sans Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 export const SANS = "'Public Sans', system-ui, sans-serif";
 
@@ -30,8 +30,8 @@ export const SANS = "'Public Sans', system-ui, sans-serif";
 export const ACTOR_COLOR: Record<string, string> = { manager: DEEP, customer: '#1f6f9c', rp: '#8a6a1e', system: FAINT };
 export const ACTOR_RGB: Record<string, string> = { manager: '46,159,130', customer: '31,111,156', rp: '212,168,32', system: '155,152,144' };
 export const ACTOR_CHIP: Record<string, [string, string, string]> = {
-  manager: ['MGR', '#1a5a4a', '#d8f2e8'], customer: ['CUS', '#1f6f9c', '#e3f0f8'],
-  rp: ['LLD', '#8a6a1e', '#fdf3dd'], system: ['SYS', '#6b6860', '#f0ede8'],
+  manager: ['MGR', '#0f4f36', '#d8efe3'], customer: ['CUS', '#1f6f9c', '#e3f0f8'],
+  rp: ['LLD', '#8a6a1e', '#fdf3dd'], system: ['SYS', '#5f6b63', '#f0ede8'],
 };
 export const ACTOR_WORD: Record<string, string> = { manager: 'manager', customer: 'customer', rp: 'landlord', system: 'system' };
 export interface Entry {
@@ -147,7 +147,7 @@ export function PeriodPicker({ preset, from, to, label, onApply }: {
         style={{ display: 'flex', gap: 9, alignItems: 'center', boxSizing: 'border-box',
           border: `1px solid ${LINE}`, background: PANEL, padding: '7px 12px', cursor: 'pointer', borderRadius: 0 }}>
         <span style={{ font: `600 11px ${MONO}`, color: A }}>{preset}</span>
-        <span style={{ font: `600 11px ${MONO}`, color: '#3d3b35' }}>{label}</span>
+        <span style={{ font: `600 11px ${MONO}`, color: '#46534c' }}>{label}</span>
         <span style={{ font: `600 9px ${MONO}`, color: FAINT }}>▼</span>
       </button>
       {open && (
@@ -249,11 +249,11 @@ export function LogTable({ entries, compact }: { entries: Entry[]; compact?: boo
           const diff = (e.changed ?? []).map((c) => `${c.field} ${c.from ?? '—'} → ${c.to ?? '—'}`).join('  ·  ');
           return (
             <tr key={e.id} onClick={() => setOpen((o) => ({ ...o, [e.id]: !o[e.id] }))}
-              style={{ borderBottom: '1px solid #f0ede8', cursor: 'pointer', background: isOpen ? '#f0faf6' : undefined }}>
+              style={{ borderBottom: '1px solid #f0ede8', cursor: 'pointer', background: isOpen ? '#eef7f2' : undefined }}>
               <td style={{ font: `500 ${compact ? 10.5 : 11}px ${MONO}`, color: DIM,
                 padding: compact ? '9px 8px 9px 20px' : '8px 10px 8px 0', whiteSpace: 'nowrap', verticalAlign: 'top' }}>{when}</td>
               <td style={{ padding: compact ? '9px 8px' : '8px 10px', verticalAlign: 'top' }}>
-                <span style={{ font: `700 9px ${MONO}`, background: '#d8f2e8', color: DEEP, padding: '3px 5px' }}>{e.lane ?? '—'}</span>
+                <span style={{ font: `700 9px ${MONO}`, background: '#d8efe3', color: DEEP, padding: '3px 5px' }}>{e.lane ?? '—'}</span>
               </td>
               <td style={{ padding: compact ? '9px 8px' : '8px 10px', verticalAlign: 'top', minWidth: compact ? 150 : undefined }}>
                 <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, letterSpacing: '-.01em',
@@ -312,7 +312,7 @@ export function FilterBar({ pad, label, hasFilter, onClear, pageLabel, page, pag
   return (
     <div style={{ position: 'sticky', top: 0, background: PANEL, zIndex: 2, display: 'flex', gap: 12,
       alignItems: 'center', padding: pad, borderBottom: `1px solid ${LINE}`, flexWrap: 'wrap' }}>
-      <p style={{ margin: 0, font: `600 10px ${MONO}`, letterSpacing: '.08em', textTransform: 'uppercase', color: '#3d3b35' }}>{label}</p>
+      <p style={{ margin: 0, font: `600 10px ${MONO}`, letterSpacing: '.08em', textTransform: 'uppercase', color: '#46534c' }}>{label}</p>
       {hasFilter && (
         <button onClick={onClear}
           style={{ border: `1px solid ${LINE}`, background: PANEL, color: DIM, font: `500 9px ${MONO}`,

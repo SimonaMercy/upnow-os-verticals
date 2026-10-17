@@ -137,7 +137,7 @@ const STATUS_COLOR: Record<string, string> = {
   active:     'bg-emerald-50 text-emerald-700 border-emerald-200',
   issued:     'bg-blue-50 text-blue-700 border-blue-200',
   pending:    'bg-amber-50 text-amber-700 border-amber-200',
-  expired:    'bg-[#f4f3ef] text-[#6b6860] border-[#e8e6e0]',
+  expired:    'bg-[#eef1ef] text-[#5f6b63] border-[#e4e9e5]',
   terminated: 'bg-red-50 text-red-700 border-red-200',
 };
 const STATUS_LABEL: Record<string, string> = {
@@ -161,9 +161,9 @@ function StatusBadge({ status }: { status: string }) {
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between items-start py-2.5 border-b border-[#f4f3ef] last:border-0">
-      <span className="text-xs text-[#9b9890] shrink-0 w-36">{label}</span>
-      <span className="text-xs font-semibold text-[#1a1916] text-right">{value ?? '—'}</span>
+    <div className="flex justify-between items-start py-2.5 border-b border-[#eef1ef] last:border-0">
+      <span className="text-xs text-[#8a948d] shrink-0 w-36">{label}</span>
+      <span className="text-xs font-semibold text-[#14201a] text-right">{value ?? '—'}</span>
     </div>
   );
 }
@@ -176,8 +176,8 @@ function SectionCard({ title, icon: Icon, children }: {
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-[#f0ede8]">
-        <Icon size={15} className="text-[#2e9f82]" />
-        <span className="text-sm font-semibold text-[#1a1916]">{title}</span>
+        <Icon size={15} className="text-[#047246]" />
+        <span className="text-sm font-semibold text-[#14201a]">{title}</span>
       </div>
       <div className="px-5 py-4">{children}</div>
     </div>
@@ -195,16 +195,16 @@ function StepRow({ num, label, state, last, children }: {
     <div className="flex gap-3.5">
       <div className="flex flex-col items-center">
         <div className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-[11px] font-bold shrink-0 ${
-          state === 'done'    ? 'bg-[#2e9f82] border-[#2e9f82] text-white' :
-          state === 'current' ? 'bg-white border-[#2e9f82] text-[#2e9f82]' :
-                                'bg-white border-[#e8e6e0] text-[#c0bdb8]'
+          state === 'done'    ? 'bg-[#047246] border-[#047246] text-white' :
+          state === 'current' ? 'bg-white border-[#047246] text-[#047246]' :
+                                'bg-white border-[#e4e9e5] text-[#c0bdb8]'
         }`}>{state === 'done' ? '✓' : num}</div>
-        {!last && <div className={`w-0.5 flex-1 min-h-[20px] mt-1 mb-1 ${state === 'done' ? 'bg-[#2e9f82]' : 'bg-[#e8e6e0]'}`} />}
+        {!last && <div className={`w-0.5 flex-1 min-h-[20px] mt-1 mb-1 ${state === 'done' ? 'bg-[#047246]' : 'bg-[#e4e9e5]'}`} />}
       </div>
       <div className={`flex-1 min-w-0 ${last ? 'pb-2' : 'pb-5'}`}>
         <p className={`text-sm font-semibold leading-tight ${
-          state === 'done'    ? 'text-[#2e9f82]' :
-          state === 'current' ? 'text-[#1a1916]' : 'text-[#c0bdb8]'
+          state === 'done'    ? 'text-[#047246]' :
+          state === 'current' ? 'text-[#14201a]' : 'text-[#c0bdb8]'
         }`}>{label}</p>
         {children}
       </div>
@@ -395,7 +395,7 @@ export default function TenantContractDetailPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#f7f6f2] flex items-center justify-center">
-        <Loader2 size={28} className="animate-spin text-[#2e9f82]" />
+        <Loader2 size={28} className="animate-spin text-[#047246]" />
       </div>
     );
   }
@@ -405,9 +405,9 @@ export default function TenantContractDetailPage() {
       <div className="min-h-screen bg-[#f7f6f2] flex items-center justify-center p-6">
         <div className="bg-white rounded-2xl p-8 max-w-sm text-center space-y-3 shadow-sm">
           <AlertCircle size={36} className="text-red-400 mx-auto" />
-          <p className="text-sm font-semibold text-[#1a1916]">Contract not found</p>
-          <p className="text-xs text-[#9b9890]">{error ?? 'Error 404'}</p>
-          <button onClick={() => router.back()} className="text-xs text-[#2e9f82] hover:underline">← Go back</button>
+          <p className="text-sm font-semibold text-[#14201a]">Contract not found</p>
+          <p className="text-xs text-[#8a948d]">{error ?? 'Error 404'}</p>
+          <button onClick={() => router.back()} className="text-xs text-[#047246] hover:underline">← Go back</button>
         </div>
       </div>
     );
@@ -419,18 +419,18 @@ export default function TenantContractDetailPage() {
     <div className="min-h-screen bg-[#f7f6f2]">
 
       {/* ── Sticky top bar ── */}
-      <div className="bg-white border-b border-[#e8e6e0] px-4 sm:px-6 py-4 sticky top-0 z-20">
+      <div className="bg-white border-b border-[#e4e9e5] px-4 sm:px-6 py-4 sticky top-0 z-20">
         <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <Link href="/dashboard/customer/contracts" className="text-[#6b6860] hover:text-[#1a1916]">
+            <Link href="/dashboard/customer/contracts" className="text-[#5f6b63] hover:text-[#14201a]">
               <ArrowLeft size={18} />
             </Link>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold text-[#1a1916]">{contract.ref}</span>
+                <span className="text-sm font-bold text-[#14201a]">{contract.ref}</span>
                 <StatusBadge status={contract.status} />
               </div>
-              <p className="text-[11px] text-[#9b9890] mt-0.5 truncate">
+              <p className="text-[11px] text-[#8a948d] mt-0.5 truncate">
                 {contract.unit.number ? `Unit ${contract.unit.number} · ` : ''}{contract.property.buildingName}
               </p>
             </div>
@@ -439,14 +439,14 @@ export default function TenantContractDetailPage() {
             <Link
               href={`/dashboard/customer/contracts/${contract.id}/print`}
               target="_blank"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e4e9e5] text-[#5f6b63] hover:text-[#14201a] hover:border-[#c5c2bc] transition-colors bg-white"
             >
               <Eye size={14} /> Preview
             </Link>
             <Link
               href={`/dashboard/customer/contracts/${contract.id}/print`}
               target="_blank"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e8e6e0] text-[#6b6860] hover:text-[#1a1916] hover:border-[#c5c2bc] transition-colors bg-white"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium border border-[#e4e9e5] text-[#5f6b63] hover:text-[#14201a] hover:border-[#c5c2bc] transition-colors bg-white"
             >
               <Download size={14} /> Download
             </Link>
@@ -454,13 +454,13 @@ export default function TenantContractDetailPage() {
               <button
                 onClick={() => setShowSignModal(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white"
-                style={{ background: '#2e9f82' }}
+                style={{ background: '#047246' }}
               >
                 <FileSignature size={14} /> Sign Contract
               </button>
             )}
             {hasTenantSigned && (
-              <span className="flex items-center gap-1.5 text-xs text-[#2e9f82] font-semibold bg-[#f0faf6] px-3 py-1.5 rounded-full border border-[#c5e8df]">
+              <span className="flex items-center gap-1.5 text-xs text-[#047246] font-semibold bg-[#eef7f2] px-3 py-1.5 rounded-full border border-[#c5e8df]">
                 <BadgeCheck size={13} /> Signed
               </span>
             )}
@@ -511,29 +511,29 @@ export default function TenantContractDetailPage() {
 
         {/* Signed success banner */}
         {signSuccess && (
-          <div className="flex items-center gap-3 bg-[#f0faf6] border border-[#c5e8df] rounded-2xl px-5 py-4">
-            <CheckCircle size={18} className="text-[#2e9f82]" />
+          <div className="flex items-center gap-3 bg-[#eef7f2] border border-[#c5e8df] rounded-2xl px-5 py-4">
+            <CheckCircle size={18} className="text-[#047246]" />
             <p className="text-sm font-semibold text-[#1a7a5a]">Contract signed successfully. Your landlord has been notified.</p>
           </div>
         )}
 
         {/* Quick-glance strip */}
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm px-5 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm px-5 py-3.5 flex flex-wrap items-center gap-x-6 gap-y-3">
           <div>
-            <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Landlord</p>
-            <p className="text-sm font-semibold text-[#1a1916]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</p>
+            <p className="text-[9px] text-[#8a948d] uppercase font-semibold tracking-wide mb-0.5">Landlord</p>
+            <p className="text-sm font-semibold text-[#14201a]">{contract.landlord.companyName ?? contract.landlord.name ?? '—'}</p>
           </div>
-          <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
+          <div className="w-px h-8 bg-[#e4e9e5] hidden sm:block" />
           <div>
-            <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Property</p>
-            <p className="text-sm font-semibold text-[#1a1916]">{contract.unit.number ? `Unit ${contract.unit.number} · ` : ''}{contract.property.buildingName ?? '—'}</p>
+            <p className="text-[9px] text-[#8a948d] uppercase font-semibold tracking-wide mb-0.5">Property</p>
+            <p className="text-sm font-semibold text-[#14201a]">{contract.unit.number ? `Unit ${contract.unit.number} · ` : ''}{contract.property.buildingName ?? '—'}</p>
           </div>
-          <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
+          <div className="w-px h-8 bg-[#e4e9e5] hidden sm:block" />
           <div>
-            <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Annual Rent</p>
-            <p className="text-sm font-bold" style={{ color: '#2e9f82' }}>
+            <p className="text-[9px] text-[#8a948d] uppercase font-semibold tracking-wide mb-0.5">Annual Rent</p>
+            <p className="text-sm font-bold" style={{ color: '#047246' }}>
               {(contract.discountAmount ?? 0) > 0 && contract.listedRent != null && (
-                <span className="text-xs font-normal text-[#9b9890] line-through mr-1.5">{fmtAed(contract.listedRent)}</span>
+                <span className="text-xs font-normal text-[#8a948d] line-through mr-1.5">{fmtAed(contract.listedRent)}</span>
               )}
               {fmtAed(contract.annualRent)}
             </p>
@@ -541,20 +541,20 @@ export default function TenantContractDetailPage() {
               <p className="text-[9px] font-semibold mt-0.5" style={{ color: '#b91c1c' }}>− {fmtAed(contract.discountAmount!)} discount</p>
             )}
             {(contract.rentVatRate ?? 0) > 0 && (
-              <p className="text-[9px] text-[#9b9890] mt-0.5">+ {fmtAed(contract.annualRent * (contract.rentVatRate ?? 0) / 100)} VAT ({contract.rentVatRate}%)</p>
+              <p className="text-[9px] text-[#8a948d] mt-0.5">+ {fmtAed(contract.annualRent * (contract.rentVatRate ?? 0) / 100)} VAT ({contract.rentVatRate}%)</p>
             )}
           </div>
-          <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
+          <div className="w-px h-8 bg-[#e4e9e5] hidden sm:block" />
           <div>
-            <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Period</p>
-            <p className="text-sm font-semibold text-[#1a1916]">{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</p>
+            <p className="text-[9px] text-[#8a948d] uppercase font-semibold tracking-wide mb-0.5">Period</p>
+            <p className="text-sm font-semibold text-[#14201a]">{fmtDate(contract.startDate)} → {fmtDate(contract.endDate)}</p>
           </div>
           {contract.numberOfInstallments != null && (
             <>
-              <div className="w-px h-8 bg-[#e8e6e0] hidden sm:block" />
+              <div className="w-px h-8 bg-[#e4e9e5] hidden sm:block" />
               <div>
-                <p className="text-[9px] text-[#9b9890] uppercase font-semibold tracking-wide mb-0.5">Cheques</p>
-                <p className="text-sm font-semibold text-[#1a1916]">{contract.numberOfInstallments}</p>
+                <p className="text-[9px] text-[#8a948d] uppercase font-semibold tracking-wide mb-0.5">Cheques</p>
+                <p className="text-sm font-semibold text-[#14201a]">{contract.numberOfInstallments}</p>
               </div>
             </>
           )}
@@ -575,13 +575,13 @@ export default function TenantContractDetailPage() {
               >
                 {/* Drawer header */}
                 <div className="px-5 py-4 border-b border-[#f0ede8] flex items-center justify-between shrink-0">
-                  <span className="text-sm font-bold text-[#1a1916]">Contract Details</span>
-                  <button onClick={dismissDrawer} className="text-[#9b9890] hover:text-[#1a1916] p-1.5 rounded-lg hover:bg-[#f4f3ef] transition-colors">
+                  <span className="text-sm font-bold text-[#14201a]">Contract Details</span>
+                  <button onClick={dismissDrawer} className="text-[#8a948d] hover:text-[#14201a] p-1.5 rounded-lg hover:bg-[#eef1ef] transition-colors">
                     <X size={16} />
                   </button>
                 </div>
                 {/* Tab bar */}
-                <div className="flex overflow-x-auto border-b border-[#f0ede8] px-2 shrink-0 bg-[#fafaf8]">
+                <div className="flex overflow-x-auto border-b border-[#f0ede8] px-2 shrink-0 bg-[#f6f8f6]">
                   {([
                     { key: 'parties',   icon: User,          label: 'Parties'   },
                     { key: 'property',  icon: Building2,     label: 'Property'  },
@@ -592,7 +592,7 @@ export default function TenantContractDetailPage() {
                   ] as const).map(({ key, icon: Icon, label }) => (
                     <button key={key} onClick={() => setActiveDrawer(key)}
                       className={`flex items-center gap-1.5 px-3 py-3 text-[11px] font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                        activeDrawer === key ? 'border-[#2e9f82] text-[#2e9f82]' : 'border-transparent text-[#9b9890] hover:text-[#1a1916]'
+                        activeDrawer === key ? 'border-[#047246] text-[#047246]' : 'border-transparent text-[#8a948d] hover:text-[#14201a]'
                       }`}
                     >
                       <Icon size={11} className="shrink-0" />{label}
@@ -608,13 +608,13 @@ export default function TenantContractDetailPage() {
                     <SectionCard title="Parties" icon={User}>
                       <div className="grid sm:grid-cols-2 gap-6">
                         <div>
-                          <p className="text-[11px] font-bold text-[#2e9f82] uppercase tracking-wide mb-2">Landlord / Lessor</p>
+                          <p className="text-[11px] font-bold text-[#047246] uppercase tracking-wide mb-2">Landlord / Lessor</p>
                           <Row label="Name"  value={contract.landlord.companyName ?? contract.landlord.name} />
                           <Row label="Email" value={contract.landlord.email} />
                           <Row label="Phone" value={contract.landlord.phone} />
                         </div>
                         <div>
-                          <p className="text-[11px] font-bold text-[#6b6860] uppercase tracking-wide mb-2">Tenant / Lessee</p>
+                          <p className="text-[11px] font-bold text-[#5f6b63] uppercase tracking-wide mb-2">Tenant / Lessee</p>
                           <Row label="Name"  value={contract.tenant.companyName ?? contract.tenant.name} />
                           <Row label="Email" value={contract.tenant.email} />
                           <Row label="Phone" value={contract.tenant.phone} />
@@ -656,16 +656,16 @@ export default function TenantContractDetailPage() {
                     {/* Preferences — only while pending */}
                     {isPending && (
                       <SectionCard title="Your Payment Preferences" icon={DirhamSign}>
-                        <p className="text-xs text-[#9b9890] mb-4">
+                        <p className="text-xs text-[#8a948d] mb-4">
                           Let your landlord know how you would like to pay. They will finalise the schedule when issuing the contract.
                         </p>
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1.5">Number of Cheques</label>
+                            <label className="text-[10px] text-[#8a948d] uppercase font-medium block mb-1.5">Number of Cheques</label>
                             <select
                               value={prefInstallments}
                               onChange={e => setPrefInstallments(e.target.value === '' ? '' : Number(e.target.value))}
-                              className="w-full text-xs px-3 py-2.5 border border-[#e8e6e0] rounded-xl bg-white focus:border-[#2e9f82] focus:outline-none"
+                              className="w-full text-xs px-3 py-2.5 border border-[#e4e9e5] rounded-xl bg-white focus:border-[#047246] focus:outline-none"
                             >
                               <option value="">— select —</option>
                               {allowedInstallmentPlans(contract.allowedInstallments, prefInstallments === '' ? [] : [Number(prefInstallments)]).map(p => (
@@ -674,11 +674,11 @@ export default function TenantContractDetailPage() {
                             </select>
                           </div>
                           <div>
-                            <label className="text-[10px] text-[#9b9890] uppercase font-medium block mb-1.5">Payment Method</label>
+                            <label className="text-[10px] text-[#8a948d] uppercase font-medium block mb-1.5">Payment Method</label>
                             <select
                               value={prefPaymentMethod}
                               onChange={e => setPrefPaymentMethod(e.target.value)}
-                              className="w-full text-xs px-3 py-2.5 border border-[#e8e6e0] rounded-xl bg-white focus:border-[#2e9f82] focus:outline-none"
+                              className="w-full text-xs px-3 py-2.5 border border-[#e4e9e5] rounded-xl bg-white focus:border-[#047246] focus:outline-none"
                             >
                               <option value="">— select —</option>
                               <option value="cheque">Cheque (PDC)</option>
@@ -689,12 +689,12 @@ export default function TenantContractDetailPage() {
                           </div>
                         </div>
                         {prefError  && <p className="text-xs text-red-600 mt-2">{prefError}</p>}
-                        {prefSaved  && <p className="text-xs text-[#2e9f82] mt-2 flex items-center gap-1"><CheckCircle size={12} /> Preferences saved</p>}
+                        {prefSaved  && <p className="text-xs text-[#047246] mt-2 flex items-center gap-1"><CheckCircle size={12} /> Preferences saved</p>}
                         <button
                           onClick={savePreferences}
                           disabled={savingPrefs}
                           className="mt-4 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                          style={{ background: '#2e9f82' }}
+                          style={{ background: '#047246' }}
                         >
                           {savingPrefs ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
                           {savingPrefs ? 'Saving…' : 'Save Preferences'}
@@ -710,7 +710,7 @@ export default function TenantContractDetailPage() {
                           <Row label="Method" value={deposit.paymentMethod} />
                           <Row label="Status" value={
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                              deposit.chequeStatus === 'cleared' ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                              deposit.chequeStatus === 'cleared' ? 'bg-[#d8efe3] text-[#1a7a5a]' :
                               deposit.chequeStatus === 'bounced' ? 'bg-red-50 text-red-700' :
                               'bg-amber-50 text-amber-700'
                             }`}>{deposit.chequeStatus ?? 'pending'}</span>
@@ -724,15 +724,15 @@ export default function TenantContractDetailPage() {
                               href={`/dashboard/customer/contracts/${contract.id}/print/receipt?kind=deposit`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e8e6e0] text-[#2e9f82] hover:bg-[#f0faf6] transition-colors"
+                              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-[#e4e9e5] text-[#047246] hover:bg-[#eef7f2] transition-colors"
                             >
                               <FileText size={12} /> View Receipt
                             </a>
                           )}
                         </>
                       ) : (
-                        <p className="text-xs text-[#9b9890]">
-                          Amount: <strong className="text-[#1a1916]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong>.
+                        <p className="text-xs text-[#8a948d]">
+                          Amount: <strong className="text-[#14201a]">{fmtAed(contract.securityDepositAmount ?? 0)}</strong>.
                           Your landlord will record receipt once the cheque is collected.
                         </p>
                       )}
@@ -744,12 +744,12 @@ export default function TenantContractDetailPage() {
                       icon={CreditCard}
                     >
                       {rentPayments.length === 0 ? (
-                        <p className="text-xs text-[#9b9890] text-center py-4">No instalments recorded yet.</p>
+                        <p className="text-xs text-[#8a948d] text-center py-4">No instalments recorded yet.</p>
                       ) : (
                         <div className="overflow-x-auto -mx-1">
                           <table className="w-full text-xs min-w-[400px]">
                             <thead>
-                              <tr className="text-left text-[10px] text-[#9b9890] uppercase border-b border-[#f4f3ef]">
+                              <tr className="text-left text-[10px] text-[#8a948d] uppercase border-b border-[#eef1ef]">
                                 <th className="px-2 py-2 font-medium">#</th>
                                 <th className="px-2 py-2 font-medium">Description</th>
                                 <th className="px-2 py-2 font-medium">Amount</th>
@@ -760,16 +760,16 @@ export default function TenantContractDetailPage() {
                             </thead>
                             <tbody>
                               {rentPayments.map((p, i) => (
-                                <tr key={p.id} className={`border-b border-[#f4f3ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
-                                  <td className="px-2 py-2 text-[#9b9890]">{i + 1}</td>
-                                  <td className="px-2 py-2 text-[#1a1916]">{p.description ?? `Instalment ${i + 1}`}</td>
-                                  <td className="px-2 py-2 font-semibold text-[#1a1916]">
+                                <tr key={p.id} className={`border-b border-[#eef1ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#f6f8f6]'}`}>
+                                  <td className="px-2 py-2 text-[#8a948d]">{i + 1}</td>
+                                  <td className="px-2 py-2 text-[#14201a]">{p.description ?? `Instalment ${i + 1}`}</td>
+                                  <td className="px-2 py-2 font-semibold text-[#14201a]">
                                     {fmtAed(p.amount)}
                                     {vatOf(p) > 0 && (
-                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(vatOf(p))} VAT</span>
+                                      <span className="block text-[10px] font-normal text-[#8a948d]">incl. {fmtAed(vatOf(p))} VAT</span>
                                     )}
                                   </td>
-                                  <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
+                                  <td className="px-2 py-2 text-[#5f6b63]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
                                   <td className="px-2 py-2">
                                     {/* A replaced bounce keeps the bounce tone and says so
                                         plainly — "Bounced · Replaced". Reading it as Cleared
@@ -779,7 +779,7 @@ export default function TenantContractDetailPage() {
                                         longer chased for money; that is decided by the
                                         coverage rule, not by this chip. */}
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8efe3] text-[#1a7a5a]' :
                                       chequeStatusDisplay(p).tone === 'bounced'   ? 'bg-red-50 text-red-700' :
                                       chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                                       'bg-amber-50 text-amber-700'
@@ -792,7 +792,7 @@ export default function TenantContractDetailPage() {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         title="View receipt"
-                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline"
+                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#047246] hover:underline"
                                       >
                                         <FileText size={11} /> Receipt
                                       </a>
@@ -804,12 +804,12 @@ export default function TenantContractDetailPage() {
                               ))}
                             </tbody>
                             <tfoot>
-                              <tr className="border-t-2 border-[#c5e8df] bg-[#f0faf6]">
-                                <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#1a1916]">Total</td>
-                                <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
+                              <tr className="border-t-2 border-[#c5e8df] bg-[#eef7f2]">
+                                <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#14201a]">Total</td>
+                                <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#047246' }}>
                                   {fmtAed(rentPayments.reduce((s, p) => s + p.amount, 0))}
                                   {rentPayments.reduce((s, p) => s + vatOf(p), 0) > 0 && (
-                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(rentPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
+                                    <span className="block text-[10px] font-normal text-[#8a948d]">incl. {fmtAed(rentPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
                                   )}
                                 </td>
                                 <td colSpan={3} />
@@ -829,7 +829,7 @@ export default function TenantContractDetailPage() {
                         <div className="overflow-x-auto -mx-1">
                           <table className="w-full text-xs min-w-[400px]">
                             <thead>
-                              <tr className="text-left text-[10px] text-[#9b9890] uppercase border-b border-[#f4f3ef]">
+                              <tr className="text-left text-[10px] text-[#8a948d] uppercase border-b border-[#eef1ef]">
                                 <th className="px-2 py-2 font-medium">#</th>
                                 <th className="px-2 py-2 font-medium">Description</th>
                                 <th className="px-2 py-2 font-medium">Amount</th>
@@ -840,16 +840,16 @@ export default function TenantContractDetailPage() {
                             </thead>
                             <tbody>
                               {otherPayments.map((p, i) => (
-                                <tr key={p.id} className={`border-b border-[#f4f3ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafaf8]'}`}>
-                                  <td className="px-2 py-2 text-[#9b9890]">{i + 1}</td>
-                                  <td className="px-2 py-2 text-[#1a1916]">{p.description ?? 'Charge'}</td>
-                                  <td className="px-2 py-2 font-semibold text-[#1a1916]">
+                                <tr key={p.id} className={`border-b border-[#eef1ef] last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-[#f6f8f6]'}`}>
+                                  <td className="px-2 py-2 text-[#8a948d]">{i + 1}</td>
+                                  <td className="px-2 py-2 text-[#14201a]">{p.description ?? 'Charge'}</td>
+                                  <td className="px-2 py-2 font-semibold text-[#14201a]">
                                     {fmtAed(p.amount)}
                                     {vatOf(p) > 0 && (
-                                      <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(vatOf(p))} VAT</span>
+                                      <span className="block text-[10px] font-normal text-[#8a948d]">incl. {fmtAed(vatOf(p))} VAT</span>
                                     )}
                                   </td>
-                                  <td className="px-2 py-2 text-[#6b6860]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
+                                  <td className="px-2 py-2 text-[#5f6b63]">{p.transactionDate ? fmtDate(p.transactionDate) : '—'}</td>
                                   <td className="px-2 py-2">
                                     {/* A replaced bounce keeps the bounce tone and says so
                                         plainly — "Bounced · Replaced". Reading it as Cleared
@@ -859,7 +859,7 @@ export default function TenantContractDetailPage() {
                                         longer chased for money; that is decided by the
                                         coverage rule, not by this chip. */}
                                     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8f2e8] text-[#1a7a5a]' :
+                                      chequeStatusDisplay(p).tone === 'cleared'   ? 'bg-[#d8efe3] text-[#1a7a5a]' :
                                       chequeStatusDisplay(p).tone === 'bounced'   ? 'bg-red-50 text-red-700' :
                                       chequeStatusDisplay(p).tone === 'cancelled' ? 'bg-[#e5e7eb] text-[#374151]' :
                                       'bg-amber-50 text-amber-700'
@@ -872,7 +872,7 @@ export default function TenantContractDetailPage() {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         title="View receipt"
-                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline"
+                                        className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#047246] hover:underline"
                                       >
                                         <FileText size={11} /> Receipt
                                       </a>
@@ -884,12 +884,12 @@ export default function TenantContractDetailPage() {
                               ))}
                             </tbody>
                             <tfoot>
-                              <tr className="border-t-2 border-[#c5e8df] bg-[#f0faf6]">
-                                <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#1a1916]">Total</td>
-                                <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#2e9f82' }}>
+                              <tr className="border-t-2 border-[#c5e8df] bg-[#eef7f2]">
+                                <td colSpan={2} className="px-2 py-2.5 text-xs font-bold text-[#14201a]">Total</td>
+                                <td className="px-2 py-2.5 text-sm font-bold" style={{ color: '#047246' }}>
                                   {fmtAed(otherPayments.reduce((s, p) => s + p.amount, 0))}
                                   {otherPayments.reduce((s, p) => s + vatOf(p), 0) > 0 && (
-                                    <span className="block text-[10px] font-normal text-[#9b9890]">incl. {fmtAed(otherPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
+                                    <span className="block text-[10px] font-normal text-[#8a948d]">incl. {fmtAed(otherPayments.reduce((s, p) => s + vatOf(p), 0))} VAT</span>
                                   )}
                                 </td>
                                 <td colSpan={3} />
@@ -905,20 +905,20 @@ export default function TenantContractDetailPage() {
                   <div className={activeDrawer !== 'documents' ? 'hidden' : 'p-5 space-y-4'}>
                     <SectionCard title="Contract Documents" icon={FileText}>
                       {docs.length === 0 ? (
-                        <p className="text-xs text-[#9b9890]">No documents available for this contract yet.</p>
+                        <p className="text-xs text-[#8a948d]">No documents available for this contract yet.</p>
                       ) : (
                         <div className="space-y-2">
                           {docs.map(d => {
                             const label = d.displayName
                               ?? d.documentKey.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
                             return (
-                              <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-[#e8e6e0] bg-white">
-                                <div className="w-9 h-9 rounded-lg bg-[#f0faf6] flex items-center justify-center shrink-0">
-                                  <FileText size={16} className="text-[#2e9f82]" />
+                              <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-[#e4e9e5] bg-white">
+                                <div className="w-9 h-9 rounded-lg bg-[#eef7f2] flex items-center justify-center shrink-0">
+                                  <FileText size={16} className="text-[#047246]" />
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-medium text-[#1a1916] truncate">{label}</p>
-                                  <p className="text-[11px] text-[#9b9890]">
+                                  <p className="text-sm font-medium text-[#14201a] truncate">{label}</p>
+                                  <p className="text-[11px] text-[#8a948d]">
                                     {d.expiryDate ? `Expires ${new Date(d.expiryDate).toLocaleDateString('en-AE', { timeZone: APP_TIME_ZONE, day: 'numeric', month: 'short', year: 'numeric' })}` : (d.category ?? '').replace(/_/g, ' ')}
                                   </p>
                                 </div>
@@ -926,7 +926,7 @@ export default function TenantContractDetailPage() {
                                   <div className="flex items-center gap-1.5 shrink-0">
                                     <button type="button"
                                       onClick={() => openDocViewer({ fileUrl: d.fileUrl, caption: d.displayName ?? d.documentKey })}
-                                      className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] px-2.5 py-1.5 rounded-lg hover:bg-[#f0faf6] cursor-pointer">
+                                      className="flex items-center gap-1 text-xs font-medium text-[#047246] px-2.5 py-1.5 rounded-lg hover:bg-[#eef7f2] cursor-pointer">
                                       <Eye size={13} /> View
                                     </button>
                                   </div>
@@ -945,16 +945,16 @@ export default function TenantContractDetailPage() {
                       {contract.customClauses?.length > 0 ? (
                         <ol className="space-y-2 list-decimal list-inside">
                           {contract.customClauses.map((c, i) => (
-                            <li key={i} className="text-xs text-[#1a1916]">{c}</li>
+                            <li key={i} className="text-xs text-[#14201a]">{c}</li>
                           ))}
                         </ol>
                       ) : (
-                        <p className="text-xs text-[#9b9890] text-center py-4">No custom clauses.</p>
+                        <p className="text-xs text-[#8a948d] text-center py-4">No custom clauses.</p>
                       )}
                     </SectionCard>
                     {contract.notes && (
                       <SectionCard title="Notes" icon={FileText}>
-                        <p className="text-xs text-[#6b6860] whitespace-pre-wrap">{contract.notes}</p>
+                        <p className="text-xs text-[#5f6b63] whitespace-pre-wrap">{contract.notes}</p>
                       </SectionCard>
                     )}
                   </div>
@@ -970,12 +970,12 @@ export default function TenantContractDetailPage() {
 
           {/* Left sidebar — nav */}
           <div className="col-span-12 lg:col-span-3">
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden lg:sticky lg:top-24">
+            <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden lg:sticky lg:top-24">
               <div className="px-4 py-3 border-b border-[#f0ede8]">
-                <p className="text-xs font-bold text-[#1a1916]">Contract Details</p>
-                <p className="text-[10px] text-[#9b9890] mt-0.5">Click any section to view</p>
+                <p className="text-xs font-bold text-[#14201a]">Contract Details</p>
+                <p className="text-[10px] text-[#8a948d] mt-0.5">Click any section to view</p>
               </div>
-              <div className="divide-y divide-[#f4f3ef]">
+              <div className="divide-y divide-[#eef1ef]">
                 {([
                   { key: 'parties',   icon: User,          label: 'Parties',   desc: 'Landlord & tenant info' },
                   { key: 'property',  icon: Building2,     label: 'Property',  desc: 'Unit & building details' },
@@ -992,17 +992,17 @@ export default function TenantContractDetailPage() {
                   <button key={key} onClick={() => setActiveDrawer(key)}
                     className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-[#f7f6f2] transition-colors group">
                     <div className="flex items-center gap-2.5">
-                      <Icon size={14} className="text-[#9b9890] group-hover:text-[#2e9f82] transition-colors shrink-0" />
+                      <Icon size={14} className="text-[#8a948d] group-hover:text-[#047246] transition-colors shrink-0" />
                       <div>
-                        <p className="text-xs font-semibold text-[#1a1916]">{label}</p>
-                        <p className="text-[10px] text-[#9b9890]">{desc}</p>
+                        <p className="text-xs font-semibold text-[#14201a]">{label}</p>
+                        <p className="text-[10px] text-[#8a948d]">{desc}</p>
                       </div>
                     </div>
-                    <ChevronRight size={12} className="text-[#c0bdb8] group-hover:text-[#2e9f82] shrink-0" />
+                    <ChevronRight size={12} className="text-[#c0bdb8] group-hover:text-[#047246] shrink-0" />
                   </button>
                 ))}
               </div>
-              <div className="px-4 py-3 border-t border-[#f0ede8] text-[10px] text-[#9b9890]">
+              <div className="px-4 py-3 border-t border-[#f0ede8] text-[10px] text-[#8a948d]">
                 Created {fmtDate(contract.createdAt)}
               </div>
             </div>
@@ -1012,9 +1012,9 @@ export default function TenantContractDetailPage() {
           <div className="col-span-12 lg:col-span-9 space-y-4">
 
             {/* Timeline */}
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden">
               {/* Header */}
-              <div className="px-5 py-4 flex items-center justify-between" style={{ background: '#2e9f82' }}>
+              <div className="px-5 py-4 flex items-center justify-between" style={{ background: '#047246' }}>
                 <div>
                   <p className="text-sm font-bold text-white uppercase tracking-wider">Tenancy Activation</p>
                   <p className="text-[11px] text-white/70 mt-0.5">
@@ -1034,29 +1034,29 @@ export default function TenantContractDetailPage() {
                 <StepRow num={1} label="Contract Issued" state={state} last={false}>
                   {state === 'current' && (
                     <div className="mt-2">
-                      <p className="text-[10px] text-[#9b9890] mb-2">Your landlord is reviewing and preparing the contract. You&apos;ll be notified once it&apos;s ready.</p>
+                      <p className="text-[10px] text-[#8a948d] mb-2">Your landlord is reviewing and preparing the contract. You&apos;ll be notified once it&apos;s ready.</p>
                       <button
                         onClick={() => setActiveDrawer('payments')}
-                        className="flex items-center gap-1 text-[10px] font-semibold text-[#2e9f82] hover:underline">
+                        className="flex items-center gap-1 text-[10px] font-semibold text-[#047246] hover:underline">
                         <CreditCard size={10} /> Set payment preferences →
                       </button>
                     </div>
                   )}
-                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Issued to you ✓</p>}
+                  {state === 'done' && <p className="text-[10px] text-[#047246] mt-0.5">Issued to you ✓</p>}
                 </StepRow>
                 );})()}
 
                 {/* Step 2: Payment Collection */}
                 {(()=>{ const state: TLState = ss(st1Done, st2Done); return (
                 <StepRow num={2} label="Payment Collection" state={state} last={false}>
-                  <p className="text-[10px] text-[#9b9890] mt-0.5">PDC cheques and security deposit collected and confirmed by landlord</p>
+                  <p className="text-[10px] text-[#8a948d] mt-0.5">PDC cheques and security deposit collected and confirmed by landlord</p>
                   {state === 'current' && (
                     <p className="text-[9px] text-[#a85b15] bg-[#fdf3e3] rounded-lg px-2.5 py-1.5 mt-1.5 leading-tight">
                       Your landlord is confirming receipt of all cheques. You will be able to review and sign once confirmed.
                     </p>
                   )}
                   {state === 'done' && (
-                    <p className="text-[10px] text-[#2e9f82] mt-0.5 flex items-center gap-1">
+                    <p className="text-[10px] text-[#047246] mt-0.5 flex items-center gap-1">
                       <CheckCircle size={9} /> Payment confirmed — contract is ready for signatures
                     </p>
                   )}
@@ -1072,13 +1072,13 @@ export default function TenantContractDetailPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${
-                            hasTenantSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'
+                            hasTenantSigned ? 'bg-[#047246] text-white' : 'bg-[#e4e9e5] text-[#8a948d]'
                           }`}>{hasTenantSigned ? '✓' : '○'}</span>
-                          <span className="text-[10px] text-[#6b6860]">Your signature</span>
+                          <span className="text-[10px] text-[#5f6b63]">Your signature</span>
                         </div>
                         {!hasTenantSigned && canSign && (
                           <button onClick={() => setShowSignModal(true)}
-                            className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-[#2e9f82] text-white hover:bg-[#27896f]">
+                            className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-[#047246] text-white hover:bg-[#27896f]">
                             Sign Now
                           </button>
                         )}
@@ -1086,9 +1086,9 @@ export default function TenantContractDetailPage() {
                       {/* Landlord signature */}
                       <div className="flex items-center gap-1.5">
                         <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold shrink-0 ${
-                          hasLandlordSigned ? 'bg-[#2e9f82] text-white' : 'bg-[#e8e6e0] text-[#9b9890]'
+                          hasLandlordSigned ? 'bg-[#047246] text-white' : 'bg-[#e4e9e5] text-[#8a948d]'
                         }`}>{hasLandlordSigned ? '✓' : '○'}</span>
-                        <span className="text-[10px] text-[#6b6860]">Landlord signed</span>
+                        <span className="text-[10px] text-[#5f6b63]">Landlord signed</span>
                       </div>
                     </div>
                   )}
@@ -1099,11 +1099,11 @@ export default function TenantContractDetailPage() {
                 {(()=>{ const state: TLState = ss(st3Done, st4Done); return (
                 <StepRow num={4} label="Contract Registration" state={state} last={false}>
                   {state === 'current' && (
-                    <p className="text-[10px] text-[#9b9890] mt-1">
+                    <p className="text-[10px] text-[#8a948d] mt-1">
                       Your landlord is registering the contract with Dubai Land Department. This typically takes 2–5 business days.
                     </p>
                   )}
-                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Registered with DLD ✓</p>}
+                  {state === 'done' && <p className="text-[10px] text-[#047246] mt-0.5">Registered with DLD ✓</p>}
                 </StepRow>
                 );})()}
 
@@ -1112,11 +1112,11 @@ export default function TenantContractDetailPage() {
                 <StepRow num={5} label="Move-In &amp; Utility" state={state} last={false}>
                   {state === 'current' && (
                     <div className="mt-1.5 space-y-1">
-                      <p className="text-[10px] text-[#9b9890]">Move-in inspection &amp; key handover in progress.</p>
-                      <p className="text-[10px] text-[#9b9890]">Utility account activation being verified by landlord.</p>
+                      <p className="text-[10px] text-[#8a948d]">Move-in inspection &amp; key handover in progress.</p>
+                      <p className="text-[10px] text-[#8a948d]">Utility account activation being verified by landlord.</p>
                     </div>
                   )}
-                  {state === 'done' && <p className="text-[10px] text-[#2e9f82] mt-0.5">Keys handed over · Utility active ✓</p>}
+                  {state === 'done' && <p className="text-[10px] text-[#047246] mt-0.5">Keys handed over · Utility active ✓</p>}
                 </StepRow>
                 );})()}
 
@@ -1125,8 +1125,8 @@ export default function TenantContractDetailPage() {
                 <StepRow num={6} label="Active Tenancy" state={state} last={true}>
                   {isActive && (
                     <div className="mt-1">
-                      <p className="text-[10px] text-[#2e9f82] font-medium">Your tenancy is live</p>
-                      <p className="text-[10px] text-[#9b9890] mt-0.5">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
+                      <p className="text-[10px] text-[#047246] font-medium">Your tenancy is live</p>
+                      <p className="text-[10px] text-[#8a948d] mt-0.5">Ends {fmtDate(contract.endDate)} · {contract.numberOfInstallments ?? '—'} cheques</p>
                     </div>
                   )}
                 </StepRow>
@@ -1137,16 +1137,16 @@ export default function TenantContractDetailPage() {
 
             {/* Signatures card */}
             {(isIssued || isActive) && (
-              <div className="bg-white rounded-2xl border border-[#e8e6e0] shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-[#e4e9e5] shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-[#f0ede8] flex items-center gap-2">
-                  <FileSignature size={15} className="text-[#2e9f82]" />
-                  <span className="text-sm font-semibold text-[#1a1916]">Signatures</span>
+                  <FileSignature size={15} className="text-[#047246]" />
+                  <span className="text-sm font-semibold text-[#14201a]">Signatures</span>
                 </div>
                 <div className="px-5 py-4">
                   <div className="grid sm:grid-cols-2 gap-4">
                     {/* Tenant */}
-                    <div className="border border-[#e8e6e0] rounded-xl p-4">
-                      <p className="text-[10px] text-[#9b9890] uppercase font-semibold mb-2">Your Signature</p>
+                    <div className="border border-[#e4e9e5] rounded-xl p-4">
+                      <p className="text-[10px] text-[#8a948d] uppercase font-semibold mb-2">Your Signature</p>
                       {tenantSig ? (
                         <div className="space-y-1.5">
                           {(tenantSig.signatureImage || tenantSig.stampImage) && (
@@ -1161,20 +1161,20 @@ export default function TenantContractDetailPage() {
                               )}
                             </div>
                           )}
-                          <p className="text-xs font-semibold text-[#1a1916]">{tenantSig.signatoryName}</p>
-                          <p className="text-[10px] text-[#9b9890]">{fmtDate(tenantSig.signedAt)}</p>
-                          <span className="inline-flex items-center gap-1 text-[10px] text-[#2e9f82] font-semibold bg-[#f0faf6] px-2 py-0.5 rounded-full border border-[#c5e8df]">
+                          <p className="text-xs font-semibold text-[#14201a]">{tenantSig.signatoryName}</p>
+                          <p className="text-[10px] text-[#8a948d]">{fmtDate(tenantSig.signedAt)}</p>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-[#047246] font-semibold bg-[#eef7f2] px-2 py-0.5 rounded-full border border-[#c5e8df]">
                             <BadgeCheck size={10} /> Signed
                           </span>
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          <div className="h-14 flex items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-lg">
+                          <div className="h-14 flex items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-lg">
                             <span className="text-xs text-[#c0bdb8] italic">Not yet signed</span>
                           </div>
                           {canSign && (
                             <button onClick={() => setShowSignModal(true)}
-                              className="flex items-center gap-1.5 text-xs font-semibold text-[#2e9f82] hover:underline">
+                              className="flex items-center gap-1.5 text-xs font-semibold text-[#047246] hover:underline">
                               <FileSignature size={12} /> Sign now →
                             </button>
                           )}
@@ -1182,22 +1182,22 @@ export default function TenantContractDetailPage() {
                       )}
                     </div>
                     {/* Landlord */}
-                    <div className="border border-[#e8e6e0] rounded-xl p-4">
-                      <p className="text-[10px] text-[#9b9890] uppercase font-semibold mb-2">Landlord Signature</p>
+                    <div className="border border-[#e4e9e5] rounded-xl p-4">
+                      <p className="text-[10px] text-[#8a948d] uppercase font-semibold mb-2">Landlord Signature</p>
                       {landlordSig ? (
                         <div className="space-y-1.5">
                           {landlordSig.signatureImage && (
                             <img src={landlordSig.signatureImage} alt="Landlord signature"
                               className="h-14 object-contain border border-[#f0ede8] rounded-lg p-1 bg-white" />
                           )}
-                          <p className="text-xs font-semibold text-[#1a1916]">{landlordSig.signatoryName}</p>
-                          <p className="text-[10px] text-[#9b9890]">{fmtDate(landlordSig.signedAt)}</p>
-                          <span className="inline-flex items-center gap-1 text-[10px] text-[#2e9f82] font-semibold bg-[#f0faf6] px-2 py-0.5 rounded-full border border-[#c5e8df]">
+                          <p className="text-xs font-semibold text-[#14201a]">{landlordSig.signatoryName}</p>
+                          <p className="text-[10px] text-[#8a948d]">{fmtDate(landlordSig.signedAt)}</p>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-[#047246] font-semibold bg-[#eef7f2] px-2 py-0.5 rounded-full border border-[#c5e8df]">
                             <BadgeCheck size={10} /> Signed
                           </span>
                         </div>
                       ) : (
-                        <div className="h-14 flex items-center justify-center border-2 border-dashed border-[#e8e6e0] rounded-lg">
+                        <div className="h-14 flex items-center justify-center border-2 border-dashed border-[#e4e9e5] rounded-lg">
                           <span className="text-xs text-[#c0bdb8] italic">Awaiting landlord signature</span>
                         </div>
                       )}
@@ -1215,7 +1215,7 @@ export default function TenantContractDetailPage() {
       {showSignModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-[#f0ede8] flex items-center justify-between" style={{ background: '#2e9f82' }}>
+            <div className="px-5 py-4 border-b border-[#f0ede8] flex items-center justify-between" style={{ background: '#047246' }}>
               <div className="flex items-center gap-2">
                 <FileSignature size={16} className="text-white" />
                 <span className="text-sm font-bold text-white">Sign Contract — {contract.ref}</span>

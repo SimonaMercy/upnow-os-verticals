@@ -45,7 +45,7 @@ function MissingChip({ label }: { label: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cls = status === 'active' ? 'bg-[#dcfce7] text-[#166534]' : status === 'pending' ? 'bg-[#fef3c7] text-[#854d0e]' : 'bg-[#f1f0ec] text-[#6b6860]';
+  const cls = status === 'active' ? 'bg-[#dcfce7] text-[#166534]' : status === 'pending' ? 'bg-[#fef3c7] text-[#854d0e]' : 'bg-[#f1f0ec] text-[#5f6b63]';
   return <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize ${cls}`}>{status || '—'}</span>;
 }
 
@@ -95,22 +95,22 @@ export function MissingDataView({
       <div className="flex items-start justify-between flex-wrap gap-3 mb-4 print:hidden">
         <div>
           {onBack ? (
-            <button type="button" onClick={onBack} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <button type="button" onClick={onBack} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </button>
           ) : backHref ? (
-            <Link href={backHref} className="text-[#6b6860] hover:text-[#1a1916] inline-flex items-center gap-1.5 text-xs mb-2">
+            <Link href={backHref} className="text-[#5f6b63] hover:text-[#14201a] inline-flex items-center gap-1.5 text-xs mb-2">
               <ArrowLeft size={12} /> All Reports
             </Link>
           ) : null}
-          <h1 className="text-2xl font-bold text-[#1a1916]">{config.title}</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5 max-w-2xl">{config.description}</p>
+          <h1 className="text-2xl font-bold text-[#14201a]">{config.title}</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5 max-w-2xl">{config.description}</p>
         </div>
         <button
           onClick={() => window.print()}
           disabled={!data || loading}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-50"
-          style={{ background: '#2e9f82' }}>
+          style={{ background: '#047246' }}>
           <Printer size={14} /> Print / PDF
         </button>
       </div>
@@ -118,10 +118,10 @@ export function MissingDataView({
       {/* Tenant scope — active customers only (default) vs include ended tenants. */}
       {scopeToggle && (
         <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden">
-          <span className="text-xs text-[#6b6860] font-medium">Customers:</span>
+          <span className="text-xs text-[#5f6b63] font-medium">Customers:</span>
           {([['active', 'Active only'], ['all', 'Incl. ended']] as const).map(([v, label]) => (
             <button key={v} onClick={() => setScope(v)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#2e9f82] text-white' : 'bg-white border border-[#e8e6e0] text-[#6b6860] hover:border-[#c5c2bc]'}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scope === v ? 'bg-[#047246] text-white' : 'bg-white border border-[#e4e9e5] text-[#5f6b63] hover:border-[#c5c2bc]'}`}>
               {label}
             </button>
           ))}
@@ -140,31 +140,31 @@ export function MissingDataView({
       )}
 
       {loading ? (
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 flex items-center justify-center">
-          <Loader2 size={20} className="animate-spin text-[#2e9f82]" />
+        <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 flex items-center justify-center">
+          <Loader2 size={20} className="animate-spin text-[#047246]" />
         </div>
       ) : data ? (
         rows.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-[#e8e6e0] p-12 text-center">
-            <CheckCircle2 size={32} className="mx-auto text-[#2e9f82] mb-3" />
-            <p className="text-sm font-semibold text-[#1a1916]">Nothing missing</p>
-            <p className="text-xs text-[#9b9890] mt-1">{config.emptyHint ?? `Every record has its ${config.unitLabel} data filled in.`}</p>
+          <div className="bg-white rounded-2xl border border-[#e4e9e5] p-12 text-center">
+            <CheckCircle2 size={32} className="mx-auto text-[#047246] mb-3" />
+            <p className="text-sm font-semibold text-[#14201a]">Nothing missing</p>
+            <p className="text-xs text-[#8a948d] mt-1">{config.emptyHint ?? `Every record has its ${config.unitLabel} data filled in.`}</p>
           </div>
         ) : (
           <>
             <div className="mb-5">
-              <div className="inline-flex bg-white rounded-2xl border border-[#e8e6e0] px-4 py-3">
+              <div className="inline-flex bg-white rounded-2xl border border-[#e4e9e5] px-4 py-3">
                 <div>
-                  <div className="text-[10px] uppercase tracking-wide text-[#9b9890] font-semibold">{config.unitLabel} needing attention</div>
+                  <div className="text-[10px] uppercase tracking-wide text-[#8a948d] font-semibold">{config.unitLabel} needing attention</div>
                   <p className="text-2xl font-bold mt-1 text-[#b91c1c]">{rows.length}</p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden print:break-inside-avoid">
+            <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden print:break-inside-avoid">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-[#fafaf8] text-[10px] uppercase tracking-wide text-[#9b9890]">
+                  <thead className="bg-[#f6f8f6] text-[10px] uppercase tracking-wide text-[#8a948d]">
                     <tr>
                       {config.columns.map(c => (
                         <th key={c.key} className={`px-4 py-2.5 font-semibold ${c.right ? 'text-right' : 'text-left'}`}>{c.label}</th>
@@ -177,9 +177,9 @@ export function MissingDataView({
                     {rows.map((row, i) => {
                       const href = config.openHref?.(row) ?? null;
                       return (
-                        <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#fafaf8]">
+                        <tr key={i} className="border-t border-[#f0ede8] hover:bg-[#f6f8f6]">
                           {config.columns.map(c => (
-                            <td key={c.key} className={`px-4 py-2.5 ${c.right ? 'text-right tabular-nums' : 'text-left'} text-[#1a1916]`}>
+                            <td key={c.key} className={`px-4 py-2.5 ${c.right ? 'text-right tabular-nums' : 'text-left'} text-[#14201a]`}>
                               {renderCell(c, row)}
                             </td>
                           ))}
@@ -189,7 +189,7 @@ export function MissingDataView({
                           {config.openHref && (
                             <td className="px-3 py-2.5 text-right print:hidden">
                               {href && (
-                                <Link href={href} className="inline-flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline">Open <ExternalLink size={12} /></Link>
+                                <Link href={href} className="inline-flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline">Open <ExternalLink size={12} /></Link>
                               )}
                             </td>
                           )}
@@ -201,7 +201,7 @@ export function MissingDataView({
               </div>
             </div>
 
-            <p className="text-[11px] text-[#9b9890] mt-4">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>
+            <p className="text-[11px] text-[#8a948d] mt-4">Generated {new Date(data.generatedAt).toLocaleString('en-AE')}</p>
           </>
         )
       ) : null}

@@ -77,13 +77,13 @@ const keyOf = (t: LegalTemplate) => (t.source === 'custom' ? `id:${t.id}` : t.ki
 const refOf = (t: LegalTemplate): TemplateKind | number => (t.source === 'custom' ? t.id : t.kind);
 
 function SourceChip({ source }: { source: LegalTemplate['source'] }) {
-  const cls = source === 'own' ? 'bg-[#e6f4ef] text-[#1a7a52]' : source === 'custom' ? 'bg-[#ece9fd] text-[#5b3fbf]' : 'bg-[#f4f3ef] text-[#6b6860]';
+  const cls = source === 'own' ? 'bg-[#e6f4ef] text-[#1a7a52]' : source === 'custom' ? 'bg-[#ece9fd] text-[#5b3fbf]' : 'bg-[#eef1ef] text-[#5f6b63]';
   return <span className={`text-[10px] font-semibold px-1.5 py-[1px] rounded-full whitespace-nowrap ${cls}`}>{source === 'own' ? 'Yours' : source === 'custom' ? 'Custom' : 'Starter'}</span>;
 }
 
-const btnGhost = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#e8e6e0] bg-white text-[#6b6860] hover:text-[#1a1916] hover:border-[#d5d2ca] cursor-pointer disabled:opacity-50 disabled:cursor-default';
+const btnGhost = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#e4e9e5] bg-white text-[#5f6b63] hover:text-[#14201a] hover:border-[#d5d2ca] cursor-pointer disabled:opacity-50 disabled:cursor-default';
 const btnDanger = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#dc2626] bg-white text-[#dc2626] hover:bg-[#fef2f2] cursor-pointer disabled:opacity-50 disabled:cursor-default';
-const menuItem = 'w-full text-left px-3 py-2 text-[12.5px] text-[#1a1916] rounded-lg hover:bg-[#f4f3ef] cursor-pointer';
+const menuItem = 'w-full text-left px-3 py-2 text-[12.5px] text-[#14201a] rounded-lg hover:bg-[#eef1ef] cursor-pointer';
 
 /* ── the studio ────────────────────────────────────────────────────────────── */
 export default function TemplateStudio({ manager, group }: { manager?: { rp: number }; group: TemplateGroup }) {
@@ -279,22 +279,22 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
     return extra.length ? [...groups, { title: 'Other', fields: extra }] : groups;
   }, [fields]);
 
-  if (loading) return <div className="flex items-center gap-3 py-16 justify-center text-[#6b6860]"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span></div>;
+  if (loading) return <div className="flex items-center gap-3 py-16 justify-center text-[#5f6b63]"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span></div>;
   if (loadErr) return <div className="rounded-xl px-4 py-3 text-sm bg-red-50 text-red-700 border border-red-200">{loadErr}</div>;
 
-  const inputCls = `w-full text-sm px-3 py-2 border border-[#e8e6e0] rounded-xl focus:outline-none ${readOnly ? 'bg-[#fbfbf8] text-[#3d3a33]' : 'bg-white focus:border-[#2e9f82]'}`;
+  const inputCls = `w-full text-sm px-3 py-2 border border-[#e4e9e5] rounded-xl focus:outline-none ${readOnly ? 'bg-[#fbfbf8] text-[#3d3a33]' : 'bg-white focus:border-[#047246]'}`;
 
   return (
     <div className="space-y-4">
       {/* top bar */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
-          <h2 className="text-[18px] font-bold text-[#1a1916] leading-tight">{meta.title}</h2>
-          <p className="text-[12.5px] text-[#6b6860] mt-1">{readOnly ? <>Templates are <b>set by the landlord</b> — read them here; the wording is theirs to change.</> : meta.purpose}</p>
+          <h2 className="text-[18px] font-bold text-[#14201a] leading-tight">{meta.title}</h2>
+          <p className="text-[12.5px] text-[#5f6b63] mt-1">{readOnly ? <>Templates are <b>set by the landlord</b> — read them here; the wording is theirs to change.</> : meta.purpose}</p>
         </div>
         {!readOnly && (
           <button type="button" onClick={() => guarded('start a new template', () => void createNew())} disabled={saving}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold hover:bg-[#27896f] cursor-pointer disabled:opacity-50 shrink-0">
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#047246] text-white text-sm font-semibold hover:bg-[#27896f] cursor-pointer disabled:opacity-50 shrink-0">
             <Plus size={16} /> New template
           </button>
         )}
@@ -315,27 +315,27 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
             const k = keyOf(t); const on = k === selKey; const menuOn = menuKey === k;
             return (
               <div key={k} role="button" tabIndex={0} aria-pressed={on} onClick={() => select(t)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(t); } }}
-                className={`relative rounded-[14px] border px-3.5 py-3 cursor-pointer transition ${on ? 'border-[#2e9f82] bg-[#f0faf6] shadow-[0_0_0_3px_rgba(46,159,130,.12)]' : 'border-[#e8e6e0] bg-white hover:border-[#d5d2ca]'}`}>
+                className={`relative rounded-[14px] border px-3.5 py-3 cursor-pointer transition ${on ? 'border-[#047246] bg-[#eef7f2] shadow-[0_0_0_3px_rgba(4,114,70,.12)]' : 'border-[#e4e9e5] bg-white hover:border-[#d5d2ca]'}`}>
                 <div className="flex items-center gap-2 pr-6">
-                  <span className={`text-[13px] truncate ${on ? 'font-bold text-[#1a1916]' : 'font-semibold text-[#3d3a33]'}`}>{on && dirty ? name || 'Untitled template' : t.name}</span>
+                  <span className={`text-[13px] truncate ${on ? 'font-bold text-[#14201a]' : 'font-semibold text-[#3d3a33]'}`}>{on && dirty ? name || 'Untitled template' : t.name}</span>
                   <SourceChip source={t.source} />
                 </div>
-                <div className="text-[11px] text-[#9b9890] mt-1 truncate">
+                <div className="text-[11px] text-[#8a948d] mt-1 truncate">
                   {t.source !== 'custom' && <span>{TEMPLATE_KIND_LABELS[t.kind]} · </span>}
                   {t.source === 'platform' ? 'Platform wording' : `Updated ${fmtUpdated(t.updatedAt)}`}
                 </div>
                 {!readOnly && (
                   <div ref={menuOn ? menuRef : undefined} className="absolute right-2 top-2" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                     <button type="button" aria-label={`Options for ${t.name}`} aria-expanded={menuOn} onClick={() => { setMenuKey(menuOn ? null : k); setMenuConfirmDelete(false); }}
-                      className={`p-1 rounded-md text-[#9b9890] hover:text-[#1a1916] hover:bg-white/80 cursor-pointer ${menuOn ? 'text-[#1a1916] bg-white' : ''}`}>
+                      className={`p-1 rounded-md text-[#8a948d] hover:text-[#14201a] hover:bg-white/80 cursor-pointer ${menuOn ? 'text-[#14201a] bg-white' : ''}`}>
                       <MoreHorizontal size={16} />
                     </button>
                     {menuOn && (
-                      <div className="absolute right-0 top-8 z-20 w-56 rounded-xl border border-[#e8e6e0] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-1">
+                      <div className="absolute right-0 top-8 z-20 w-56 rounded-xl border border-[#e4e9e5] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-1">
                         <button type="button" className={menuItem} onClick={() => { setMenuKey(null); duplicate(t); }}>{t.source === 'custom' ? 'Duplicate' : 'Duplicate as custom'}</button>
                         {t.source === 'own' && <button type="button" className={menuItem} onClick={() => { setMenuKey(null); guarded('reset it to the starter', () => void reset(t)); }}>Reset to starter</button>}
                         {t.source === 'custom' && (menuConfirmDelete ? (
-                          <div className="px-3 py-2 text-[12px] text-[#6b6860]">
+                          <div className="px-3 py-2 text-[12px] text-[#5f6b63]">
                             Delete “{t.name}”?
                             <div className="flex gap-2 mt-2">
                               <button type="button" className={btnDanger} disabled={saving} onClick={() => void remove(t)}>Delete</button>
@@ -352,45 +352,45 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
               </div>
             );
           })}
-          {list.length === 0 && <p className="text-[12px] text-[#9b9890] px-1">No templates on this tab yet.</p>}
+          {list.length === 0 && <p className="text-[12px] text-[#8a948d] px-1">No templates on this tab yet.</p>}
         </div>
 
         {/* ── main ── */}
         {current ? (
-          <div className="rounded-[16px] border border-[#e8e6e0] bg-white overflow-hidden grid grid-cols-1 xl:grid-cols-2">
+          <div className="rounded-[16px] border border-[#e4e9e5] bg-white overflow-hidden grid grid-cols-1 xl:grid-cols-2">
             {/* Write */}
-            <div className="flex flex-col min-w-0 border-b xl:border-b-0 xl:border-r border-[#e8e6e0]">
-              <div className="px-5 pt-4 pb-3 border-b border-[#f4f3ef] flex items-center justify-between gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#9b9890]">Write</span>
+            <div className="flex flex-col min-w-0 border-b xl:border-b-0 xl:border-r border-[#e4e9e5]">
+              <div className="px-5 pt-4 pb-3 border-b border-[#eef1ef] flex items-center justify-between gap-3">
+                <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#8a948d]">Write</span>
                 <div className="flex items-center gap-2">
                   <SourceChip source={current.source} />
-                  {current.source !== 'custom' && <span className="text-[11px] text-[#9b9890]">{TEMPLATE_KIND_LABELS[current.kind]}</span>}
+                  {current.source !== 'custom' && <span className="text-[11px] text-[#8a948d]">{TEMPLATE_KIND_LABELS[current.kind]}</span>}
                 </div>
               </div>
               <div className="px-5 py-4 space-y-3 flex-1 flex flex-col">
                 <input id="studio-name" value={name} readOnly={readOnly} disabled={readOnly} onChange={e => { setName(e.target.value); setSaved(false); }} placeholder="Template name" aria-label="Template name"
-                  className="w-full text-[20px] font-bold text-[#1a1916] bg-transparent border-0 border-b border-transparent focus:border-[#e8e6e0] focus:outline-none px-0 py-1 placeholder:text-[#c0bdb8] disabled:text-[#1a1916]" />
+                  className="w-full text-[20px] font-bold text-[#14201a] bg-transparent border-0 border-b border-transparent focus:border-[#e4e9e5] focus:outline-none px-0 py-1 placeholder:text-[#c0bdb8] disabled:text-[#14201a]" />
                 <div>
-                  <label htmlFor="studio-subject" className="text-[11px] font-medium text-[#6b6860] mb-1 block">Subject</label>
+                  <label htmlFor="studio-subject" className="text-[11px] font-medium text-[#5f6b63] mb-1 block">Subject</label>
                   <input id="studio-subject" className={inputCls} value={subject} readOnly={readOnly} disabled={readOnly} onChange={e => { setSubject(e.target.value); setSaved(false); }} placeholder="Subject of the letter" />
                 </div>
                 <div className="flex-1 flex flex-col">
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <label htmlFor="studio-body" className="text-[11px] font-medium text-[#6b6860]">Body</label>
+                    <label htmlFor="studio-body" className="text-[11px] font-medium text-[#5f6b63]">Body</label>
                     {!readOnly && (
                       <div ref={fieldsRef} className="relative">
                         <button type="button" onClick={() => setFieldsOpen(o => !o)} aria-expanded={fieldsOpen} className={btnGhost}>
                           Insert field <ChevronDown size={12} />
                         </button>
                         {fieldsOpen && (
-                          <div className="absolute right-0 top-9 z-20 w-[300px] max-h-[380px] overflow-y-auto rounded-xl border border-[#e8e6e0] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-2">
+                          <div className="absolute right-0 top-9 z-20 w-[300px] max-h-[380px] overflow-y-auto rounded-xl border border-[#e4e9e5] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-2">
                             {fieldGroups.map(g => (
                               <div key={g.title} className="mb-1.5 last:mb-0">
-                                <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[.08em] text-[#9b9890]">{g.title}</div>
+                                <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-[.08em] text-[#8a948d]">{g.title}</div>
                                 {g.fields.map(f => (
                                   <button key={f.key} type="button" onClick={() => insertField(f.key)} className={`${menuItem} flex items-center justify-between gap-2`}>
                                     <span>{f.label}</span>
-                                    <code className="text-[10.5px] text-[#9b9890]">{`{{${f.key}}}`}</code>
+                                    <code className="text-[10.5px] text-[#8a948d]">{`{{${f.key}}}`}</code>
                                   </button>
                                 ))}
                               </div>
@@ -402,34 +402,34 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
                   </div>
                   <textarea id="studio-body" ref={bodyRef} value={body} readOnly={readOnly} disabled={readOnly} onChange={e => { setBody(e.target.value); setSaved(false); }} spellCheck={false}
                     placeholder={'Dear {{customer_name}},\n\n…'}
-                    className={`${inputCls} flex-1 min-h-[440px] text-[14px] leading-7 text-[#1a1916] px-4 py-3 resize-y`} />
-                  <p className="text-[11px] text-[#9b9890] mt-1.5">A field with nothing to show comes out blank — a line that is only a field disappears from the letter.</p>
+                    className={`${inputCls} flex-1 min-h-[440px] text-[14px] leading-7 text-[#14201a] px-4 py-3 resize-y`} />
+                  <p className="text-[11px] text-[#8a948d] mt-1.5">A field with nothing to show comes out blank — a line that is only a field disappears from the letter.</p>
                 </div>
               </div>
               {/* footer */}
-              <div className="px-5 py-3 border-t border-[#f4f3ef] flex items-center justify-between gap-3 flex-wrap bg-[#fbfbf8]">
-                <span className="inline-flex items-center gap-2 text-[11.5px] text-[#6b6860]">
+              <div className="px-5 py-3 border-t border-[#eef1ef] flex items-center justify-between gap-3 flex-wrap bg-[#fbfbf8]">
+                <span className="inline-flex items-center gap-2 text-[11.5px] text-[#5f6b63]">
                   {readOnly ? 'Templates are set by the landlord.' : dirty
                     ? <><span className="w-2 h-2 rounded-full bg-[#d97706]" aria-hidden /> Unsaved changes</>
-                    : saved ? <><Check size={13} className="text-[#2e9f82]" /> Saved</> : current.source === 'platform' ? 'On the platform starter — save to keep your own wording.' : `Saved ${fmtUpdated(current.updatedAt)}`}
+                    : saved ? <><Check size={13} className="text-[#047246]" /> Saved</> : current.source === 'platform' ? 'On the platform starter — save to keep your own wording.' : `Saved ${fmtUpdated(current.updatedAt)}`}
                 </span>
                 {!readOnly && (
                   <div className="flex items-center gap-2 flex-wrap">
                     {error && <span className="text-[11.5px] text-[#dc2626]">{error}</span>}
                     {current.source === 'own' && (confirmReset ? (
-                      <span className="inline-flex items-center gap-2 text-[11.5px] text-[#6b6860]">Back to the starter wording?
+                      <span className="inline-flex items-center gap-2 text-[11.5px] text-[#5f6b63]">Back to the starter wording?
                         <button type="button" className={btnDanger} disabled={saving} onClick={() => void reset(current)}>Reset</button>
                         <button type="button" className={btnGhost} onClick={() => setConfirmReset(false)}>Keep</button>
                       </span>
                     ) : <button type="button" className={btnGhost} disabled={saving} onClick={() => setConfirmReset(true)}>Reset to starter</button>)}
                     {current.source === 'custom' && (confirmDelete ? (
-                      <span className="inline-flex items-center gap-2 text-[11.5px] text-[#6b6860]">Delete this template?
+                      <span className="inline-flex items-center gap-2 text-[11.5px] text-[#5f6b63]">Delete this template?
                         <button type="button" className={btnDanger} disabled={saving} onClick={() => void remove(current)}>Delete</button>
                         <button type="button" className={btnGhost} onClick={() => setConfirmDelete(false)}>Keep</button>
                       </span>
                     ) : <button type="button" className={btnDanger} disabled={saving} onClick={() => setConfirmDelete(true)}>Delete</button>)}
                     <button type="button" onClick={() => void save()} disabled={saving || !dirty}
-                      className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#2e9f82] hover:bg-[#27896f] cursor-pointer disabled:opacity-50 disabled:cursor-default">
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#047246] hover:bg-[#27896f] cursor-pointer disabled:opacity-50 disabled:cursor-default">
                       {saving ? 'Saving…' : 'Save'}
                     </button>
                   </div>
@@ -438,15 +438,15 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
             </div>
 
             {/* Preview */}
-            <div className="flex flex-col min-w-0 bg-[#f4f3ef]">
-              <div className="px-5 pt-4 pb-3 border-b border-[#e8e6e0] bg-white flex items-center justify-between gap-3 flex-wrap">
-                <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#9b9890]">Preview</span>
+            <div className="flex flex-col min-w-0 bg-[#eef1ef]">
+              <div className="px-5 pt-4 pb-3 border-b border-[#e4e9e5] bg-white flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-[11px] font-semibold uppercase tracking-[.08em] text-[#8a948d]">Preview</span>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] text-[#6b6860]">Preview with</span>
-                  <div className="inline-flex rounded-lg border border-[#e8e6e0] bg-[#f4f3ef] p-[2px]">
+                  <span className="text-[11px] text-[#5f6b63]">Preview with</span>
+                  <div className="inline-flex rounded-lg border border-[#e4e9e5] bg-[#eef1ef] p-[2px]">
                     {(['sample', 'lease'] as const).map(m => (
                       <button key={m} type="button" onClick={() => { setPreviewMode(m); if (m === 'lease' && !leaseSel) setLeaseOpen(true); }} aria-pressed={previewMode === m}
-                        className={`px-2.5 py-1 rounded-md text-[11.5px] cursor-pointer ${previewMode === m ? 'bg-white text-[#1a1916] font-semibold shadow-sm' : 'text-[#6b6860] font-medium'}`}>
+                        className={`px-2.5 py-1 rounded-md text-[11.5px] cursor-pointer ${previewMode === m ? 'bg-white text-[#14201a] font-semibold shadow-sm' : 'text-[#5f6b63] font-medium'}`}>
                         {m === 'sample' ? 'Sample data' : 'A real lease'}
                       </button>
                     ))}
@@ -457,12 +457,12 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
                         <Search size={12} className="shrink-0" /><span className="truncate">{leaseSel ? `Unit ${leaseSel.unit?.number ?? '—'} · CID-${leaseSel.id}` : 'Pick a lease'}</span>
                       </button>
                       {leaseOpen && (
-                        <div className="absolute right-0 top-9 z-20 w-[360px] rounded-xl border border-[#e8e6e0] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-2">
+                        <div className="absolute right-0 top-9 z-20 w-[360px] rounded-xl border border-[#e4e9e5] bg-white shadow-[0_12px_32px_-12px_rgba(26,25,22,.35)] p-2">
                           <input autoFocus value={leaseQ} onChange={e => setLeaseQ(e.target.value)} placeholder="Unit, customer, building or CID…" aria-label="Search leases"
-                            className="w-full text-[12.5px] px-3 py-2 border border-[#e8e6e0] rounded-lg focus:outline-none focus:border-[#2e9f82] mb-1.5" />
+                            className="w-full text-[12.5px] px-3 py-2 border border-[#e4e9e5] rounded-lg focus:outline-none focus:border-[#047246] mb-1.5" />
                           <div className="max-h-[260px] overflow-y-auto">
-                            {leases === null ? <div className="px-3 py-2 text-[12px] text-[#9b9890] inline-flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Loading leases…</div>
-                              : leaseOptions.length === 0 ? <div className="px-3 py-2 text-[12px] text-[#9b9890]">No lease matches.</div>
+                            {leases === null ? <div className="px-3 py-2 text-[12px] text-[#8a948d] inline-flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Loading leases…</div>
+                              : leaseOptions.length === 0 ? <div className="px-3 py-2 text-[12px] text-[#8a948d]">No lease matches.</div>
                               : leaseOptions.map(l => (
                                 <button key={l.id} type="button" onClick={() => { setLeaseSel(l); setLeaseOpen(false); }} className={`${menuItem} truncate`}>{leaseLine(l)}</button>
                               ))}
@@ -476,31 +476,31 @@ export default function TemplateStudio({ manager, group }: { manager?: { rp: num
               </div>
               <div className="px-4 sm:px-6 py-6 flex-1 overflow-y-auto">
                 {previewMode === 'lease' && (
-                  <p className="text-[11px] text-[#6b6860] mb-3 text-center">
+                  <p className="text-[11px] text-[#5f6b63] mb-3 text-center">
                     {!leaseSel ? 'Pick a lease to fill the letter from its real details.' : leaseBusy ? 'Loading the lease values…' : leaseErr ? <span className="text-[#dc2626]">{leaseErr}</span> : `Filled from ${leaseLine(leaseSel)} — breach and case fields stay blank here.`}
                   </p>
                 )}
-                <div className="mx-auto w-full max-w-[640px] min-h-[760px] bg-white rounded-[6px] border border-[#ecebe6] shadow-[0_1px_2px_rgba(0,0,0,.05),0_18px_40px_-16px_rgba(26,25,22,.28)] px-8 sm:px-12 py-10 sm:py-12 text-[#1a1916]"
+                <div className="mx-auto w-full max-w-[640px] min-h-[760px] bg-white rounded-[6px] border border-[#ecebe6] shadow-[0_1px_2px_rgba(0,0,0,.05),0_18px_40px_-16px_rgba(26,25,22,.28)] px-8 sm:px-12 py-10 sm:py-12 text-[#14201a]"
                   style={{ fontFamily: "Georgia, 'Times New Roman', serif", opacity: leaseBusy ? 0.6 : 1 }}>
-                  <div className="flex items-baseline justify-between gap-4 border-b border-[#1a1916] pb-3 mb-8">
-                    <span className="text-[11px] font-semibold uppercase tracking-[.14em]" style={{ fontFamily: 'Manrope, sans-serif' }}>{values.landlord_name || 'Landlord'}</span>
-                    <span className="text-[11.5px] text-[#6b6860]">{values.date}</span>
+                  <div className="flex items-baseline justify-between gap-4 border-b border-[#14201a] pb-3 mb-8">
+                    <span className="text-[11px] font-semibold uppercase tracking-[.14em]" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{values.landlord_name || 'Landlord'}</span>
+                    <span className="text-[11.5px] text-[#5f6b63]">{values.date}</span>
                   </div>
                   <h3 className="text-[22px] leading-snug font-normal mb-6" style={{ fontFamily: 'var(--font-serif), Georgia, serif' }}>{previewSubject || <span className="text-[#c0bdb8]">Subject of the letter</span>}</h3>
                   <div className="space-y-4 text-[14px] leading-[1.7]">
                     {paragraphs.length ? paragraphs.map((p, i) => <p key={i} className="whitespace-pre-line">{p}</p>) : <p className="text-[#c0bdb8]">The letter body appears here as you type.</p>}
                   </div>
-                  <div className="mt-14 pt-3 border-t border-[#1a1916] w-[220px]">
-                    <div className="text-[10.5px] uppercase tracking-[.12em] text-[#9b9890]" style={{ fontFamily: 'Manrope, sans-serif' }}>Signature</div>
+                  <div className="mt-14 pt-3 border-t border-[#14201a] w-[220px]">
+                    <div className="text-[10.5px] uppercase tracking-[.12em] text-[#8a948d]" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>Signature</div>
                     <div className="text-[13px] mt-1">{values.landlord_name || 'Landlord'}</div>
                   </div>
                 </div>
-                <p className="text-[11px] text-[#9b9890] mt-4 text-center">{previewMode === 'sample' ? 'Shown with sample values — the real letter takes them from the lease, breach or case.' : 'Copy the letter into your own letter or email; the platform does not send it.'}</p>
+                <p className="text-[11px] text-[#8a948d] mt-4 text-center">{previewMode === 'sample' ? 'Shown with sample values — the real letter takes them from the lease, breach or case.' : 'Copy the letter into your own letter or email; the platform does not send it.'}</p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="rounded-[16px] border border-dashed border-[#e8e6e0] bg-white px-6 py-16 text-center text-[13px] text-[#9b9890]">
+          <div className="rounded-[16px] border border-dashed border-[#e4e9e5] bg-white px-6 py-16 text-center text-[13px] text-[#8a948d]">
             {readOnly ? 'The landlord has no templates on this tab yet.' : 'Pick a template on the left, or start a new one.'}
           </div>
         )}

@@ -200,7 +200,7 @@ export function SecureDocCanvas({
     <div>
       <div ref={hostRef} />
       {status === 'loading' && (
-        <div className="p-10 text-center text-xs text-[#6b6860]">Loading…</div>
+        <div className="p-10 text-center text-xs text-[#5f6b63]">Loading…</div>
       )}
       {status === 'error' && (
         <div className="p-10 text-center text-xs text-[#a6a29a]">Preview unavailable.</div>

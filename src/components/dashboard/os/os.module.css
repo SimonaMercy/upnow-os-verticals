@@ -1,0 +1,162 @@
+/* UpNow OS shell — ported from the approved Genspark Stage 2 prototype (os.css), on the
+   MarketSpace tokens (--ms-* in globals.css). Used by the rental-provider, manager and
+   admin dashboards. */
+
+.rail {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  background: var(--ms-surface); border-right: 1px solid var(--ms-border);
+  font-family: var(--font-sans); color: var(--ms-ink);
+}
+
+/* ---- brand (dark block, same height as the topbar) ---- */
+.brand {
+  flex: none; height: 56px; display: flex; align-items: center; gap: 9px; padding: 0 14px;
+  background: var(--ms-primary-darkest); color: #fff; text-decoration: none;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.mark {
+  width: 26px; height: 26px; border-radius: 8px; flex: none;
+  background: linear-gradient(140deg, var(--ms-primary-lighter), var(--ms-primary));
+  display: grid; place-items: center; font-weight: 800; font-size: 12.5px; color: #fff;
+}
+.brandName { font-weight: 800; font-size: 15px; letter-spacing: -.02em; }
+.brandTag {
+  margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: rgba(255,255,255,.62); border: 1px solid rgba(255,255,255,.26); border-radius: 999px; padding: 2px 7px;
+}
+.closeBtn { margin-left: 8px; color: rgba(255,255,255,.7); background: none; border: 0; cursor: pointer; display: grid; place-items: center; }
+
+/* ---- scope block ---- */
+.scope { flex: none; padding: 11px 14px; border-bottom: 1px solid var(--ms-border); background: var(--ms-tint-pale); }
+.scopeK { font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ms-primary); }
+.scopeV { font-size: 12.5px; font-weight: 700; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+.scopeD { font-size: 10.5px; color: var(--ms-ink-3); margin-top: 1px; }
+
+/* ---- groups ---- */
+.nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 0 10px; }
+.layer {
+  font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ms-ink-3);
+  padding: 12px 14px 4px; display: flex; align-items: center; gap: 6px;
+}
+.layer i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.group { border-bottom: 1px solid var(--ms-surface-3); }
+.groupBtn {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 12px;
+  border: 0; border-left: 2.5px solid transparent; background: transparent; cursor: pointer; text-align: left;
+  color: var(--ms-ink); text-decoration: none; transition: background .13s;
+  font: inherit;
+}
+.groupBtn:hover { background: var(--ms-surface-2); }
+.groupOpen > .groupBtn { border-left-color: var(--ms-primary); background: var(--ms-tint-pale); }
+.groupActive .groupLabel { color: var(--ms-primary-dark); }
+.groupIc { color: var(--ms-primary); flex: none; display: grid; place-items: center; }
+.groupLabel { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+.chev { color: var(--ms-ink-3); flex: none; transition: transform .16s; }
+.groupOpen .chev { transform: rotate(90deg); }
+.badge {
+  font-size: 10px; font-weight: 800; min-width: 18px; padding: 1px 6px; border-radius: 999px; text-align: center;
+  background: var(--ms-tint); color: var(--ms-primary-dark); font-variant-numeric: tabular-nums;
+}
+.kids { padding: 1px 0 7px; }
+.kid {
+  display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 12px 6px 37px;
+  border-left: 2.5px solid transparent; font-size: 12.5px; color: var(--ms-ink-2); text-decoration: none;
+  transition: background .12s, color .12s;
+}
+.kid:hover { background: var(--ms-surface-2); color: var(--ms-ink); }
+.kidOn { background: var(--ms-tint-light); color: var(--ms-primary-dark); font-weight: 700; border-left-color: var(--ms-primary); }
+.kidOn:hover { background: var(--ms-tint-light); color: var(--ms-primary-dark); }
+.kid .badge { margin-left: auto; background: var(--ms-primary); color: #fff; }
+.kidSoon { color: var(--ms-ink-3); cursor: default; }
+.kidSoon:hover { background: transparent; color: var(--ms-ink-3); }
+.soonChip {
+  margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; background: var(--ms-amber-bg); color: var(--ms-amber-text); white-space: nowrap;
+}
+
+/* ---- collapsed rail (icon only) ---- */
+.iconItem {
+  position: relative; display: grid; place-items: center; width: 40px; height: 38px; margin: 3px auto;
+  border-radius: 10px; color: var(--ms-ink-2); text-decoration: none;
+}
+.iconItem:hover { background: var(--ms-surface-2); color: var(--ms-ink); }
+.iconItemOn { background: var(--ms-tint-light); color: var(--ms-primary-dark); }
+.dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 99px; background: var(--ms-primary); border: 1.5px solid #fff; }
+
+/* ---- user footer ---- */
+.foot { flex: none; border-top: 1px solid var(--ms-border); padding: 10px 12px; }
+.user { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.av {
+  width: 30px; height: 30px; border-radius: 99px; flex: none; display: grid; place-items: center;
+  background: var(--ms-primary-darkest); color: #fff; font-size: 12px; font-weight: 800;
+}
+.userName { font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.userEmail { font-size: 11px; color: var(--ms-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.signOut {
+  margin-top: 8px; width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--ms-ink-2); background: none; border: 0; cursor: pointer; font-family: inherit;
+}
+.signOut:hover { background: var(--ms-surface-2); color: var(--ms-danger); }
+
+/* ---- context bar (topbar: workspace + vertical scope) ---- */
+.ctx { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.ws {
+  display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 6px; flex-shrink: 0; max-width: 260px;
+  border: 1px solid var(--ms-border-strong); border-radius: 8px; background: var(--ms-surface);
+}
+.wsAv {
+  width: 24px; height: 24px; border-radius: 6px; flex: none; display: grid; place-items: center;
+  background: var(--ms-primary-darkest); color: #fff; font-size: 10px; font-weight: 800;
+}
+.wsTx { min-width: 0; line-height: 1.15; }
+.wsA { display: block; font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsB { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--ms-ink-3); white-space: nowrap; }
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.pillOk { background: var(--ms-tint); color: var(--ms-primary-dark); }
+.pillWarn { background: var(--ms-amber-bg); color: var(--ms-amber-text); }
+.pillBad { background: var(--ms-danger-bg); color: var(--ms-danger); }
+.vtabs {
+  display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 8px; background: var(--ms-surface-3);
+  min-width: 0; overflow-x: auto; scrollbar-width: none;
+}
+.vtabs::-webkit-scrollbar { display: none; }
+.vtab {
+  height: 26px; padding: 0 8px; border-radius: 6px; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--ms-ink-3);
+  white-space: nowrap; cursor: default;
+}
+.vtabOn { background: var(--ms-surface); color: var(--ms-primary-dark); font-weight: 700; box-shadow: var(--ms-shadow); }
+.vtab .lk { color: var(--ms-ink-3); opacity: .8; }
+
+/* ---- breadcrumb under the topbar ---- */
+.crumb {
+  flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 7px 20px; font-size: 12px;
+  background: var(--ms-surface); border-bottom: 1px solid var(--ms-border); color: var(--ms-ink-3);
+}
+.crumb b { color: var(--ms-ink); font-weight: 700; }
+.crumbTone { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ms-primary); }
+
+@media (max-width: 1340px) { .wsB { display: none; } }
+@media (max-width: 1180px) { .vtabs { display: none; } }
+@media (max-width: 640px) { .ws { max-width: 170px; } .crumb { padding: 7px 14px; } }
+
+/* ---- vertical scope switching + preview marks ---- */
+.vtabBtn { border: 0; background: transparent; font-family: inherit; cursor: pointer; }
+.vtabBtn:hover { background: var(--ms-surface); color: var(--ms-ink); }
+.lkPending { color: var(--ms-amber) !important; opacity: 1 !important; }
+.lkRefused { color: var(--ms-danger) !important; opacity: 1 !important; }
+.previewChip {
+  margin-left: auto; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; background: #fdf3d9; color: #7a5410; border: 1px dashed #d9b46a; white-space: nowrap;
+}
+
+/* Sub-heading inside a workspace ("Long-term leases" / "Bookings — …"): a non-link label
+   row in the same small-uppercase voice as .layer, indented to the child column. */
+.subhead {
+  font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ms-ink-3);
+  padding: 9px 12px 3px 37px; line-height: 1.35;
+}
+.subhead:first-child { padding-top: 4px; }
+.kid + .subhead { margin-top: 5px; border-top: 1px solid var(--ms-surface-3); padding-top: 10px; }

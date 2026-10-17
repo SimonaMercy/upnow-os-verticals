@@ -103,8 +103,8 @@ function DocRow({
       isRejected   ? 'bg-[#fff1f2] border-l-4 border-l-[#ef4444] border border-[#fecaca]'
       : needsUpload && req.required ? 'bg-[#fffbeb] border-l-4 border-l-[#f59e0b] border border-[#fde68a]'
       : isPending  ? 'bg-[#eff6ff] border border-[#bfdbfe]'
-      : isApproved ? 'bg-[#f0faf6] border border-[#bbf7d0]'
-      : 'bg-[#f9f8f6] border border-[#e8e6e0] opacity-75',
+      : isApproved ? 'bg-[#eef7f2] border border-[#bbf7d0]'
+      : 'bg-[#f9f8f6] border border-[#e4e9e5] opacity-75',
     ].join(' ')}>
 
       {/* Status icon */}
@@ -113,27 +113,27 @@ function DocRow({
         {isApproved   && <div className="w-6 h-6 rounded-full bg-[#dcfce7] flex items-center justify-center"><CheckCircle2 size={13} className="text-[#16a34a]" /></div>}
         {isPending    && <div className="w-6 h-6 rounded-full bg-[#dbeafe] flex items-center justify-center"><Clock size={12} className="text-[#2563eb]" /></div>}
         {!uploaded && req.required  && <div className="w-6 h-6 rounded-full bg-[#fef3c7] flex items-center justify-center"><UploadCloud size={12} className="text-[#d97706]" /></div>}
-        {!uploaded && !req.required && <div className="w-6 h-6 rounded-full bg-[#f4f3ef] flex items-center justify-center"><UploadCloud size={12} className="text-[#c5c3bc]" /></div>}
+        {!uploaded && !req.required && <div className="w-6 h-6 rounded-full bg-[#eef1ef] flex items-center justify-center"><UploadCloud size={12} className="text-[#c5c3bc]" /></div>}
       </div>
 
       {/* Label + status text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <p className={`text-sm font-semibold ${isRejected ? 'text-[#991b1b]' : needsUpload && req.required ? 'text-[#92400e]' : isApproved ? 'text-[#166534]' : 'text-[#1a1916]'}`}>
+          <p className={`text-sm font-semibold ${isRejected ? 'text-[#991b1b]' : needsUpload && req.required ? 'text-[#92400e]' : isApproved ? 'text-[#166534]' : 'text-[#14201a]'}`}>
             {req.label}
           </p>
           {!uploaded && req.required  && <span className="text-[10px] font-bold uppercase tracking-wide text-[#d97706] bg-[#fef3c7] px-1.5 py-0.5 rounded">Required</span>}
-          {!uploaded && !req.required && <span className="text-[10px] text-[#9b9890]">Optional</span>}
+          {!uploaded && !req.required && <span className="text-[10px] text-[#8a948d]">Optional</span>}
         </div>
         {isRejected && (
           <p className="text-xs text-[#ef4444] font-medium mt-0.5">
             Rejected — re-upload required
-            {docRecord?.notes && <span className="font-normal text-[#6b6860]"> · {docRecord.notes}</span>}
+            {docRecord?.notes && <span className="font-normal text-[#5f6b63]"> · {docRecord.notes}</span>}
           </p>
         )}
-        {isPending  && <p className="text-xs text-[#6b6860] mt-0.5">Uploaded · awaiting review</p>}
+        {isPending  && <p className="text-xs text-[#5f6b63] mt-0.5">Uploaded · awaiting review</p>}
         {isApproved && <p className="text-xs text-[#16a34a] font-medium mt-0.5">Approved ✓</p>}
-        {needsUpload && !isRejected && req.hint && <p className="text-xs text-[#9b9890] mt-0.5">{req.hint}</p>}
+        {needsUpload && !isRejected && req.hint && <p className="text-xs text-[#8a948d] mt-0.5">{req.hint}</p>}
       </div>
 
       {/* Actions */}
@@ -141,7 +141,7 @@ function DocRow({
         {uploaded && docRecord?.fileUrl && !isRejected && (
           <button type="button"
             onClick={() => openDocViewer({ fileUrl: docRecord.fileUrl, caption: req.label })}
-            className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
+            className="flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline cursor-pointer">
             <ExternalLink size={12} /> View
           </button>
         )}
@@ -150,7 +150,7 @@ function DocRow({
           uploading ? 'opacity-50 pointer-events-none' : '',
           isRejected ? 'bg-[#ef4444] hover:bg-[#dc2626]'
             : needsUpload && req.required ? 'bg-[#f59e0b] hover:bg-[#d97706]'
-            : 'bg-[#9b9890] hover:bg-[#6b6860]',
+            : 'bg-[#8a948d] hover:bg-[#5f6b63]',
         ].join(' ')}>
           {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
           {isRejected ? 'Re-upload' : uploaded ? 'Replace' : 'Upload'}
@@ -182,14 +182,14 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#e8e6e0] overflow-hidden">
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-[#f4f3ef] bg-[#fafaf8]">
-        <div className="w-8 h-8 rounded-xl bg-[#f0faf6] flex items-center justify-center shrink-0">
-          <Icon size={16} className="text-[#2e9f82]" />
+    <div className="bg-white rounded-2xl border border-[#e4e9e5] overflow-hidden">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-[#eef1ef] bg-[#f6f8f6]">
+        <div className="w-8 h-8 rounded-xl bg-[#eef7f2] flex items-center justify-center shrink-0">
+          <Icon size={16} className="text-[#047246]" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-[#1a1916]">{title}</p>
-          <p className="text-xs text-[#9b9890] mt-0.5">{subtitle}</p>
+          <p className="text-sm font-bold text-[#14201a]">{title}</p>
+          <p className="text-xs text-[#8a948d] mt-0.5">{subtitle}</p>
         </div>
         {badge}
       </div>
@@ -504,8 +504,8 @@ export default function CustomerDocumentsPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1916]">My Documents</h1>
-          <p className="text-sm text-[#6b6860] mt-0.5">
+          <h1 className="text-2xl font-bold text-[#14201a]">My Documents</h1>
+          <p className="text-sm text-[#5f6b63] mt-0.5">
             Manage your identity and rental application documents.
           </p>
         </div>
@@ -518,21 +518,21 @@ export default function CustomerDocumentsPage() {
 
       {/* Stat strip */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white border border-[#e8e6e0] rounded-2xl px-4 py-3.5">
-          <p className="text-xs text-[#6b6860]">KYC Documents</p>
-          <p className={`text-2xl font-bold mt-0.5 ${kycUploaded < kycRequired ? 'text-[#d97706]' : 'text-[#2e9f82]'}`}>
+        <div className="bg-white border border-[#e4e9e5] rounded-2xl px-4 py-3.5">
+          <p className="text-xs text-[#5f6b63]">KYC Documents</p>
+          <p className={`text-2xl font-bold mt-0.5 ${kycUploaded < kycRequired ? 'text-[#d97706]' : 'text-[#047246]'}`}>
             {loading ? '…' : `${kycUploaded}/${kycRequired}`}
           </p>
         </div>
-        <div className="bg-white border border-[#e8e6e0] rounded-2xl px-4 py-3.5">
-          <p className="text-xs text-[#6b6860]">Rental Documents</p>
-          <p className={`text-2xl font-bold mt-0.5 ${!hasRentalSection ? 'text-[#c0bdb8]' : rentalUploaded < rentalRequired ? 'text-[#d97706]' : 'text-[#2e9f82]'}`}>
+        <div className="bg-white border border-[#e4e9e5] rounded-2xl px-4 py-3.5">
+          <p className="text-xs text-[#5f6b63]">Rental Documents</p>
+          <p className={`text-2xl font-bold mt-0.5 ${!hasRentalSection ? 'text-[#c0bdb8]' : rentalUploaded < rentalRequired ? 'text-[#d97706]' : 'text-[#047246]'}`}>
             {loading ? '…' : !hasRentalSection ? '—' : `${rentalUploaded}/${rentalRequired}`}
           </p>
         </div>
-        <div className="bg-white border border-[#e8e6e0] rounded-2xl px-4 py-3.5">
-          <p className="text-xs text-[#6b6860]">Additional</p>
-          <p className="text-2xl font-bold mt-0.5 text-[#1a1916]">
+        <div className="bg-white border border-[#e4e9e5] rounded-2xl px-4 py-3.5">
+          <p className="text-xs text-[#5f6b63]">Additional</p>
+          <p className="text-2xl font-bold mt-0.5 text-[#14201a]">
             {loading ? '…' : extraCount}
           </p>
         </div>
@@ -550,14 +550,14 @@ export default function CustomerDocumentsPage() {
         title="Identity & KYC"
         subtitle="Required for all customers regardless of property type"
         badge={
-          loading ? <Loader2 size={14} className="animate-spin text-[#9b9890]" /> :
+          loading ? <Loader2 size={14} className="animate-spin text-[#8a948d]" /> :
           kycUploaded === kycRequired
             ? <span className="text-xs font-semibold text-[#16a34a] bg-[#dcfce7] px-2.5 py-1 rounded-full">Complete ✓</span>
             : <span className="text-xs font-semibold text-[#92400e] bg-[#fef3c7] px-2.5 py-1 rounded-full">{kycUploaded}/{kycRequired} uploaded</span>
         }
       >
         {loading ? (
-          <p className="text-sm text-[#9b9890] text-center py-4">Loading…</p>
+          <p className="text-sm text-[#8a948d] text-center py-4">Loading…</p>
         ) : (
           KYC_DOCS.map(req => {
             const docRecord = uploadedByKey.get(req.key) ?? pendingByKey.get(req.key);
@@ -615,10 +615,10 @@ export default function CustomerDocumentsPage() {
         }
       >
         {/* Utility account number */}
-        <div className="rounded-xl px-4 py-4 bg-[#f9f8f6] border border-[#e8e6e0] space-y-3">
+        <div className="rounded-xl px-4 py-4 bg-[#f9f8f6] border border-[#e4e9e5] space-y-3">
           <div className="flex items-center gap-2">
-            <Zap size={14} className="text-[#2e9f82] shrink-0" />
-            <p className="text-sm font-semibold text-[#1a1916]">Utility Account Number</p>
+            <Zap size={14} className="text-[#047246] shrink-0" />
+            <p className="text-sm font-semibold text-[#14201a]">Utility Account Number</p>
           </div>
           <div className="flex gap-2">
             <input
@@ -626,26 +626,26 @@ export default function CustomerDocumentsPage() {
               value={utilityAccountNum}
               onChange={e => setDewaAccountNum(e.target.value)}
               placeholder="e.g. 1234567890"
-              className="flex-1 border border-[#e8e6e0] rounded-lg px-3 py-2 text-sm font-mono text-[#1a1916] bg-white focus:outline-none focus:border-[#2e9f82] transition-colors"
+              className="flex-1 border border-[#e4e9e5] rounded-lg px-3 py-2 text-sm font-mono text-[#14201a] bg-white focus:outline-none focus:border-[#047246] transition-colors"
             />
             {utilityDocId && (
               <button
                 type="button"
                 onClick={saveUtilityAccountNum}
                 disabled={utilityAccountSaving}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#2e9f82] hover:bg-[#267a65] disabled:opacity-60 transition-colors shrink-0"
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#047246] hover:bg-[#267a65] disabled:opacity-60 transition-colors shrink-0"
               >
                 {utilityAccountSaving ? 'Saving…' : 'Save'}
               </button>
             )}
           </div>
           {utilityAccountSaved && (
-            <p className="text-xs text-[#2e9f82] flex items-center gap-1">
+            <p className="text-xs text-[#047246] flex items-center gap-1">
               <CheckCircle size={12} /> Account number saved.
             </p>
           )}
           {!utilityDocId && (
-            <p className="text-[11px] text-[#9b9890]">Upload the proof of payment below — account number will be saved together.</p>
+            <p className="text-[11px] text-[#8a948d]">Upload the proof of payment below — account number will be saved together.</p>
           )}
         </div>
 
@@ -662,26 +662,26 @@ export default function CustomerDocumentsPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className={`text-sm font-semibold ${utilityDocId ? 'text-[#1a1916]' : 'text-[#92400e]'}`}>Proof of Payment</p>
+              <p className={`text-sm font-semibold ${utilityDocId ? 'text-[#14201a]' : 'text-[#92400e]'}`}>Proof of Payment</p>
               {!utilityDocId && <span className="text-[10px] font-bold uppercase tracking-wide text-[#d97706] bg-[#fef3c7] px-1.5 py-0.5 rounded">Required</span>}
             </div>
             {utilityDocId
-              ? <p className="text-xs text-[#6b6860] mt-0.5">Uploaded · awaiting review</p>
-              : <p className="text-xs text-[#9b9890] mt-0.5">Utility connection letter or latest payment receipt (PDF or image)</p>
+              ? <p className="text-xs text-[#5f6b63] mt-0.5">Uploaded · awaiting review</p>
+              : <p className="text-xs text-[#8a948d] mt-0.5">Utility connection letter or latest payment receipt (PDF or image)</p>
             }
           </div>
           <div className="flex items-center gap-2 shrink-0 mt-0.5">
             {utilityDocId && utilityDocUrl && (
               <button type="button"
                 onClick={() => openDocViewer({ fileUrl: utilityDocUrl, caption: 'Proof of Payment' })}
-                className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
+                className="flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline cursor-pointer">
                 <ExternalLink size={12} /> View
               </button>
             )}
             <label className={[
               'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',
               utilityUploading ? 'opacity-50 pointer-events-none' : '',
-              utilityDocId ? 'bg-[#9b9890] hover:bg-[#6b6860]' : 'bg-[#f59e0b] hover:bg-[#d97706]',
+              utilityDocId ? 'bg-[#8a948d] hover:bg-[#5f6b63]' : 'bg-[#f59e0b] hover:bg-[#d97706]',
             ].join(' ')}>
               {utilityUploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
               {utilityDocId ? 'Replace' : 'Upload'}
@@ -705,7 +705,7 @@ export default function CustomerDocumentsPage() {
           anyPending
             ? <span className="text-xs font-semibold text-[#f97316] bg-[#fff7ed] px-2.5 py-1 rounded-full">Requested</span>
             : extraCount > 0
-            ? <span className="text-xs text-[#6b6860]">{extraCount} file{extraCount !== 1 ? 's' : ''}</span>
+            ? <span className="text-xs text-[#5f6b63]">{extraCount} file{extraCount !== 1 ? 's' : ''}</span>
             : undefined
         }
       >
@@ -722,7 +722,7 @@ export default function CustomerDocumentsPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-[#9a3412]">{label}</p>
                 <p className="text-xs font-semibold text-[#f97316] mt-0.5">Requested by landlord — upload required</p>
-                {doc.notes && <p className="text-xs text-[#9b9890] mt-0.5">{doc.notes}</p>}
+                {doc.notes && <p className="text-xs text-[#8a948d] mt-0.5">{doc.notes}</p>}
               </div>
               <label className={[
                 'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white bg-[#f97316] hover:bg-[#ea6b00] transition-opacity mt-0.5',
@@ -749,7 +749,7 @@ export default function CustomerDocumentsPage() {
               className={[
                 'rounded-xl px-4 py-3 flex items-start gap-3',
                 isRejected ? 'bg-[#fff1f2] border-l-4 border-l-[#ef4444] border border-[#fecaca]'
-                : isApproved ? 'bg-[#f0faf6] border border-[#bbf7d0]'
+                : isApproved ? 'bg-[#eef7f2] border border-[#bbf7d0]'
                 : 'bg-[#eff6ff] border border-[#bfdbfe]',
               ].join(' ')}>
               <div className="mt-0.5 shrink-0">
@@ -759,25 +759,25 @@ export default function CustomerDocumentsPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className={`text-sm font-semibold ${isRejected ? 'text-[#991b1b]' : isApproved ? 'text-[#166534]' : 'text-[#1a1916]'}`}>{label}</p>
-                  <span className="text-[10px] text-[#9b9890]">Additional</span>
+                  <p className={`text-sm font-semibold ${isRejected ? 'text-[#991b1b]' : isApproved ? 'text-[#166534]' : 'text-[#14201a]'}`}>{label}</p>
+                  <span className="text-[10px] text-[#8a948d]">Additional</span>
                 </div>
-                {isRejected && <p className="text-xs text-[#ef4444] font-medium mt-0.5">Rejected — re-upload required{doc.notes && <span className="font-normal text-[#6b6860]"> · {doc.notes}</span>}</p>}
-                {isPending  && <p className="text-xs text-[#6b6860] mt-0.5">Uploaded · awaiting review</p>}
+                {isRejected && <p className="text-xs text-[#ef4444] font-medium mt-0.5">Rejected — re-upload required{doc.notes && <span className="font-normal text-[#5f6b63]"> · {doc.notes}</span>}</p>}
+                {isPending  && <p className="text-xs text-[#5f6b63] mt-0.5">Uploaded · awaiting review</p>}
                 {isApproved && <p className="text-xs text-[#16a34a] font-medium mt-0.5">Approved ✓</p>}
               </div>
               <div className="flex items-center gap-2 shrink-0 mt-0.5">
                 {doc.fileUrl && !isRejected && (
                   <button type="button"
                     onClick={() => openDocViewer({ fileUrl: doc.fileUrl, caption: label })}
-                    className="flex items-center gap-1 text-xs font-medium text-[#2e9f82] hover:underline cursor-pointer">
+                    className="flex items-center gap-1 text-xs font-medium text-[#047246] hover:underline cursor-pointer">
                     <ExternalLink size={12} /> View
                   </button>
                 )}
                 <label className={[
                   'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer text-white transition-opacity',
                   docUploading === doc.documentKey ? 'opacity-50 pointer-events-none' : '',
-                  isRejected ? 'bg-[#ef4444] hover:bg-[#dc2626]' : 'bg-[#9b9890] hover:bg-[#6b6860]',
+                  isRejected ? 'bg-[#ef4444] hover:bg-[#dc2626]' : 'bg-[#8a948d] hover:bg-[#5f6b63]',
                 ].join(' ')}>
                   {docUploading === doc.documentKey ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />}
                   {isRejected ? 'Re-upload' : 'Replace'}
@@ -795,20 +795,20 @@ export default function CustomerDocumentsPage() {
         )}
 
         {/* Attach form */}
-        <div className="pt-2 border-t border-[#f4f3ef]">
+        <div className="pt-2 border-t border-[#eef1ef]">
           {!showAttach ? (
             <button
               onClick={() => setShowAttach(true)}
-              className="flex items-center gap-2 text-sm font-semibold text-[#2e9f82] hover:opacity-75 transition-opacity">
+              className="flex items-center gap-2 text-sm font-semibold text-[#047246] hover:opacity-75 transition-opacity">
               <UploadCloud size={14} /> Attach a document
             </button>
           ) : (
             <div className="space-y-3 bg-[#f7f6f2] rounded-xl px-4 py-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-bold text-[#1a1916] uppercase tracking-wide">Attach document</p>
+                <p className="text-xs font-bold text-[#14201a] uppercase tracking-wide">Attach document</p>
                 <button
                   onClick={() => { setShowAttach(false); setAttachFile(null); setAttachLabel(''); setAttachError(null); }}
-                  className="text-[#9b9890] hover:text-[#1a1916]">
+                  className="text-[#8a948d] hover:text-[#14201a]">
                   <X size={15} />
                 </button>
               </div>
@@ -817,7 +817,7 @@ export default function CustomerDocumentsPage() {
                 value={attachLabel}
                 onChange={e => setAttachLabel(e.target.value)}
                 placeholder="Document name (e.g. Utility Bill)"
-                className="w-full text-sm px-3 py-2.5 border border-[#e8e6e0] rounded-xl bg-white focus:border-[#2e9f82] focus:outline-none"
+                className="w-full text-sm px-3 py-2.5 border border-[#e4e9e5] rounded-xl bg-white focus:border-[#047246] focus:outline-none"
               />
               <input
                 ref={attachInputRef}
@@ -833,14 +833,14 @@ export default function CustomerDocumentsPage() {
                     if (!f && attachInputRef.current) attachInputRef.current.value = '';
                   });
                 }}
-                className="w-full text-sm text-[#6b6860] file:mr-3 file:text-xs file:font-semibold file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#f0faf6] file:text-[#2e9f82] hover:file:bg-[#e0f5ee] cursor-pointer"
+                className="w-full text-sm text-[#5f6b63] file:mr-3 file:text-xs file:font-semibold file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-[#eef7f2] file:text-[#047246] hover:file:bg-[#e0f5ee] cursor-pointer"
               />
               {attachError && <p className="text-xs text-red-600">{attachError}</p>}
               <button
                 onClick={handleFreeUpload}
                 disabled={!attachFile || attaching}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-opacity"
-                style={{ background: '#2e9f82' }}>
+                style={{ background: '#047246' }}>
                 {attaching ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
                 {attaching ? 'Uploading…' : 'Upload'}
               </button>
@@ -853,7 +853,7 @@ export default function CustomerDocumentsPage() {
       <div className="pb-4">
         <a
           href="/dashboard/customer/spaces"
-          className="inline-flex items-center gap-1.5 text-sm text-[#6b6860] hover:text-[#2e9f82] transition-colors">
+          className="inline-flex items-center gap-1.5 text-sm text-[#5f6b63] hover:text-[#047246] transition-colors">
           <ChevronRight size={14} className="rotate-180" /> Back to My Spaces
         </a>
       </div>

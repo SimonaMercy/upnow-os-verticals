@@ -20,8 +20,8 @@ import { useReactPdfDoc } from './useReactPdfDoc';
 import { leaseDocFileName } from '@/lib/leaseDocName';
 import EjariCanvas from './EjariCanvas';
 
-const VIEW_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#2e9f82', color: '#fff', border: 'none' };
-const DL_LINK: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#fff', color: '#2e9f82', border: '1px solid #cfe9e0', textDecoration: 'none' };
+const VIEW_BTN: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#047246', color: '#fff', border: 'none' };
+const DL_LINK: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 12, background: '#fff', color: '#047246', border: '1px solid #cfe9e0', textDecoration: 'none' };
 const VIEWER_WRAP: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#52555a' };
 const VIEWER_BAR: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', background: '#fff', borderBottom: '1px solid #ddd', gap: 12, flexWrap: 'wrap' };
 const CLOSE_BTN: React.CSSProperties = { padding: '6px 16px', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, background: '#fff' };

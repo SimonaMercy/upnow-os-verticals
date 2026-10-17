@@ -42,7 +42,7 @@ export default function EjariInline({ data, addendums = [], height = 640, fluid 
   const bytes = dubai ? dubaiBytes : vectorBytes;
   const url = dubai ? dubaiUrl : vectorUrl;
   const error = dubai ? dubaiErr : vectorErr;
-  const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
+  const frame = { border: '1px solid #e4e9e5', borderRadius: 12 } as const;
 
   if (error) return <div style={{ ...frame, height, display: 'grid', placeItems: 'center', color: '#c00', fontSize: 13 }}>Failed to render contract: {error}</div>;
   // EjariCanvas shows its own "Preparing contract…" placeholder while bytes are null.

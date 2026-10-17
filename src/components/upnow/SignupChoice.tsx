@@ -38,7 +38,7 @@ export function SignupChoice() {
     <section
       id="signup"
       style={{
-        background: "linear-gradient(180deg, var(--base-100) 0%, #f0faf6 100%)",
+        background: "linear-gradient(180deg, var(--base-100) 0%, #eef7f2 100%)",
         paddingBlock: 96,
       }}
     >

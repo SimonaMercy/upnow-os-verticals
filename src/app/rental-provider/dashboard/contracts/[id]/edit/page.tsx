@@ -1,20 +1,58 @@
 /**
- * RP — Edit Tenancy Contract.
+ * Operations › Long-term leases › Edit tenancy contract — the Genspark wizard
+ * (steps left · form centre · live summary right).
  *
- * Mirrors the new-contract wizard's layout (rental-provider/dashboard/contracts/new)
- * but operates on an EXISTING contract: prefills every term, keeps the unit &
- * customer fixed (read-only), and lets the RP edit the FULL financial terms
- * (rent, deposit, admin/Ejari fee, payment method, installments) + dates,
- * clauses and notes. Saves via PATCH /contracts/:id (audited, no re-sign). The
- * cheque schedule is a live preview only — editing does not regenerate the
- * stored payment rows, so recorded cheques are preserved.
+ * Operates on an EXISTING contract: prefills every term, keeps the unit fixed, lets
+ * the customer be reassigned only before any signature, and lets the RP edit the
+ * FULL financial terms + dates, third-party charges, clauses and notes. Saves via
+ * PATCH /contracts/:id (audited, no re-sign).
+ *
+ * Reused by the manager route (/dashboard/manager/contracts/[id]/edit re-exports this
+ * default export inside ManagerPermissionGate "Manage Agreements", after resolving ?rp=).
+ *
+ * Parity with previous page (single-scroll form + summary column; original backed up
+ * to the session scratchpad as contracts-edit.orig.tsx):
+ *  Data / API (unchanged endpoints + payloads)
+ *   [x] GET   /contracts/:id/signatures → customerEditable (no signatures) + signedLocked (any non-on_file method)
+ *   [x] GET   /contracts/tenants/list | manager: /manager/tenants/list?rp=   → active customers list
+ *   [x] GET   /contracts/tenants/search?q= | manager: /manager/tenants/search?rp=&q= (300 ms debounce)
+ *   [x] POST  /api/contracts/tenants | manager: /api/manager/tenants?rp=   → inline "Create a new customer"
+ *   [x] GET   /profiles/rental-provider/me (RP only) → allowedInstallments
+ *   [x] GET   /contracts/:id → every field (fees from fee rows, falling back to legacy columns; `other`
+ *             payment rows → third-party lines, bounced/cancelled dropped, non-pending = locked)
+ *   [x] GET   /contracts/:id/addendums · POST /contracts/:id/addendums/from-layout → Agreement Addendum
+ *   [x] PATCH /contracts/:id → same body: tenantId (only when editable), contractStartDate/EndDate,
+ *             listedRent (2 dp), discountType (null clears) / discountValue, securityDepositAmount, adminFee,
+ *             ejariFee (blank = undefined), numberOfInstallments, modeOfPayment, customClauses, notes,
+ *             extraCharges (unlocked, described, amount > 0; id = update in place)
+ *   [x] Save → `${contractsBase}/:id/v2` (manager: /dashboard/manager/contracts/:id/v2)
+ *  Fields / behaviour
+ *   [x] Unit + building read-only ("Fixed")
+ *   [x] Customer: fixed once signed · "Change" → search + dropdown + clear, active-customers list,
+ *       inline new customer, "Done" · "Changed" confirmation when reassigned
+ *   [x] Start / end date (min = start; a blank end re-anchors to 12 months) · 6 / 12 / 24-month presets · duration
+ *   [x] Listed rent, discount none / % / fixed with Listed → Discount → Net breakdown, VAT on rent at the
+ *       contract's rentVatRate (read-only), total incl. VAT
+ *   [x] Security deposit, admin fee, contract registration fee, payment method, payments / year
+ *       (allowedInstallmentPlans keeping the current value)
+ *   [x] SegregatedPlanView preview (same rows: even split dated by chequeDateISO, VAT, deposit, fees,
+ *       third-party lines) + "Saving regenerates the cheque schedule…" note
+ *   [x] Third-party charges: add (due with the first instalment), edit, remove; derived % lines follow the
+ *       net rent (recomputeThirdPartyCharges) and show their hint; recorded lines locked
+ *   [x] Custom clauses add (Enter / Add) + remove · notes
+ *   [x] Addendum list / attach (hidden for terminated / expired) with error
+ *   [x] Validation: signed lock, dates required, end after start, listed rent ≥ 0 (zero = rent-free allowed),
+ *       discount must leave rent > 0 · error banner
+ *   [x] Signed contract → locked notice + "Back to contract" · loading state · Back (router.back) · Cancel
+ *  Added (Genspark): step list, live summary on every step, "Preview & save" checklist from the real form
+ *  state, validation jumps to the failing step, a load failure shows a retry instead of an empty form.
+ *  Changed on purpose: row actions are labelled ("Remove"), recorded charges show a "Recorded" pill.
  */
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, ChevronDown, Building2, User, Plus, X, Info, Search, PlusCircle, Check, Lock } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { allowedInstallmentPlans } from '@/lib/installmentPlans';
 import { SegregatedPlanView } from '@/components/upnow/SegregatedPlanView';
@@ -22,6 +60,10 @@ import { buildSegregatedPlan, type SegPaymentInput } from '@/lib/segregatedPlan'
 import { buildInstallmentDueDates } from '@/lib/installmentDates';
 import { derivedChargeHint, recomputeThirdPartyCharges } from '@/lib/thirdPartyCharges';
 import { tenantDisplayName } from '@/lib/tenantName';
+import {
+  Btn, Callout, Card, Checklist, EmptyRow, Evid, Field, KV, Locked, OsPage, PageHead, Pill, ScopeStrip,
+  StatusTag, TableWrap, Thumb, fmtAed, fmtDate,
+} from '@/components/os/kit';
 
 interface Tenant {
   id: number;
@@ -51,7 +93,6 @@ function NewCustomerForm({ createTenantUrl, onCreated, onCancel }: {
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const field = 'w-full rounded-xl border border-[#e8e6e0] bg-white px-3 py-2 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
   const submit = async () => {
     if (!name.trim()) { setErr('Name is required'); return; }
     if (!email.trim()) { setErr('Email is required'); return; }
@@ -71,29 +112,24 @@ function NewCustomerForm({ createTenantUrl, onCreated, onCancel }: {
     finally { setBusy(false); }
   };
   return (
-    <div className="mt-3 rounded-xl border border-[#e8e6e0] bg-[#fafaf8] p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#1a1916]">New customer</p>
-        <button type="button" onClick={onCancel} className="text-xs text-[#9b9890] hover:text-[#1a1916]">Cancel</button>
+    <Card title="New customer" right={<Btn size="xs" onClick={onCancel}>Cancel</Btn>} pad>
+      <div className="gx-two">
+        <Field label="Full name *" htmlFor="enc-name"><input id="enc-name" className="gx-inp" value={name} onChange={e => setName(e.target.value)} /></Field>
+        <Field label="Email *" htmlFor="enc-email"><input id="enc-email" className="gx-inp" type="email" value={email} onChange={e => setEmail(e.target.value)} /></Field>
+        <Field label="Phone (optional)" htmlFor="enc-phone"><input id="enc-phone" className="gx-inp" value={phone} onChange={e => setPhone(e.target.value)} /></Field>
+        <Field label="Customer type" htmlFor="enc-type">
+          <select id="enc-type" className="gx-sel" value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')}>
+            <option value="individual">Individual</option>
+            <option value="company">Company</option>
+          </select>
+        </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" className={field} />
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" className={field} />
-        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone (optional)" className={field} />
-        <select value={entityType} onChange={e => setEntityType(e.target.value as 'individual' | 'company')} className={field}>
-          <option value="individual">Individual</option>
-          <option value="company">Company</option>
-        </select>
-        {entityType === 'company' && (
-          <input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Company name" className={`${field} col-span-2`} />
-        )}
-      </div>
-      {err && <p className="text-xs text-red-600">{err}</p>}
-      <button type="button" onClick={submit} disabled={busy}
-        className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-[#2e9f82] text-white disabled:opacity-60">
-        {busy ? 'Creating…' : 'Create customer'}
-      </button>
-    </div>
+      {entityType === 'company' && (
+        <Field label="Company name" htmlFor="enc-company"><input id="enc-company" className="gx-inp" value={companyName} onChange={e => setCompanyName(e.target.value)} /></Field>
+      )}
+      {err && <div style={{ marginBottom: 10 }}><Callout tone="bad">{err}</Callout></div>}
+      <Btn variant="primary" onClick={submit} disabled={busy}>{busy ? 'Creating…' : 'Create customer'}</Btn>
+    </Card>
   );
 }
 
@@ -105,9 +141,6 @@ const PAYMENT_METHODS: { value: string; label: string }[] = [
   { value: 'online', label: 'Online Payment' },
 ];
 
-function fmtAed(aed: number) {
-  return new Intl.NumberFormat('en-AE', { style: 'currency', currency: 'AED', maximumFractionDigits: 0 }).format(aed);
-}
 function addMonths(dateStr: string, months: number): string {
   if (!dateStr) return '';
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -175,9 +208,26 @@ interface ExtraLine {
 const toDateInput = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '');
 const numStr = (v: number | null | undefined) => (v == null ? '' : String(v));
 
-const cardCls = 'bg-white rounded-2xl p-5 shadow-sm space-y-4';
-const labelCls = 'block text-xs font-medium text-[#6b6860] mb-1.5';
-const inputCls = 'w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]';
+type StepId = 'parties' | 'period' | 'rent' | 'fees' | 'charges' | 'clauses' | 'addendum' | 'review';
+const STEPS: { id: StepId; t: string; d: string }[] = [
+  { id: 'parties',  t: 'Unit & customer',     d: 'Unit is fixed; customer until signed' },
+  { id: 'period',   t: 'Rental period',       d: 'Start, end and duration' },
+  { id: 'rent',     t: 'Rent & instalments',  d: 'Listed rent, discount, payment plan' },
+  { id: 'fees',     t: 'Fees & deposit',      d: 'Security deposit and one-off fees' },
+  { id: 'charges',  t: 'Third-party charges', d: 'Pass-through amounts on this lease' },
+  { id: 'clauses',  t: 'Clauses & notes',     d: 'Special terms on the contract' },
+  { id: 'addendum', t: 'Agreement addendum',  d: 'Attach the layout addendum' },
+  { id: 'review',   t: 'Preview & save',      d: 'Checklist, then save the changes' },
+];
+
+function SumRow({ k, v, strong }: { k: string; v: React.ReactNode; strong?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--ms-surface-3)', fontSize: 11.5 }}>
+      <span style={{ color: 'var(--ms-ink-3)' }}>{k}</span>
+      <span style={{ fontWeight: strong ? 800 : 600, textAlign: 'right' }}>{v}</span>
+    </div>
+  );
+}
 
 export default function EditContractPage() {
   const router = useRouter();
@@ -202,7 +252,10 @@ export default function EditContractPage() {
   // POST goes through the raw /api proxy (NewCustomerForm uses fetch).
   const createTenantUrl = isManager ? `/api/manager/tenants?rp=${rpParam}` : '/api/contracts/tenants';
 
+  const [step, setStep] = useState<StepId>('parties');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<{ ref?: string; status?: string | null; tenant?: string | null; unit?: string | null; building?: string | null }>({});
@@ -284,6 +337,7 @@ export default function EditContractPage() {
     apiGet<ContractDetail>(`/contracts/${id}`)
       .then((c) => {
         if (cancelled) return;
+        setLoadError(false);
         setTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
         setOriginalTenantId(c.tenant?.id != null ? String(c.tenant.id) : '');
         setTenantName(tenantDisplayName(c.tenant) ?? '');
@@ -325,10 +379,11 @@ export default function EditContractPage() {
           building: c.property?.buildingName ?? null,
         });
       })
-      .catch(() => { if (!cancelled) setError('Could not load this contract.'); })
+      .catch(() => { if (!cancelled) setLoadError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, reloadKey]);
 
   // Load any addendum currently attached to this contract.
   useEffect(() => {
@@ -405,13 +460,17 @@ export default function EditContractPage() {
   // rent cheques stay NET. Shown here so the edit form reflects the tax.
   const rentVat = rentVatRate > 0 ? Math.round(rentNum * rentVatRate) / 100 : 0;
   const durationLabel = calcDurationLabel(startDate, endDate);
+  const datesValid = !!startDate && !!endDate && new Date(startDate) < new Date(endDate);
 
-  // Keep the derived third-party lines pinned to the net rent as it is edited.
-  // recomputeThirdPartyCharges returns the same array when nothing moved, so
-  // this settles in one pass. Flat charges and recorded rows are untouched.
-  useEffect(() => {
+  // Keep the derived third-party lines pinned to the net rent as it is edited —
+  // adjusted during render when the net rent changes (no effect round-trip).
+  // recomputeThirdPartyCharges returns the same array when nothing moved.
+  // Flat charges and recorded rows are untouched.
+  const [seenRent, setSeenRent] = useState<number | null>(null);
+  if (seenRent !== rentNum) {
+    setSeenRent(rentNum);
     setExtras((prev) => recomputeThirdPartyCharges(prev, rentNum));
-  }, [rentNum]);
+  }
 
   // New lines fall due with the first rent instalment — the same anchor the
   // backend uses for an undated line and the renewal form uses for carried ones.
@@ -444,11 +503,13 @@ export default function EditContractPage() {
   }
   const previewSeg = buildSegregatedPlan(previewRows);
 
+  const fail = (msg: string, at: StepId) => { setError(msg); setStep(at); };
+
   const save = async () => {
     setError(null);
     if (signedLocked) { setError('This contract has been signed and can no longer be edited.'); return; }
-    if (!startDate || !endDate) { setError('Start and end dates are required.'); return; }
-    if (new Date(startDate) >= new Date(endDate)) { setError('End date must be after the start date.'); return; }
+    if (!startDate || !endDate) { fail('Start and end dates are required.', 'period'); return; }
+    if (new Date(startDate) >= new Date(endDate)) { fail('End date must be after the start date.', 'period'); return; }
     // A rent-free tenancy is legitimate — staff accommodation, a grace period —
     // so zero is allowed here. Refusing it is what pushed a landlord to type
     // 0.001 to get a zero past this check (prod, 3 Aug 2026): a sub-cent value
@@ -456,10 +517,10 @@ export default function EditContractPage() {
     // the backend's schedule rebuild saw it as positive on the way in and as
     // nothing on the way out — leaving an ACTIVE lease with no cheques at all.
     // Validate the 2 dp that actually get SAVED, and let zero through.
-    if (listedAed < 0) { setError('Listed rent cannot be negative.'); return; }
+    if (listedAed < 0) { fail('Listed rent cannot be negative.', 'rent'); return; }
     // A discount that cancels the whole rent is a data-entry slip; a genuinely
     // rent-free lease is entered as a zero rent, not as a 100% discount.
-    if (discountType !== 'none' && rentAed <= 0) { setError('The discount cannot be equal to or greater than the rent.'); return; }
+    if (discountType !== 'none' && rentAed <= 0) { fail('The discount cannot be equal to or greater than the rent.', 'rent'); return; }
     setSaving(true);
     try {
       const opt = (v: string) => (v.trim() === '' ? undefined : Number(v));
@@ -495,487 +556,558 @@ export default function EditContractPage() {
     }
   };
 
+  // ─── Wizard state + checklist (from the real form state) ──────────────────
+
+  const stepIdx = STEPS.findIndex((s) => s.id === step);
+  const next = STEPS[stepIdx + 1]?.id;
+  const prev = STEPS[stepIdx - 1]?.id;
+  const discountOk = !(discountType !== 'none' && rentAed <= 0);
+  const openExtras = extras.filter((e) => !e.locked);
+  const droppedExtras = openExtras.filter((e) => !(e.description.trim() && (Number(e.amount) || 0) > 0)).length;
+  const lockedExtras = extras.length - openExtras.length;
+  const methodLabel = PAYMENT_METHODS.find((m) => m.value === modeOfPayment)?.label ?? modeOfPayment;
+  const customerChanged = tenantId !== originalTenantId;
+  const complete: Record<StepId, boolean> = {
+    parties: stepIdx > 0,
+    period: datesValid,
+    rent: listedAed >= 0 && listedRent.trim() !== '' && discountOk,
+    fees: stepIdx > 3,
+    charges: stepIdx > 4 && droppedExtras === 0,
+    clauses: stepIdx > 5,
+    addendum: addendums.length > 0,
+    review: false,
+  };
+
+  const checks: { l: React.ReactNode; sub?: React.ReactNode; state: 'pass' | 'fail' | 'wait' }[] = [
+    {
+      l: 'Customer',
+      sub: !customerEditable ? `${tenantName || meta.tenant || '—'} · fixed (the contract has a signature)`
+        : customerChanged ? `Reassigned to ${tenantName || '—'} — saved with this change` : `${tenantName || meta.tenant || '—'} · unchanged`,
+      state: tenantId ? 'pass' : 'wait',
+    },
+    {
+      l: 'Contract dates',
+      sub: !startDate || !endDate ? 'Start and end dates are required.'
+        : datesValid ? `${fmtDate(startDate)} → ${fmtDate(endDate)} · ${durationLabel}` : 'End date must be after the start date.',
+      state: datesValid ? 'pass' : 'fail',
+    },
+    {
+      l: 'Rent',
+      sub: listedAed < 0 ? 'Listed rent cannot be negative.'
+        : !discountOk ? 'The discount cannot be equal to or greater than the rent.'
+        : rentAed === 0 ? 'Rent-free lease (AED 0) — allowed; no rent cheques will be scheduled.'
+        : `${fmtAed(rentAed)} net${discountAmt > 0 ? ` (listed ${fmtAed(listedAed)} − ${fmtAed(discountAmt)})` : ''} · ${inst} payment${inst === 1 ? '' : 's'} · ${methodLabel}`,
+      state: listedAed < 0 || !discountOk ? 'fail' : rentAed === 0 ? 'wait' : 'pass',
+    },
+    {
+      l: 'VAT on rent',
+      sub: rentVat > 0 ? `${rentVatRate}% · ${fmtAed(rentVat)}, collected as separate cheque(s). The backend recomputes it on save.` : 'Not VAT-able (residential) — the backend confirms on save.',
+      state: 'pass',
+    },
+    {
+      l: 'Third-party charges',
+      sub: `${openExtras.length - droppedExtras} line${openExtras.length - droppedExtras === 1 ? '' : 's'} will be saved`
+        + (lockedExtras ? ` · ${lockedExtras} recorded line${lockedExtras === 1 ? '' : 's'} kept as is` : '')
+        + (droppedExtras ? ` · ${droppedExtras} incomplete line${droppedExtras === 1 ? '' : 's'} (no description or amount) will be dropped` : ''),
+      state: droppedExtras ? 'wait' : 'pass',
+    },
+    {
+      l: 'Cheque schedule',
+      sub: 'Saving regenerates the cheque schedule — unless a cheque is already recorded (cleared/bounced); then the existing cheques are kept and you adjust them on the contract page.',
+      state: 'wait',
+    },
+    {
+      l: 'Agreement addendum',
+      sub: addendums.length ? addendums.map((a) => a.name || 'Agreement Addendum').join(', ') : 'None attached (optional).',
+      state: addendums.length ? 'pass' : 'wait',
+    },
+  ];
+  const blocking = checks.filter((c) => c.state === 'fail').length;
+
+  const head = (
+    <PageHead
+      eyebrow="Operations"
+      title="Edit tenancy contract"
+      lede={<>
+        {meta.ref ?? `CID-${id}`}
+        {signedLocked
+          ? ' — signed, so its terms are locked.'
+          : ' — editing terms is recorded in the audit log and does not require re-signing.'}
+      </>}
+      actions={<>
+        {meta.status && <StatusTag status={meta.status} />}
+        <Btn onClick={() => router.back()}>Back</Btn>
+      </>}
+    />
+  );
+
+  if (loading) {
+    return (
+      <OsPage>
+        {head}
+        <Card pad>
+          <div aria-busy="true" style={{ display: 'grid', gap: 10 }}>
+            {[70, 55, 85, 40].map((w, i) => <div key={i} className="gx-skel" style={{ height: 14, width: `${w}%` }} />)}
+          </div>
+        </Card>
+      </OsPage>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <OsPage>
+        {head}
+        <Callout tone="bad" title="Could not load this contract.">
+          <span className="gx-btn-row" style={{ display: 'inline-flex', marginLeft: 6 }}>
+            <Btn size="xs" onClick={() => { setLoading(true); setReloadKey((k) => k + 1); }}>Try again</Btn>
+            <Btn size="xs" href={`${contractsBase}/${id}/v2`}>Back to contract</Btn>
+          </span>
+        </Callout>
+      </OsPage>
+    );
+  }
+
+  if (signedLocked) {
+    // Signed → read-only. The Edit affordance is hidden across the app, but a deep
+    // link still lands here, so show a clear locked notice instead of a form that
+    // the backend would reject on save.
+    return (
+      <OsPage>
+        {head}
+        <Locked
+          title="Contract is signed"
+          text={<>{meta.ref ?? `CID-${id}`} has been signed, so its terms are locked and can no longer be edited. Editing after signing would no longer match the executed agreement.</>}
+          actions={<Btn variant="primary" href={`${contractsBase}/${id}/v2`}>Back to contract</Btn>}
+        />
+      </OsPage>
+    );
+  }
+
+  const filteredActive = activeTenants.filter((t) => !tenantSearch || t.user.name.toLowerCase().includes(tenantSearch.toLowerCase()) || t.user.email.toLowerCase().includes(tenantSearch.toLowerCase()));
+
   return (
-    <div className="min-h-screen bg-[#f7f6f2] p-4 md:p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => router.back()}
-            className="w-9 h-9 rounded-xl bg-white shadow-sm border border-[#e8e6e0] flex items-center justify-center hover:bg-[#f4f3ef]">
-            <ArrowLeft size={16} className="text-[#1a1916]" />
-          </button>
-          <div>
-            <h1 className="text-xl font-bold text-[#1a1916]">Edit Tenancy Contract</h1>
-            <p className="text-xs text-[#6b6860] mt-0.5">
-              {meta.ref ?? `CID-${id}`}{meta.status ? ` · ${meta.status}` : ''}
-              {signedLocked
-                ? ' — signed, so its terms are locked.'
-                : ' — editing terms is recorded in the audit log and does not require re-signing.'}
-            </p>
-          </div>
-        </div>
+    <OsPage>
+      {head}
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Operations' },
+        { label: 'Vertical', value: 'Spaces · Long-term lease' },
+        { label: 'Contract', value: meta.ref ?? `CID-${id}` },
+        { label: 'Status', value: meta.status ? <StatusTag status={meta.status} /> : '—' },
+        ...(isManager ? [{ label: 'Scope', value: `Managed landlord #${rpParam || '—'}` }] : []),
+      ]} />
 
-        {loading ? (
-          <div className="bg-white rounded-2xl p-10 shadow-sm text-center text-sm text-[#9b9890]">Loading contract…</div>
-        ) : signedLocked ? (
-          // Signed → read-only. The Edit affordance is hidden across the app, but
-          // a deep link still lands here, so show a clear locked notice instead of
-          // a form that the backend would reject on save.
-          <div className="bg-white rounded-2xl p-8 shadow-sm max-w-xl mx-auto text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#f4f3ef] flex items-center justify-center mx-auto mb-4 text-[#6b6860]">
-              <Lock size={20} />
+      <section className="gx-card">
+        <div className="gx-wz">
+          <nav className="gx-wz-steps" aria-label="Edit contract steps">
+            {STEPS.map((sx, i) => (
+              <button key={sx.id} type="button" className={`gx-wz-s${complete[sx.id] ? ' done' : ''}`}
+                aria-current={sx.id === step ? 'step' : undefined} onClick={() => setStep(sx.id)}>
+                <span className="n">{complete[sx.id] ? '✓' : i + 1}</span>
+                <span><span className="t">{sx.t}</span><span className="d">{sx.d}</span></span>
+              </button>
+            ))}
+            <div className="max-[760px]:hidden" style={{ marginTop: 12, padding: '0 8px', fontSize: 10.5, color: 'var(--ms-ink-3)', lineHeight: 1.45 }}>
+              Jump to any step. Changes are saved only when you press “Save changes”.
             </div>
-            <h2 className="text-base font-bold text-[#1a1916]">Contract is signed</h2>
-            <p className="text-sm text-[#6b6860] mt-2">
-              {meta.ref ?? `CID-${id}`} has been signed, so its terms are locked and can no longer be edited.
-              Editing after signing would no longer match the executed agreement.
-            </p>
-            <Link href={`${contractsBase}/${id}/v2`}
-              className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-4 py-2.5 hover:bg-[#267a65]">
-              <ArrowLeft size={14} /> Back to contract
-            </Link>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5 items-start">
-            {/* Left: form */}
-            <div className="space-y-4">
-              {/* Property & Unit (read-only) */}
-              <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Property &amp; Unit</h2>
-                <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
-                    <Building2 size={18} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#1a1916] truncate">{meta.unit ?? '—'}</p>
-                    <p className="text-xs text-[#6b6860] truncate">{meta.building ?? '—'}</p>
-                  </div>
-                  <span className="ml-auto text-[10px] font-medium text-[#9b9890] uppercase tracking-wide">Fixed</span>
-                </div>
-              </div>
+          </nav>
 
-              {/* Customer — editable only before the contract is signed */}
-              <div className={cardCls}>
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-sm text-[#1a1916]">Customer</h2>
-                  {customerEditable && !changingCustomer && (
-                    <button type="button" onClick={() => setChangingCustomer(true)}
-                      className="text-xs text-[#2e9f82] font-medium hover:underline">Change</button>
-                  )}
-                </div>
+          <div className="gx-wz-main">
+            <h2 style={{ fontSize: 15, fontWeight: 800, marginBottom: 4 }}>{stepIdx + 1}. {STEPS[stepIdx].t}</h2>
+            <p style={{ fontSize: 12, color: 'var(--ms-ink-3)', marginBottom: 14 }}>{STEPS[stepIdx].d}</p>
 
-                {!customerEditable ? (
-                  <>
-                    <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
-                      <div className="w-9 h-9 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
-                        <User size={18} />
-                      </div>
-                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
-                      <span className="ml-auto text-[10px] font-medium text-[#9b9890] uppercase tracking-wide">Fixed</span>
-                    </div>
-                    <p className="text-[11px] text-[#9b9890] mt-1.5">The customer can only be changed before the contract is signed.</p>
-                  </>
-                ) : !changingCustomer ? (
-                  // Neutral until the customer is actually changed; green confirms a switch.
-                  tenantId !== originalTenantId ? (
-                    <div className="flex items-center gap-3 rounded-xl border border-[#c5e8df] bg-[#f0faf6] px-4 py-3">
-                      <div className="w-9 h-9 rounded-full bg-[#2e9f82] flex items-center justify-center text-white shrink-0">
-                        <Check size={18} />
-                      </div>
-                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
-                      <span className="ml-auto text-[10px] font-medium text-[#2e9f82] uppercase tracking-wide">Changed</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3 rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] px-4 py-3">
-                      <div className="w-9 h-9 rounded-full bg-[#d8f2e8] flex items-center justify-center text-[#2e9f82] shrink-0">
-                        <User size={18} />
-                      </div>
-                      <p className="text-sm font-semibold text-[#1a1916] truncate">{tenantName || meta.tenant || '—'}</p>
-                    </div>
-                  )
-                ) : (
-                  <>
-                    <label className="block text-xs font-medium text-[#6b6860] mb-1.5">Search by name or email</label>
-                    <div className="relative">
-                      <div className="relative flex items-center">
-                        <Search size={14} className="absolute left-3 text-[#9b9890]" />
-                        <input type="text" placeholder="Type name or email…" value={tenantSearch}
-                          onChange={e => handleTenantInput(e.target.value)}
-                          onFocus={() => { if (tenantResults.length > 0) setTenantDropdownOpen(true); }}
-                          className="w-full rounded-xl border border-[#e8e6e0] bg-[#f7f6f2] pl-9 pr-9 py-2.5 text-sm text-[#1a1916] focus:outline-none focus:ring-2 focus:ring-[#2e9f82]"
-                          autoComplete="off" />
-                        {tenantSearch && (
-                          <button type="button" onClick={() => { setTenantSearch(''); setTenantResults([]); setTenantDropdownOpen(false); }}
-                            className="absolute right-3 text-[#9b9890] hover:text-[#1a1916]"><X size={14} /></button>
-                        )}
-                      </div>
-                      {tenantDropdownOpen && tenantResults.length > 0 && (
-                        <div className="absolute z-20 mt-1 w-full bg-white border border-[#e8e6e0] rounded-xl shadow-lg overflow-hidden">
-                          {tenantResults.map(t => (
-                            <button key={t.id} type="button" onClick={() => selectTenant(t)}
-                              className="w-full text-left px-4 py-2.5 hover:bg-[#f4f3ef] transition-colors">
-                              <span className="block text-sm font-medium text-[#1a1916]">{t.user.name}</span>
-                              <span className="block text-xs text-[#6b6860]">{t.user.email}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <p className="mt-2 text-xs text-[#2e9f82] font-medium">✓ {tenantName || '—'}</p>
-
-                    {showNewCustomer ? (
-                      <NewCustomerForm createTenantUrl={createTenantUrl} onCancel={() => setShowNewCustomer(false)}
-                        onCreated={(t) => selectTenant({ id: t.id, user: { name: t.name, email: '' } })} />
-                    ) : (
-                      <button type="button" onClick={() => setShowNewCustomer(true)}
-                        className="mt-2 inline-flex items-center gap-1 text-xs text-[#2e9f82] font-medium hover:underline">
-                        <PlusCircle size={13} /> Customer not listed? Create a new customer
-                      </button>
-                    )}
-
-                    {activeTenants.length > 0 && !(tenantDropdownOpen && tenantResults.length > 0) && (
-                      <div className="mt-4">
-                        <p className="text-[11px] font-medium text-[#9b9890] mb-2">Active customers — click to select</p>
-                        <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                          {activeTenants
-                            .filter(t => !tenantSearch || t.user.name.toLowerCase().includes(tenantSearch.toLowerCase()) || t.user.email.toLowerCase().includes(tenantSearch.toLowerCase()))
-                            .map(t => (
-                              <button key={t.id} type="button" onClick={() => selectTenant(t)}
-                                className="w-full flex items-center gap-3 px-3 py-2 rounded-xl bg-[#f7f6f2] border border-[#e8e6e0] hover:border-[#2e9f82] hover:bg-[#f0faf6] transition-all text-left">
-                                <div className="w-7 h-7 rounded-full bg-[#d8f2e8] flex items-center justify-center text-xs font-bold text-[#2e9f82] shrink-0">{t.user.name.charAt(0).toUpperCase()}</div>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-[#1a1916] truncate">{t.user.name}</p>
-                                  <p className="text-[10px] text-[#9b9890] truncate">{t.user.email}</p>
-                                </div>
-                              </button>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-                    <button type="button" onClick={() => setChangingCustomer(false)}
-                      className="mt-3 text-xs text-[#6b6860] hover:underline">Done</button>
-                  </>
-                )}
-              </div>
-
-              {/* Rental Period */}
-              <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Rental Period</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Start Date *</label>
-                    <input type="date" value={startDate} onChange={(e) => applyStartDate(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>End Date *</label>
-                    <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-[#9b9890] mb-2">Quick duration (from start date)</p>
-                  <div className="flex gap-2">
-                    {[{ label: '6 Months', months: 6 }, { label: '12 Months', months: 12 }, { label: '24 Months', months: 24 }].map((p) => (
-                      <button key={p.months} type="button" disabled={!startDate} onClick={() => applyPreset(p.months)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#e8e6e0] bg-[#f7f6f2] text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82] hover:bg-[#f0faf6] disabled:opacity-40 disabled:cursor-not-allowed">
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {startDate && endDate && (
-                  <div className="flex items-center gap-2 bg-[#f0faf6] border border-[#c5e8df] rounded-xl px-4 py-2.5">
-                    <span className="text-xs font-medium text-[#6b6860]">Duration:</span>
-                    <span className="text-sm font-bold text-[#2e9f82]">{durationLabel}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Financial Terms (editable) */}
-              <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Financial Terms</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Listed Rent (AED) *</label>
-                    <input type="number" min={0} value={listedRent} onChange={(e) => setListedRent(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Security Deposit (AED)</label>
-                    <input type="number" min={0} value={securityDeposit} onChange={(e) => setSecurityDeposit(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Admin Fee (AED)</label>
-                    <input type="number" min={0} value={adminFee} onChange={(e) => setAdminFee(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Contract Registration Fee (AED)</label>
-                    <input type="number" min={0} value={ejariFee} onChange={(e) => setEjariFee(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Payment Method</label>
-                    <div className="relative">
-                      <select value={modeOfPayment} onChange={(e) => setModeOfPayment(e.target.value)} className={`${inputCls} appearance-none pr-9`}>
-                        {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                      </select>
-                      <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Payments / Year</label>
-                    <div className="relative">
-                      <select value={installments} onChange={(e) => setInstallments(e.target.value)} className={`${inputCls} appearance-none pr-9`}>
-                        {allowedInstallmentPlans(allowedInstallments, [Number(installments)]).map((p) => (
-                          <option key={p.value} value={p.value}>{p.longLabel}</option>
-                        ))}
-                      </select>
-                      <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6b6860]" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Discount (rent line only) → live Listed → Discount → Net breakdown */}
-                <div className="rounded-xl border border-[#e8e6e0] bg-[#fbfaf7] px-4 py-3">
-                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                    <label className="text-xs font-medium text-[#6b6860]">Discount (optional)</label>
-                    <div className="flex gap-1.5">
-                      {(['none', 'percent', 'fixed'] as const).map((t) => (
-                        <button key={t} type="button"
-                          onClick={() => { setDiscountType(t); if (t === 'none') setDiscountValue(''); }}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
-                            discountType === t
-                              ? 'border-[#2e9f82] bg-[#f0faf6] text-[#2e9f82]'
-                              : 'border-[#e8e6e0] bg-white text-[#6b6860] hover:border-[#2e9f82] hover:text-[#2e9f82]'
-                          }`}>
-                          {t === 'none' ? 'None' : t === 'percent' ? '% Off' : 'Fixed AED'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {discountType !== 'none' && (
-                    <div className="flex items-center gap-2">
-                      <input type="number" min={0} step={discountType === 'percent' ? 0.1 : 1}
-                        value={discountValue} onChange={(e) => setDiscountValue(e.target.value)}
-                        placeholder={discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'}
-                        className={inputCls} />
-                      <span className="text-xs font-semibold text-[#6b6860]">{discountType === 'percent' ? '%' : 'AED'}</span>
-                    </div>
-                  )}
-                  <div className="mt-3 space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-[#6b6860]">Listed rent</span>
-                      <span className={discountAmt > 0 ? 'text-[#9b9890] line-through' : 'text-[#1a1916] font-semibold'}>{listedNum > 0 ? fmtAed(listedNum) : '—'}</span>
-                    </div>
-                    {discountAmt > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-[#6b6860]">Discount</span>
-                        <span className="text-[#b91c1c] font-medium">− {fmtAed(discountAmt)} ({listedNum > 0 ? ((discountAmt / listedNum) * 100).toFixed(1) : '0'}%)</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm font-bold pt-1 border-t border-[#e8e6e0]">
-                      <span className="text-[#1a1916]">Annual rent / Contract value</span>
-                      <span className="text-[#2e9f82]">{rentNum > 0 ? fmtAed(rentNum) : '—'}</span>
-                    </div>
-                    {rentVat > 0 && (
+            {/* 1 · UNIT & CUSTOMER */}
+            {step === 'parties' && (
+              <>
+                <Card title="Property & unit" right={<Pill tone="neutral" dot={false}>Fixed</Pill>} pad>
+                  <KV items={[{ k: 'Unit', v: meta.unit ?? '—' }, { k: 'Building', v: meta.building ?? '—' }]} />
+                </Card>
+                <div style={{ marginTop: 14 }}>
+                  <Card title="Customer"
+                    right={!customerEditable ? <Pill tone="neutral" dot={false}>Fixed</Pill>
+                      : customerChanged && !changingCustomer ? <Pill tone="primary">Changed</Pill>
+                      : !changingCustomer ? <Btn size="xs" onClick={() => setChangingCustomer(true)}>Change customer</Btn> : null}
+                    pad>
+                    {!changingCustomer || !customerEditable ? (
                       <>
-                        <div className="flex justify-between text-xs pt-1">
-                          <span className="text-[#6b6860]">VAT on rent ({rentVatRate}%) · separate cheque</span>
-                          <span className="text-[#1a1916] font-medium">{fmtAed(rentVat)}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Thumb text={tenantName || meta.tenant || '?'} />
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>{tenantName || meta.tenant || '—'}</div>
                         </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-[#6b6860]">Total incl. VAT</span>
-                          <span className="text-[#1a1916] font-semibold">{fmtAed(rentNum + rentVat)}</span>
-                        </div>
+                        {!customerEditable && <div style={{ marginTop: 8 }}><Evid>The customer can only be changed before the contract is signed.</Evid></div>}
                       </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Cheque schedule preview — segregated four-group view (matches the contract, receipts & lead) */}
-                {rentNum > 0 && <SegregatedPlanView plan={previewSeg} />}
-                <div className="flex items-start gap-2 rounded-lg bg-[#f4f7f5] px-3 py-2.5 text-xs text-[#6b6860]">
-                  <Info className="h-4 w-4 shrink-0 text-[#2e9f82]" />
-                  Saving regenerates the cheque schedule to match these terms — as long as no cheque has been recorded yet (cleared/bounced). If any payment is already recorded, the existing cheques are kept and you can adjust them on the contract page.
-                </div>
-              </div>
-
-              {/* Third-party charges — the contract's `other` rows, edited as a list */}
-              <div className={cardCls}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold text-sm text-[#1a1916]">Third-party Charges</h2>
-                    <p className="text-xs text-[#9b9890] mt-1">
-                      Pass-through amounts billed with this lease — sub-lease charge, its VAT, VAT on rent recorded as a charge, service charge, parking. Percentage lines follow the net rent automatically.
-                    </p>
-                  </div>
-                  <button type="button" onClick={addExtra}
-                    className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-[#e6f7f1] text-[#2e9f82] text-sm font-semibold">
-                    <Plus size={14} /> Add charge
-                  </button>
-                </div>
-                {extras.length === 0 ? (
-                  <p className="text-sm text-[#6b6860]">No third-party charges on this contract.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {extras.map((e) => {
-                      const hint = derivedChargeHint(e.description);
-                      const derived = !!hint && !e.locked;
-                      return (
-                        <li key={e.key} className="rounded-xl border border-[#e8e6e0] bg-[#fbfaf7] px-3 py-2.5">
-                          <div className="grid grid-cols-[1fr_140px_150px_28px] gap-2 items-start">
-                            <div>
-                              <label className={labelCls}>Description</label>
-                              {e.locked ? (
-                                <p className="text-sm text-[#1a1916] py-2">{e.description || '—'}</p>
-                              ) : (
-                                <input value={e.description} onChange={(ev) => setExtra(e.key, 'description', ev.target.value)}
-                                  placeholder="e.g. Service Charge" className={inputCls} />
-                              )}
-                            </div>
-                            <div>
-                              <label className={labelCls}>Amount (AED)</label>
-                              {e.locked || derived ? (
-                                <p className="text-sm font-semibold text-[#1a1916] py-2">{e.amount ? fmtAed(Number(e.amount)) : '—'}</p>
-                              ) : (
-                                <input type="number" min={0} value={e.amount} onChange={(ev) => setExtra(e.key, 'amount', ev.target.value)} className={inputCls} />
-                              )}
-                            </div>
-                            <div>
-                              <label className={labelCls}>Due date</label>
-                              {e.locked ? (
-                                <p className="text-sm text-[#1a1916] py-2">{e.dueDate || '—'}</p>
-                              ) : (
-                                <input type="date" value={e.dueDate} onChange={(ev) => setExtra(e.key, 'dueDate', ev.target.value)} className={inputCls} />
-                              )}
-                            </div>
-                            <div className="pt-6">
-                              {e.locked ? (
-                                <Lock size={14} className="text-[#9b9890]" aria-label="Recorded — cannot be edited" />
-                              ) : (
-                                <button type="button" onClick={() => removeExtra(e.key)} className="text-[#9b9890] hover:text-[#b91c1c]" aria-label="Remove charge">
+                    ) : (
+                      <>
+                        <Field label="Search by name or email" htmlFor="ecust-search">
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                              <Search size={14} aria-hidden style={{ position: 'absolute', left: 10, color: 'var(--ms-ink-3)' }} />
+                              <input id="ecust-search" type="text" className="gx-inp" placeholder="Type name or email…" autoComplete="off"
+                                style={{ paddingLeft: 30, paddingRight: 30 }} value={tenantSearch}
+                                onChange={(e) => handleTenantInput(e.target.value)}
+                                onFocus={() => { if (tenantResults.length > 0) setTenantDropdownOpen(true); }} />
+                              {tenantSearch && (
+                                <button type="button" className="gx-x" aria-label="Clear search" style={{ position: 'absolute', right: 6 }}
+                                  onClick={() => { setTenantSearch(''); setTenantResults([]); setTenantDropdownOpen(false); }}>
                                   <X size={14} />
                                 </button>
                               )}
                             </div>
+                            {tenantDropdownOpen && tenantResults.length > 0 && (
+                              <div role="listbox" aria-label="Matching customers" style={{ position: 'absolute', zIndex: 20, marginTop: 4, width: '100%', background: 'var(--ms-surface)', border: '1px solid var(--ms-border)', borderRadius: 10, boxShadow: 'var(--ms-shadow-lg)', overflow: 'hidden' }}>
+                                {tenantResults.map((t) => (
+                                  <button key={t.id} type="button" role="option" aria-selected={String(t.id) === tenantId} onClick={() => selectTenant(t)}
+                                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, background: 'transparent', cursor: 'pointer' }}
+                                    onMouseOver={(e) => { e.currentTarget.style.background = 'var(--ms-surface-2)'; }}
+                                    onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+                                    <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{t.user.name}</span>
+                                    <span style={{ display: 'block', fontSize: 11, color: 'var(--ms-ink-3)' }}>{t.user.email}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          {e.locked ? (
-                            <p className="text-[11px] text-[#9b9890] mt-1.5">Recorded — collected money is kept as is.</p>
-                          ) : hint ? (
-                            <p className="text-[11px] text-[#2e9f82] mt-1.5">Auto · {hint}. Rename the line without a percentage to make it a fixed amount.</p>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
+                        </Field>
 
-              {/* Clauses & Notes */}
-              <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Clauses &amp; Notes</h2>
-                <div>
-                  <label className={labelCls}>Custom clauses</label>
-                  <div className="flex gap-2">
-                    <input value={clauseInput} onChange={(e) => setClauseInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addClause(); } }}
-                      placeholder="Add a clause and press Enter" className={inputCls} />
-                    <button type="button" onClick={addClause}
-                      className="shrink-0 inline-flex items-center gap-1 px-3 rounded-xl bg-[#e6f7f1] text-[#2e9f82] text-sm font-semibold">
-                      <Plus size={14} /> Add
-                    </button>
-                  </div>
-                  {clauses.length > 0 && (
-                    <ul className="mt-2 space-y-1.5">
-                      {clauses.map((cl, i) => (
-                        <li key={i} className="flex items-start gap-2 rounded-lg bg-[#f7f6f2] border border-[#e8e6e0] px-3 py-2 text-sm text-[#1a1916]">
-                          <span className="flex-1">{cl}</span>
-                          <button type="button" onClick={() => setClauses((c) => c.filter((_, j) => j !== i))} className="text-[#9b9890] hover:text-[#b91c1c]">
-                            <X size={14} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <label className={labelCls}>Notes</label>
-                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls} />
-                </div>
-              </div>
+                        <Evid tone="ok">Current: <b>{tenantName || '—'}</b></Evid>
 
-              {/* Agreement Addendum */}
-              <div className={cardCls}>
-                <h2 className="font-semibold text-sm text-[#1a1916]">Agreement Addendum</h2>
-                {addendums.length > 0 ? (
-                  <ul className="space-y-1.5">
-                    {addendums.map((a) => (
-                      <li key={a.id} className="flex items-center gap-2 rounded-lg bg-[#e6f7f1] border border-[#bfe9da] px-3 py-2 text-sm text-[#1a1916]">
-                        <Check size={14} className="shrink-0 text-[#2e9f82]" />
-                        <span className="flex-1">{a.name || 'Agreement Addendum'}</span>
-                        <span className="text-xs font-semibold text-[#2e9f82]">Attached</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (meta.status === 'terminated' || meta.status === 'expired') ? (
-                  <p className="text-sm text-[#6b6860]">No addendum attached.</p>
-                ) : (
-                  <div className="space-y-2.5">
-                    <p className="text-sm text-[#6b6860]">
-                      Attach this plan’s Agreement Addendum so it appears on the tenancy agreement. Works on issued and active contracts.
-                    </p>
-                    {addendumErr && (
-                      <div className="flex items-center gap-2 rounded-xl bg-[#fee2e2] px-4 py-2.5 text-sm text-[#b91c1c]">
-                        <Info className="h-4 w-4 shrink-0" /> {addendumErr}
-                      </div>
+                        <div style={{ marginTop: 10 }}>
+                          {showNewCustomer ? (
+                            <NewCustomerForm createTenantUrl={createTenantUrl} onCancel={() => setShowNewCustomer(false)}
+                              onCreated={(t) => selectTenant({ id: t.id, user: { name: t.name, email: '' } })} />
+                          ) : (
+                            <Btn size="sm" onClick={() => setShowNewCustomer(true)}>Customer not listed? Create a new customer</Btn>
+                          )}
+                        </div>
+
+                        {activeTenants.length > 0 && !(tenantDropdownOpen && tenantResults.length > 0) && (
+                          <div style={{ marginTop: 14 }}>
+                            <div className="gx-lb">Active customers — select one</div>
+                            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                              <TableWrap>
+                                <table className="gx-tbl">
+                                  <thead><tr><th>Customer</th><th>Email</th><th className="act" /></tr></thead>
+                                  {filteredActive.length === 0 ? (
+                                    <EmptyRow cols={3} title="No active customer matches" text="Try the search above or create a new customer." />
+                                  ) : (
+                                    <tbody>
+                                      {filteredActive.map((t) => (
+                                        <tr key={t.id} className="click" onClick={() => selectTenant(t)}>
+                                          <td className="strong"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Thumb text={t.user.name} />{t.user.name}</span></td>
+                                          <td>{t.user.email}</td>
+                                          <td className="act"><Btn size="xs" onClick={() => selectTenant(t)}>Select</Btn></td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  )}
+                                </table>
+                              </TableWrap>
+                            </div>
+                          </div>
+                        )}
+                        <div style={{ marginTop: 12 }}><Btn size="sm" onClick={() => setChangingCustomer(false)}>Done</Btn></div>
+                      </>
                     )}
-                    <button type="button" onClick={attachAddendum} disabled={addendumBusy}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#e6f7f1] text-[#2e9f82] text-sm font-semibold px-4 py-2.5 hover:bg-[#d4f0e6] disabled:opacity-50">
-                      <Plus size={14} /> {addendumBusy ? 'Attaching…' : 'Attach Agreement Addendum'}
-                    </button>
+                  </Card>
+                </div>
+              </>
+            )}
+
+            {/* 2 · RENTAL PERIOD */}
+            {step === 'period' && (
+              <>
+                <div className="gx-two">
+                  <Field label="Start date *" htmlFor="e-start">
+                    <input id="e-start" type="date" className="gx-inp" value={startDate} onChange={(e) => applyStartDate(e.target.value)} />
+                  </Field>
+                  <Field label="End date *" htmlFor="e-end">
+                    <input id="e-end" type="date" className="gx-inp" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </Field>
+                </div>
+                <div className="gx-lb">Quick duration (from start date)</div>
+                <div className="gx-chips" role="group" aria-label="Quick duration">
+                  {[{ label: '6 months', months: 6 }, { label: '12 months', months: 12 }, { label: '24 months', months: 24 }].map((p) => (
+                    <button key={p.months} type="button" className="gx-chip" disabled={!startDate}
+                      aria-pressed={!!startDate && endDate === addMonths(startDate, p.months)}
+                      onClick={() => applyPreset(p.months)}>{p.label}</button>
+                  ))}
+                </div>
+                {startDate && endDate && (
+                  <div style={{ marginTop: 12 }}><Evid tone={datesValid ? 'ok' : 'bad'}>Duration: <b>{durationLabel}</b></Evid></div>
+                )}
+              </>
+            )}
+
+            {/* 3 · RENT & INSTALMENTS */}
+            {step === 'rent' && (
+              <>
+                <div className="gx-two">
+                  <Field label="Listed rent (AED) *" htmlFor="e-listed" hint="Zero is allowed for a rent-free lease.">
+                    <input id="e-listed" type="number" min={0} className="gx-inp" value={listedRent} onChange={(e) => setListedRent(e.target.value)} />
+                  </Field>
+                  <div>
+                    <div className="gx-lb">Discount (optional)</div>
+                    <div className="gx-chips" role="group" aria-label="Discount type" style={{ marginBottom: 8 }}>
+                      {(['none', 'percent', 'fixed'] as const).map((t) => (
+                        <button key={t} type="button" className="gx-chip" aria-pressed={discountType === t}
+                          onClick={() => { setDiscountType(t); if (t === 'none') setDiscountValue(''); }}>
+                          {t === 'none' ? 'None' : t === 'percent' ? '% off' : 'Fixed AED'}
+                        </button>
+                      ))}
+                    </div>
+                    {discountType !== 'none' && (
+                      <Field label={discountType === 'percent' ? 'Discount (%)' : 'Discount (AED)'} htmlFor="e-disc">
+                        <input id="e-disc" type="number" min={0} step={discountType === 'percent' ? 0.1 : 1} className="gx-inp"
+                          value={discountValue} onChange={(e) => setDiscountValue(e.target.value)}
+                          placeholder={discountType === 'percent' ? 'e.g. 5' : 'e.g. 2000'} />
+                      </Field>
+                    )}
+                  </div>
+                </div>
+
+                {/* Discount (rent line only) → live Listed → Discount → Net breakdown */}
+                <Card pad>
+                  <SumRow k="Listed rent" v={<span style={discountAmt > 0 ? { textDecoration: 'line-through', color: 'var(--ms-ink-3)' } : undefined}>{listedNum > 0 ? fmtAed(listedNum) : '—'}</span>} />
+                  {discountAmt > 0 && (
+                    <SumRow k="Discount" v={<span style={{ color: 'var(--ms-danger)' }}>− {fmtAed(discountAmt)} ({listedNum > 0 ? ((discountAmt / listedNum) * 100).toFixed(1) : '0'}%)</span>} />
+                  )}
+                  <SumRow k="Annual rent / Contract value" strong v={<span style={{ color: 'var(--ms-primary-dark)' }}>{rentNum > 0 ? fmtAed(rentNum) : '—'}</span>} />
+                  {rentVat > 0 && (
+                    <>
+                      <SumRow k={`VAT on rent (${rentVatRate}%) · separate cheque`} v={fmtAed(rentVat)} />
+                      <SumRow k="Total incl. VAT" v={fmtAed(rentNum + rentVat)} />
+                    </>
+                  )}
+                </Card>
+
+                <div className="gx-two" style={{ marginTop: 14 }}>
+                  <Field label="Payment method" htmlFor="e-method">
+                    <select id="e-method" className="gx-sel" value={modeOfPayment} onChange={(e) => setModeOfPayment(e.target.value)}>
+                      {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Payments / year" htmlFor="e-inst">
+                    <select id="e-inst" className="gx-sel" value={installments} onChange={(e) => setInstallments(e.target.value)}>
+                      {allowedInstallmentPlans(allowedInstallments, [Number(installments)]).map((p) => (
+                        <option key={p.value} value={p.value}>{p.longLabel}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                {/* Cheque schedule preview — segregated four-group view (matches the contract, receipts & lead) */}
+                {rentNum > 0 && (
+                  <>
+                    <div className="gx-lb">Cheque schedule preview</div>
+                    <SegregatedPlanView plan={previewSeg} />
+                  </>
+                )}
+                <div style={{ marginTop: 10 }}>
+                  <Callout tone="info">
+                    Saving regenerates the cheque schedule to match these terms — as long as no cheque has been recorded yet (cleared/bounced). If any payment is already recorded, the existing cheques are kept and you can adjust them on the contract page.
+                  </Callout>
+                </div>
+              </>
+            )}
+
+            {/* 4 · FEES & DEPOSIT */}
+            {step === 'fees' && (
+              <div className="gx-cols gx-cols-3">
+                <Field label="Security deposit (AED)" htmlFor="e-dep">
+                  <input id="e-dep" type="number" min={0} className="gx-inp" value={securityDeposit} onChange={(e) => setSecurityDeposit(e.target.value)} />
+                </Field>
+                <Field label="Admin fee (AED)" htmlFor="e-admin">
+                  <input id="e-admin" type="number" min={0} className="gx-inp" value={adminFee} onChange={(e) => setAdminFee(e.target.value)} />
+                </Field>
+                <Field label="Contract registration fee (AED)" htmlFor="e-ejari">
+                  <input id="e-ejari" type="number" min={0} className="gx-inp" value={ejariFee} onChange={(e) => setEjariFee(e.target.value)} />
+                </Field>
+              </div>
+            )}
+
+            {/* 5 · THIRD-PARTY CHARGES — the contract's `other` rows, edited as a list */}
+            {step === 'charges' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                  <p style={{ fontSize: 12, color: 'var(--ms-ink-3)', flex: 1 }}>
+                    Pass-through amounts billed with this lease — sub-lease charge, its VAT, VAT on rent recorded as a charge, service charge, parking. Percentage lines follow the net rent automatically.
+                  </p>
+                  <Btn size="sm" variant="primary" onClick={addExtra}>Add charge</Btn>
+                </div>
+                <TableWrap>
+                  <table className="gx-tbl">
+                    <thead><tr><th>Description</th><th style={{ width: 150 }}>Amount (AED)</th><th style={{ width: 160 }}>Due date</th><th className="act" /></tr></thead>
+                    {extras.length === 0 ? (
+                      <EmptyRow cols={4} title="No third-party charges on this contract." text="Use “Add charge” to bill a service charge, parking or similar with this lease." />
+                    ) : (
+                      <tbody>
+                        {extras.map((e) => {
+                          const hint = derivedChargeHint(e.description);
+                          const derived = !!hint && !e.locked;
+                          return (
+                            <tr key={e.key}>
+                              <td style={{ whiteSpace: 'normal' }}>
+                                {e.locked ? <span>{e.description || '—'}</span> : (
+                                  <input aria-label="Charge description" className="gx-inp" value={e.description}
+                                    onChange={(ev) => setExtra(e.key, 'description', ev.target.value)} placeholder="e.g. Service Charge" />
+                                )}
+                                {e.locked ? <span className="sub">Recorded — collected money is kept as is.</span>
+                                  : hint ? <span className="sub" style={{ color: 'var(--ms-primary-dark)' }}>Auto · {hint}. Rename the line without a percentage to make it a fixed amount.</span>
+                                  : null}
+                              </td>
+                              <td>
+                                {e.locked || derived ? <b>{e.amount ? fmtAed(Number(e.amount)) : '—'}</b> : (
+                                  <input aria-label="Charge amount (AED)" type="number" min={0} className="gx-inp" value={e.amount}
+                                    onChange={(ev) => setExtra(e.key, 'amount', ev.target.value)} />
+                                )}
+                              </td>
+                              <td>
+                                {e.locked ? <span>{e.dueDate ? fmtDate(e.dueDate) : '—'}</span> : (
+                                  <input aria-label="Charge due date" type="date" className="gx-inp" value={e.dueDate}
+                                    onChange={(ev) => setExtra(e.key, 'dueDate', ev.target.value)} />
+                                )}
+                              </td>
+                              <td className="act">
+                                {e.locked ? <Pill tone="neutral" dot={false} title="Recorded — cannot be edited">Recorded</Pill>
+                                  : <Btn size="xs" variant="danger" onClick={() => removeExtra(e.key)}>Remove</Btn>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    )}
+                  </table>
+                </TableWrap>
+                {extras.length > 0 && <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ms-ink-3)' }}>Total third-party charges: <b>{extrasTotal > 0 ? fmtAed(extrasTotal) : '—'}</b></div>}
+              </>
+            )}
+
+            {/* 6 · CLAUSES & NOTES */}
+            {step === 'clauses' && (
+              <>
+                <Field label="Custom clauses" htmlFor="e-clause">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input id="e-clause" className="gx-inp" value={clauseInput} onChange={(e) => setClauseInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addClause(); } }}
+                      placeholder="Add a clause and press Enter" />
+                    <Btn variant="primary" onClick={addClause} disabled={!clauseInput.trim()}>Add clause</Btn>
+                  </div>
+                </Field>
+                {clauses.length > 0 && (
+                  <TableWrap>
+                    <table className="gx-tbl">
+                      <thead><tr><th style={{ width: 36 }}>#</th><th>Clause</th><th className="act" /></tr></thead>
+                      <tbody>
+                        {clauses.map((cl, i) => (
+                          <tr key={i}>
+                            <td className="mono">{i + 1}</td>
+                            <td style={{ whiteSpace: 'normal' }}>{cl}</td>
+                            <td className="act"><Btn size="xs" variant="danger" onClick={() => setClauses((c) => c.filter((_, j) => j !== i))}>Remove</Btn></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </TableWrap>
+                )}
+                <div style={{ marginTop: 14 }}>
+                  <Field label="Notes" htmlFor="e-notes">
+                    <textarea id="e-notes" className="gx-ta" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                  </Field>
+                </div>
+              </>
+            )}
+
+            {/* 7 · AGREEMENT ADDENDUM */}
+            {step === 'addendum' && (
+              addendums.length > 0 ? (
+                <TableWrap>
+                  <table className="gx-tbl">
+                    <thead><tr><th>Addendum</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {addendums.map((a) => (
+                        <tr key={a.id}><td className="strong">{a.name || 'Agreement Addendum'}</td><td><Pill tone="primary">Attached</Pill></td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableWrap>
+              ) : (meta.status === 'terminated' || meta.status === 'expired') ? (
+                <Evid>No addendum attached.</Evid>
+              ) : (
+                <>
+                  <p style={{ fontSize: 12.5, color: 'var(--ms-ink-2)', marginBottom: 10 }}>
+                    Attach this plan’s Agreement Addendum so it appears on the tenancy agreement. Works on issued and active contracts.
+                  </p>
+                  {addendumErr && <div style={{ marginBottom: 10 }}><Callout tone="bad">{addendumErr}</Callout></div>}
+                  <Btn variant="primary" onClick={attachAddendum} disabled={addendumBusy}>{addendumBusy ? 'Attaching…' : 'Attach Agreement Addendum'}</Btn>
+                  <div style={{ marginTop: 10 }}><Evid>Attaching takes effect immediately — it does not wait for “Save changes”.</Evid></div>
+                </>
+              )
+            )}
+
+            {/* 8 · PREVIEW & SAVE */}
+            {step === 'review' && (
+              <>
+                <div className="gx-lb">Preview &amp; validate</div>
+                <Checklist items={checks} />
+                <div style={{ marginTop: 12 }}>
+                  {blocking === 0
+                    ? <Evid tone="ok">Ready to save. The change is recorded in the audit log and does not require re-signing.</Evid>
+                    : <Evid tone="warn">{blocking} item{blocking === 1 ? '' : 's'} must be fixed before saving. Click a step on the left to fix it.</Evid>}
+                </div>
+                {rentNum > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <div className="gx-lb">Payment schedule</div>
+                    <SegregatedPlanView plan={previewSeg} />
                   </div>
                 )}
-              </div>
-
-              {error && (
-                <div className="flex items-center gap-2 rounded-xl bg-[#fee2e2] px-4 py-2.5 text-sm text-[#b91c1c]">
-                  <Info className="h-4 w-4 shrink-0" /> {error}
+                {error && <div style={{ marginTop: 12 }}><Callout tone="bad" title="Not saved.">{error}</Callout></div>}
+                <div className="gx-btn-row" style={{ marginTop: 14 }}>
+                  <Btn variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Btn>
+                  <Btn href={`${contractsBase}/${id}/v2`}>Cancel</Btn>
                 </div>
-              )}
-            </div>
+              </>
+            )}
 
-            {/* Right: summary + save */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm space-y-3 lg:sticky lg:top-6">
-              <h2 className="font-semibold text-sm text-[#1a1916]">Summary</h2>
-              {([
-                ...(discountAmt > 0
-                  ? ([['Listed rent', fmtAed(listedNum)], ['Discount', `− ${fmtAed(discountAmt)}`]] as [string, string][])
-                  : []),
-                [discountAmt > 0 ? 'Annual rent (net)' : 'Annual rent', rentNum > 0 ? fmtAed(rentNum) : '—'],
-                ...(rentVat > 0 ? ([[`VAT on rent (${rentVatRate}%)`, fmtAed(rentVat)]] as [string, string][]) : []),
-                ['Security deposit', securityDeposit ? fmtAed(Number(securityDeposit)) : '—'],
-                ['Admin fee', adminFee ? fmtAed(Number(adminFee)) : '—'],
-                ['Contract Registration Fee', ejariFee ? fmtAed(Number(ejariFee)) : '—'],
-                ['Third-party charges', extrasTotal > 0 ? fmtAed(extrasTotal) : '—'],
-                ['Payments / year', String(inst)],
-                ['Per cheque', rentNum > 0 ? fmtAed(chequeAmount) : '—'],
-                ['Duration', durationLabel],
-              ] as [string, string][]).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between text-sm">
-                  <span className="text-[#6b6860]">{k}</span>
-                  <span className="font-semibold text-[#1a1916]">{v}</span>
-                </div>
-              ))}
-              <button type="button" onClick={save} disabled={saving}
-                className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold py-2.5 hover:bg-[#267a65] disabled:opacity-50">
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-              <Link href={`${contractsBase}/${id}/v2`}
-                className="block text-center text-xs text-[#6b6860] hover:underline">
-                Cancel
-              </Link>
+            {error && step !== 'review' && <div style={{ marginTop: 12 }}><Callout tone="bad">{error}</Callout></div>}
+
+            {/* footer nav */}
+            <div className="gx-btn-row" style={{ marginTop: 18, borderTop: '1px solid var(--ms-surface-3)', paddingTop: 14 }}>
+              <Btn href={`${contractsBase}/${id}/v2`}>Cancel</Btn>
+              <span style={{ flex: 1 }} />
+              {prev && <Btn onClick={() => setStep(prev)}>Back</Btn>}
+              {next && <Btn variant="primary" onClick={() => setStep(next)}>Continue</Btn>}
             </div>
           </div>
-        )}
-      </div>
-    </div>
+
+          {/* Live summary + save (as on the previous page's side panel) */}
+          <aside className="gx-wz-prev" aria-label="Contract summary">
+            <div className="gx-lb" style={{ marginBottom: 8 }}>Summary</div>
+            <div className="gx-card" style={{ padding: 12 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800 }}>{meta.unit ?? '—'}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--ms-ink-3)', marginBottom: 6 }}>{meta.building ?? '—'} · {tenantName || meta.tenant || '—'}</div>
+              {discountAmt > 0 && <SumRow k="Listed rent" v={fmtAed(listedNum)} />}
+              {discountAmt > 0 && <SumRow k="Discount" v={`− ${fmtAed(discountAmt)}`} />}
+              <SumRow k={discountAmt > 0 ? 'Annual rent (net)' : 'Annual rent'} strong v={rentNum > 0 ? fmtAed(rentNum) : '—'} />
+              {rentVat > 0 && <SumRow k={`VAT on rent (${rentVatRate}%)`} v={fmtAed(rentVat)} />}
+              <SumRow k="Security deposit" v={securityDeposit ? fmtAed(Number(securityDeposit)) : '—'} />
+              <SumRow k="Admin fee" v={adminFee ? fmtAed(Number(adminFee)) : '—'} />
+              <SumRow k="Contract Registration Fee" v={ejariFee ? fmtAed(Number(ejariFee)) : '—'} />
+              <SumRow k="Third-party charges" v={extrasTotal > 0 ? fmtAed(extrasTotal) : '—'} />
+              <SumRow k="Payments / year" v={String(inst)} />
+              <SumRow k="Per cheque" v={rentNum > 0 ? fmtAed(chequeAmount) : '—'} />
+              <SumRow k="Duration" v={durationLabel} />
+              <div className="gx-btn-row" style={{ marginTop: 10 }}>
+                <Btn variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Btn>
+                <Btn size="sm" href={`${contractsBase}/${id}/v2`}>Cancel</Btn>
+              </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ms-ink-3)', lineHeight: 1.5 }}>
+              {checks.filter((c) => c.state === 'pass').length} of {checks.length} checks passing
+              {blocking > 0 && <><br /><span style={{ color: 'var(--ms-danger)' }}>{blocking} must be fixed before saving.</span></>}
+            </div>
+          </aside>
+        </div>
+      </section>
+    </OsPage>
   );
 }

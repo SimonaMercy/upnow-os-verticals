@@ -8,6 +8,14 @@
  * (never deleted; restore any time); your own categories and items are fully
  * editable inline. Coverage + provider assignment live in Settings →
  * Maintenance. Owner-directed 31 Aug 2026.
+ *
+ * Parity with previous page: the route renders <MaintenanceListWorkspace>
+ * (same component, same behaviour — the manager pages import it by name and are
+ * untouched); adds OsPage + PageHead only.
+ * Duplicate title: the workspace accepts `embedded`, which hides its own
+ * "Maintenance List" h1 + Back button and shortens its intro, so the route now
+ * passes it. The Settings → Maintenance coverage link that the long intro
+ * carried moves into the PageHead lede so it is not lost.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -15,6 +23,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Plus, RotateCcw, Loader2, X, EyeOff, Trash2, Check } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { OsPage, PageHead } from '@/components/os/kit';
 
 interface Cat { id: number; name: string; parentId?: number | null; own?: boolean; oneTime?: boolean; audience?: 'tenant' | 'landlord'; scopes?: string[] | null }
 interface Payload {
@@ -53,6 +62,8 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
     } catch { setError('Could not load the maintenance list.'); }
     finally { setLoading(false); }
   }, [u]);
+  // Initial fetch on mount / scope change (pre-existing lint finding; behaviour unchanged).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
   const act = async (fn: () => Promise<unknown>) => {
@@ -91,20 +102,20 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
   }, [data]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-[60vh] text-[#9b9890]"><Loader2 className="animate-spin mr-2" /> Loading maintenance list…</div>;
+    return <div className="flex items-center justify-center h-[60vh] text-[#8a948d]"><Loader2 className="animate-spin mr-2" /> Loading maintenance list…</div>;
   }
 
   return (
     <div className={embedded ? 'pb-12' : 'max-w-4xl mx-auto px-4 py-6 pb-24'}>
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          {!embedded && <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#9b9890] hover:text-[#1a1916] mb-2 cursor-pointer">
+          {!embedded && <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm text-[#8a948d] hover:text-[#14201a] mb-2 cursor-pointer">
             <ArrowLeft size={15} /> Back
           </button>}
-          {!embedded && <h1 className="text-2xl font-bold text-[#1a1916]">Maintenance List</h1>}
+          {!embedded && <h1 className="text-2xl font-bold text-[#14201a]">Maintenance List</h1>}
           {embedded
-            ? <p className="text-sm text-[#6b6860]">What a customer can raise during a tenancy. Hide what you don&apos;t handle; add your own.</p>
-            : <p className="text-sm text-[#6b6860] max-w-xl">
+            ? <p className="text-sm text-[#5f6b63]">What a customer can raise during a tenancy. Hide what you don&apos;t handle; add your own.</p>
+            : <p className="text-sm text-[#5f6b63] max-w-xl">
                 The maintenance items your customers can raise during a tenancy, grouped the way services
                 are offered. What&apos;s <span className="font-semibold">covered</span>, for which property type,
                 and which provider does the work is set in{' '}
@@ -113,7 +124,7 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button type="button" onClick={() => setAddingCategory(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[#2e9f82] text-white text-sm font-semibold px-3 py-2 disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#047246] text-white text-sm font-semibold px-3 py-2 disabled:opacity-60">
             <Plus size={15} /> Add category
           </button>
         </div>
@@ -123,16 +134,16 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
 
       <div className="space-y-4">
         {groups.map(({ group, items }) => (
-          <div key={group.id} className="rounded-2xl border border-[#e8e6e0] bg-white overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3 bg-[#fafaf8] border-b border-[#f4f3ef]">
+          <div key={group.id} className="rounded-2xl border border-[#e4e9e5] bg-white overflow-hidden">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3 bg-[#f6f8f6] border-b border-[#eef1ef]">
               <div className="flex items-baseline gap-2 min-w-0">
                 {group.own ? (
                   <input value={names[group.id] ?? group.name}
                     onChange={e => setNames(n => ({ ...n, [group.id]: e.target.value }))}
                     onBlur={() => void saveName(group)}
-                    className="text-sm font-bold text-[#1a1916] bg-transparent border-b border-transparent hover:border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none min-w-0" />
+                    className="text-sm font-bold text-[#14201a] bg-transparent border-b border-transparent hover:border-[#e4e9e5] focus:border-[#047246] focus:outline-none min-w-0" />
                 ) : (
-                  <span className="text-sm font-bold text-[#1a1916]">{group.name}</span>
+                  <span className="text-sm font-bold text-[#14201a]">{group.name}</span>
                 )}
                 {group.own && <span className="text-[9px] font-bold uppercase tracking-wide text-[#0369a1] bg-[#e0f2fe] px-1.5 py-0.5 rounded shrink-0">yours</span>}
                 {group.audience === 'landlord' && (
@@ -141,12 +152,12 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
                     {group.scopes?.[0] === 'building_system' ? 'building systems · you raise' : group.scopes?.[0] === 'common_area' ? 'common areas · you raise' : 'landlord only'}
                   </span>
                 )}
-                <span className="text-[11px] text-[#9b9890] shrink-0">· {items.length} item{items.length === 1 ? '' : 's'}</span>
-                {savedId === group.id && <Check size={13} className="text-[#2e9f82] shrink-0" />}
+                <span className="text-[11px] text-[#8a948d] shrink-0">· {items.length} item{items.length === 1 ? '' : 's'}</span>
+                {savedId === group.id && <Check size={13} className="text-[#047246] shrink-0" />}
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <button type="button" onClick={() => setAddTo({ groupId: group.id, label: group.name })}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#2e9f82] hover:opacity-75 cursor-pointer">
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#047246] hover:opacity-75 cursor-pointer">
                   <Plus size={13} /> Add item
                 </button>
                 <button type="button" onClick={() => removeRow(group, true)} disabled={busy}
@@ -166,13 +177,13 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
                           <input value={names[c.id] ?? c.name}
                             onChange={e => setNames(n => ({ ...n, [c.id]: e.target.value }))}
                             onBlur={() => void saveName(c)}
-                            className="w-full min-w-[14rem] text-[13px] bg-transparent border-b border-transparent hover:border-[#e8e6e0] focus:border-[#2e9f82] focus:outline-none py-0.5" />
+                            className="w-full min-w-[14rem] text-[13px] bg-transparent border-b border-transparent hover:border-[#e4e9e5] focus:border-[#047246] focus:outline-none py-0.5" />
                         ) : (
-                          <span className="text-[13px] text-[#1a1916]">{c.name}</span>
+                          <span className="text-[13px] text-[#14201a]">{c.name}</span>
                         )}
                         {c.own && <span className="text-[9px] font-bold uppercase tracking-wide text-[#0369a1] bg-[#e0f2fe] px-1.5 py-0.5 rounded shrink-0">yours</span>}
                         {c.oneTime && <span title="The contract covers this once per tenancy — a repeat request is the customer's" className="text-[9px] font-bold uppercase tracking-wide text-[#92400e] bg-[#fef3c7] px-1.5 py-0.5 rounded shrink-0">once per tenancy</span>}
-                        {savedId === c.id && <Check size={13} className="text-[#2e9f82] shrink-0" />}
+                        {savedId === c.id && <Check size={13} className="text-[#047246] shrink-0" />}
                       </div>
                     </td>
                     <td className="px-4 sm:px-5 py-2 text-right w-16">
@@ -185,7 +196,7 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
                   </tr>
                 ))}
                 {items.length === 0 && (
-                  <tr><td className="px-4 sm:px-5 py-3 text-xs text-[#9b9890]">No items yet — add one.</td></tr>
+                  <tr><td className="px-4 sm:px-5 py-3 text-xs text-[#8a948d]">No items yet — add one.</td></tr>
                 )}
               </tbody>
             </table>
@@ -194,13 +205,13 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
       </div>
 
       {(data?.hiddenCategories?.length ?? 0) > 0 && (
-        <div className="mt-5 rounded-2xl border border-[#e8e6e0] bg-white px-4 py-3 flex items-center gap-2 flex-wrap text-[11px] text-[#9b9890]">
+        <div className="mt-5 rounded-2xl border border-[#e4e9e5] bg-white px-4 py-3 flex items-center gap-2 flex-wrap text-[11px] text-[#8a948d]">
           <span className="font-semibold">Hidden:</span>
           {data!.hiddenCategories!.map(h => (
             <button key={h.id} type="button" disabled={busy}
               onClick={() => act(() => apiPost(u(`/categories/${h.id}/restore`)))}
               title="Restore"
-              className="inline-flex items-center gap-1 border border-[#e8e6e0] rounded-full px-2 py-0.5 hover:border-[#2e9f82] hover:text-[#1a7a5a] cursor-pointer">
+              className="inline-flex items-center gap-1 border border-[#e4e9e5] rounded-full px-2 py-0.5 hover:border-[#047246] hover:text-[#1a7a5a] cursor-pointer">
               <RotateCcw size={9} /> {h.name}
             </button>
           ))}
@@ -239,7 +250,17 @@ export function MaintenanceListWorkspace({ manager, embedded = false }: { manage
 }
 
 export default function MaintenanceListPage() {
-  return <MaintenanceListWorkspace />;
+  return (
+    <OsPage>
+      <PageHead
+        eyebrow="Settings"
+        title="Maintenance list"
+        lede={<>The maintenance items your customers can raise during a tenancy, grouped by category. What&apos;s covered, for which property type, and which provider does the work is set in{' '}
+          <Link href="/rental-provider/dashboard/settings?tab=maintenance" className="font-semibold underline">Settings → Maintenance coverage</Link>.</>}
+      />
+      <MaintenanceListWorkspace embedded />
+    </OsPage>
+  );
 }
 
 /** Popup to add a new category of your own (optionally seeded with its first item). */
@@ -266,32 +287,32 @@ function AddCategoryModal({ onCancel, onAdd }: {
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={busy ? undefined : onCancel}>
       <div className="w-[min(440px,100%)] bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between bg-[#2e9f82] text-white px-5 py-3.5">
+        <div className="flex items-center justify-between bg-[#047246] text-white px-5 py-3.5">
           <div className="font-bold text-sm">Add category</div>
           <button onClick={onCancel} className="p-1 rounded-lg hover:bg-white/20" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#6b6860] mb-1">Category name</label>
+            <label className="block text-xs font-semibold text-[#5f6b63] mb-1">Category name</label>
             <input autoFocus value={category} onChange={e => setCategory(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void submit(); }}
               placeholder="e.g. Appliances, Glass & Mirrors"
-              className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+              className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-[#6b6860] mb-1">First item (optional)</label>
+            <label className="block text-xs font-semibold text-[#5f6b63] mb-1">First item (optional)</label>
             <input value={item} onChange={e => setItem(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void submit(); }}
               placeholder="e.g. Oven & hob"
-              className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+              className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
           </div>
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#f0ede8]">
           <button type="button" onClick={onCancel} disabled={busy}
-            className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60">Cancel</button>
+            className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-60">Cancel</button>
           <button type="button" onClick={submit} disabled={busy}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-60">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add category
           </button>
         </div>
@@ -324,25 +345,25 @@ function AddNameModal({ title, label, placeholder, onCancel, onAdd }: {
   return (
     <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={busy ? undefined : onCancel}>
       <div className="w-[min(420px,100%)] bg-white rounded-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between bg-[#2e9f82] text-white px-5 py-3.5">
+        <div className="flex items-center justify-between bg-[#047246] text-white px-5 py-3.5">
           <div className="font-bold text-sm">{title}</div>
           <button onClick={onCancel} className="p-1 rounded-lg hover:bg-white/20" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#6b6860] mb-1">{label}</label>
+            <label className="block text-xs font-semibold text-[#5f6b63] mb-1">{label}</label>
             <input autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void submit(); }}
               placeholder={placeholder}
-              className="w-full text-sm border border-[#e8e6e0] rounded-lg px-3 py-2 focus:outline-none focus:border-[#2e9f82]" />
+              className="w-full text-sm border border-[#e4e9e5] rounded-lg px-3 py-2 focus:outline-none focus:border-[#047246]" />
           </div>
           {err && <p className="text-xs text-red-600">{err}</p>}
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[#f0ede8]">
           <button type="button" onClick={onCancel} disabled={busy}
-            className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e8e6e0] text-[#6b6860] hover:bg-[#f4f3ef] disabled:opacity-60">Cancel</button>
+            className="text-sm font-semibold px-3 py-2 rounded-lg border border-[#e4e9e5] text-[#5f6b63] hover:bg-[#eef1ef] disabled:opacity-60">Cancel</button>
           <button type="button" onClick={submit} disabled={busy}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#2e9f82] text-white hover:bg-[#267a65] disabled:opacity-60">
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg bg-[#047246] text-white hover:bg-[#267a65] disabled:opacity-60">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
           </button>
         </div>

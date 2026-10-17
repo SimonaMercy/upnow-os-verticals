@@ -132,7 +132,7 @@ export default function EjariCanvas({ bytes, height = 640, fill = false, fluid =
     );
   }
 
-  const frame = { border: '1px solid #e8e6e0', borderRadius: 12 } as const;
+  const frame = { border: '1px solid #e4e9e5', borderRadius: 12 } as const;
   // No-scroll grows to content, so a full-height placeholder box would leave a
   // large gap before the pages arrive — use a modest loading height instead.
   const loadingH = noScroll ? 360 : height;

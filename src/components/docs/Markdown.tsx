@@ -20,7 +20,7 @@ function inline(text: string, keyPrefix: string) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1]) {
       out.push(
-        <strong key={`${keyPrefix}-${m.index}`} style={{ fontWeight: 700, color: '#1a1916' }}>
+        <strong key={`${keyPrefix}-${m.index}`} style={{ fontWeight: 700, color: '#14201a' }}>
           {m[1].slice(2, -2)}
         </strong>,
       );
@@ -28,8 +28,8 @@ function inline(text: string, keyPrefix: string) {
       out.push(
         <code key={`${keyPrefix}-${m.index}`} style={{
           fontFamily: 'monospace', fontSize: '0.92em',
-          backgroundColor: '#f4f3ef', border: '1px solid #eceae4',
-          padding: '1px 5px', borderRadius: 4, color: '#1a5a4a',
+          backgroundColor: '#eef1ef', border: '1px solid #eceae4',
+          padding: '1px 5px', borderRadius: 4, color: '#0f4f36',
         }}>
           {m[2].slice(1, -1)}
         </code>,

@@ -23,10 +23,10 @@ export default function ManagerOperationsPage() {
   const allowed = effectiveRp != null && canForRp('canManageAgreements', effectiveRp);
 
   if (!loading && !allowed) {
-    return <div style={{ padding: 40, color: '#6b6860' }}>You don’t have contract access for this landlord.</div>;
+    return <div style={{ padding: 40, color: '#5f6b63' }}>You don’t have contract access for this landlord.</div>;
   }
   if (effectiveRp == null) {
-    return <div style={{ padding: 40, color: '#6b6860' }}>Loading…</div>;
+    return <div style={{ padding: 40, color: '#5f6b63' }}>Loading…</div>;
   }
 
   const rp = effectiveRp;

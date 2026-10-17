@@ -233,8 +233,8 @@ export const KIND_CHIP: Record<WaKind, string> = {
   lead: 'text-[#1d4f8a] bg-[#eaf2fd]',
   vendor: 'text-[#8a6d1d] bg-[#fdf3e3]',
   team: 'text-[#5b3d8a] bg-[#f3edfb]',
-  group: 'text-[#4a4842] bg-[#f4f3ef]',
-  other: 'text-[#6b6860] bg-[#f4f3ef]',
+  group: 'text-[#4a4842] bg-[#eef1ef]',
+  other: 'text-[#5f6b63] bg-[#eef1ef]',
 };
 
 /**

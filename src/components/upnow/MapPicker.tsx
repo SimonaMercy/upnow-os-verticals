@@ -89,7 +89,7 @@ export function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
         draggable: true,
         icon: {
           path:        google.maps.SymbolPath.CIRCLE,
-          fillColor:   '#2e9f82',
+          fillColor:   '#047246',
           fillOpacity: 1,
           strokeColor: '#ffffff',
           strokeWeight: 3,
@@ -136,7 +136,7 @@ export function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center bg-[#f4f3ef] rounded-xl h-[220px] text-sm text-[#9b9890]">
+      <div className="flex items-center justify-center bg-[#eef1ef] rounded-xl h-[220px] text-sm text-[#8a948d]">
         <MapPin size={16} className="mr-2 text-[#c9c7c1]" />
         {error}
       </div>
@@ -147,20 +147,20 @@ export function MapPicker({ latitude, longitude, onChange }: MapPickerProps) {
     <div className="relative">
       <div
         ref={containerRef}
-        className="w-full rounded-xl overflow-hidden border border-[#e8e6e0]"
+        className="w-full rounded-xl overflow-hidden border border-[#e4e9e5]"
         style={{ height: 220 }}
       />
       {!mapLoaded && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#f4f3ef] rounded-xl text-xs text-[#9b9890]">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#eef1ef] rounded-xl text-xs text-[#8a948d]">
           Loading map…
         </div>
       )}
       {latitude != null && longitude != null && (
-        <div className="absolute top-2 left-2 bg-white rounded-lg px-2 py-1 text-xs font-mono text-[#6b6860] shadow-sm">
+        <div className="absolute top-2 left-2 bg-white rounded-lg px-2 py-1 text-xs font-mono text-[#5f6b63] shadow-sm">
           {Number(latitude).toFixed(5)}, {Number(longitude).toFixed(5)}
         </div>
       )}
-      <p className="text-xs text-[#9b9890] mt-1.5">
+      <p className="text-xs text-[#8a948d] mt-1.5">
         Click on the map or drag the pin to set the exact location.
       </p>
     </div>

@@ -59,7 +59,7 @@ export default function AddendumTemplatePicker({ onPick, manager, rpQ, selectedN
   }, [tpls, selectedName, selectedTerms, controlled]);
 
   if (tpls === null) {
-    return <span className="text-[11px] text-[#9b9890] inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Loading templates…</span>;
+    return <span className="text-[11px] text-[#8a948d] inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Loading templates…</span>;
   }
   if (tpls.length === 0) return null;
 
@@ -77,12 +77,12 @@ export default function AddendumTemplatePicker({ onPick, manager, rpQ, selectedN
           if (t?.terms) onPick({ ...t.terms }, t.name);
           if (controlled) setVal(v); else e.target.value = '';
         }}
-        className="appearance-none min-w-[13rem] max-w-[22rem] pl-3 pr-8 py-1.5 rounded-lg border border-[#e8e6e0] bg-white text-xs font-semibold text-[#1a1916] focus:outline-none focus:border-[#2e9f82] cursor-pointer">
+        className="appearance-none min-w-[13rem] max-w-[22rem] pl-3 pr-8 py-1.5 rounded-lg border border-[#e4e9e5] bg-white text-xs font-semibold text-[#14201a] focus:outline-none focus:border-[#047246] cursor-pointer">
         {hasCurrent && <option value="__current__">{selectedName}</option>}
         <option value="">Choose a template…</option>
         {tpls.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
       </select>
-      <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9b9890] pointer-events-none" />
+      <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#8a948d] pointer-events-none" />
     </div>
   );
 }

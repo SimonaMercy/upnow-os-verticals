@@ -117,7 +117,7 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
   return (
     <div
       onClick={() => onOpen(deal)}
-      className="group relative bg-white border-b border-[#f0ede8] hover:bg-[#fafaf8] transition-colors cursor-pointer"
+      className="group relative bg-white border-b border-[#f0ede8] hover:bg-[#f6f8f6] transition-colors cursor-pointer"
     >
       {/* Coloured left-edge bar — primary visual cue for stage */}
       <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${stageStyle.bar}`} />
@@ -125,7 +125,7 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
       <div className="pl-4 pr-3 py-2.5 flex items-center gap-3">
 
         {/* Avatar */}
-        <div className="w-8 h-8 rounded-full bg-[#f0ede8] text-[#3d3b35] flex items-center justify-center text-[10px] font-bold shrink-0">
+        <div className="w-8 h-8 rounded-full bg-[#f0ede8] text-[#46534c] flex items-center justify-center text-[10px] font-bold shrink-0">
           {initials(deal.customerName)}
         </div>
 
@@ -134,25 +134,25 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
 
           {/* Line 1 — name + contract ref */}
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold text-[#1a1916] truncate">
+            <span className="text-sm font-semibold text-[#14201a] truncate">
               {deal.customerName}
             </span>
             {deal.contractRef && (
-              <span className="text-[10px] font-mono text-[#9b9890] truncate shrink-0">
+              <span className="text-[10px] font-mono text-[#8a948d] truncate shrink-0">
                 {deal.contractRef}
               </span>
             )}
           </div>
 
           {/* Line 2 — unit · rent · context */}
-          <div className="flex items-center gap-2 text-[11px] text-[#6b6860] mt-0.5">
+          <div className="flex items-center gap-2 text-[11px] text-[#5f6b63] mt-0.5">
             <span className="truncate">
               {deal.buildingName ? `${deal.buildingName} · ${deal.unitLabel}` : deal.unitLabel}
             </span>
             {deal.rentFils && (
               <>
                 <span className="text-[#d4d0c8]">·</span>
-                <span className="text-[#1a1916] font-medium shrink-0">{fmtMoney(deal.rentFils)}/yr</span>
+                <span className="text-[#14201a] font-medium shrink-0">{fmtMoney(deal.rentFils)}/yr</span>
               </>
             )}
             {ctx && Icon && (
@@ -168,12 +168,12 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
         </div>
 
         {/* Hidden contact strip (visible on hover) */}
-        <div className="hidden lg:flex opacity-0 group-hover:opacity-100 transition-opacity items-center gap-2 text-[11px] text-[#9b9890] shrink-0">
+        <div className="hidden lg:flex opacity-0 group-hover:opacity-100 transition-opacity items-center gap-2 text-[11px] text-[#8a948d] shrink-0">
           {deal.customerPhone && (
             <a
               href={`tel:${deal.customerPhone}`}
               onClick={e => e.stopPropagation()}
-              className="hover:text-[#2e9f82]"
+              className="hover:text-[#047246]"
               title={deal.customerPhone}
             >
               <Phone size={12} />
@@ -183,7 +183,7 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
             <a
               href={`mailto:${deal.customerEmail}`}
               onClick={e => e.stopPropagation()}
-              className="hover:text-[#2e9f82]"
+              className="hover:text-[#047246]"
               title={deal.customerEmail}
             >
               <Mail size={12} />
@@ -201,7 +201,7 @@ export function PipelineDealRow({ deal, onOpen, onPrimary }: Props) {
         {action ? (
           <button
             onClick={e => { e.stopPropagation(); onPrimary?.(deal, action.key); }}
-            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[11px] font-medium text-[#1a1916] bg-white border border-[#d4d0c8] rounded-md px-2 py-1 hover:bg-[#f0ede8] flex items-center gap-1 cursor-pointer"
+            className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-[11px] font-medium text-[#14201a] bg-white border border-[#d4d0c8] rounded-md px-2 py-1 hover:bg-[#f0ede8] flex items-center gap-1 cursor-pointer"
           >
             {action.label}
             <ArrowRight size={10} />

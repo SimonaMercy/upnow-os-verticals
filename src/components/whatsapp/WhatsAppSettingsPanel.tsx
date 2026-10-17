@@ -23,15 +23,15 @@ export function WhatsAppSettingsPanel() {
   // `check` asks each bridge how its number is doing right now, not what was last known.
   useEffect(() => { const t = window.setTimeout(() => { void load(true); }, 0); return () => window.clearTimeout(t); }, [load]);
 
-  if (!lines) return <div className="bg-white rounded-2xl p-6 shadow-sm text-sm text-[#9b9890]">{error ?? 'Loading…'}</div>;
+  if (!lines) return <div className="bg-white rounded-2xl p-6 shadow-sm text-sm text-[#8a948d]">{error ?? 'Loading…'}</div>;
 
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm">
       <div className="flex items-start gap-3 mb-5">
         <div className="w-10 h-10 rounded-xl grid place-items-center bg-[#eef9f4] text-[#1a7a5a] shrink-0"><MessageCircle size={18} /></div>
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-base text-[#1a1916]">Your WhatsApp numbers</h2>
-          <p className="text-xs text-[#9b9890] mt-1 leading-relaxed">
+          <h2 className="font-semibold text-base text-[#14201a]">Your WhatsApp numbers</h2>
+          <p className="text-xs text-[#8a948d] mt-1 leading-relaxed">
             Link the WhatsApp numbers your team already uses with customers. Every conversation on them appears on the{' '}
             <Link href="/rental-provider/dashboard/whatsapp" className="text-[#1a7a5a] font-medium hover:underline">WhatsApp page</Link>{' '}
             and on the lead, lease, customer or vendor it belongs to, and your team answers from here. Each number is kept signed in by a small

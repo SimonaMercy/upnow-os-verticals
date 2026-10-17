@@ -1,7 +1,20 @@
 'use client';
 
 /**
- * Platform Status — the internal uptime page for the platform's external
+ * Admin › Platform › Platform status — Genspark OS rebuild.
+ *
+ * Parity with previous page (same endpoints):
+ *  - GET /api/admin/status (AbortController on mount) + 5-minute auto refresh interval.
+ *  - "Run checks now" → POST /api/admin/status/probe (replaces data; busy label "Checking…").
+ *  - Load error with no data → error Callout (now with Try again); loading → skeletons.
+ *  - Overall banner (operational / degraded / down / nodata) + unhealthy component names, now a
+ *    kit Callout + Kpis (overall, monitored, unhealthy, last check).
+ *  - Per component: label, state chip (now kit Pill + icon, words always shown), latency,
+ *    impact, detail when not operational, uptime % + checks/window, 90-day UptimeStrip with
+ *    hover tooltip (local component KEPT — height encodes severity redundantly) and Legend.
+ *  - "How to read it" explanatory copy kept (now a Callout).
+ *
+ * Original notes — Platform Status: the internal uptime page for the platform's external
  * dependencies (`/api/admin/status`).
  *
  * Everything drawn here is a probe result. The backend probes the frontend, its
@@ -26,10 +39,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  CheckCircle2, AlertTriangle, XCircle, MinusCircle, CircleDashed,
-  RefreshCw, Activity,
+  CheckCircle2, AlertTriangle, XCircle, MinusCircle, CircleDashed, RefreshCw,
 } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api';
+import { Btn, Callout, Card, Kpi, Kpis, OsPage, PageHead, Pill, ScopeStrip, type Tone } from '@/components/os/kit';
 
 /* ── Payload ── */
 
@@ -76,14 +89,17 @@ const STATE: Record<
   degraded:     { color: '#fab219', label: 'Degraded',      height: '55%',  Icon: AlertTriangle },
   down:         { color: '#d03b3b', label: 'Down',          height: '28%',  Icon: XCircle },
   unconfigured: { color: '#c9c6bf', label: 'Not configured', height: '18%', Icon: MinusCircle },
-  nodata:       { color: '#e8e6e0', label: 'No data',       height: '12%',  Icon: CircleDashed },
+  nodata:       { color: '#e4e9e5', label: 'No data',       height: '12%',  Icon: CircleDashed },
 };
 
-const BANNER: Record<PlatformStatus['overall'], { text: string; tone: string; bg: string }> = {
-  operational: { text: 'All systems operational', tone: '#0ca30c', bg: '#f1f9f1' },
-  degraded:    { text: 'Degraded performance',    tone: '#b07c05', bg: '#fdf6e7' },
-  down:        { text: 'Service disruption',      tone: '#d03b3b', bg: '#fcf1f1' },
-  nodata:      { text: 'No checks recorded yet',  tone: '#6b6860', bg: '#f4f3ef' },
+const BANNER: Record<PlatformStatus['overall'], { text: string; tone: 'warn' | 'bad' | 'info' | undefined }> = {
+  operational: { text: 'All systems operational', tone: undefined },
+  degraded:    { text: 'Degraded performance',    tone: 'warn' },
+  down:        { text: 'Service disruption',      tone: 'bad' },
+  nodata:      { text: 'No checks recorded yet',  tone: 'info' },
+};
+const PILL_TONE: Record<ComponentState, Tone> = {
+  operational: 'primary', degraded: 'amber', down: 'danger', unconfigured: 'neutral', nodata: 'outline',
 };
 
 /* ── Bits ── */
@@ -91,13 +107,10 @@ const BANNER: Record<PlatformStatus['overall'], { text: string; tone: string; bg
 function StateChip({ state }: { state: ComponentState }) {
   const s = STATE[state];
   return (
-    <span
-      className="inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2.5 py-1 whitespace-nowrap"
-      style={{ color: state === 'degraded' ? '#8a6100' : s.color, background: `${s.color}1a` }}
-    >
-      <s.Icon size={13} strokeWidth={2.4} aria-hidden />
+    <Pill tone={PILL_TONE[state]} dot={false}>
+      <s.Icon size={12} strokeWidth={2.4} aria-hidden style={{ marginRight: 4, verticalAlign: '-2px' }} />
       {s.label}
-    </span>
+    </Pill>
   );
 }
 
@@ -118,7 +131,7 @@ function UptimeStrip({
     <div className="relative">
       {hovered && (
         <div className="absolute -top-1 left-1/2 -translate-x-1/2 -translate-y-full z-10 pointer-events-none
-                        bg-[#1a1916] text-white text-[11px] rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg">
+                        bg-[#14201a] text-white text-[11px] rounded-lg px-2.5 py-1.5 whitespace-nowrap shadow-lg">
           <span className="font-semibold">{formatDay(hovered.date)}</span>
           <span className="text-[#c9c6bf]"> · {STATE[hovered.status].label}</span>
           {hovered.checks > 0 && (
@@ -154,7 +167,7 @@ function UptimeStrip({
         </div>
       </div>
 
-      <div className="flex justify-between text-[10px] text-[#9b9890] mt-1.5">
+      <div className="flex justify-between text-[10px] text-[#8a948d] mt-1.5">
         <span>90 days ago</span>
         <span>Today</span>
       </div>
@@ -167,7 +180,7 @@ function Legend() {
   return (
     <div className="flex flex-wrap items-end gap-4">
       {shown.map((s) => (
-        <span key={s} className="flex items-end gap-1.5 text-[11px] text-[#6b6860]">
+        <span key={s} className="flex items-end gap-1.5 text-[11px] text-[#5f6b63]">
           <span className="w-[7px] h-4 flex items-end">
             <span
               className="w-full rounded-[2px] block"
@@ -200,11 +213,12 @@ export default function PlatformStatusPage() {
 
   useEffect(() => {
     const ac = new AbortController();
-    void load(ac.signal);
+    // Deferred a tick so no setState runs synchronously in the effect body.
+    const first = setTimeout(() => void load(ac.signal), 0);
     // The cron writes every five minutes; refresh on the same cadence so a page
     // left open on a wall display never goes stale.
     const t = setInterval(() => void load(), 5 * 60 * 1000);
-    return () => { ac.abort(); clearInterval(t); };
+    return () => { ac.abort(); clearTimeout(first); clearInterval(t); };
   }, [load]);
 
   async function probeNow() {
@@ -219,22 +233,39 @@ export default function PlatformStatusPage() {
     }
   }
 
+  const head = (
+    <PageHead
+      eyebrow="Admin › Platform"
+      title="Platform status"
+      lede={data
+        ? <>Every dependency probed every {data.probeIntervalMinutes} minutes · last check {relative(lastCheck(data))}. Nothing here is inferred — a component never probed says “no data”.</>
+        : 'Live probe results for the platform’s external dependencies, with 90 days of daily history.'}
+      actions={<Btn size="sm" variant="primary" onClick={probeNow} disabled={probing}>
+        <RefreshCw size={13} className={probing ? 'animate-spin' : ''} aria-hidden /> {probing ? 'Checking…' : 'Run checks now'}
+      </Btn>}
+    />
+  );
+
   if (error && !data) {
     return (
-      <div className="p-6">
-        <div className="bg-white rounded-2xl border border-[#e8e6e0] p-5 text-[13px] text-[#d03b3b]">
-          Could not load platform status: {error}
-        </div>
-      </div>
+      <OsPage>
+        {head}
+        <Callout tone="bad" title="Could not load platform status:">
+          {error} <Btn size="xs" onClick={() => void load()}>Try again</Btn>
+        </Callout>
+      </OsPage>
     );
   }
 
   if (!data) {
     return (
-      <div className="p-6 animate-pulse space-y-3">
-        <div className="h-16 bg-[#f4f3ef] rounded-2xl" />
-        {[...Array(6)].map((_, i) => <div key={i} className="h-28 bg-[#f4f3ef] rounded-2xl" />)}
-      </div>
+      <OsPage>
+        {head}
+        <div aria-busy="true" style={{ display: 'grid', gap: 12 }}>
+          <div className="gx-skel" style={{ height: 64, borderRadius: 12 }} />
+          {[...Array(5)].map((_, i) => <div key={i} className="gx-skel" style={{ height: 110, borderRadius: 12 }} />)}
+        </div>
+      </OsPage>
     );
   }
 
@@ -244,100 +275,68 @@ export default function PlatformStatusPage() {
   );
 
   return (
-    <div className="p-6 max-w-[1100px]">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-[20px] font-bold text-[#1a1916] flex items-center gap-2">
-            <Activity size={19} className="text-[#1e5fae]" aria-hidden />
-            Platform Status
-          </h1>
-          <p className="text-[12px] text-[#6b6860] mt-0.5">
-            Every dependency probed every {data.probeIntervalMinutes} minutes · last check{' '}
-            {relative(lastCheck(data))}
-          </p>
-        </div>
-        <button
-          onClick={probeNow}
-          disabled={probing}
-          className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#1a1916] border border-[#e8e6e0]
-                     bg-white rounded-full px-3.5 py-2 hover:border-[#1e5fae] disabled:opacity-50 transition-colors"
-        >
-          <RefreshCw size={13} className={probing ? 'animate-spin' : ''} aria-hidden />
-          {probing ? 'Checking…' : 'Run checks now'}
-        </button>
-      </div>
+    <OsPage>
+      {head}
+      <ScopeStrip items={[
+        { label: 'Workspace', value: 'Platform' },
+        { label: 'Window', value: `${data.windowDays} days` },
+        { label: 'Generated', value: new Date(data.generatedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Dubai' }) },
+      ]} />
 
-      {/* Banner */}
-      <div
-        className="rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-3 mb-4"
-        style={{ background: banner.bg, border: `1px solid ${banner.tone}33` }}
-      >
-        <div className="flex items-center gap-2.5">
-          {(() => {
-            const Icon = STATE[data.overall === 'nodata' ? 'nodata' : data.overall].Icon;
-            return <Icon size={20} strokeWidth={2.3} style={{ color: banner.tone }} aria-hidden />;
-          })()}
-          <span className="text-[15px] font-bold" style={{ color: banner.tone }}>{banner.text}</span>
-        </div>
-        <span className="text-[12px] text-[#6b6860]">
+      {error && <div style={{ marginBottom: 14 }}><Callout tone="bad" title="Last refresh failed:">{error}</Callout></div>}
+
+      <div style={{ marginBottom: 14 }}>
+        <Callout tone={banner.tone} title={`${banner.text}.`}>
           {unhealthy.length > 0
-            ? unhealthy.map((c) => c.label).join(', ')
+            ? `Affected: ${unhealthy.map((c) => c.label).join(', ')}`
             : `${data.components.length} components monitored`}
-        </span>
+        </Callout>
       </div>
 
-      {/* Components */}
-      <div className="space-y-3">
-        {data.components.map((c) => (
-          <div key={c.key} className="bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">
-            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 mb-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-[14px] font-semibold text-[#1a1916]">{c.label}</span>
-                  <StateChip state={c.status} />
-                  {c.latencyMs != null && c.status !== 'unconfigured' && (
-                    <span className="text-[11px] text-[#9b9890] tabular-nums">{c.latencyMs} ms</span>
-                  )}
-                </div>
-                <p className="text-[11.5px] text-[#6b6860] mt-1">{c.impact}</p>
-                {c.detail && c.status !== 'operational' && (
-                  <p className="text-[11.5px] text-[#8a6100] mt-1">{c.detail}</p>
-                )}
-              </div>
-              <div className="text-right shrink-0">
-                <div className="text-[15px] font-bold text-[#1a1916] tabular-nums">
-                  {c.uptimePct != null ? `${c.uptimePct}%` : '—'}
-                </div>
-                <div className="text-[10px] text-[#9b9890]">
-                  {c.checks > 0 ? `${c.checks.toLocaleString()} checks · ${data.windowDays}d` : 'no checks yet'}
-                </div>
-              </div>
-            </div>
+      <Kpis>
+        <Kpi k="Overall" v={STATE[data.overall === 'nodata' ? 'nodata' : data.overall].label} dark={data.overall === 'down'} />
+        <Kpi k="Components" v={data.components.length} d="monitored" />
+        <Kpi k="Unhealthy" v={unhealthy.length} d="degraded or down" />
+        <Kpi k="Last check" v={relative(lastCheck(data))} d={`every ${data.probeIntervalMinutes} min`} />
+      </Kpis>
 
+      <div style={{ display: 'grid', gap: 12 }}>
+        {data.components.map((c) => (
+          <Card
+            key={c.key}
+            title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {c.label} <StateChip state={c.status} />
+              {c.latencyMs != null && c.status !== 'unconfigured' && <span className="sub" style={{ fontVariantNumeric: 'tabular-nums' }}>{c.latencyMs} ms</span>}
+            </span>}
+            sub={<>{c.impact}{c.detail && c.status !== 'operational' && <span style={{ display: 'block', color: '#8a6100', marginTop: 2 }}>{c.detail}</span>}</>}
+            right={<div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{c.uptimePct != null ? `${c.uptimePct}%` : '—'}</div>
+              <div className="sub">{c.checks > 0 ? `${c.checks.toLocaleString()} checks · ${data.windowDays}d` : 'no checks yet'}</div>
+            </div>}
+            pad
+          >
             <UptimeStrip
               days={c.days}
               hovered={hover?.key === c.key ? hover.day : null}
               onHover={(d) => setHover(d ? { key: c.key, day: d } : null)}
             />
-          </div>
+          </Card>
         ))}
       </div>
 
-      {/* Legend + how to read it */}
-      <div className="mt-4 bg-white rounded-2xl border border-[#e8e6e0] px-5 py-4">
-        <Legend />
-        <p className="text-[11.5px] text-[#6b6860] mt-3 leading-relaxed">
-          A day is a Dubai calendar day and takes the colour of the worst result recorded that
-          day; the percentage beside each component is the share of all probes in the window that
-          came back clean. Bar height repeats severity so the strip reads without colour.
-          A component with no credentials on this environment reports{' '}
-          <span className="font-semibold text-[#1a1916]">Not configured</span> and is left out of
-          the uptime figure entirely — an absent key is not an outage. Probes are read-only and
-          free: no mail is sent, no image is processed, no tokens are spent.
-        </p>
+      <div style={{ marginTop: 14 }}>
+        <Card title="How to read this" right={<Legend />} pad>
+          <Callout tone="info">
+            A day is a Dubai calendar day and takes the colour of the worst result recorded that
+            day; the percentage beside each component is the share of all probes in the window that
+            came back clean. Bar height repeats severity so the strip reads without colour.
+            A component with no credentials on this environment reports <b>Not configured</b> and is
+            left out of the uptime figure entirely — an absent key is not an outage. Probes are
+            read-only and free: no mail is sent, no image is processed, no tokens are spent.
+          </Callout>
+        </Card>
       </div>
-    </div>
+    </OsPage>
   );
 }
 
